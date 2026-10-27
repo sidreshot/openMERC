@@ -470,6 +470,7 @@ SCR_Init(void)
 	r_menuscale = Cvar_Get("r_menuscale", "-1", CVAR_ARCHIVE);
 	scr_aspect = Cvar_Get("scr_aspect", "1", CVAR_ARCHIVE);
 	Cvar_Get("scr_hudscale", "0", CVAR_ARCHIVE); /* V1: HUD scale, read by cl_hud.c (0 = auto) */
+	SCR_TextScale(); /* registers scr_textscale */
 
 	/* register our commands */
 	Cmd_AddCommand("timerefresh", SCR_TimeRefresh_f);
@@ -1970,6 +1971,32 @@ SCR_UIScale(void)
 	return (f < 0.5f) ? 0.5f : f;
 }
 
+/* OpenMerc (text size, docs/DEVIATIONS.md "Text size"): scr_textscale
+   multiplies the size of the screen texts - console, notify and chat lines,
+   centre prints and subtitles - on top of their automatic scale. 1 (default)
+   = the size of the UI scale; 0.5 .. 3. */
+static cvar_t *scr_textscale;
+
+float
+SCR_TextScale(void)
+{
+	float t;
+
+	if (!scr_textscale)
+	{
+		scr_textscale = Cvar_Get("scr_textscale", "1", CVAR_ARCHIVE);
+	}
+
+	t = scr_textscale->value;
+
+	if (t <= 0.0f)
+	{
+		t = 1.0f;
+	}
+
+	return (t < 0.5f) ? 0.5f : (t > 3.0f) ? 3.0f : t;
+}
+
 static float
 SCR_GetDefaultScale(void)
 {
@@ -2072,7 +2099,15 @@ SCR_GetConsoleScale(void)
 	}
 	else if (r_consolescale->value < 0)
 	{
+		/* OpenMerc: the auto console size follows the text size; the
+		   console's OFL face is rasterized at the resulting cell, so
+		   fractional sizes stay sharp */
 		scale = SCR_GetDefaultScale();
+
+		if (SCR_TextScale() != 1.0f)
+		{
+			scale = SCR_ClampScale(scale * SCR_TextScale());
+		}
 	}
 	else
 	{

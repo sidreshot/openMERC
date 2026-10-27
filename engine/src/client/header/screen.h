@@ -73,6 +73,7 @@ float SCR_GetMenuScale(void);
 qboolean SCR_AspectCorrect(void);
 float SCR_CanvasScale(void);  /* s */
 float SCR_UIScale(void);      /* menus, HUD and console: ui_scale (MENU2) */
+float SCR_TextScale(void);    /* text size multiplier: scr_textscale (0.5 .. 3, 1 = as the UI scale) */
 int SCR_CanvasX(void);        /* window x of the canvas (0 with scr_aspect 0) */
 int SCR_CanvasW(void);        /* canvas width in window pixels (640 s, or the window width) */
 

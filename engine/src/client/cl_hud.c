@@ -365,6 +365,60 @@ HUD_H(void)
 	return (int)((float)viddef.height / HUD_Scale());
 }
 
+/* OpenMerc (text size): the centre prints and subtitles are drawn with the
+   HUD factor times scr_textscale (SCR_TextScale). From a HUD factor of 2 the
+   result is rounded to a whole factor, so the bitmap fonts stay sharp
+   (nearest sampled) instead of being filtered; below 2 it is exact. Between
+   HUD_BeginText and HUD_EndText (inside HUD_BeginScaled) the text lays out in
+   a virtual window of HUD_TextW() x HUD_TextH(). */
+float
+HUD_TextFactor(void)
+{
+	float f = HUD_Scale(), t = f * SCR_TextScale();
+
+	if (SCR_TextScale() == 1.0f)
+	{
+		return f; /* exactly the HUD factor, as before */
+	}
+
+	if (f >= 2.0f)
+	{
+		t = floorf(t + 0.5f);
+	}
+
+	return (t < 0.25f) ? 0.25f : t;
+}
+
+int
+HUD_TextW(void)
+{
+	return (int)((float)viddef.width / HUD_TextFactor());
+}
+
+int
+HUD_TextH(void)
+{
+	return (int)((float)viddef.height / HUD_TextFactor());
+}
+
+void
+HUD_BeginText(void)
+{
+	if (HUD_Ref() && sre_setscale)
+	{
+		sre_setscale(HUD_TextFactor());
+	}
+}
+
+void
+HUD_EndText(void)
+{
+	if (HUD_Ref() && sre_setscale)
+	{
+		sre_setscale(HUD_Scale());
+	}
+}
+
 void
 HUD_BeginScaled(void)
 {
@@ -826,7 +880,19 @@ HUD_DrawPanel(int which, int x, int y)
 		o = (int)(cosf(t->phase) * 27);
 		D_PicPart(x, y + 27, l0, 0, r0, 32, c_white, "pics/interface2/frame_lip");
 		D_PicPart(x, y + o, l0, 0, r0, 64, c_white, "pics/interface2/frame_top");
-		D_Text(x + labelx, y + o + 21, label, c_hudgreen, &font_small);
+
+		{
+			/* OpenMerc: a name longer than the tray's window (localized names, e.g. Russian) is moved
+			   left so that it ends 2 units inside the screen instead of running off the right edge */
+			int lx = x + labelx, w = HUD_TextWidth(label, 0);
+
+			if ((which == 1) && (lx + w > HUD_W() - 2))
+			{
+				lx = HUD_W() - 2 - w;
+			}
+
+			D_Text(lx, y + o + 21, label, c_hudgreen, &font_small);
+		}
 		D_PicPart(x, y + 28, l0, 0, r0, 64, c_white, "pics/interface2/frame_bottom");
 	}
 

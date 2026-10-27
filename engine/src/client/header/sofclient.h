@@ -133,6 +133,12 @@ int HUD_W(void);
 int HUD_H(void);
 void HUD_BeginScaled(void);
 void HUD_EndScaled(void);
+/* OpenMerc (text size): centre prints and subtitles, HUD factor x scr_textscale */
+float HUD_TextFactor(void);
+int HUD_TextW(void);
+int HUD_TextH(void);
+void HUD_BeginText(void);
+void HUD_EndText(void);
 /* string-package print (SPEC-201 section 34) */
 void CL_SP_Print(int id, const byte *data, int len, qboolean obit);
 

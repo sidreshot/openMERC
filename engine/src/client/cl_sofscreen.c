@@ -67,7 +67,7 @@ SCR_SetPrint(const char *str, int caption)
 		return;
 	}
 
-	maxchars = HUD_W() / 8 - ((ps->remote_type == 2) ? 4 : 34);
+	maxchars = HUD_TextW() / 8 - ((ps->remote_type == 2) ? 4 : 34);
 
 	if (maxchars < 8)
 	{
@@ -145,7 +145,7 @@ SCR_CaptionPrint(const char *str)
 static void
 SCR_DrawPrint(void)
 {
-	int L, y0, i, H = HUD_H();
+	int L, y0, i, W = HUD_TextW(), H = HUD_TextH();
 	const sofps_t *ps = CL_SoF_CurrentPS();
 
 	if (!cprint.n || (cls.realtime >= cprint.endtime))
@@ -153,6 +153,7 @@ SCR_DrawPrint(void)
 		return;
 	}
 
+	HUD_BeginText();
 	L = HUD_FontHeight(1);
 
 	if (!cprint.caption)
@@ -170,9 +171,11 @@ SCR_DrawPrint(void)
 
 	for (i = 0; i < cprint.n; i++)
 	{
-		HUD_DrawFontText((HUD_W() - HUD_TextWidth(cprint.lines[i], 1)) / 2, y0 + i * L,
+		HUD_DrawFontText((W - HUD_TextWidth(cprint.lines[i], 1)) / 2, y0 + i * L,
 				cprint.lines[i], c_yellow, 1, i > 0);
 	}
+
+	HUD_EndText();
 }
 
 /* ---------------------------------------------------------------------
@@ -211,7 +214,7 @@ static void
 SCR_DrawTypewriter(void)
 {
 	static const unsigned char col[4] = {0, 254, 0, 220};
-	int speed, step, n, i, line = 0, col_i = 0, H = HUD_H();
+	int speed, step, n, i, line = 0, col_i = 0, H = HUD_TextH(), cols = (HUD_TextW() - 20) / 8;
 	float y;
 
 	if (!tw.endtime || (cls.realtime >= tw.endtime))
@@ -250,11 +253,46 @@ SCR_DrawTypewriter(void)
 		}
 	}
 
+	/* OpenMerc (text size): drawn with the text factor; a larger text wraps earlier than the 104 columns
+	   and keeps the bottom of the block where the original size puts it, so it grows upwards */
+	cols = (cols > 104) ? 104 : (cols < 16) ? 16 : cols;
 	y = (float)(int)(H - tw.y * H / 640.0f);
+
+	if (HUD_TextFactor() != HUD_Scale())
+	{
+		int rows = 1, c = 0, hrows = 1, hc = 0, hH = HUD_H();
+
+		for (i = 0; i < tw.len; i++)
+		{
+			if ((tw.text[i] == '\n') || (c >= cols))
+			{
+				rows++;
+				c = (tw.text[i] == '\n') ? 0 : 1;
+			}
+			else
+			{
+				c++;
+			}
+
+			if ((tw.text[i] == '\n') || (hc >= 104))
+			{
+				hrows++;
+				hc = (tw.text[i] == '\n') ? 0 : 1;
+			}
+			else
+			{
+				hc++;
+			}
+		}
+
+		y = (float)(int)(((hH - tw.y * hH / 640.0f) + 8 * hrows) * HUD_Scale() / HUD_TextFactor() - 8 * rows);
+	}
+
+	HUD_BeginText();
 
 	for (i = 0; i < n; i++)
 	{
-		if ((tw.text[i] == '\n') || (col_i >= 104))
+		if ((tw.text[i] == '\n') || (col_i >= cols))
 		{
 			line++;
 			col_i = 0;
@@ -273,6 +311,8 @@ SCR_DrawTypewriter(void)
 	{
 		HUD_DrawCharFloat(10.0f + 8 * col_i, y + 8 * line, '_', col);
 	}
+
+	HUD_EndText();
 }
 
 /* ---------------------------------------------------------------------

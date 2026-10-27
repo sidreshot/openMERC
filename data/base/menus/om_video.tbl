@@ -17,6 +17,7 @@ list | menu_maxfps | 0,60,120,144,165,240,999 | Display Refresh,60,120,144,165,2
 
 section | SCALING | МАСШТАБ
 list | menu_uiscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | Menu and Text Size | Размер меню и текста | stage
+list | scr_textscale | 1,1.25,1.5,2,2.5,3 | 100%,125%,150%,200%,250%,300% | 100%,125%,150%,200%,250%,300% | Text Size | Размер текста | tip=Console text and on-screen messages and subtitles/Текст консоли и сообщений на экране и субтитры
 list | menu_hudscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | HUD Size | Размер HUD | stage
 list | menu_aspect | 0,1 | Off,On | Выкл,Вкл | Widescreen HUD and Menus | Широкоэкранные HUD и меню | stage
 list | menu_rail | 0,1 | Off,On | Выкл,Вкл | Menu Side Panel | Боковая панель меню | tip=Section list left of the menu on widescreen displays/Список разделов слева от меню на широких экранах
