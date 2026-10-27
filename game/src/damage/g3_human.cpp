@@ -2511,6 +2511,28 @@ public:
 				dir[k] += G3_flrand(-s, s);
 			VectorNormalize(dir);
 		}
+		// SPEC-722 Firing: for types 7, 9, 11, 12, 16, 17, 18 and 29 the vertical aim uses the target's real position
+		// (its origin, SPEC-AMEND-006 G2.11), and type 11 then mixes 60 % of the current direction with 40 % towards
+		// the target; applied in the spec's order, after the per-type spread. Without it the full +-0.2 spread of a
+		// shotgunner (type 11) sent pellets into characters next to the line of fire.
+		if (target && target->inuse && !(owner && owner->FiresBlind())) {
+			int at = rightType;
+			if (at == 7 || at == 9 || at == 11 || at == 12 || at == 16 || at == 17 || at == 18 || at == 29) {
+				vec3_t to;
+				VectorSubtract(target->s.origin, start, to);
+				float th = sqrtf(to[0] * to[0] + to[1] * to[1]), dh = sqrtf(dir[0] * dir[0] + dir[1] * dir[1]);
+				if (th > 1.0f && dh > 1e-4f) {
+					dir[2] = dh * to[2] / th;
+					VectorNormalize(dir);
+				}
+				if (at == 11) {
+					VectorNormalize(to);
+					for (int k = 0; k < 3; k++)
+						dir[k] = 0.6f * dir[k] + 0.4f * to[k];
+					VectorNormalize(dir);
+				}
+			}
+		}
 		clip--;
 		lastShot = now;
 		justShot = true;

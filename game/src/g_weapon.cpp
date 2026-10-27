@@ -609,6 +609,11 @@ static void FireShotgun(edict_t *ent, const vec3_t start_in, const vec3_t dir)
 		if (!tr.ent || tr.fraction == 1.0f)
 			continue;
 		if (tr.ent->client || tr.ent->ai || (tr.ent->svflags & SVF_MONSTER)) {
+			if (gi.cvar("g3_shotdebug", "0", 0)->value != 0) // OpenMerc diagnostic
+				gi.dprintf("pellet %d: shooter %d hits %d at (%.0f %.0f %.0f) frac %.2f box z %.0f..%.0f org z %.0f same %d dir (%.2f %.2f %.2f) start (%.0f %.0f %.0f)\n", i,
+				           (int)(ent - g_edicts), (int)(tr.ent - g_edicts), tr.endpos[0], tr.endpos[1], tr.endpos[2], tr.fraction,
+				           tr.ent->absmin[2], tr.ent->absmax[2], tr.ent->s.origin[2], (int)om_ai::SameTeam(ent, tr.ent), d[0], d[1], d[2],
+				           start[0], start[1], start[2]);
 			int k;
 			for (k = 0; k < nh; k++)
 				if (hits[k] == tr.ent)

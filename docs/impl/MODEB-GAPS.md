@@ -431,3 +431,30 @@ Corrections and results:
   box face (y -1034). The spark code therefore never runs in B. Open: why the bullets do not hit the helicopter.
 - Far tsr1 shotgun shooter (6 vs 11): still open. In A a third fire source at 933 -83 fires 0.9 s after the far
   shooter in every 4.2 s cycle, which B does not have. B's shooter 292 never plays `xcock`.
+
+### 6.6 Shotgun pellets hitting bystanders (tsr1, 27 Oct 2026)
+
+- Question: does B lack a "friendly in the line of fire" check, or aim at the wrong target? Neither:
+  - the far tsr1 shotgunner (type 11) aims at the player in every shot, and its clear-shot check (SPEC-710, eye to
+    target eye) is as specified; the character that was hit lay about 90 units off that line;
+  - that character is not on the shooter's team, so the SPEC-782 teammate rule does not apply and full pellet damage
+    is correct for a pellet that reaches it. The spec has no other in-the-way check for ordinary shots.
+- Cause: the shot direction. `G3HumanBody::Fire` used only the per-type spread (+-0.2 per component for type 11) and
+  lacked the SPEC-722 Firing rules "for types 7, 9, 11, 12, 16, 17, 18, 29 the vertical aim uses the target's real
+  position; type 11 mixes 60 % of the current direction with 40 % towards the target" (already listed in G2.md).
+  A hit shot left about 10 degrees off the aim point, and most of its pellets struck the bystander.
+- Fix (`g3_human.cpp` `Fire`): after the spread, for those types the vertical slope of the direction is set from the
+  target's origin (SPEC-AMEND-006 G2.11), and type 11 is then mixed 60/40 with the direction to the target origin.
+  Skipped for blind fire and without a target. Diagnostic: with `g3_shotdebug 1` every pellet that hits a creature
+  prints shooter, target, position and whether they are on the same team.
+- Result, tsr1 (A = original module, B = openMERC):
+  | | shotgunner shots | shots with gore on a character other than the player |
+  |---|---|---|
+  | A | 30 | 0 |
+  | B before | 18 | 4 |
+  | B after | 18 | at most 1 pellet on a non-teammate per run |
+  - Deviation from the aim point, before: yaw up to 10.5 degrees, elevation -9.5..+5.7; after: yaw -6.8..+4.8,
+    elevation within 1.2 degrees.
+  - The remaining pellet hits fall on crouched teammates next to the player, which the teammate rule handles.
+- kos1 check: shotgun shots A 10, B 8; assault-rifle shots A 74, B 76. Character gore away from the player: A none
+  beyond the scripted deaths, B one teammate hit by a grunt standing in the line of fire (spec behaviour).
