@@ -18,6 +18,7 @@
 #include "header/menu.h"
 #include "header/m_draw.h"
 #include "../../common/header/sof/engine.h"
+#include "../header/sofclient.h"
 
 extern int mp_errorcount;
 extern void (*mp_errorhook)(const char *tag, const char *msg);
