@@ -15,6 +15,8 @@ add_library(om_script STATIC
   script_host.h script_vm.h script_internal.h
   script_value.cpp script_vm.cpp script_save.cpp script_ai_table.inc)
 target_include_directories(om_script PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# linked into the shared gamex86 module: position-independent on every toolchain, not only where PIE is the default
+set_target_properties(om_script PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
   target_compile_options(om_script PRIVATE /W3 /wd4244 /wd4305 /wd4996 /wd4018 /wd4267 /EHs-c- /GR- /fp:precise)
   target_compile_definitions(om_script PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
