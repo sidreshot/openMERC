@@ -83,21 +83,14 @@ signalhandler(int sig)
 {
 	printf("\n=======================================================\n");
 	printf("\nopenMERC crashed! This should not happen...\n");
-	printf("\nMake sure that you're using the last version. It can\n");
-	printf("be found at http://www.yamagi.org/quake2. If you do,\n");
-	printf("send a bug report to quake2@yamagi.org and include:\n\n");
+	printf("\nMake sure that you are using the latest version from\n");
+	printf("https://github.com/sidreshot/openMERC. If you are, open an\n");
+	printf("issue there and include:\n\n");
 	printf(" - This output\n");
 	printf(" - The conditions that triggered the crash\n");
 	printf(" - How to reproduce the crash (if known)\n");
-	printf(" - The following files. None of them contains private\n");
-	printf("   data. They're necessary to analyze the backtrace:\n\n");
-	printf("    - quake2 (the executable / binary)\n\n");
-	printf("    - game.so (the game.so of the mod you were playing\n");
-	printf("      when the game crashed. baseq2/game.so for the\n");
-	printf("      main game)\n\n");
-	printf(" - Any other data which you think might be useful\n");
-	printf("\nThank you very much for your help, making openMERC\n");
-	printf("II an even better source port. It's much appreciated.\n");
+	printf(" - The openMERC version (main menu) and your distribution\n");
+	printf("\nThank you very much for your help.\n");
 	printf("\n=======================================================\n\n");
 
 	printBacktrace(sig);
