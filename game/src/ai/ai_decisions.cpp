@@ -273,7 +273,7 @@ void CombatDecision::ActionDone(edict_t *ent, AI *ai, Action *a, float m)
 		success = 0.75f * success + 0.25f * m;
 	if (m <= 0.25f)
 		Unstick(ent, ai);
-	else if (pending_set && !PendingValid(ent))
+	else if (pending_set && !PendingExecutable(ent))
 		pending_set = 0;
 }
 
@@ -784,11 +784,22 @@ bool CombatDecision::PendingValid(edict_t *ent)
 	return pending_set && Now() - pending_time < 1.0f && HDist2(pending, ent->s.origin) >= 2500.0f;
 }
 
+/* a door point (kind 3) is set at the owner's own position by C9, so the 50-unit minimum distance of C8 cannot
+ * apply to it (it would never be executed and the owner would keep walking into the closed door); it is executable
+ * while younger than 1 s. On arm1 the original game has Sam (m_x_msam, point_combat sam3 -> sam4) open the smart door *18;
+ * OpenMerc left him pressed against it */
+bool CombatDecision::PendingExecutable(edict_t *ent)
+{
+	if (PendingValid(ent))
+		return true;
+	return pending_set && pending_kind == 3 && Now() - pending_time < 1.0f;
+}
+
 bool CombatDecision::ExecutePending(edict_t *ent, AI *ai)
 {
 	if (!pending_set)
 		return false;
-	if (!PendingValid(ent) && !(pending_kind == 3 && Now() - pending_time < 1.0f)) {
+	if (!PendingExecutable(ent)) {
 		pending_set = 0;
 		return false;
 	}
@@ -813,6 +824,8 @@ bool CombatDecision::ExecutePending(edict_t *ent, AI *ai)
 	}
 	case 3: {
 		edict_t *door = pending_door;
+		if (CvarValue(cv.ai_trace) >= 2)
+			Dbg("ai %d opens door %d\n", G_EdictNum(ent), door ? G_EdictNum(door) : -1);
 		if (door && door->inuse && door->plUse)
 			door->plUse(door, ent, ent);
 		vec3_t face;
@@ -884,10 +897,33 @@ void CombatDecision::Unstick(edict_t *ent, AI *ai)
 	AngleVectors(ent->s.angles, f, nullptr, nullptr);
 	f[2] = 0;
 	VectorNormalize(f);
+	/* the probe is raised by the step height. A tall character in front of a closed door has its raised box top
+	 * above the doorway (88 units in stock maps), so the probe starts in the lintel or hits it in front of the door
+	 * and reports the world: the door was never used and the character kept walking into it (arm1: Sam at smart
+	 * door *18, toiletguy at *17; the original opens both on arrival). When the raised probe is blocked by something
+	 * other than a door-like entity, it is repeated from half the step height and from the origin (the heights of
+	 * the step test, SPEC-740 9) and a door-like hit there is used; otherwise the raised result stands */
 	VectorCopy(ent->s.origin, start);
 	start[2] += ai->step_height;
 	VectorMA(start, 25, f, end);
 	trace_t tr = Trace(start, ent->mins, ent->maxs, end, ent, 0x2020003);
+	if ((tr.startsolid || tr.fraction < 1.0f) && !DoorLike(tr.ent)) {
+		for (int pass = 1; pass < 3; pass++) {
+			vec3_t s2, e2;
+			VectorCopy(ent->s.origin, s2);
+			s2[2] += pass == 1 ? ai->step_height * 0.5f : 0.0f;
+			VectorMA(s2, 25, f, e2);
+			trace_t t2 = Trace(s2, ent->mins, ent->maxs, e2, ent, 0x2020003);
+			if (!t2.startsolid && t2.fraction < 1.0f && DoorLike(t2.ent)) {
+				tr = t2;
+				break;
+			}
+		}
+	}
+	if (CvarValue(cv.ai_trace) >= 2)
+		Dbg("ai %d unstick: frac %.2f solid %d hit %d %s usable %d at %s\n", G_EdictNum(ent), tr.fraction, tr.startsolid,
+		    tr.ent ? G_EdictNum(tr.ent) : -1, tr.ent && tr.ent->classname ? tr.ent->classname : "-",
+		    tr.ent && DoorUsableNow(tr.ent) ? 1 : 0, vtos(ent->s.origin));
 	if (tr.fraction >= 1.0f && !tr.startsolid) {
 		vec3_t back;
 		VectorNegate(f, back);
@@ -1007,7 +1043,7 @@ void CombatDecision::CombatPlan(edict_t *ent, AI *ai)
 		IdealPlan(ent, ai);
 		return;
 	}
-	if (PendingValid(ent) && ExecutePending(ent, ai))
+	if (PendingExecutable(ent) && ExecutePending(ent, ai))
 		return;
 	NonIdealPlan(ent, ai, code);
 }

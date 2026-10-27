@@ -458,3 +458,51 @@ Corrections and results:
   - The remaining pellet hits fall on crouched teammates next to the player, which the teammate rule handles.
 - kos1 check: shotgun shots A 10, B 8; assault-rifle shots A 74, B 76. Character gore away from the player: A none
   beyond the scripted deaths, B one teammate hit by a grunt standing in the line of fire (spec behaviour).
+
+### 6.8 arm1 NPC pushing against a door that never opens (27 Oct 2026)
+
+- Report (0.2.0, mode B): on arm1 an NPC keeps walking into a door and the door never opens.
+- Which NPC and door:
+  - Sam (`m_x_msam`, ai 48) at smart door *18 (ent 72, 227 228 44, areaportal `powers`);
+  - also toiletguy (ai 124) at smart door *17 (ent 71).
+- Root cause 1 (SPEC-710 C8 vs C9): the unstick code sets a door point (kind 3) at the owner's own position, but the
+  pending check requires the point to be at least 50 units away. So the point could never run.
+  - `CombatDecision::PendingExecutable` now accepts kind 3 when it is younger than 1 s.
+  - It is used by ExecutePending, ActionDone and both plan paths.
+- Root cause 2 (C9 probe height): the unstick probe is raised by the step height (24). With a tall box in an
+  88-unit doorway, it started inside the lintel or hit the wall above the door.
+  - Fix: retry at half the step height and then at the origin (the SPEC-740 rule 9 heights).
+  - The retry accepts only a hit on a door-like entity.
+- Player-use check: the player also cannot open *18 before Sam passes, in both A and B. That is map design:
+  - func_wall `locked` (*5) has contents playerclip|detail|translucent, so it blocks only players;
+  - use trigger *4 plays the `lockmes` talk sound;
+  - Sam's pathtarget `lethimin` at sam4 turns `locked` off.
+  - After Sam passes, the player opens door 72 in both A (31.99 s) and B (31.69 s), so the door entity is fine.
+  - In 0.2.0, Sam never got through, so the lock stayed on for good.
+- Evidence: door open sounds in seconds of client time, mode A vs mode B.
+  - arm1:
+
+    | Door | A | B |
+    |---|---|---|
+    | 71 | 5.89 | 5.09 |
+    | 72 | 15.19 | 14.99 |
+    | hwy 58 | 23.6 | 27.5 |
+    | 86 | 39.1 | 42.4 |
+
+    - Before the fix, B had no door events at all.
+    - `move blocked` count, Sam: 276 before, 6 after. toiletguy: 375 before, 7 after.
+  - arm2:
+
+    | Door | A | B |
+    |---|---|---|
+    | 63 | 13.50 / 17.49 | 13.29 / 17.39 |
+    | 50 | 21.99 | 25.48 |
+    | 24 | 28.29 | 31.39 |
+
+    - Before the fix, B had no door events and 467 `move blocked`.
+    - The remaining 175 `move blocked` belong to smokeguy (ai 116, politician). They are identical before and after
+      the fix, with no door nearby, and are unrelated (unverified in A, which has no trace).
+  - sud1 (trigger *9 -> t474 next to smart door 159): the soldiers fight the player and no door opens in either A
+    or B (parity, weak evidence).
+- Still open (not changed): after Sam's door, B runs about 3.5-3.9 s behind A, because Sam plays std_epushbuttons
+  twice at sam6 (waitaction list sf 2).

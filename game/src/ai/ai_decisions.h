@@ -81,6 +81,7 @@ public:
 	bool NavPoint(edict_t *ent, AI *ai, const vec3_t goal, int mode, vec3_t out);
 	bool Steer(edict_t *ent, AI *ai, vec3_t goal);
 	bool PendingValid(edict_t *ent);
+	bool PendingExecutable(edict_t *ent);
 	bool ExecutePending(edict_t *ent, AI *ai);
 	void SetPending(const vec3_t p, int kind, edict_t *door, const vec3_t normal);
 	void Sidestep(edict_t *ent, AI *ai, const vec3_t v);

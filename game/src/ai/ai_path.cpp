@@ -150,7 +150,7 @@ public:
 	{
 		if (kind == DK_POINT && target && target->client && Enemy(ent, ai, target))
 			ai->Alert(ent, target_time, target, target_pos);
-		if (PendingValid(ent) && ExecutePending(ent, ai))
+		if (PendingExecutable(ent) && ExecutePending(ent, ai))
 			return;
 		if (!waiting && !arrived && HDist2(corner->s.origin, ent->s.origin) <= 50.0f * 50.0f)
 			Arrive(ent, ai);
