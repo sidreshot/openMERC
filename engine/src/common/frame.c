@@ -545,7 +545,10 @@ Qcommon_Frame(int usec)
 	   Used by the signal handlers. */
 	if (quitnextframe)
 	{
-		Cbuf_AddText("quit");
+		/* once, and as a complete line: the command buffer only runs
+		   newline-terminated lines */
+		quitnextframe = false;
+		Cbuf_AddText("quit\n");
 	}
 
 
@@ -850,7 +853,10 @@ Qcommon_Frame(int usec)
 	   Used by the signal handlers. */
 	if (quitnextframe)
 	{
-		Cbuf_AddText("quit");
+		/* once, and as a complete line: the command buffer only runs
+		   newline-terminated lines */
+		quitnextframe = false;
+		Cbuf_AddText("quit\n");
 	}
 
 
