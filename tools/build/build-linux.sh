@@ -40,10 +40,13 @@ configure() { # <source> <build> [extra args]
   cmake --build "$bld" -j "$JOBS"
 }
 
-echo "== engine";  configure "$REPO/engine"        "$OUT/engine" -DCURL_SUPPORT=OFF -DGLES3_RENDERER=ON
+# the engine, renderers and sound module look in <their folder>/lib first, so a package can bring its own
+# libSDL3.so.0 and libopenal.so.1 (tools/build/package-linux.sh); the system ones are used otherwise
+RPATH='-DCMAKE_BUILD_RPATH=$ORIGIN/lib'
+echo "== engine";  configure "$REPO/engine"        "$OUT/engine" -DCURL_SUPPORT=OFF -DGLES3_RENDERER=ON "$RPATH"
 echo "== game";    configure "$REPO/game"          "$OUT/game"
 echo "== player";  configure "$REPO/player"        "$OUT/player"
-echo "== sound";   configure "$REPO/modules/sound" "$OUT/sound"
+echo "== sound";   configure "$REPO/modules/sound" "$OUT/sound" "$RPATH"
 
 echo "== staging"
 REL=$OUT/release
