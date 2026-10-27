@@ -82,6 +82,10 @@ struct Shared
 	const GhoulGLTable *gl = nullptr;
 	unsigned char gamma[256];
 	int textureDetail = 0;
+	// OpenMerc fb5: largest uploaded level (SoF: 256). Retail skins are at most 256, an HD pack
+	// (sofhd2024: 4x) brings 512..1024 that the 256 rule silently threw away; the client sets
+	// ghl_om_maxtexsize (default 2048)
+	int maxTextureSize = 256;
 	float polyFactor = -0.1f, polyUnits = -0.1f;
 	bool specular = false;
 	GserverSettings gs;

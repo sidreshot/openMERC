@@ -71,6 +71,8 @@ static struct
 } clg_vw;
 
 static qboolean clg_dumping;
+static cvar_t *ghl_om_maxtexsize;
+void OMGhoul_SetMaxTextureSize(int size); /* ghoul_system.cpp (fb5) */
 
 /* ---- start-up --------------------------------------------------------------- */
 
@@ -95,6 +97,8 @@ CL_Ghoul_Init(void)
 	ghl_light_method = Cvar_Get("ghl_light_method", "3", CVAR_ARCHIVE);
 	ghl_no_texture_stack = Cvar_Get("ghl_no_texture_stack", "0", CVAR_ARCHIVE);
 	clg_freezeworld = Cvar_Get("freezeworld", "0", 0);
+	/* fb5: Ghoul skin upload cap; 256 = the SoF rule, larger keeps HD-pack skins (sofhd2024 4x) */
+	ghl_om_maxtexsize = Cvar_Get("ghl_om_maxtexsize", "2048", CVAR_ARCHIVE);
 	Cmd_AddCommand("om_ghoulinfo", CL_Ghoul_Info_f);
 	(void)CLG_System(); /* the library is up before the renderer asks for the system */
 }
@@ -148,6 +152,8 @@ CL_Ghoul_RendererStarted(void)
 		clg_re = NULL;
 		return;
 	}
+
+	OMGhoul_SetMaxTextureSize(ghl_om_maxtexsize ? (int)ghl_om_maxtexsize->value : 256);
 
 	/* the renderer runs system methods 38, 39, 37, 1, 2 and keeps the pointer */
 	if (clg_re->Init(NULL, NULL, CLG_System()) == -1)

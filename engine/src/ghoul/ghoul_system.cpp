@@ -483,6 +483,15 @@ void System::SetGamma(const unsigned char *table256)
 
 void System::SetTextureDetail(int level) { G().textureDetail = level; }
 
+// OpenMerc fb5: upload size cap (256 = SoF); set before textures are uploaded (renderer start)
+extern "C" void OMGhoul_SetMaxTextureSize(int size)
+{
+	int s = 256;
+	while (s < size && s < 8192)
+		s <<= 1;
+	G().maxTextureSize = size < 256 ? 256 : s;
+}
+
 void System::SetPolygonOffset(float factor, float units)
 {
 	G().polyFactor = factor;

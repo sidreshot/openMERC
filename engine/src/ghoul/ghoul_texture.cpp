@@ -198,7 +198,8 @@ Texture *ListTexture(ImageList *l, int index, bool load)
 
 // ------------------------------------------------------------------ TGA (SPEC-012 TGA rules)
 
-static bool Pow2(int v) { return v > 0 && v <= 1024 && (v & (v - 1)) == 0; }
+// fb5: up to 8192 (HD packs); the original stopped at 1024 with a fatal error
+static bool Pow2(int v) { return v > 0 && v <= 8192 && (v & (v - 1)) == 0; }
 
 bool DecodeTGA(const uint8_t *d, size_t n, const std::string &name, Texture &out)
 {
@@ -315,7 +316,7 @@ static void Upload(Texture *t)
 	int internal = t->hasAlpha ? (int)gl::RGBA : (int)gl::RGB;
 	for (;;)
 	{
-		bool use = level >= start && w <= 256 && h <= 256;
+		bool use = level >= start && w <= G().maxTextureSize && h <= G().maxTextureSize;
 		if (use)
 		{
 			g->TexImage2D(gl::TEXTURE_2D, glLevel, internal, w, h, 0, gl::RGBA, gl::UNSIGNED_BYTE, cur.data());
