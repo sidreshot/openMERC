@@ -1946,6 +1946,34 @@ FS_InitFilesystem(void)
 		Com_sprintf(fs_binbase, sizeof(fs_binbase), "%s%s", bindir, BASEDIRNAME);
 	}
 
+	/* install layout: openMERC unpacked as its own folder inside the Soldier
+	   of Fortune folder (<SoF>/openMERC/openMerc.exe). Without -cddir and
+	   without game data in <basedir>/base, the parent folder is the game folder
+	   when it holds base/pak0.pak. It is only read, never written. */
+	if (!fs_cddir->string[0])
+	{
+		Com_sprintf(path, sizeof(path), "%s/%s/pak0.pak", fs_basedir->string, BASEDIRNAME);
+
+		if (!Sys_IsFile(path))
+		{
+			char parent[MAX_OSPATH];
+
+			Com_sprintf(path, sizeof(path), "%s/..", fs_basedir->string);
+
+			if (Sys_Realpath(path, parent, sizeof(parent)))
+			{
+				Com_sprintf(path, sizeof(path), "%s/%s/pak0.pak", parent, BASEDIRNAME);
+
+				if (Sys_IsFile(path))
+				{
+					FS_NormalizeSwitchValue(parent, sizeof(parent));
+					Cvar_FullSet("cddir", parent, CVAR_NOSET);
+					Com_Printf("Game data: %s\n", fs_cddir->string);
+				}
+			}
+		}
+	}
+
 	/* 1. <cddir>/base, 2. <basedir>/base */
 	if (fs_cddir->string[0])
 	{
