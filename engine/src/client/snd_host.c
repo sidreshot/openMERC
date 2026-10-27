@@ -89,7 +89,7 @@ static cvar_t *snd_dll;
 
 #define SS_ENTSTATE_SIZE 116
 #define SS_CLENTITY_SIZE 396
-#define SS_CL_SIZE (SNDH_CL_EXT + 4 * (SNDH_ALL_SOUNDS - SNDH_MAX_SOUNDS)) /* 1.07f block + extension */
+#define SS_CL_SIZE (SNDH_CL_EXT + sizeof(void *) * (SNDH_ALL_SOUNDS - SNDH_MAX_SOUNDS)) /* 1.07f block + extension of precache pointers */
 
 static byte ss_entring[MAX_PARSE_ENTITIES * SS_ENTSTATE_SIZE];
 static byte *ss_cl;               /* client state, SS_CL_SIZE bytes */
