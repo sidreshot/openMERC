@@ -1,0 +1,127 @@
+<!-- OpenMerc MENU2: key bindings page (written for OpenMerc; layout of SPEC-803).
+     MENU-SCRATCH (owner t104u): own action names (menu_omset PG_K_*), two columns
+     (action | keys), own buttons without the stock confirmation dialogs -->
+<stm>
+<strings menu_omset>
+<vbar tint vbargray>
+
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_KEY_PRESETS^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "" files "configs" "*" "cfg" cvar menu_config key mouse1 "unbindall;exec configs/$menu_config"><hbr>
+<font type small tint gray>
+"^MENU_OMSET_KEY_BINDTIP^"<hbr>
+
+
+<hbr>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_KEY_MOVE^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+
+<setkey +forward atext "^MENU_OMSET_PG_K_FORWARD^" split 230><hbr>
+<setkey +back atext "^MENU_OMSET_PG_K_BACK^" split 230><hbr>
+<setkey +moveleft atext "^MENU_OMSET_PG_K_STEP_LEFT^" split 230 tip "^MENU_OMSET_KEY_LEANTIP^"><hbr>
+<setkey +moveright atext "^MENU_OMSET_PG_K_STEP_RIGHT^" split 230 tip "^MENU_OMSET_KEY_LEANTIP^"><hbr>
+<setkey +moveup atext "^MENU_OMSET_PG_K_UP^" split 230><hbr>
+<setkey +movedown atext "^MENU_OMSET_PG_K_DOWN^" split 230><hbr>
+<setkey +speed atext "^MENU_OMSET_PG_K_RUN^" split 230><hbr>
+<setkey +use atext "^MENU_OMSET_PG_K_USE^" split 230 tip "^MENU_OMSET_KEY_LEANTIP^"><hbr>
+<setkey +leanleft atext "^MENU_OMSET_PG_K_LL^" split 230><hbr>
+<setkey +leanright atext "^MENU_OMSET_PG_K_LR^" split 230><hbr>
+<hbr>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_KEY_COMBAT^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+
+<setkey +attack atext "^MENU_OMSET_PG_K_ATTACK^" split 230><hbr>
+<setkey +altattack atext "^MENU_OMSET_PG_K_ALT_ATTACK^" split 230><hbr>
+<setkey reload atext "^MENU_OMSET_PG_K_RELOAD^" split 230><hbr>
+<setkey weaplast atext "^MENU_OMSET_KEY_LASTWEAP^" split 230><hbr>
+<setkey weapnext atext "^MENU_OMSET_PG_K_NEXT^" split 230><hbr>
+<setkey weapprev atext "^MENU_OMSET_PG_K_PREV^" split 230><hbr>
+<setkey weaponbestsafe atext "^MENU_OMSET_PG_K_SAFE^" split 230><hbr>
+<setkey weaponbestunsafe atext "^MENU_OMSET_PG_K_UNSAFE^" split 230><hbr>
+<setkey weapondrop atext "^MENU_OMSET_PG_K_DROP_WEAPON^" split 230><hbr>
+<setkey +weaponextra1 atext "^MENU_OMSET_PG_K_WSPECIAL1^" split 230><hbr>
+<setkey +weaponextra2 atext "^MENU_OMSET_PG_K_WSPECIAL2^" split 230><hbr>
+<hbr>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_KEY_SLOTS^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+
+<setkey "weaponselect 1" atext "1. ^MENU_OMSET_PG_K_KNIFE^" split 230><hbr>
+<setkey "weaponselect 2" atext "2. ^MENU_OMSET_PG_K_PISTOL1^" split 230><hbr>
+<setkey "weaponselect 3" atext "3. ^MENU_OMSET_PG_K_PISTOL2^" split 230><hbr>
+<setkey "weaponselect 4" atext "4. ^MENU_OMSET_PG_K_SHOTGUN^" split 230><hbr>
+<setkey "weaponselect 5" atext "5. ^MENU_OMSET_PG_K_SNIPER^" split 230><hbr>
+<setkey "weaponselect 6" atext "6. ^MENU_OMSET_PG_K_MPISTOL^" split 230><hbr>
+<setkey "weaponselect 7" atext "7. ^MENU_OMSET_PG_K_ASSAULT^" split 230><hbr>
+<setkey "weaponselect 8" atext "8. ^MENU_OMSET_PG_K_MACHINEGUN^" split 230><hbr>
+<setkey "weaponselect 9" atext "9. ^MENU_OMSET_PG_K_SLUGGER^" split 230><hbr>
+<setkey "weaponselect 10" atext "10. ^MENU_OMSET_PG_K_ROCKET^" split 230><hbr>
+<setkey "weaponselect 11" atext "11. ^MENU_OMSET_PG_K_FLAMEGUN^" split 230><hbr>
+<setkey "weaponselect 12" atext "12. ^MENU_OMSET_PG_K_MPG^" split 230><hbr>
+<hbr>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_KEY_ITEMS^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+
+<setkey itemuse atext "^MENU_OMSET_PG_K_USE_ITEM^" split 230><hbr>
+<setkey itemnext atext "^MENU_OMSET_PG_K_NEXT_ITEM^" split 230><hbr>
+<setkey itemprev atext "^MENU_OMSET_PG_K_PREV_ITEM^" split 230><hbr>
+<setkey itemdrop atext "^MENU_OMSET_PG_K_DROP_ITEM^" split 230><hbr>
+<setkey "itemuse grenade" atext "^MENU_OMSET_PG_K_USE_GRENADE^" split 230><hbr>
+<setkey "itemuse c4" atext "^MENU_OMSET_PG_K_USE_C4^" split 230><hbr>
+<setkey "itemuse fpak" atext "^MENU_OMSET_PG_K_USE_FPAK^" split 230><hbr>
+<setkey "itemuse medkit" atext "^MENU_OMSET_PG_K_USE_MEDKIT^" split 230><hbr>
+<setkey "itemuse goggles" atext "^MENU_OMSET_PG_K_USE_GOGGLES^" split 230><hbr>
+<hbr>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_KEY_UI^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+
+<setkey score atext "^MENU_OMSET_PG_K_SS^" split 230><hbr>
+<setkey messagemode atext "^MENU_OMSET_PG_K_CHAT^" split 230><hbr>
+<setkey messagemode2 atext "^MENU_OMSET_PG_K_TCHAT^" split 230><hbr>
+<setkey "menu objectives" atext "^MENU_OMSET_PG_K_OBJS^" split 230><hbr>
+<setkey toggleconsole atext "^MENU_OMSET_KEY_CONSOLE^" split 230><hbr>
+<setkey help atext "^MENU_OMSET_PG_K_HELP^" split 230><hbr>
+<setkey "wave 1" atext "^MENU_OMSET_PG_K_WAVE1^" split 230><hbr>
+<setkey "wave 2" atext "^MENU_OMSET_PG_K_WAVE2^" split 230><hbr>
+<setkey "wave 3" atext "^MENU_OMSET_PG_K_WAVE3^" split 230><hbr>
+<hbr>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_KEY_LOOK^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+
+<setkey +left atext "^MENU_OMSET_PG_K_LEFT^" split 230><hbr>
+<setkey +right atext "^MENU_OMSET_PG_K_RIGHT^" split 230><hbr>
+<setkey +lookup atext "^MENU_OMSET_PG_K_LOOK_UP^" split 230><hbr>
+<setkey +lookdown atext "^MENU_OMSET_PG_K_LOOK_DOWN^" split 230><hbr>
+<setkey centerview atext "^MENU_OMSET_PG_K_CENTER^" split 230><hbr>
+<setkey +mlook atext "^MENU_OMSET_PG_K_MOUSE_LOOK^" split 230><hbr>
+<setkey +klook atext "^MENU_OMSET_PG_K_KEYBOARD^" split 230><hbr>
+<setkey +strafe atext "^MENU_OMSET_PG_K_STRAFE^" split 230><hbr>
+<hbr>
+<center>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_KEYS_SAVE^" ombutton btint transgray width 240 height 24 key mouse1 "savekeys"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_KEYS_DEFAULTS^" ombutton btint transgray width 240 height 24 key mouse1 "unbindall;exec configs/default_keys.cfg"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_KEYS_UNBIND^" ombutton btint transgray width 240 height 24 key mouse1 "unbindall"><br>
+</stm>

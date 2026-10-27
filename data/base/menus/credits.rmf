@@ -1,0 +1,13 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): screen "credits". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<strings menu_game>
+<strings menu_credits>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_credits center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<cursor 0>
+<frame keys 0 0 page m_credits cut main>
+</stm>

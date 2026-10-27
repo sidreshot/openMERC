@@ -1,0 +1,7 @@
+; SPDX-License-Identifier: GPL-2.0-or-later
+; Implements: SPEC-003 (exports: GetPlayerClientAPI ordinal 1, GetPlayerServerAPI ordinal 2)
+LIBRARY player
+EXPORTS
+    GetPlayerClientAPI @1
+    GetPlayerServerAPI @2
+    OpenMerc_Module @3

@@ -1,0 +1,57 @@
+<comment OpenMerc MENU-SCRATCH: navigation rail left of the 640x480 panel on
+     widescreen windows (docs/impl/MENU2.md "Widescreen composition"). The
+     engine adds it as frame omrail to the folder screens and the main menu
+     and sets menu_omrail_cur to the row of the open screen.>
+<stm>
+<strings menu_omset>
+<include om_tints>
+<left>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_MAIN^" btint transgray width 176 currentif menu_omrail_cur 0 key mouse1 "menu main"><br>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_RAIL_SINGLE^">
+<hr width 176 tint gray>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_NEWGAME^" btint transgray width 176 currentif menu_omrail_cur 1 key mouse1 "menu game"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_LOAD^" btint transgray width 176 currentif menu_omrail_cur 2 key mouse1 "menu load"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_SAVE^" btint transgray width 176 currentif menu_omrail_cur 3 key mouse1 "menu save"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_CREDITS^" btint transgray width 176 currentif menu_omrail_cur 4 key mouse1 "menu credits"><br>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_RAIL_MULTI^">
+<hr width 176 tint gray>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_PLAYER^" btint transgray width 176 currentif menu_omrail_cur 5 key mouse1 "stopsound;menu player2"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_JOIN^" btint transgray width 176 currentif menu_omrail_cur 6 key mouse1 "menu join"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_START^" btint transgray width 176 currentif menu_omrail_cur 7 key mouse1 "menu start"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_MPOPTIONS^" btint transgray width 176 currentif menu_omrail_cur 8 key mouse1 "menu options"><br>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_RAIL_OPTIONS^">
+<hr width 176 tint gray>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_KEYS^" btint transgray width 176 currentif menu_omrail_cur 9 key mouse1 "menu keys"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_VIDEO^" btint transgray width 176 currentif menu_omrail_cur 10 key mouse1 "menu video"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_AUDIO^" btint transgray width 176 currentif menu_omrail_cur 11 key mouse1 "menu audio"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_GAMEPLAY^" btint transgray width 176 currentif menu_omrail_cur 12 key mouse1 "menu scale"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_MOUSE^" btint transgray width 176 currentif menu_omrail_cur 13 key mouse1 "menu misc"><br>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_RAIL_MORE^">
+<hr width 176 tint gray>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_STATS^" btint transgray width 176 currentif menu_omrail_cur 14 key mouse1 "menu stats"><br>
+<font type medium tint normaltext atint hilitetext>
+<text "^MENU_OMSET_RAIL_QUIT^" btint transgray width 176 currentif menu_omrail_cur 16 key mouse1 "menu quit"><br>
+</stm>

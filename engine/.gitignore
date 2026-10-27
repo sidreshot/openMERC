@@ -1,0 +1,6 @@
+/build*/
+/debug/
+/release/
+*.mk
+*.user
+*.d

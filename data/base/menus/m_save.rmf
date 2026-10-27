@@ -1,0 +1,13 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): new save and saved games to overwrite. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm command savesleft>
+<vbar tint vbargray>
+<center>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_SAVE_NEW^" ombutton btint transgray width 280 height 26 key mouse1 "newsave;menuoff"><br>
+<font type title tint normaltext atint normaltext>
+<ctext menu_savesleft atext "^MENU_OMSET_PG_SAVE_LEFT^ : "><br>
+<hbr>
+<font type small tint normaltext atint hilitetext>
+<loadbox width 520 cvar menu_save key mouse1 "menu overwrite" key mouse2 "menu wipe" saving spacing 16>
+</stm>

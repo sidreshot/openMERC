@@ -1,0 +1,24 @@
+<stm>
+<strings menu_omset>
+
+<vbar tint vbargray>
+
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_VIEW^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_FOV^" match "75,80,85,90,95,100,105,110" atext "^MENU_OMSET_FOV_LABEL^" split 230 cvar fov><hbr>
+<list "^MENU_OMSET_CROSSHAIRS^" atext "^MENU_OMSET_CROSSHAIR^" split 230 cvari crosshair><hbr>
+<list "^MENU_OMSET_CH_SIZES^" match "-1,1,2,3,4" atext "^MENU_OMSET_CH_SIZE^" split 230 cvar crosshair_scale><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_SUBTITLES^" split 230 cvari cl_subtitles><hbr>
+<list "^MENU_OMSET_LANGUAGES^" match "auto,en,ru" atext "^MENU_OMSET_LANGUAGE^" split 230 cvar om_language><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_WORLD^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_CORPSE_OPTS^" match "2,5,10,20" atext "^MENU_OMSET_CORPSES^" split 230 cvar ai_maxcorpses><hbr>
+<hbr>
+<blank 16 16>
+</stm>

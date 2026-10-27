@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Implements: SPEC-602 (predicting-client session, driven in real time by mp_drive.py: "<delay s> <command>",
+# "wait <timeout> <regex>" on the client log). Actions are separated by idle gaps so that both modules see the same
+# discrete inputs; taps (0.1 s) give single shots, holds of about 1 s give short bursts (+-1 shot between runs).
+wait 400 Welcome to Soldier of Fortune
+3 echo OMTEST marker elbow
+0 elbow
+4 echo OMTEST marker pistol1
+0 +attack
+0.1 -attack
+2 +attack
+1 -attack
+2 reload
+3 echo OMTEST marker switch assault
+0 weaponselect 7
+3 +attack
+0.1 -attack
+2 +attack
+1 -attack
+2 reload
+4 echo OMTEST marker sniper
+0 weaponselect 5
+3 +altattack
+0.1 -altattack
+3 +attack
+0.1 -attack
+3 +altattack
+0.1 -altattack
+3 reload
+4 echo OMTEST marker shotgun
+0 weaponselect 4
+3 +attack
+0.1 -attack
+2 +attack
+0.1 -attack
+2 reload
+6 echo OMTEST marker knife
+0 weaponselect 1
+3 +attack
+0.1 -attack
+2 +altattack
+0.1 -altattack
+3 echo OMTEST marker pistol2
+0 weaponselect 3
+3 +attack
+0.1 -attack
+2 reload
+3 echo OMTEST marker drop
+0 weapondrop
+4 echo OMTEST marker quit
+0 disconnect
+1 quit

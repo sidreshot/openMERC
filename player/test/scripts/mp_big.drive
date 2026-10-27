@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Implements: SPEC-602 (predicting-client session 2: the bigelbow kit - slugger, machine pistol, machinegun, rocket
+# launcher, flamethrower, MPG - whose predicted starts and refires use "now" or the button, SPEC-602 Constants), and an
+# empty clip on a predicting client (test vector 4). God mode against the rockets' splash damage.
+wait 400 Welcome to Soldier of Fortune
+3 echo OMTEST marker bigelbow
+0 heretic
+1 bigelbow
+4 echo OMTEST marker slugger
+0 +attack
+0.1 -attack
+2 +attack
+1 -attack
+2 +altattack
+0.1 -altattack
+3 reload
+4 echo OMTEST marker mpistol
+0 weaponselect 6
+3 +attack
+0.15 -attack
+2 +attack
+1 -attack
+2 reload
+4 echo OMTEST marker machinegun
+0 weaponselect 8
+3 +attack
+0.1 -attack
+2 +attack
+1.2 -attack
+2 +altattack
+0.1 -altattack
+3 reload
+5 echo OMTEST marker rocket
+0 weaponselect 10
+3 +attack
+0.1 -attack
+3 +altattack
+0.1 -altattack
+4 reload
+5 echo OMTEST marker flamegun
+0 weaponselect 11
+3 +attack
+1.5 -attack
+3 +altattack
+0.1 -altattack
+4 echo OMTEST marker mpg
+0 weaponselect 12
+3 +attack
+1 -attack
+3 +altattack
+0.1 -altattack
+4 echo OMTEST marker empty clip
+0 weaponselect 6
+3 +attack
+5 -attack
+4 +attack
+0.1 -attack
+4 echo OMTEST marker quit
+0 disconnect
+1 quit

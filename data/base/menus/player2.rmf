@@ -1,0 +1,7 @@
+<!-- OpenMerc MENU-SCRATCH (owner t104u): short wait while the player models
+     are read, then the player setup screen (menus/player.rmf) -->
+<stm resize 400 160 nopush>
+<include om_tints>
+<frame main 400 160 border 16 1 darkgray backfill tipback>
+<frame alert 0 0 page a_player2 cut main>
+</stm>

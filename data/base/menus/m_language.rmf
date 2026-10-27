@@ -1,0 +1,15 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): language. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<vbar tint vbargray>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_LANG_TITLE^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_PG_LANG_TEXTS^" match "auto,en,ru" atext "^MENU_OMSET_PG_LANG_TEXT^" split 230 cvar om_language><hbr>
+<list "^MENU_OMSET_PG_LANG_BASES^" match "0,3,2" atext "^MENU_OMSET_PG_LANG_BASE^" split 230 cvar sp_language tip "^MENU_OMSET_PG_LANG_BASE_TIP^"><hbr>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_APPLY^" ombutton btint transgray width 200 height 26 key mouse1 "reloadall;menu language"><br>
+</stm>

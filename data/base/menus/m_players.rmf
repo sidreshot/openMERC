@@ -1,0 +1,8 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): players of the selected server. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<vbar tint vbargray>
+<tab 94 128>
+<font type medium tint normaltext atint normaltext>
+<players cvar menu_server title "^MENU_OMSET_PG_JOIN_NOPLAYERS^">
+</stm>

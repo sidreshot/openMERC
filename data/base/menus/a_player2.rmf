@@ -1,0 +1,9 @@
+<!-- OpenMerc MENU-SCRATCH (owner t104u): own page -->
+<stm>
+<cbuf "wait;wait;wait;menu player;menu players/$skin text">
+<center>
+<hbr>
+<hbr>
+<font type title tint orange atint orange>
+"^MENU_OMSET_PG_LOADING_PLAYERS^"<br>
+</stm>

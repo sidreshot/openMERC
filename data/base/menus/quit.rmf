@@ -1,0 +1,6 @@
+<!-- OpenMerc MENU-SCRATCH (owner t104u): confirmation dialog, own page -->
+<stm resize 400 200>
+<include om_tints>
+<frame main 400 200 border 16 1 darkgray backfill tipback>
+<frame alert 0 0 page a_quit cut main>
+</stm>

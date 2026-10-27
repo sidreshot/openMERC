@@ -1,0 +1,10 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): screen "load". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_load center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame keys 0 0 page m_load cut main>
+</stm>

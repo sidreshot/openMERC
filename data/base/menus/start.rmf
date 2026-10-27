@@ -1,0 +1,14 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): screen "start". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_start center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame left 320 0 page m_start cut main>
+<frame right 0 146 cut main border 8 1 gray>
+<frame m_right 0 0 page r_start cut right>
+<frame bottom 0 0 cut main border 8 1 gray>
+<frame m_bottom 0 0 page b_start cut bottom>
+</stm>

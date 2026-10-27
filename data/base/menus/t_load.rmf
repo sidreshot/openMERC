@@ -1,0 +1,18 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): folder tabs, title and ticker of "t_load". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm global>
+<backdrop omflat>
+<center>
+<image none label "^MENU_OMSET_RAIL_NEWGAME^" bolt "null_tab01" key mouse1 "menu game">
+<image none label "^MENU_OMSET_RAIL_LOAD^" bolt "null_tab02">
+<image none label "^MENU_OMSET_RAIL_SAVE^" bolt "null_tab03" key mouse1 "menu save">
+<image none label "^MENU_OMSET_RAIL_CREDITS^" bolt "null_tab04" key mouse1 "menu credits">
+
+<font type title tint normaltext atint normaltext>
+<text "^MENU_OMSET_PG_LOAD_TITLE^" bolt "NULL_HEADER">
+
+<include control>
+
+<font type title tint orange>
+<ticker "^MENU_OMSET_PG_LOAD_TICK^" bolt "null_ticker_tape" speed 10 width 336 xoff -160 yoff -11>
+</stm>

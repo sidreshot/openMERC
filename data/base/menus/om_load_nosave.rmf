@@ -1,0 +1,4 @@
+<!-- OpenMerc MENU-SCRATCH: load page without savegames -->
+<blank 16 40><br>
+<font type title tint gray>
+<text "^MENU_OMSET_PG_LOAD_EMPTY^"><br>

@@ -1,0 +1,30 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* OpenMerc: names the engine executable exports on ELF systems for OMsnd (src/common/sof_exports.c,
+   SPEC-004 "Engine functions imported by name"). The wrapped ones are exported under their SoFExp_
+   names; OMsnd (modules/sound/src/snd_engine.c) looks those up instead of the Windows export names. */
+{
+	Com_Printf;
+	Com_DPrintf;
+	Com_Error;
+	Com_sprintf;
+	Cmd_AddCommand;
+	Cmd_RemoveCommand;
+	Cmd_Argc;
+	Cmd_Argv;
+	Cvar_Set;
+	Cvar_SetValue;
+	FS_FreeFile;
+	Sys_Error;
+	irand;
+	flrand;
+	VectorLength;
+	VectorNormalize;
+	CL_GetEntitySoundOrigin;
+	SoFExp_Cvar_Get;
+	SoFExp_FS_LoadFile;
+	SoFExp_FS_FOpenFile;
+	SoFExp_FS_FCloseFile;
+	SoFExp_Z_Malloc;
+	SoFExp_Z_Free;
+	SoFExp_Z_Touch;
+};

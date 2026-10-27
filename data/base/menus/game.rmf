@@ -1,0 +1,10 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): screen "game". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_game center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame game 0 0 page m_game cut main>
+</stm>

@@ -1,0 +1,15 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): folder tab, title and ticker of "t_stats". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm global>
+<backdrop omflat>
+<center>
+<image none label "^MENU_OMSET_RAIL_STATS^" bolt "null_tab01">
+
+<font type title tint normaltext atint normaltext>
+<text "^MENU_OMSET_PG_STATS_TITLE^" bolt "NULL_HEADER">
+
+<include control>
+
+<font type title tint orange>
+<ticker "^MENU_OMSET_PG_STATS_TICK^" bolt "null_ticker_tape" speed 10 width 336 xoff -160 yoff -11>
+</stm>

@@ -1,0 +1,17 @@
+<!-- OpenMerc MENU-SCRATCH: folder of the main menu (main.rmf): one tab,
+     the title, the ticker; the landing page is m_omhome. Own background
+     (backdrop omflat), no retail art (owner t95u) -->
+<stm global>
+<strings menu_omset>
+
+<backdrop omflat>
+
+<center>
+<image none tint iconhilite atint iconhilite bolt "null_tab01" tip "^MENU_OMSET_HOME_TAB^">
+
+<font type title tint normaltext atint normaltext>
+<text "^MENU_OMSET_HOME_TITLE^" bbolt "NULL_HEADER">
+
+<font type title tint orange>
+<ticker "^MENU_OMSET_HOME_TICKER^" bbolt "null_ticker_tape" speed 10 width 336 xoff -160 yoff -11>
+</stm>

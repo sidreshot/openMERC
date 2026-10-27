@@ -1,0 +1,749 @@
+VERSION 1
+ID 197
+REFERENCE MENU_OMSET
+DESCRIPTION "OpenMerc audio, controls, gameplay and multiplayer pages"
+COUNT 124
+INDEX 0
+{
+   REFERENCE OFFON
+   TEXT_ENGLISH "Off,On"
+   TEXT_RUSSIAN "Выкл,Вкл"
+}
+INDEX 1
+{
+   REFERENCE NOYES
+   TEXT_ENGLISH "No,Yes"
+   TEXT_RUSSIAN "Нет,Да"
+}
+INDEX 2
+{
+   REFERENCE SECTION_VOLUME
+   TEXT_ENGLISH "VOLUME"
+   TEXT_RUSSIAN "ГРОМКОСТЬ"
+}
+INDEX 3
+{
+   REFERENCE MASTER
+   TEXT_ENGLISH "Master Volume"
+   TEXT_RUSSIAN "Общая громкость"
+}
+INDEX 4
+{
+   REFERENCE EFFECTS
+   TEXT_ENGLISH "Effects Volume"
+   TEXT_RUSSIAN "Громкость эффектов"
+}
+INDEX 5
+{
+   REFERENCE VOICE
+   TEXT_ENGLISH "Speech Volume"
+   TEXT_RUSSIAN "Громкость речи"
+}
+INDEX 6
+{
+   REFERENCE MUSIC
+   TEXT_ENGLISH "Music Volume"
+   TEXT_RUSSIAN "Громкость музыки"
+}
+INDEX 7
+{
+   REFERENCE MUSIC_ON
+   TEXT_ENGLISH "Music"
+   TEXT_RUSSIAN "Музыка"
+}
+INDEX 8
+{
+   REFERENCE SECTION_OUTPUT
+   TEXT_ENGLISH "SOUND OUTPUT"
+   TEXT_RUSSIAN "ВЫВОД ЗВУКА"
+}
+INDEX 9
+{
+   REFERENCE HRTF
+   TEXT_ENGLISH "Headphone 3D Sound (HRTF)"
+   TEXT_RUSSIAN "Объёмный звук в наушниках (HRTF)"
+}
+INDEX 10
+{
+   REFERENCE REVERB
+   TEXT_ENGLISH "Environmental Reverb"
+   TEXT_RUSSIAN "Реверберация окружения"
+}
+INDEX 11
+{
+   REFERENCE LIMITER
+   TEXT_ENGLISH "Volume Limiter"
+   TEXT_RUSSIAN "Ограничитель громкости"
+}
+INDEX 12
+{
+   REFERENCE FOCUSMUTE
+   TEXT_ENGLISH "Mute in Background"
+   TEXT_RUSSIAN "Без звука в фоне"
+}
+INDEX 13
+{
+   REFERENCE SND_RESTART
+   TEXT_ENGLISH "RESTART SOUND"
+   TEXT_RUSSIAN "ПЕРЕЗАПУСК ЗВУКА"
+}
+INDEX 14
+{
+   REFERENCE SND_DEFAULTS
+   TEXT_ENGLISH "RESTORE DEFAULTS"
+   TEXT_RUSSIAN "ПО УМОЛЧАНИЮ"
+}
+INDEX 15
+{
+   REFERENCE SND_TIP
+   TEXT_ENGLISH "Output settings apply at once"
+   TEXT_RUSSIAN "Настройки вывода применяются сразу"
+}
+INDEX 16
+{
+   REFERENCE SND_RESTART_TIP
+   TEXT_ENGLISH "Reloads every sound"
+   TEXT_RUSSIAN "Заново загружает все звуки"
+}
+INDEX 17
+{
+   REFERENCE DEVICE
+   TEXT_ENGLISH "Device"
+   TEXT_RUSSIAN "Устройство"
+}
+INDEX 18
+{
+   REFERENCE DEVICE_DEFAULT
+   TEXT_ENGLISH "System Default"
+   TEXT_RUSSIAN "Системное по умолчанию"
+}
+INDEX 19
+{
+   REFERENCE DEVICE_TIP
+   TEXT_ENGLISH "System Default follows Windows"
+   TEXT_RUSSIAN "Системное следует настройке Windows"
+}
+INDEX 20
+{
+   REFERENCE SECTION_MOUSE
+   TEXT_ENGLISH "MOUSE"
+   TEXT_RUSSIAN "МЫШЬ"
+}
+INDEX 21
+{
+   REFERENCE SENS_X
+   TEXT_ENGLISH "Horizontal Sensitivity"
+   TEXT_RUSSIAN "Чувствительность по горизонтали"
+}
+INDEX 22
+{
+   REFERENCE SENS_Y
+   TEXT_ENGLISH "Vertical Sensitivity"
+   TEXT_RUSSIAN "Чувствительность по вертикали"
+}
+INDEX 23
+{
+   REFERENCE INVERT_X
+   TEXT_ENGLISH "Invert Horizontal"
+   TEXT_RUSSIAN "Инверсия по горизонтали"
+}
+INDEX 24
+{
+   REFERENCE INVERT_Y
+   TEXT_ENGLISH "Invert Vertical"
+   TEXT_RUSSIAN "Инверсия по вертикали"
+}
+INDEX 25
+{
+   REFERENCE FREELOOK
+   TEXT_ENGLISH "Mouse Look"
+   TEXT_RUSSIAN "Обзор мышью"
+}
+INDEX 26
+{
+   REFERENCE FILTER
+   TEXT_ENGLISH "Mouse Smoothing"
+   TEXT_RUSSIAN "Сглаживание мыши"
+}
+INDEX 27
+{
+   REFERENCE SECTION_MOVE
+   TEXT_ENGLISH "MOVEMENT"
+   TEXT_RUSSIAN "ПЕРЕДВИЖЕНИЕ"
+}
+INDEX 28
+{
+   REFERENCE RUN
+   TEXT_ENGLISH "Always Run"
+   TEXT_RUSSIAN "Всегда бежать"
+}
+INDEX 29
+{
+   REFERENCE LOOKSPRING
+   TEXT_ENGLISH "Centre View on Release"
+   TEXT_RUSSIAN "Центрировать взгляд"
+}
+INDEX 30
+{
+   REFERENCE SECTION_PAD
+   TEXT_ENGLISH "GAMEPAD"
+   TEXT_RUSSIAN "ГЕЙМПАД"
+}
+INDEX 31
+{
+   REFERENCE PAD_SENS
+   TEXT_ENGLISH "Stick Look Speed"
+   TEXT_RUSSIAN "Скорость обзора стиком"
+}
+INDEX 32
+{
+   REFERENCE KEYS
+   TEXT_ENGLISH "KEY BINDINGS"
+   TEXT_RUSSIAN "НАЗНАЧЕНИЕ КЛАВИШ"
+}
+INDEX 33
+{
+   REFERENCE KEY_PRESETS
+   TEXT_ENGLISH "KEY LAYOUTS"
+   TEXT_RUSSIAN "ГОТОВЫЕ РАСКЛАДКИ"
+}
+INDEX 34
+{
+   REFERENCE KEY_MOVE
+   TEXT_ENGLISH "MOVING"
+   TEXT_RUSSIAN "ДВИЖЕНИЕ"
+}
+INDEX 35
+{
+   REFERENCE KEY_COMBAT
+   TEXT_ENGLISH "COMBAT"
+   TEXT_RUSSIAN "БОЙ"
+}
+INDEX 36
+{
+   REFERENCE KEY_SLOTS
+   TEXT_ENGLISH "WEAPON SLOTS"
+   TEXT_RUSSIAN "ОРУЖИЕ ПО НОМЕРАМ"
+}
+INDEX 37
+{
+   REFERENCE KEY_ITEMS
+   TEXT_ENGLISH "ITEMS"
+   TEXT_RUSSIAN "ПРЕДМЕТЫ"
+}
+INDEX 38
+{
+   REFERENCE KEY_UI
+   TEXT_ENGLISH "MULTIPLAYER AND INTERFACE"
+   TEXT_RUSSIAN "СЕТЬ И ИНТЕРФЕЙС"
+}
+INDEX 39
+{
+   REFERENCE KEY_LOOK
+   TEXT_ENGLISH "LOOKING"
+   TEXT_RUSSIAN "ОБЗОР"
+}
+INDEX 40
+{
+   REFERENCE KEY_LASTWEAP
+   TEXT_ENGLISH "Last Weapon"
+   TEXT_RUSSIAN "Предыдущее оружие"
+}
+INDEX 41
+{
+   REFERENCE KEY_CONSOLE
+   TEXT_ENGLISH "Console"
+   TEXT_RUSSIAN "Консоль"
+}
+INDEX 42
+{
+   REFERENCE KEY_LEANTIP
+   TEXT_ENGLISH "Hold Use and press Step Left or Step Right to lean"
+   TEXT_RUSSIAN "Удерживайте клавишу действия и нажмите шаг влево или вправо, чтобы выглянуть"
+}
+INDEX 43
+{
+   REFERENCE KEY_BINDTIP
+   TEXT_ENGLISH "Click an action, then press the new key"
+   TEXT_RUSSIAN "Щёлкните действие и нажмите новую клавишу"
+}
+INDEX 44
+{
+   REFERENCE SECTION_VIEW
+   TEXT_ENGLISH "VIEW"
+   TEXT_RUSSIAN "ОБЗОР"
+}
+INDEX 45
+{
+   REFERENCE FOV_LABEL
+   TEXT_ENGLISH "Field of View"
+   TEXT_RUSSIAN "Поле зрения"
+}
+INDEX 46
+{
+   REFERENCE FOV
+   TEXT_ENGLISH "75,80,85,90,95,100,105,110"
+   TEXT_RUSSIAN "75,80,85,90,95,100,105,110"
+}
+INDEX 47
+{
+   REFERENCE CROSSHAIR
+   TEXT_ENGLISH "Crosshair"
+   TEXT_RUSSIAN "Прицел"
+}
+INDEX 48
+{
+   REFERENCE CROSSHAIRS
+   TEXT_ENGLISH "Off,Style 1,Style 2,Style 3,Style 4"
+   TEXT_RUSSIAN "Выкл,Вид 1,Вид 2,Вид 3,Вид 4"
+}
+INDEX 49
+{
+   REFERENCE CH_SIZE
+   TEXT_ENGLISH "Crosshair Size"
+   TEXT_RUSSIAN "Размер прицела"
+}
+INDEX 50
+{
+   REFERENCE CH_SIZES
+   TEXT_ENGLISH "Auto,1x,2x,3x,4x"
+   TEXT_RUSSIAN "Авто,1x,2x,3x,4x"
+}
+INDEX 51
+{
+   REFERENCE SUBTITLES
+   TEXT_ENGLISH "Subtitles"
+   TEXT_RUSSIAN "Субтитры"
+}
+INDEX 52
+{
+   REFERENCE LANGUAGE
+   TEXT_ENGLISH "Text Language"
+   TEXT_RUSSIAN "Язык текста"
+}
+INDEX 53
+{
+   REFERENCE LANGUAGES
+   TEXT_ENGLISH "Auto,English,Russian"
+   TEXT_RUSSIAN "Авто,Английский,Русский"
+}
+INDEX 54
+{
+   REFERENCE SECTION_WORLD
+   TEXT_ENGLISH "WORLD"
+   TEXT_RUSSIAN "МИР"
+}
+INDEX 55
+{
+   REFERENCE CORPSES
+   TEXT_ENGLISH "Bodies Kept"
+   TEXT_RUSSIAN "Тела на уровне"
+}
+INDEX 56
+{
+   REFERENCE CORPSE_OPTS
+   TEXT_ENGLISH "2,5,10,20"
+   TEXT_RUSSIAN "2,5,10,20"
+}
+INDEX 57
+{
+   REFERENCE SECTION_NET
+   TEXT_ENGLISH "MULTIPLAYER"
+   TEXT_RUSSIAN "СЕТЕВАЯ ИГРА"
+}
+INDEX 58
+{
+   REFERENCE TEAM
+   TEXT_ENGLISH "Team"
+   TEXT_RUSSIAN "Команда"
+}
+INDEX 59
+{
+   REFERENCE TEAMS
+   TEXT_ENGLISH "Blue,Red"
+   TEXT_RUSSIAN "Синие,Красные"
+}
+INDEX 60
+{
+   REFERENCE SPECTATOR
+   TEXT_ENGLISH "Spectator Mode"
+   TEXT_RUSSIAN "Режим зрителя"
+}
+INDEX 61
+{
+   REFERENCE NAMES
+   TEXT_ENGLISH "Show Player Names"
+   TEXT_RUSSIAN "Показывать имена игроков"
+}
+INDEX 62
+{
+   REFERENCE WEAPSWITCH
+   TEXT_ENGLISH "Switch to New Weapon"
+   TEXT_RUSSIAN "Брать новое оружие"
+}
+INDEX 63
+{
+   REFERENCE WEAPSWITCHES
+   TEXT_ENGLISH "Never,Safe,Always"
+   TEXT_RUSSIAN "Никогда,Безопасно,Всегда"
+}
+INDEX 64
+{
+   REFERENCE RATE
+   TEXT_ENGLISH "Connection"
+   TEXT_RUSSIAN "Соединение"
+}
+INDEX 65
+{
+   REFERENCE RATES
+   TEXT_ENGLISH "Slow,Medium,Fast"
+   TEXT_RUSSIAN "Медленное,Среднее,Быстрое"
+}
+INDEX 66
+{
+   REFERENCE SECTION_DL
+   TEXT_ENGLISH "DOWNLOADS"
+   TEXT_RUSSIAN "ЗАГРУЗКИ"
+}
+INDEX 67
+{
+   REFERENCE DL
+   TEXT_ENGLISH "Allow Downloads"
+   TEXT_RUSSIAN "Разрешить загрузки"
+}
+INDEX 68
+{
+   REFERENCE DL_MAPS
+   TEXT_ENGLISH "Maps"
+   TEXT_RUSSIAN "Карты"
+}
+INDEX 69
+{
+   REFERENCE DL_SOUNDS
+   TEXT_ENGLISH "Sounds"
+   TEXT_RUSSIAN "Звуки"
+}
+INDEX 70
+{
+   REFERENCE DL_STRINGS
+   TEXT_ENGLISH "Text Packages"
+   TEXT_RUSSIAN "Текстовые пакеты"
+}
+INDEX 71
+{
+   REFERENCE RAIL_MAIN
+   TEXT_ENGLISH "Main Menu"
+   TEXT_RUSSIAN "Главное меню"
+}
+INDEX 72
+{
+   REFERENCE RAIL_SINGLE
+   TEXT_ENGLISH "CAMPAIGN"
+   TEXT_RUSSIAN "КАМПАНИЯ"
+}
+INDEX 73
+{
+   REFERENCE RAIL_NEWGAME
+   TEXT_ENGLISH "New Game"
+   TEXT_RUSSIAN "Новая игра"
+}
+INDEX 74
+{
+   REFERENCE RAIL_LOAD
+   TEXT_ENGLISH "Load Game"
+   TEXT_RUSSIAN "Загрузить"
+}
+INDEX 75
+{
+   REFERENCE RAIL_SAVE
+   TEXT_ENGLISH "Save Game"
+   TEXT_RUSSIAN "Сохранить"
+}
+INDEX 76
+{
+   REFERENCE RAIL_CREDITS
+   TEXT_ENGLISH "Credits"
+   TEXT_RUSSIAN "Авторы"
+}
+INDEX 77
+{
+   REFERENCE RAIL_MULTI
+   TEXT_ENGLISH "MULTIPLAYER"
+   TEXT_RUSSIAN "СЕТЕВАЯ ИГРА"
+}
+INDEX 78
+{
+   REFERENCE RAIL_PLAYER
+   TEXT_ENGLISH "Player Setup"
+   TEXT_RUSSIAN "Игрок"
+}
+INDEX 79
+{
+   REFERENCE RAIL_JOIN
+   TEXT_ENGLISH "Join Server"
+   TEXT_RUSSIAN "Подключиться"
+}
+INDEX 80
+{
+   REFERENCE RAIL_START
+   TEXT_ENGLISH "Start Server"
+   TEXT_RUSSIAN "Создать сервер"
+}
+INDEX 81
+{
+   REFERENCE RAIL_MPOPTIONS
+   TEXT_ENGLISH "Server Options"
+   TEXT_RUSSIAN "Параметры сервера"
+}
+INDEX 82
+{
+   REFERENCE RAIL_OPTIONS
+   TEXT_ENGLISH "OPTIONS"
+   TEXT_RUSSIAN "НАСТРОЙКИ"
+}
+INDEX 83
+{
+   REFERENCE RAIL_KEYS
+   TEXT_ENGLISH "Controls"
+   TEXT_RUSSIAN "Управление"
+}
+INDEX 84
+{
+   REFERENCE RAIL_VIDEO
+   TEXT_ENGLISH "Video"
+   TEXT_RUSSIAN "Видео"
+}
+INDEX 85
+{
+   REFERENCE RAIL_AUDIO
+   TEXT_ENGLISH "Audio"
+   TEXT_RUSSIAN "Звук"
+}
+INDEX 86
+{
+   REFERENCE RAIL_GAMEPLAY
+   TEXT_ENGLISH "Gameplay"
+   TEXT_RUSSIAN "Игра"
+}
+INDEX 87
+{
+   REFERENCE RAIL_MOUSE
+   TEXT_ENGLISH "Mouse and Gamepad"
+   TEXT_RUSSIAN "Мышь и геймпад"
+}
+INDEX 88
+{
+   REFERENCE RAIL_MORE
+   TEXT_ENGLISH "OTHER"
+   TEXT_RUSSIAN "ПРОЧЕЕ"
+}
+INDEX 89
+{
+   REFERENCE RAIL_STATS
+   TEXT_ENGLISH "Statistics"
+   TEXT_RUSSIAN "Статистика"
+}
+INDEX 90
+{
+   REFERENCE RAIL_QUIT
+   TEXT_ENGLISH "Quit"
+   TEXT_RUSSIAN "Выход"
+}
+INDEX 91
+{
+   REFERENCE TAB_PLAYER
+   TEXT_ENGLISH "Player"
+   TEXT_RUSSIAN "Игрок"
+}
+INDEX 92
+{
+   REFERENCE TAB_JOIN
+   TEXT_ENGLISH "Join"
+   TEXT_RUSSIAN "Подключиться"
+}
+INDEX 93
+{
+   REFERENCE TAB_START
+   TEXT_ENGLISH "Start"
+   TEXT_RUSSIAN "Создать"
+}
+INDEX 94
+{
+   REFERENCE TAB_OPTIONS
+   TEXT_ENGLISH "Server"
+   TEXT_RUSSIAN "Сервер"
+}
+INDEX 95
+{
+   REFERENCE TAB_MOTD
+   TEXT_ENGLISH "News"
+   TEXT_RUSSIAN "Новости"
+}
+INDEX 96
+{
+   REFERENCE TAB_CHAT
+   TEXT_ENGLISH "Chat"
+   TEXT_RUSSIAN "Чат"
+}
+INDEX 97
+{
+   REFERENCE TAB_GAMEPAD
+   TEXT_ENGLISH "Gamepad"
+   TEXT_RUSSIAN "Геймпад"
+}
+INDEX 98
+{
+   REFERENCE TAB_MOUSE
+   TEXT_ENGLISH "Mouse"
+   TEXT_RUSSIAN "Мышь"
+}
+INDEX 99
+{
+   REFERENCE TAB_LOCK
+   TEXT_ENGLISH "Lock"
+   TEXT_RUSSIAN "Замок"
+}
+INDEX 100
+{
+   REFERENCE TAB_RULES
+   TEXT_ENGLISH "Rules"
+   TEXT_RUSSIAN "Правила"
+}
+INDEX 101
+{
+   REFERENCE TAB_BOTS
+   TEXT_ENGLISH "Bots"
+   TEXT_RUSSIAN "Боты"
+}
+INDEX 102
+{
+   REFERENCE TAB_LANGUAGE
+   TEXT_ENGLISH "Language"
+   TEXT_RUSSIAN "Язык"
+}
+INDEX 103
+{
+   REFERENCE WIDE_HELP
+   TEXT_ENGLISH "Help"
+   TEXT_RUSSIAN "Справка"
+}
+INDEX 104
+{
+   REFERENCE WIDE_RESUME
+   TEXT_ENGLISH "Resume"
+   TEXT_RUSSIAN "В игру"
+}
+INDEX 105
+{
+   REFERENCE WIDE_BACK
+   TEXT_ENGLISH "Back"
+   TEXT_RUSSIAN "Назад"
+}
+INDEX 106
+{
+   REFERENCE WIDE_DEPLOY
+   TEXT_ENGLISH "Deploy"
+   TEXT_RUSSIAN "В бой"
+}
+INDEX 107
+{
+   REFERENCE SL_TRANSFER
+   TEXT_ENGLISH "Receiving Server List"
+   TEXT_RUSSIAN "Получение списка серверов"
+}
+INDEX 108
+{
+   REFERENCE SL_QUERY
+   TEXT_ENGLISH "Querying Servers"
+   TEXT_RUSSIAN "Опрос серверов"
+}
+INDEX 109
+{
+   REFERENCE SL_DONE
+   TEXT_ENGLISH "Query Complete"
+   TEXT_RUSSIAN "Опрос завершен"
+}
+INDEX 110
+{
+   REFERENCE HOME_TAB
+   TEXT_ENGLISH "Home"
+   TEXT_RUSSIAN "Главная"
+}
+INDEX 111
+{
+   REFERENCE HOME_TITLE
+   TEXT_ENGLISH "MAIN MENU"
+   TEXT_RUSSIAN "ГЛАВНОЕ МЕНЮ"
+}
+INDEX 112
+{
+   REFERENCE HOME_TICKER
+   TEXT_ENGLISH "openMERC  -  an open-source engine for Soldier of Fortune  -  your game data stays yours"
+   TEXT_RUSSIAN "openMERC  -  открытый движок для Soldier of Fortune  -  нужны файлы вашей копии игры"
+}
+INDEX 113
+{
+   REFERENCE HOME_CONTINUE
+   TEXT_ENGLISH "CONTINUE"
+   TEXT_RUSSIAN "ПРОДОЛЖИТЬ"
+}
+INDEX 114
+{
+   REFERENCE HOME_NEWGAME
+   TEXT_ENGLISH "NEW GAME"
+   TEXT_RUSSIAN "НОВАЯ ИГРА"
+}
+INDEX 115
+{
+   REFERENCE HOME_LOAD
+   TEXT_ENGLISH "LOAD GAME"
+   TEXT_RUSSIAN "ЗАГРУЗИТЬ ИГРУ"
+}
+INDEX 116
+{
+   REFERENCE HOME_MULTI
+   TEXT_ENGLISH "MULTIPLAYER"
+   TEXT_RUSSIAN "СЕТЕВАЯ ИГРА"
+}
+INDEX 117
+{
+   REFERENCE HOME_SETTINGS
+   TEXT_ENGLISH "SETTINGS"
+   TEXT_RUSSIAN "НАСТРОЙКИ"
+}
+INDEX 118
+{
+   REFERENCE HOME_QUIT
+   TEXT_ENGLISH "EXIT"
+   TEXT_RUSSIAN "ВЫХОД"
+}
+INDEX 119
+{
+   REFERENCE HOME_LASTSAVE
+   TEXT_ENGLISH "LAST SAVE"
+   TEXT_RUSSIAN "ПОСЛЕДНЕЕ СОХРАНЕНИЕ"
+}
+INDEX 120
+{
+   REFERENCE HOME_NOSAVE
+   TEXT_ENGLISH "No saved games yet"
+   TEXT_RUSSIAN "Сохранённых игр пока нет"
+}
+INDEX 121
+{
+   REFERENCE SECTION_SAVE
+   TEXT_ENGLISH "SAVING"
+   TEXT_RUSSIAN "СОХРАНЕНИЕ"
+}
+INDEX 122
+{
+   REFERENCE AUTOSAVE
+   TEXT_ENGLISH "Timed Autosave"
+   TEXT_RUSSIAN "Автосохранение по таймеру"
+}
+INDEX 123
+{
+   REFERENCE AUTOSAVE_OPTS
+   TEXT_ENGLISH "Off,1 min,2 min,3 min,4 min,5 min"
+   TEXT_RUSSIAN "Выкл,1 мин,2 мин,3 мин,4 мин,5 мин"
+}

@@ -1,0 +1,34 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): new game: name, difficulty, tutorial. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<set menu_skill $skill>
+<vbar tint vbargray>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_GAME_NAME^">
+<hr width 288 tint gray>
+<font type title tint hilitetext atint hilitetext>
+<input width 240 cvar name global maxchars 32 border 8 1 gray tip "^MENU_OMSET_PG_GAME_NAME_TIP^"><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_GAME_DIFF^">
+<hr width 288 tint gray>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_GAME_D0^" ombutton btint transgray width 280 height 26 key mouse1 "set menu_skill 0;freshgame" tip "^MENU_OMSET_PG_GAME_DTIP^"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_GAME_D1^" ombutton btint transgray width 280 height 26 key mouse1 "set menu_skill 1;freshgame" tip "^MENU_OMSET_PG_GAME_DTIP^"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_GAME_D2^" ombutton btint transgray width 280 height 26 key mouse1 "set menu_skill 2;freshgame" tip "^MENU_OMSET_PG_GAME_DTIP^"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_GAME_D3^" ombutton btint transgray width 280 height 26 key mouse1 "set menu_skill 3;freshgame" tip "^MENU_OMSET_PG_GAME_DTIP^"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_GAME_D4^" ombutton btint transgray width 280 height 26 key mouse1 "set menu_skill 4;freshgame" tip "^MENU_OMSET_PG_GAME_DTIP^"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_GAME_DCUSTOM^" ombutton btint transgray width 280 height 26 key mouse1 "menu game2"><br>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_GAME_TRAIN^">
+<hr width 288 tint gray>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_GAME_TUTORIAL^" ombutton btint transgray width 280 height 26 key mouse1 "tutorial"><br>
+</stm>

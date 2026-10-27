@@ -1,0 +1,62 @@
+# OpenMerc MENU-SCRATCH: rows of the video page (m_video.rmf, <omtable>).
+# UTF-8; the engine picks EN or RU by the menu language (om_language).
+# kind    | cvar | values | labels EN | labels RU | label EN | label RU | flags
+# kind    | cvar | min | max | step | label EN | label RU | flags         (slider)
+# section | EN | RU | flags      note | EN | RU | flags      rmf | raw RMF
+# flags: stage (menu_* cvar staged until Apply, menus/video.cfg + applyvid.cfg),
+#        requires=cvar (row hidden while the cvar is not registered),
+#        tip=EN/RU
+# Renderer effects add their rows in the EFFECTS block; rows of cvars the
+# running renderer does not register stay hidden.
+
+section | DISPLAY | ЭКРАН | tip=Display settings are applied with the Apply button/Настройки экрана применяются кнопкой Применить
+rmf | <list "^MENU_OMVIDEO_DESKTOP^" match "desktop" vidmodes atext "^MENU_OMVIDEO_MODES_LABEL^" split 230 cvar menu_mode key mouse1 "set menu_settings_changed 1"><hbr>
+list | menu_fullscreen | 0,1,2 | Windowed,Fullscreen,Borderless | В окне,Полный экран,Без рамки | Display Mode | Режим экрана | stage
+list | menu_vsync | 0,1 | Off,On | Выкл,Вкл | Vertical Sync | Вертикальная синхронизация | stage
+list | menu_maxfps | 0,60,120,144,165,240,999 | Display Refresh,60,120,144,165,240,Unlimited | Частота экрана,60,120,144,165,240,Без ограничения | Frame Rate Limit | Ограничение кадров | stage
+
+section | SCALING | МАСШТАБ
+list | menu_uiscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | Menu and Text Size | Размер меню и текста | stage
+list | menu_hudscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | HUD Size | Размер HUD | stage
+list | menu_aspect | 0,1 | Off,On | Выкл,Вкл | Widescreen HUD and Menus | Широкоэкранные HUD и меню | stage
+list | menu_rail | 0,1 | Off,On | Выкл,Вкл | Menu Side Panel | Боковая панель меню | tip=Section list left of the menu on widescreen displays/Список разделов слева от меню на широких экранах
+list | menu_layout | 0,1 | Classic,Widescreen | Классика,Широкая | Menu Layout | Компоновка меню | tip=Widescreen: menus fill the window in openMERC panels/Широкая: меню на весь экран в панелях openMERC
+
+section | VIEW | ОБЗОР
+list | menu_fov | 75,80,85,90,95,100,105,110 | 75,80,85,90,95,100,105,110 | 75,80,85,90,95,100,105,110 | Field of View | Поле зрения | stage
+list | horplus | 0,1 | Off,On | Выкл,Вкл | Widescreen View (Hor+) | Широкий обзор (Hor+)
+
+section | PICTURE QUALITY | КАЧЕСТВО ИЗОБРАЖЕНИЯ
+list | menu_anisotropic | 1,2,4,8,16 | Off,2x,4x,8x,16x | Выкл,2x,4x,8x,16x | Anisotropic Filtering | Анизотропная фильтрация | stage
+list | menu_msaa | 0,2,4,8 | Off,2x,4x,8x | Выкл,2x,4x,8x | Antialiasing (MSAA) | Сглаживание (MSAA) | stage
+list | gl_texturemode | GL_LINEAR_MIPMAP_NEAREST,GL_LINEAR_MIPMAP_LINEAR,GL_LINEAR,GL_NEAREST | Bilinear,Trilinear,Linear without mipmaps,Nearest | Билинейная,Трилинейная,Линейная без MIP-уровней,Без фильтрации | Texture Filtering | Фильтрация текстур
+list | gl_detailtexturing | 0,1 | Off,On | Выкл,Вкл | Detail Textures | Детальные текстуры
+list | gl_detailtexturingdistance | 150,250,400,600,1000 | Near,Medium,Far,Very far,Maximum | Близко,Средне,Далеко,Очень далеко,Максимум | Detail Texture Distance | Дальность детальных текстур
+list | ghl_light_method | 0,1,2,3 | Fastest,Fast,Quality,Highest quality | Быстрейшее,Быстрое,Качественное,Наилучшее | Character Lighting | Освещение персонажей
+list | ghl_specular | 0,1 | Off,On | Выкл,Вкл | Specular Highlights | Блики
+list | ghl_shadows | 0,1,2 | Off,Basic,Full | Выкл,Простые,Полные | Character Shadows | Тени персонажей | requires=ghl_shadows
+
+# ---- EFFECTS: renderer effects of the gfx-modern renderer (docs GFX-modern.md 14)
+section | EFFECTS | ЭФФЕКТЫ | requires=r_om_bloom
+list | r_om_bloom | 0,1 | Off,On | Выкл,Вкл | Bloom | Свечение | requires=r_om_bloom
+slider | r_om_bloom_intensity | 0.1 | 1.0 | 0.05 | Bloom Intensity | Сила свечения | requires=r_om_bloom
+list | r_om_bloom_radius | 0.5,1,1.5,2 | Small,Normal,Wide,Widest | Малый,Обычный,Широкий,Очень широкий | Bloom Radius | Радиус свечения | requires=r_om_bloom
+list | r_om_volfog | 0,1 | Off,On | Выкл,Вкл | Volumetric Fog | Объёмный туман | requires=r_om_volfog
+list | r_om_volfog_quality | 1,2 | Half resolution,Full resolution | Половинное разрешение,Полное разрешение | Fog Quality | Качество тумана | requires=r_om_volfog
+list | r_om_volfog_shafts | 0,1 | Off,On | Выкл,Вкл | Light Shafts | Лучи света | requires=r_om_volfog
+list | r_om_csm | 0,1 | Off,On | Выкл,Вкл | World Shadows | Тени мира | requires=r_om_csm
+list | r_om_csm_size | 512,1024,2048,4096 | Low,Medium,High,Ultra | Низкое,Среднее,Высокое,Ультра | Shadow Resolution | Разрешение теней | requires=r_om_csm
+list | r_om_csm_cascades | 2,3,4 | 2,3,4 | 2,3,4 | Shadow Cascades | Каскады теней | requires=r_om_csm
+list | r_om_csm_soft | 0,1,2 | Hard,Soft,Softest | Жёсткие,Мягкие,Очень мягкие | Shadow Edges | Края теней | requires=r_om_csm
+list | r_om_softparticles | 0,1 | Off,On | Выкл,Вкл | Soft Particles | Мягкие частицы | requires=r_om_softparticles
+list | r_om_softparticles_dist | 6,12,24 | Short,Normal,Long | Короткое,Обычное,Длинное | Particle Fade Distance | Расстояние смягчения | requires=r_om_softparticles
+list | r_om_ppfog | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Fog | Попиксельный туман | requires=r_om_ppfog
+# per-pixel dynamic lights: A/B check passed (GFX-modern.md 14)
+list | r_om_pdlight | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Dynamic Lights | Попиксельные источники света | requires=r_om_pdlight
+list | r_om_overbright | 0,1 | Off,On | Выкл,Вкл | Overbright Lighting (not original) | Пересвет (не как в оригинале) | requires=r_om_overbright | tip=Brighter lighting that the original game does not have/Более яркое освещение, которого нет в оригинальной игре
+
+section | COLOUR | ЦВЕТ
+slider | menu_gamma | 0 | 1 | 0.1 | Gamma | Гамма | stage
+slider | menu_contrast | 0 | 1 | 0.1 | Contrast | Контраст | stage
+slider | menu_brightness | 0 | 1 | 0.1 | Brightness | Яркость | stage
+slider | menu_modulate | 0.4 | 4.0 | 0.1 | Light Intensity | Интенсивность света | stage

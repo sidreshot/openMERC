@@ -1,0 +1,6 @@
+; SPDX-License-Identifier: GPL-2.0-or-later
+; Implements: SPEC-001 (the only required export: GetGameAPI)
+LIBRARY gamex86
+EXPORTS
+    GetGameAPI
+    OpenMerc_Module

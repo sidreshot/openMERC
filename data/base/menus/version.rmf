@@ -1,0 +1,4 @@
+<font type small tint white>
+<right>
+<ctext om_version bbolt "null_version" nudge -4 8 ckey c console "" "menuoff">
+<include it>

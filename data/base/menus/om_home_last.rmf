@@ -1,0 +1,6 @@
+<!-- OpenMerc MENU-SCRATCH: newest savegame card of the landing page -->
+<font type small tint orange>
+<text "^MENU_OMSET_HOME_LASTSAVE^"><br>
+<image "om/newest" width 112 height 84 border 1 1 gray><br>
+<font type small tint normaltext>
+<ctext om_lastsave_level><text "   "><ctext om_lastsave_time><br>

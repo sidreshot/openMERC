@@ -1,0 +1,27 @@
+<!-- OpenMerc MENU2: video page (rewritten; options of the OpenGL 3 renderer only) -->
+<stm>
+<strings menu_omvideo>
+
+<vbar tint vbargray>
+<config "menus/video">
+<onexit menu_settings_changed "altervid">
+
+<comment MENU-SCRATCH: the rows come from the data table menus/om_video.tbl
+     (engine tag omtable); renderer effects plug in there>
+<center>
+<font type title tint normaltext atint hilitetext>
+<omtable "menus/om_video.tbl">
+<hbr>
+
+<center>
+<omcalib>
+<hbr>
+
+<center>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMVIDEO_APPLY^" key mouse1 "menuoff;exec menus/applyvid.cfg;vid_restart;menu main;menu video" ombutton btint transgray width 240 height 24><br>
+<blank 3 3><br>
+<text "^MENU_OMVIDEO_DEFAULTS^" key mouse1 "menuoff;exec default_video.cfg;vid_restart;menu main;menu video" ombutton btint transgray width 240 height 24><br>
+<hbr>
+<blank 16 16>
+</stm>

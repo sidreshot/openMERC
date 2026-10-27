@@ -1,0 +1,3 @@
+<!-- OpenMerc MENU2: the stock S3TC row of the old video page is not used; the OpenGL 3 renderer picks texture compression itself and the video page (m_video.rmf) no longer includes this fragment -->
+<stm>
+</stm>

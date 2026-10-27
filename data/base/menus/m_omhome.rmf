@@ -1,0 +1,30 @@
+<!-- OpenMerc MENU-SCRATCH: landing page of the main menu (owner t91u, t96):
+     title, version, the main actions (text option ombutton) and the newest
+     savegame (menu.c sets menu_cancontinue, menu_hassave, menu_nosave and
+     om_lastsave_*; "om_continue" returns to the level or loads that save) -->
+<stm>
+<strings menu_omset>
+
+<center>
+<hbr>
+<font type logo tint orange>
+<text "openMERC"><br>
+<font type logosmall tint normaltext>
+<ctext om_version><br>
+<hr width 280 tint gray>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<cinclude menu_cancontinue om_home_cont>
+<text "^MENU_OMSET_HOME_NEWGAME^" ombutton btint transgray width 280 height 28 key mouse1 "menu game"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_HOME_LOAD^" ombutton btint transgray width 280 height 28 key mouse1 "menu load"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_HOME_MULTI^" ombutton btint transgray width 280 height 28 key mouse1 "stopsound;menu player2"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_HOME_SETTINGS^" ombutton btint transgray width 280 height 28 key mouse1 "menu video"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_HOME_QUIT^" ombutton btint transgray width 280 height 28 key mouse1 "menu quit"><br>
+<hbr>
+<cinclude menu_hassave om_home_last>
+<cinclude menu_nosave om_home_nosave>
+</stm>

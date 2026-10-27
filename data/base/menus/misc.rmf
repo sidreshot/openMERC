@@ -1,0 +1,10 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): screen "misc". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_misc center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame misc 0 0 page m_misc cut main>
+</stm>

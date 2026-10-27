@@ -1,0 +1,154 @@
+# the listener's own sounds (modules/sound/test/local.txt): head-relative, full volume, never culled or stolen
+0 playernum 3
+0 entorg 4 5000 0 0
+0 entorg 72 6000 0 0
+500 start weapons/shotgun/fire.wav 4 1 1 1 expect=local
+3000 start weapons/shotgun/fire.wav 4 1 1 1 1000 0 0 expect=local
+5500 start weapons/shotgun/fire.wav 70 0 1 0 2000 300 0 expect=local
+8000 start weapons/shotgun/fire.wav 0 0 1 1 expect=local
+10500 start weapons/shotgun/fire.wav 71 1 1 1 0 0 -30 expect=local
+13000 start weapons/shotgun/fire.wav 1 1 1 1 3000 0 0 expect=silent
+15500 start weapons/shotgun/fire.wav 100 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 101 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 102 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 103 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 104 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 105 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 106 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 107 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 108 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 109 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 110 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 111 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 112 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 113 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 114 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 115 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 116 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 117 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 118 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 119 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 120 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 121 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 122 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 123 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 124 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 125 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 126 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 127 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 128 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 129 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 130 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 131 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 132 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 133 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 134 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 135 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 136 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 137 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 138 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 139 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 140 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 141 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 142 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 143 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 144 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 145 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 146 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 147 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 148 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 149 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 150 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 151 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 152 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 153 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 154 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 155 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 156 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 157 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 158 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 159 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 160 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 161 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 162 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 163 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 164 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 165 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 166 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 167 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 168 0 1 1 0 2500 0
+15500 start weapons/shotgun/fire.wav 169 0 1 1 0 2500 0
+15600 start weapons/shotgun/fire.wav 4 1 1 1 expect=local
+15700 start weapons/shotgun/fire.wav 200 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 201 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 202 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 203 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 204 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 205 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 206 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 207 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 208 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 209 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 210 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 211 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 212 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 213 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 214 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 215 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 216 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 217 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 218 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 219 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 220 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 221 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 222 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 223 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 224 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 225 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 226 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 227 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 228 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 229 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 230 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 231 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 232 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 233 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 234 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 235 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 236 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 237 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 238 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 239 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 240 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 241 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 242 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 243 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 244 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 245 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 246 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 247 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 248 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 249 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 250 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 251 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 252 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 253 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 254 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 255 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 256 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 257 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 258 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 259 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 260 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 261 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 262 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 263 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 264 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 265 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 266 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 267 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 268 0 1 1 0 2500 0
+15700 start weapons/shotgun/fire.wav 269 0 1 1 0 2500 0 expect=heard
+18500 start enemy/dog/bark1.wav 72 1 1 1
+18600 entorg 72 100 0 0 expect=heard
+21000 quit

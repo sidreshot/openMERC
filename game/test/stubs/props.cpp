@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// OpenMerc G18 - test-only no-op stand-ins for the hooks package G7 (props/) provides to G18's files. Compiled only when
+// "props" is listed in -DOM_GAME_SKIP=... (game/CMakeLists.txt), so that the rest of gamex86.dll can be built and
+// black-box tested while that package does not compile. Never part of a shipped gamex86.dll.
+// Implements: (test scaffolding, no spec)
+
+#include "../../src/g_local.h"
+#include "../../src/props/props.h"
+
+bool G7_CallSpawn(edict_t *) { return false; }
+void G7_LevelSpawned(void) {}

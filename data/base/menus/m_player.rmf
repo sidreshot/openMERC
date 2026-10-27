@@ -1,0 +1,27 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): player setup: name, team, character with its preview. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<config menus/om_player>
+<exitcfg om_applyskin>
+<vbar tint vbargray>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_PLAYER_NAME^">
+<hr width 288 tint gray>
+<font type title tint hilitetext atint hilitetext>
+<input cvar menu_temp_name width 240 global maxchars 32 border 8 1 gray><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_PLAYER_LOOK^">
+<hr width 288 tint gray>
+<gpm menu_temp_skin menu_temp_team cvari menu_gpm cvar2 menu_team width 240 height 260 rotation 1.5708 1.1345 0 rotate 0 -0.0006 0><br>
+<font type small tint gray atint gray>
+<text "^MENU_OMSET_PG_PLAYER_TEAM^"><br>
+<font type title tint normaltext atint hilitetext>
+<ctext menu_temp_team width 240 height 24 btint transgray prev "add menu_team -1;wait;menu players/$menu_temp_skin text" next "add menu_team 1;wait;menu players/$menu_temp_skin text"><br>
+<blank 6 6><br>
+<font type small tint gray atint gray>
+<text "^MENU_OMSET_PG_PLAYER_MODEL^"><br>
+<font type title tint normaltext atint hilitetext>
+<ctext menu_temp_skin width 240 height 24 btint transgray prev "add menu_gpm -1;wait;menu players/$menu_temp_skin text" next "add menu_gpm 1;wait;menu players/$menu_temp_skin text"><br>
+</stm>

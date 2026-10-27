@@ -1,0 +1,2104 @@
+/*
+ * Copyright (C) 1997-2001 Id Software, Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or (at
+ * your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+ * 02111-1307, USA.
+ *
+ * =======================================================================
+ *
+ * This file implements the 2D stuff. For example the HUD and the
+ * networkgraph.
+ *
+ * =======================================================================
+ *
+ * OpenMerc: for Soldier of Fortune (protocol 33, and while not connected)
+ * the screen update runs in the SoF order: 3D view, crosshair, HUD
+ * interface layer, scoreboard layout, remote-view overlays, credit picture,
+ * centre/caption print, typewriter print, player labels, debug graphs,
+ * pause screen, console, network icon, menus. Loading opens the `loading`
+ * menu and draws progress frames. The parts are in cl_hud.c and
+ * cl_sofscreen.c; the Quake II path is kept for a Quake II server.
+ *
+ * Implements: SPEC-310 (sections 1, 6, 9)
+ */
+
+#include "header/client.h"
+#include "header/sofclient.h"
+
+static float scr_con_current; /* aproaches scr_conlines at scr_conspeed */
+static float scr_conlines; /* 0.0 to 1.0 lines of console to display */
+
+static qboolean scr_initialized; /* ready to draw */
+
+static int scr_draw_loading;
+
+vrect_t scr_vrect; /* position of render window on screen */
+
+cvar_t *scr_viewsize;
+cvar_t *scr_conspeed;
+cvar_t *scr_centertime;
+cvar_t *scr_showturtle;
+cvar_t *scr_showpause;
+
+cvar_t *scr_netgraph;
+cvar_t *scr_timegraph;
+cvar_t *scr_debuggraph;
+cvar_t *scr_graphheight;
+cvar_t *scr_graphscale;
+cvar_t *scr_graphshift;
+cvar_t *scr_drawall;
+
+cvar_t *r_hudscale; /* named for consistency with R1Q2 */
+cvar_t *r_consolescale;
+cvar_t *r_menuscale;
+cvar_t *scr_aspect; /* OpenMerc V1: aspect-correct 2D (1) or the original's stretch (0) */
+
+typedef struct
+{
+	int x1, y1, x2, y2;
+} dirty_t;
+
+static dirty_t scr_dirty;
+
+static char crosshair_pic[MAX_QPATH];
+static int crosshair_width, crosshair_height;
+
+extern cvar_t *cl_showfps;
+extern cvar_t *crosshair_scale;
+extern cvar_t *crosshair_color_r;
+extern cvar_t *crosshair_color_g;
+extern cvar_t *crosshair_color_b;
+extern cvar_t *cl_showspeed;
+extern float GetPlayerSpeed(float *, float *);
+
+static void SCR_TimeRefresh_f(void);
+static void SCR_Loading_f(void);
+
+#define CHAR_SIZE 8
+
+/*
+ * A new packet was just parsed
+ */
+void
+CL_AddNetgraph(void)
+{
+	int i;
+	int in;
+	int ping;
+
+	if (SCR_SoFMode())
+	{
+		SCR_SoF_AddNetgraph(); /* OpenMerc */
+		return;
+	}
+
+	/* if using the debuggraph for something
+	   else, don't add the net lines */
+	if (scr_debuggraph->value || scr_timegraph->value)
+	{
+		return;
+	}
+
+	for (i = 0; i < cls.netchan.dropped; i++)
+	{
+		SCR_DebugGraph(30, 0x40);
+	}
+
+	for (i = 0; i < cl.surpressCount; i++)
+	{
+		SCR_DebugGraph(30, 0xdf);
+	}
+
+	/* see what the latency was on this packet */
+	in = cls.netchan.incoming_acknowledged & (CMD_BACKUP - 1);
+	ping = cls.realtime - cl.cmd_time[in];
+	ping /= 30;
+
+	if (ping > 30)
+	{
+		ping = 30;
+	}
+
+	SCR_DebugGraph((float)ping, 0xd0);
+}
+
+typedef struct
+{
+	float value;
+	int color;
+} graphsamp_t;
+
+static int current;
+static graphsamp_t values[2024];
+
+void
+SCR_DebugGraph(float value, int color)
+{
+	values[current & 2023].value = value;
+	values[current & 2023].color = color;
+	current++;
+}
+
+static void
+SCR_DrawDebugGraph(void)
+{
+	int a, x, y, w, i, h;
+	float v;
+	int color;
+
+	/* draw the graph */
+	w = scr_vrect.width;
+
+	x = scr_vrect.x;
+	y = scr_vrect.y + scr_vrect.height;
+	Draw_Fill(x, y - scr_graphheight->value,
+			w, scr_graphheight->value, 8);
+
+	for (a = 0; a < w; a++)
+	{
+		i = (current - 1 - a + 1024) & 1023;
+		v = values[i].value;
+		color = values[i].color;
+		v = v * scr_graphscale->value + scr_graphshift->value;
+
+		if (v < 0)
+		{
+			v += scr_graphheight->value *
+				 (1 + (int)(-v / scr_graphheight->value));
+		}
+
+		h = (int)v % (int)scr_graphheight->value;
+		Draw_Fill(x + w - 1 - a, y - h, 1, h, color);
+	}
+}
+
+static char scr_centerstring[1024];
+static float scr_centertime_start; /* for slow victory printing */
+static float scr_centertime_off;
+static int scr_center_lines;
+static int scr_erase_center;
+
+/*
+ * Called for important messages that should stay
+ * in the center of the screen for a few moments
+ */
+void
+SCR_CenterPrint(char *str)
+{
+	char *s;
+
+	if (SCR_SoFMode())
+	{
+		SCR_SoF_CenterPrint(str); /* OpenMerc: SPEC-310 section 6 */
+		return;
+	}
+
+	Q_strlcpy(scr_centerstring, str, sizeof(scr_centerstring));
+	scr_centertime_off = scr_centertime->value;
+	scr_centertime_start = cl.time;
+
+	/* count the number of lines for centering */
+	scr_center_lines = 1;
+	s = str;
+
+	while (*s)
+	{
+		if (*s == '\n')
+		{
+			scr_center_lines++;
+		}
+
+		s++;
+	}
+
+	/* echo it to the console */
+	Com_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+
+	s = str;
+
+	do
+	{
+		char line[64];
+		int i, j, l;
+
+		/* scan the width of the line */
+		for (l = 0; l < 40; l++)
+		{
+			if ((s[l] == '\n') || !s[l])
+			{
+				break;
+			}
+		}
+
+		for (i = 0; i < (40 - l) / 2; i++)
+		{
+			line[i] = ' ';
+		}
+
+		for (j = 0; j < l; j++)
+		{
+			line[i++] = s[j];
+		}
+
+		line[i] = '\n';
+		line[i + 1] = 0;
+
+		Com_Printf("%s", line);
+
+		while (*s && *s != '\n')
+		{
+			s++;
+		}
+
+		if (!*s)
+		{
+			break;
+		}
+
+		s++; /* skip the \n */
+	}
+	while (1);
+
+	Com_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+	Con_ClearNotify();
+}
+
+static void
+SCR_DrawCenterString(void)
+{
+	char *start;
+	int l;
+	int j;
+	int x, y;
+	int remaining;
+	float scale;
+    const int char_unscaled_width  = 8;
+    const int char_unscaled_height = 8;
+
+	/* the finale prints the characters one at a time */
+	remaining = 9999;
+
+	scr_erase_center = 0;
+	start = scr_centerstring;
+	scale = SCR_GetConsoleScale();
+
+	if (scr_center_lines <= 4)
+	{
+		y = (viddef.height * 0.35) / scale;
+	}
+
+	else
+	{
+		y = 48 / scale;
+	}
+
+	do
+	{
+		/* scan the width of the line */
+		for (l = 0; l < 40; l++)
+		{
+			if ((start[l] == '\n') || !start[l])
+			{
+				break;
+			}
+		}
+
+		x = ((viddef.width / scale) - (l * char_unscaled_width)) / 2;
+		SCR_AddDirtyPoint(x, y);
+
+		for (j = 0; j < l; j++, x += char_unscaled_width)
+		{
+			Draw_CharScaled(x * scale, y * scale, start[j], scale);
+
+			if (!remaining--)
+			{
+				return;
+			}
+		}
+
+		SCR_AddDirtyPoint(x, y + char_unscaled_height);
+
+		y += char_unscaled_height;
+
+		while (*start && *start != '\n')
+		{
+			start++;
+		}
+
+		if (!*start)
+		{
+			break;
+		}
+
+		start++; /* skip the \n */
+	}
+	while (1);
+}
+
+static void
+SCR_CheckDrawCenterString(void)
+{
+	scr_centertime_off -= cls.rframetime;
+
+	if (scr_centertime_off <= 0)
+	{
+		return;
+	}
+
+	SCR_DrawCenterString();
+}
+
+/*
+ * Sets scr_vrect, the coordinates of the rendered window
+ */
+static void
+SCR_CalcVrect(void)
+{
+	int size;
+
+	/* bound viewsize */
+	if (scr_viewsize->value < 40)
+	{
+		Cvar_Set("viewsize", "40");
+	}
+
+	if (scr_viewsize->value > 100)
+	{
+		Cvar_Set("viewsize", "100");
+	}
+
+	size = scr_viewsize->value;
+
+	scr_vrect.width = viddef.width * size / 100;
+	scr_vrect.height = viddef.height * size / 100;
+
+	scr_vrect.x = (viddef.width - scr_vrect.width) / 2;
+	scr_vrect.y = (viddef.height - scr_vrect.height) / 2;
+}
+
+/*
+ * Keybinding command
+ */
+static void
+SCR_SizeUp_f(void)
+{
+	Cvar_SetValue("viewsize", (float)scr_viewsize->value + 10);
+}
+
+/*
+ * Keybinding command
+ */
+static void
+SCR_SizeDown_f(void)
+{
+	Cvar_SetValue("viewsize", (float)scr_viewsize->value - 10);
+}
+
+/*
+ * Set a specific sky and rotation speed
+ */
+static void
+SCR_Sky_f(void)
+{
+	float rotate = 0;
+	vec3_t axis;
+
+	if (Cmd_Argc() < 2)
+	{
+		Com_Printf("Usage: sky <basename> <rotate> <axis x y z>\n");
+		return;
+	}
+
+	if (Cmd_Argc() > 2)
+	{
+		rotate = (float)strtod(Cmd_Argv(2), (char **)NULL);
+	}
+
+	else
+	{
+		rotate = 0;
+	}
+
+	if (Cmd_Argc() == 6)
+	{
+		axis[0] = (float)strtod(Cmd_Argv(3), (char **)NULL);
+		axis[1] = (float)strtod(Cmd_Argv(4), (char **)NULL);
+		axis[2] = (float)strtod(Cmd_Argv(5), (char **)NULL);
+	}
+	else
+	{
+		axis[0] = 0;
+		axis[1] = 0;
+		axis[2] = 1;
+	}
+
+	R_SetSky(Cmd_Argv(1), rotate, axis);
+}
+
+void
+SCR_Init(void)
+{
+	SCR_SoF_Init(); /* OpenMerc: SoF cvars and defaults first, HUD commands */
+
+	scr_viewsize = Cvar_Get("viewsize", "100", CVAR_ARCHIVE);
+	scr_conspeed = Cvar_Get("scr_conspeed", "3", 0);
+	scr_centertime = Cvar_Get("scr_centertime", "2.5", 0);
+	scr_showturtle = Cvar_Get("scr_showturtle", "0", 0);
+	scr_showpause = Cvar_Get("scr_showpause", "1", 0);
+	scr_netgraph = Cvar_Get("netgraph", "0", 0);
+	scr_timegraph = Cvar_Get("timegraph", "0", 0);
+	scr_debuggraph = Cvar_Get("debuggraph", "0", 0);
+	scr_graphheight = Cvar_Get("graphheight", "32", 0);
+	scr_graphscale = Cvar_Get("graphscale", "1", 0);
+	scr_graphshift = Cvar_Get("graphshift", "0", 0);
+	scr_drawall = Cvar_Get("scr_drawall", "0", 0);
+	r_hudscale = Cvar_Get("r_hudscale", "-1", CVAR_ARCHIVE);
+	r_consolescale = Cvar_Get("r_consolescale", "-1", CVAR_ARCHIVE);
+	r_menuscale = Cvar_Get("r_menuscale", "-1", CVAR_ARCHIVE);
+	scr_aspect = Cvar_Get("scr_aspect", "1", CVAR_ARCHIVE);
+	Cvar_Get("scr_hudscale", "0", CVAR_ARCHIVE); /* V1: HUD scale, read by cl_hud.c (0 = auto) */
+
+	/* register our commands */
+	Cmd_AddCommand("timerefresh", SCR_TimeRefresh_f);
+	Cmd_AddCommand("loading", SCR_Loading_f);
+	Cmd_AddCommand("sizeup", SCR_SizeUp_f);
+	Cmd_AddCommand("sizedown", SCR_SizeDown_f);
+	Cmd_AddCommand("sky", SCR_Sky_f);
+
+	scr_initialized = true;
+}
+
+static void
+SCR_DrawNet(void)
+{
+	float scale = SCR_GetMenuScale();
+
+	if (cls.netchan.outgoing_sequence - cls.netchan.incoming_acknowledged < CMD_BACKUP - 1)
+	{
+		return;
+	}
+
+	Draw_PicScaled(scr_vrect.x + 64 * scale, scr_vrect.y, "net", scale);
+}
+
+static void
+SCR_DrawPause(void)
+{
+	int w, h;
+	float scale = SCR_GetMenuScale();
+
+	if (!scr_showpause->value) /* turn off for screenshots */
+	{
+		return;
+	}
+
+	if (!cl_paused->value)
+	{
+		return;
+	}
+
+	Draw_GetPicSize(&w, &h, "pause");
+	Draw_PicScaled((viddef.width - w * scale) / 2, viddef.height / 2 + 8 * scale, "pause", scale);
+}
+
+static void
+SCR_DrawLoading(void)
+{
+	int w, h;
+	float scale = SCR_GetMenuScale();
+
+	if (!scr_draw_loading)
+	{
+		return;
+	}
+
+	Draw_GetPicSize(&w, &h, "loading");
+	Draw_PicScaled((viddef.width - w * scale) / 2, (viddef.height - h * scale) / 2, "loading", scale);
+}
+
+/*
+ * Scroll it up or down
+ */
+void
+SCR_RunConsole(void)
+{
+	/* src_conspeed must be a positiv integer,
+	   otherwise things go wrong. Clamp it. */
+	if (scr_conspeed->value < 0.1f)
+	{
+		Cvar_Set("scr_conspeed", "0.1");
+	}
+
+	/* decide on the height of the console */
+	if (cls.key_dest == key_console)
+	{
+		scr_conlines = 0.5; /* half screen */
+	}
+	else
+	{
+		scr_conlines = 0; /* none visible */
+	}
+
+	if (scr_conlines < scr_con_current)
+	{
+		scr_con_current -= scr_conspeed->value * cls.rframetime;
+
+		if (scr_conlines > scr_con_current)
+		{
+			scr_con_current = scr_conlines;
+		}
+	}
+	else if (scr_conlines > scr_con_current)
+	{
+		scr_con_current += scr_conspeed->value * cls.rframetime;
+
+		if (scr_conlines < scr_con_current)
+		{
+			scr_con_current = scr_conlines;
+		}
+	}
+}
+
+static void
+SCR_DrawConsole(void)
+{
+	Con_CheckResize();
+
+	if ((cls.state == ca_disconnected) || (cls.state == ca_connecting))
+	{
+		/* forced full screen console */
+		Con_DrawConsole(1.0);
+		return;
+	}
+
+	if ((cls.state != ca_active) || !cl.refresh_prepped)
+	{
+		/* connected, but can't render */
+		Con_DrawConsole(0.5);
+		Draw_Fill(0, viddef.height / 2, viddef.width, viddef.height / 2, 0);
+		return;
+	}
+
+	if (scr_con_current)
+	{
+		Con_DrawConsole(scr_con_current);
+	}
+	else
+	{
+		if ((cls.key_dest == key_game) || (cls.key_dest == key_message))
+		{
+			Con_DrawNotify(); /* only draw notify in game */
+		}
+	}
+}
+
+void
+SCR_BeginLoadingPlaque(void)
+{
+	S_StopAllSounds();
+	cl.sound_prepped = false; /* don't play ambients */
+
+	/* OpenMerc: SPEC-310 section 9 - menus close, the `loading` menu opens
+	   and one frame is drawn (not with the screen disabled, dedicated,
+	   developer, or the console holding the keyboard) */
+	if (SCR_SoFMode())
+	{
+		/* already loading (the `loading` command or the savegame load, then
+		   SV_Map): a second call would close the `loading` menu without
+		   reopening it, and the menu close at the end of loading is what
+		   clears the `paused` 1 of a savegame load (SPEC-303 step 6,
+		   SPEC-801 section 3) - the game stayed paused after Load until
+		   the menu was opened and closed again (owner t91u #6) */
+		if (cls.disable_screen)
+		{
+			return;
+		}
+
+		M_ForceMenuOff();
+
+		if (!cls.disable_screen && !dedicated->value && !developer->value &&
+			(cls.key_dest != key_console) && Cmd_Exists("menu"))
+		{
+			Cmd_ExecuteString("menu loading");
+			SCR_UpdateScreenForce();
+		}
+
+		if (cls.disable_screen)
+		{
+			return;
+		}
+
+		SCR_StopCinematic();
+		cls.disable_screen = Sys_Milliseconds();
+		cls.disable_servercount = cl.servercount;
+		return;
+	}
+
+	if (cls.disable_screen)
+	{
+		return;
+	}
+
+	if (developer->value)
+	{
+		/* Hack: When we are returning here (not drawing
+		   the loading plaque) we don't reset the palette
+		   later on. We might end up with the cinematic
+		   palette applied to the world. Enforce the world
+		   palette. */
+		if (cl.cinematictime > 0)
+		{
+			R_SetPalette(NULL);
+		}
+
+		return;
+	}
+
+	if (cls.state == ca_disconnected)
+	{
+		/* if at console, don't bring up the plaque */
+		return;
+	}
+
+	if (cls.key_dest == key_console)
+	{
+		return;
+	}
+
+	if (cl.cinematictime > 0)
+	{
+		scr_draw_loading = 2; /* clear to balack first */
+	}
+	else
+	{
+		scr_draw_loading = 1;
+	}
+
+	SCR_UpdateScreen();
+
+	scr_draw_loading = false;
+
+	SCR_StopCinematic();
+	cls.disable_screen = Sys_Milliseconds();
+	cls.disable_servercount = cl.servercount;
+}
+
+void
+SCR_EndLoadingPlaque(void)
+{
+	cls.disable_screen = 0;
+
+	if (SCR_SoFMode())
+	{
+		M_ForceMenuOff(); /* OpenMerc: menus close at the end of loading (SPEC-310 9) */
+	}
+
+	Con_ClearNotify();
+}
+
+static void
+SCR_Loading_f(void)
+{
+	SCR_BeginLoadingPlaque();
+}
+
+static void
+SCR_TimeRefresh_f(void)
+{
+	int i;
+	int start, stop;
+	float time;
+
+	if (cls.state != ca_active)
+	{
+		return;
+	}
+
+	start = Sys_Milliseconds();
+
+	if (Cmd_Argc() == 2)
+	{
+		/* run without page flipping */
+		int j;
+
+		for (j = 0; j < 1000; j++)
+		{
+			R_BeginFrame(0);
+
+			for (i = 0; i < 128; i++)
+			{
+				cl.refdef.viewangles[1] = i / 128.0f * 360.0f;
+				R_RenderFrame(&cl.refdef);
+			}
+
+			R_EndFrame();
+		}
+	}
+	else
+	{
+		for (i = 0; i < 128; i++)
+		{
+			cl.refdef.viewangles[1] = i / 128.0f * 360.0f;
+
+			R_BeginFrame(0);
+			R_RenderFrame(&cl.refdef);
+			R_EndFrame();
+		}
+	}
+
+	stop = Sys_Milliseconds();
+	time = (stop - start) / 1000.0f;
+	Com_Printf("%f seconds (%f fps)\n", time, 128 / time);
+}
+
+void
+SCR_AddDirtyPoint(int x, int y)
+{
+	if (x < scr_dirty.x1)
+	{
+		scr_dirty.x1 = x;
+	}
+
+	if (x > scr_dirty.x2)
+	{
+		scr_dirty.x2 = x;
+	}
+
+	if (y < scr_dirty.y1)
+	{
+		scr_dirty.y1 = y;
+	}
+
+	if (y > scr_dirty.y2)
+	{
+		scr_dirty.y2 = y;
+	}
+}
+
+void
+SCR_DirtyScreen(void)
+{
+	SCR_AddDirtyPoint(0, 0);
+	SCR_AddDirtyPoint(viddef.width - 1, viddef.height - 1);
+}
+
+/*
+ * Clear any parts of the tiled background that were drawn on last frame
+ */
+static void
+SCR_TileClear(void)
+{
+	if (scr_con_current == 1.0)
+	{
+		return; /* full screen console */
+	}
+
+	if (scr_viewsize->value == 100)
+	{
+		return; /* full screen rendering */
+	}
+
+	if (cl.cinematictime > 0)
+	{
+		return; /* full screen cinematic */
+	}
+
+	/* OpenGL needs the borders redrawn after every glClear(): redraw them every frame */
+	// Top
+	Draw_TileClear(scr_vrect.x, 0, scr_vrect.width, scr_vrect.y, "backtile");
+
+	// Bottom
+	Draw_TileClear(scr_vrect.x, scr_vrect.y + scr_vrect.height, scr_vrect.width, viddef.height, "backtile");
+
+	// Left
+	Draw_TileClear(0, 0, scr_vrect.x, viddef.height, "backtile");
+
+	// Right
+	Draw_TileClear(scr_vrect.x + scr_vrect.width, 0, viddef.width, viddef.height, "backtile");
+}
+
+#define STAT_MINUS 10
+static char *sb_nums[2][11] = {
+	{
+		"num_0", "num_1", "num_2", "num_3", "num_4", "num_5",
+		"num_6", "num_7", "num_8", "num_9", "num_minus"
+	},
+	{
+		"anum_0", "anum_1", "anum_2", "anum_3", "anum_4", "anum_5",
+		"anum_6", "anum_7", "anum_8", "anum_9", "anum_minus"
+	}
+};
+
+#define ICON_WIDTH 24
+#define ICON_HEIGHT 24
+#define CHARACTER_WIDTH 16
+#define ICON_SPACE 8
+
+/*
+ * Allow embedded \n in the string
+ */
+void
+SizeHUDString(char *string, int *w, int *h)
+{
+	int lines, width, current;
+
+	lines = 1;
+	width = 0;
+
+	current = 0;
+
+	while (*string)
+	{
+		if (*string == '\n')
+		{
+			lines++;
+			current = 0;
+		}
+		else
+		{
+			current++;
+
+			if (current > width)
+			{
+				width = current;
+			}
+		}
+
+		string++;
+	}
+
+	*w = width * 8;
+	*h = lines * 8;
+}
+
+static void
+DrawHUDStringScaled(const char *string, int x, int y, int centerwidth, int xor, float factor)
+{
+	int margin;
+	int i;
+
+	margin = x;
+
+	while (*string)
+	{
+		/* scan out one line of text from the string */
+		int width;
+		char line[1024];
+
+		width = 0;
+
+		while (*string && *string != '\n')
+		{
+			line[width++] = *string++;
+		}
+
+		line[width] = 0;
+
+		if (centerwidth)
+		{
+			x = margin + (centerwidth - width * 8)*factor / 2;
+		}
+
+		else
+		{
+			x = margin;
+		}
+
+		for (i = 0; i < width; i++)
+		{
+			(void)xor; /* OpenMerc: no high-bit alternate charset in SoF fonts */
+			Draw_CharScaled(x, y, line[i], factor);
+			x += 8*factor;
+		}
+
+		if (*string)
+		{
+			string++; /* skip the \n */
+			y += CHAR_SIZE * factor;
+		}
+	}
+}
+
+void
+DrawHUDString(char *string, int x, int y, int centerwidth, int xor)
+{
+	DrawHUDStringScaled(string, x, y, centerwidth, xor, 1.0f);
+}
+
+void
+SCR_DrawFieldScaled(int x, int y, int color, int width, int value, float factor)
+{
+	char num[16], *ptr;
+	int l;
+	int frame;
+
+	if (width < 1)
+	{
+		return;
+	}
+
+	/* draw number string */
+	if (width > 5)
+	{
+		width = 5;
+	}
+
+	SCR_AddDirtyPoint(x, y);
+	SCR_AddDirtyPoint(x + (width * CHARACTER_WIDTH + 2) * factor, y + factor * 24);
+
+	Com_sprintf(num, sizeof(num), "%i", value);
+	l = (int)strlen(num);
+
+	if (l > width)
+	{
+		l = width;
+	}
+
+	x += (2 + CHARACTER_WIDTH * (width - l)) * factor;
+
+	ptr = num;
+
+	while (*ptr && l)
+	{
+		if (*ptr == '-')
+		{
+			frame = STAT_MINUS;
+		}
+
+		else
+		{
+			frame = *ptr - '0';
+		}
+
+		Draw_PicScaled(x, y, sb_nums[color][frame], factor);
+		x += CHARACTER_WIDTH * factor;
+		ptr++;
+		l--;
+	}
+}
+
+void
+SCR_DrawField(int x, int y, int color, int width, int value)
+{
+	SCR_DrawFieldScaled(x, y, color, width, value, 1.0f);
+}
+
+/*
+ * Allows rendering code to cache all needed sbar graphics
+ */
+void
+SCR_TouchPics(void)
+{
+	int i, j;
+
+	for (i = 0; i < 2; i++)
+	{
+		for (j = 0; j < 11; j++)
+		{
+			Draw_FindPic(sb_nums[i][j]);
+		}
+	}
+
+	if (crosshair->value)
+	{
+		if ((crosshair->value > 3) || (crosshair->value < 0))
+		{
+			crosshair->value = 3;
+		}
+
+		Com_sprintf(crosshair_pic, sizeof(crosshair_pic), "ch%i",
+				(int)(crosshair->value));
+		Draw_GetPicSize(&crosshair_width, &crosshair_height, crosshair_pic);
+
+		if (!crosshair_width)
+		{
+			crosshair_pic[0] = 0;
+		}
+	}
+}
+
+static void
+SCR_ExecuteLayoutString(char *s)
+{
+	int x, y;
+	float scale;
+
+	scale = SCR_GetHUDScale();
+
+	if ((cls.state != ca_active) || !cl.refresh_prepped)
+	{
+		return;
+	}
+
+	if (!s[0])
+	{
+		return;
+	}
+
+	x = 0;
+	y = 0;
+
+	while (s)
+	{
+		const char *token;
+
+		token = COM_Parse(&s);
+
+		if (!strcmp(token, "xl"))
+		{
+			token = COM_Parse(&s);
+			x = scale * (int)strtol(token, (char **)NULL, 10);
+			continue;
+		}
+
+		if (!strcmp(token, "xr"))
+		{
+			token = COM_Parse(&s);
+			x = viddef.width + scale * (int)strtol(token, (char **)NULL, 10);
+			continue;
+		}
+
+		if (!strcmp(token, "xv"))
+		{
+			token = COM_Parse(&s);
+			x = viddef.width / 2 - scale * 160 + scale * (int)strtol(token, (char **)NULL, 10);
+			continue;
+		}
+
+		if (!strcmp(token, "yt"))
+		{
+			token = COM_Parse(&s);
+			y = scale * (int)strtol(token, (char **)NULL, 10);
+			continue;
+		}
+
+		if (!strcmp(token, "yb"))
+		{
+			token = COM_Parse(&s);
+			y = viddef.height + scale * (int)strtol(token, (char **)NULL, 10);
+			continue;
+		}
+
+		if (!strcmp(token, "yv"))
+		{
+			token = COM_Parse(&s);
+			y = viddef.height / 2 - scale * 120 + scale * (int)strtol(token, (char **)NULL, 10);
+			continue;
+		}
+
+		if (!strcmp(token, "pic"))
+		{
+			int index, value;
+
+			/* draw a pic from a stat number */
+			token = COM_Parse(&s);
+			index = (int)strtol(token, (char **)NULL, 10);
+
+			if ((index < 0) || (index >= MAX_STATS))
+			{
+				Com_DPrintf("%s: bad stats index %d (0x%x) in pic\n",
+					__func__, index, index);
+				continue;
+			}
+
+			value = cl.frame.playerstate.stats[index];
+
+			if (value >= MAX_IMAGES)
+			{
+				Com_DPrintf("%s: Pic %d >= MAX_IMAGES in pic\n",
+					__func__, value);
+				continue;
+			}
+
+			if (cl.configstrings[CS_IMAGES + value][0] != '\0')
+			{
+				const char *text;
+				int w, h;
+
+				text = cl.configstrings[CS_IMAGES + value];
+				Draw_GetPicSize(&w, &h, text);
+				SCR_AddDirtyPoint(x, y);
+				SCR_AddDirtyPoint(x + (w - 1) * scale, y + (h - 1) * scale);
+				Draw_PicScaled(x, y, text, scale);
+			}
+
+			continue;
+		}
+
+		if (!strcmp(token, "client"))
+		{
+			/* draw a deathmatch client block */
+			int score, ping, time, value;
+			clientinfo_t *ci;
+
+			token = COM_Parse(&s);
+			x = viddef.width / 2 - scale * 160 + scale * (int)strtol(token, (char **)NULL, 10);
+			token = COM_Parse(&s);
+			y = viddef.height / 2 - scale * 120 + scale * (int)strtol(token, (char **)NULL, 10);
+			SCR_AddDirtyPoint(x, y);
+			SCR_AddDirtyPoint(x + scale * 159, y + scale * 31);
+
+			token = COM_Parse(&s);
+			value = (int)strtol(token, (char **)NULL, 10);
+
+			if ((value >= MAX_CLIENTS) || (value < 0))
+			{
+				Com_DPrintf("%s: client >= MAX_CLIENTS in client\n", __func__);
+				continue;
+			}
+
+			ci = &cl.clientinfo[value];
+
+			token = COM_Parse(&s);
+			score = (int)strtol(token, (char **)NULL, 10);
+
+			token = COM_Parse(&s);
+			ping = (int)strtol(token, (char **)NULL, 10);
+
+			token = COM_Parse(&s);
+			time = (int)strtol(token, (char **)NULL, 10);
+
+			DrawAltStringScaled(x + scale * 32, y, ci->name, scale);
+			DrawAltStringScaled(x + scale * 32, y + scale * CHAR_SIZE, "Score: ", scale);
+			DrawAltStringScaled(x + scale * (32 + 7 * CHAR_SIZE), y + scale * CHAR_SIZE, va("%i", score), scale);
+			DrawStringScaled(x + scale * 32, y + scale * 16, va("Ping:  %i", ping), scale);
+			DrawStringScaled(x + scale * 32, y + scale * 24, va("Time:  %i", time), scale);
+
+			if (!ci->icon)
+			{
+				ci = &cl.baseclientinfo;
+			}
+
+			Draw_PicScaled(x, y, ci->iconname, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "ctf"))
+		{
+			/* draw a ctf client block */
+			int score, ping, value;
+			clientinfo_t *ci;
+			char block[80];
+
+			token = COM_Parse(&s);
+			x = viddef.width / 2 - scale * 160 + scale*(int)strtol(token, (char **)NULL, 10);
+			token = COM_Parse(&s);
+			y = viddef.height / 2 - scale * 120 + scale*(int)strtol(token, (char **)NULL, 10);
+			SCR_AddDirtyPoint(x, y);
+			SCR_AddDirtyPoint(x + scale * 159, y + scale * 31);
+
+			token = COM_Parse(&s);
+			value = (int)strtol(token, (char **)NULL, 10);
+
+			if ((value >= MAX_CLIENTS) || (value < 0))
+			{
+				Com_DPrintf("%s: client >= MAX_CLIENTS in client\n", __func__);
+				continue;
+			}
+
+			ci = &cl.clientinfo[value];
+
+			token = COM_Parse(&s);
+			score = (int)strtol(token, (char **)NULL, 10);
+
+			token = COM_Parse(&s);
+			ping = (int)strtol(token, (char **)NULL, 10);
+
+			if (ping > 999)
+			{
+				ping = 999;
+			}
+
+			sprintf(block, "%3d %3d %-12.12s", score, ping, ci->name);
+
+			if (value == cl.playernum)
+			{
+				DrawAltStringScaled(x, y, block, scale);
+			}
+
+			else
+			{
+				DrawStringScaled(x, y, block, scale);
+			}
+
+			continue;
+		}
+
+		if (!strcmp(token, "picn"))
+		{
+			int w, h;
+
+			/* draw a pic from a name */
+			token = COM_Parse(&s);
+			Draw_GetPicSize(&w, &h, token);
+			SCR_AddDirtyPoint(x, y);
+			SCR_AddDirtyPoint(x + scale * (w - 1), y + scale * (h - 1));
+			Draw_PicScaled(x, y, token, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "num"))
+		{
+			int value, width;
+
+			/* draw a number */
+			token = COM_Parse(&s);
+			width = (int)strtol(token, (char **)NULL, 10);
+			token = COM_Parse(&s);
+			value = cl.frame.playerstate.stats[(int)strtol(token, (char **)NULL, 10)];
+			SCR_DrawFieldScaled(x, y, 0, width, value, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "hnum"))
+		{
+			/* health number */
+			int color, value, width;
+
+			width = 3;
+			value = cl.frame.playerstate.stats[STAT_HEALTH];
+
+			if (value > 25)
+			{
+				color = 0;  /* green */
+			}
+			else if (value > 0)
+			{
+				color = (cl.frame.serverframe >> 2) & 1; /* flash */
+			}
+			else
+			{
+				color = 1;
+			}
+
+			if (cl.frame.playerstate.stats[STAT_FLASHES] & 1)
+			{
+				Draw_PicScaled(x, y, "field_3", scale);
+			}
+
+			SCR_DrawFieldScaled(x, y, color, width, value, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "anum"))
+		{
+			/* ammo number */
+			int color, value, width;
+
+			width = 3;
+			value = cl.frame.playerstate.stats[STAT_AMMO];
+
+			if (value > 5)
+			{
+				color = 0; /* green */
+			}
+			else if (value >= 0)
+			{
+				color = (cl.frame.serverframe >> 2) & 1; /* flash */
+			}
+			else
+			{
+				continue; /* negative number = don't show */
+			}
+
+			if (cl.frame.playerstate.stats[STAT_FLASHES] & 4)
+			{
+				Draw_PicScaled(x, y, "field_3", scale);
+			}
+
+			SCR_DrawFieldScaled(x, y, color, width, value, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "rnum"))
+		{
+			/* armor number */
+			int color, value, width;
+
+			width = 3;
+			value = cl.frame.playerstate.stats[STAT_ARMOR];
+
+			if (value < 1)
+			{
+				continue;
+			}
+
+			color = 0; /* green */
+
+			if (cl.frame.playerstate.stats[STAT_FLASHES] & 2)
+			{
+				Draw_PicScaled(x, y, "field_3", scale);
+			}
+
+			SCR_DrawFieldScaled(x, y, color, width, value, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "stat_string"))
+		{
+			int index;
+
+			token = COM_Parse(&s);
+			index = (int)strtol(token, (char **)NULL, 10);
+
+			if ((index < 0) || (index >= MAX_STATS))
+			{
+				Com_DPrintf("%s: bad stats index %d (0x%x) in stat_string\n",
+					__func__, index, index);
+				continue;
+			}
+
+			index = cl.frame.playerstate.stats[index];
+
+			if ((index < 0) || (index >= MAX_CONFIGSTRINGS))
+			{
+				Com_DPrintf("%s: bad stats index %d (0x%x) in stat_string\n",
+					__func__, index, index);
+				continue;
+			}
+
+			DrawStringScaled(x, y, cl.configstrings[index], scale);
+			continue;
+		}
+
+		if (!strcmp(token, "cstring"))
+		{
+			token = COM_Parse(&s);
+			DrawHUDStringScaled(token, x, y, 320, 0, scale); // FIXME: or scale 320 here?
+			continue;
+		}
+
+		if (!strcmp(token, "string"))
+		{
+			token = COM_Parse(&s);
+			DrawStringScaled(x, y, token, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "cstring2"))
+		{
+			token = COM_Parse(&s);
+			DrawHUDStringScaled(token, x, y, 320, 0x80, scale); // FIXME: or scale 320 here?
+			continue;
+		}
+
+		if (!strcmp(token, "string2"))
+		{
+			token = COM_Parse(&s);
+			DrawAltStringScaled(x, y, token, scale);
+			continue;
+		}
+
+		if (!strcmp(token, "if"))
+		{
+			int index, value;
+
+			/* draw a number */
+			token = COM_Parse(&s);
+			index = (int)strtol(token, (char **)NULL, 10);
+
+			if ((index < 0) || (index >= MAX_STATS))
+			{
+				Com_DPrintf("%s: bad stats index %d (0x%x) in if\n",
+					__func__, index, index);
+				value = 0;
+			}
+			else
+			{
+				value = cl.frame.playerstate.stats[index];
+			}
+
+			if (!value)
+			{
+				/* skip to endif */
+				while (s && strcmp(token, "endif"))
+				{
+					token = COM_Parse(&s);
+				}
+			}
+
+			continue;
+		}
+
+		if (!strcmp(token, "endif") || !token[0])
+		{
+			/* just skip endif and empty line */
+			continue;
+		}
+
+		Com_DPrintf("%s: Unknown token: %s\n", __func__, token);
+	}
+}
+
+/*
+ * The status bar is a small layout program that
+ * is based on the stats array
+ */
+static void
+SCR_DrawStats(void)
+{
+	SCR_ExecuteLayoutString(cl.configstrings[CS_STATUSBAR]);
+}
+
+#define STAT_LAYOUTS 13
+
+static void
+SCR_DrawLayout(void)
+{
+	if (!cl.frame.playerstate.stats[STAT_LAYOUTS])
+	{
+		return;
+	}
+
+	SCR_ExecuteLayoutString(cl.layout);
+}
+
+// ----
+
+static void
+SCR_DrawSpeed(void)
+{
+	if (cl_showspeed->value < 1)  //Disabled, do nothing
+		return;
+
+	char spd_str[32];
+	float speed, speedxy;
+	float scale = SCR_GetConsoleScale();
+	int str_len, xPos, yPos = 0;
+
+	GetPlayerSpeed(&speed, &speedxy);
+	snprintf(spd_str, sizeof(spd_str), "%6.2f (%6.2f) QU/s", speed, speedxy);
+	str_len = scale * (strlen(spd_str) * CHAR_SIZE + 2);
+
+	if (cl_showspeed->value == 1) //Draw speed and xy speed at top right
+	{
+		xPos = viddef.width - str_len;
+
+		if (cl_showfps->value == 1 || cl_showfps->value == 2)  // If showfps is enabled, draw it underneath
+		{
+			yPos = scale * 10;
+		}
+		else if (cl_showfps->value > 2)
+		{
+			yPos = scale * 20;
+		}
+
+		DrawStringScaled(xPos, yPos, spd_str, scale);
+		SCR_AddDirtyPoint(xPos, yPos);
+		SCR_AddDirtyPoint(viddef.width, yPos);
+	}
+
+	else if (cl_showspeed->value > 1) //Draw only xy speed under the crosshair
+	{
+		if (scale != 1)  // Check if low resolution
+		{
+			scale -= 1;
+		}
+
+		snprintf(spd_str, sizeof(spd_str), "%6.2f", speedxy);
+		str_len = scale * (strlen(spd_str) * CHAR_SIZE + 2);
+		yPos = scr_vrect.y + (scr_vrect.height / 2) + (scale * 10);
+		xPos = scr_vrect.x + (scr_vrect.width / 2) - (str_len / 2);
+		
+		DrawStringScaled(xPos, yPos, spd_str, scale);
+		SCR_AddDirtyPoint(xPos, yPos);
+		SCR_AddDirtyPoint(xPos + str_len, yPos);
+	}
+}
+
+static void
+SCR_Framecounter(void)
+{
+	long long newtime;
+	static int frame;
+	static int frametimes[60] = {0};
+	static long long oldtime;
+
+	/* skip statistics without show fps */
+	if (cl_showfps->value < 1)
+	{
+		return;
+	}
+
+	newtime = Sys_Microseconds();
+	frametimes[frame] = (int)(newtime - oldtime);
+
+	oldtime = newtime;
+	frame++;
+	if (frame > 59)
+	{
+		frame = 0;
+	}
+
+	float scale = SCR_GetConsoleScale();
+
+	if (cl_showfps->value == 1)
+	{
+		// Calculate average of frames.
+		char str[10];
+		int avg = 0;
+		int num = 0;
+
+		for (int i = 0; i < 60; i++) {
+			if (frametimes[i] != 0) {
+				avg += frametimes[i];
+				num++;
+			}
+		}
+
+		snprintf(str, sizeof(str), "%3.2ffps", (1000.0 * 1000.0) / (avg / num));
+		DrawStringScaled(viddef.width - scale * (strlen(str) * CHAR_SIZE + 2), 0, str, scale);
+		SCR_AddDirtyPoint(viddef.width - scale * (strlen(str) * CHAR_SIZE + 2), 0);
+		SCR_AddDirtyPoint(viddef.width, 0);
+	}
+	else if (cl_showfps->value >= 2)
+	{
+		// Calculate average of frames.
+		int avg = 0;
+		int num = 0;
+		char str[64];
+
+		for (int i = 0; i < 60; i++) {
+			if (frametimes[i] != 0) {
+				avg += frametimes[i];
+				num++;
+			}
+		}
+
+		// Find lowest and highest
+		int min = frametimes[0];
+		int max = frametimes[1];
+
+		for (int i = 1; i < 60; i++)
+		{
+			if ((frametimes[i] > 0) &&  (min < frametimes[i]))
+			{
+				min = frametimes[i];
+			}
+
+			if ((frametimes[i] > 0) && (max > frametimes[i]))
+			{
+				max = frametimes[i];
+			}
+		}
+
+		snprintf(str, sizeof(str), "Min: %7.2ffps, Max: %7.2ffps, Avg: %7.2ffps",
+		         (1000.0 * 1000.0) / min, (1000.0 * 1000.0) / max, (1000.0 * 1000.0) / (avg / num));
+		DrawStringScaled(viddef.width - scale * (strlen(str) * CHAR_SIZE + 2), 0, str, scale);
+		SCR_AddDirtyPoint(viddef.width - scale * (strlen(str) * CHAR_SIZE + 2), 0);
+		SCR_AddDirtyPoint(viddef.width, 0);
+
+		if (cl_showfps->value > 2)
+		{
+			snprintf(str, sizeof(str), "Max: %5.2fms, Min: %5.2fms, Avg: %5.2fms",
+			         0.001f * min, 0.001f * max, 0.001f * ((float)avg / num));
+			DrawStringScaled(viddef.width - scale * (strlen(str) * CHAR_SIZE + 2), scale * 10, str, scale);
+			SCR_AddDirtyPoint(viddef.width - scale * (strlen(str) * CHAR_SIZE + 2), scale * 10);
+			SCR_AddDirtyPoint(viddef.width, scale + 10);
+		}
+	}
+}
+
+// ----
+/*
+ * This is called every frame, and can also be called
+ * explicitly to flush text to the screen.
+ */
+/* OpenMerc: Soldier of Fortune (protocol 33) and while not connected */
+qboolean
+SCR_SoFMode(void)
+{
+	return CL_SoF_Active() || (cls.state < ca_connected);
+}
+
+qboolean MWD_Enabled(void); /* menu/m_wide.c */
+
+static void
+SCR_SoF_Frame(void)
+{
+	cvar_t *overlay = Cvar_Get("scr_menuoverlay", "0", 0);
+	/* MENU-SCRATCH (owner t96 f): the wide menu over a running level shows the
+	   live game behind it, dimmed by the menu (m_wide.c MWD_DrawBackground) */
+	cvar_t *livebg = Cvar_Get("menu_livebg", "1", CVAR_ARCHIVE);
+	qboolean live = overlay->value && livebg->value && cls.state == ca_active &&
+		MWD_Enabled();
+
+	R_BeginFrame(0);
+
+	if (live)
+	{
+		SCR_CalcVrect();
+		SCR_TileClear();
+		V_RenderView(0);
+		HUD_Set2D();
+	}
+	else if (!overlay->value)
+	{
+		SCR_CalcVrect();
+		SCR_TileClear();
+		V_RenderView(0);
+		HUD_Set2D();
+		SCR_SoF_DrawOverlays();
+		SCR_DrawConsole();
+		SCR_SoF_DrawNet();
+	}
+	else
+	{
+		R_EndWorldRenderpass();
+	}
+
+	M_Draw();
+	SCR_SoF_EndFrame();
+	R_EndFrame();
+}
+
+/* one frame even while the screen is disabled (loading progress) */
+void
+SCR_UpdateScreenForce(void)
+{
+	if (!scr_initialized || !con.initialized)
+	{
+		return;
+	}
+
+	SCR_SoF_Frame();
+}
+
+static void
+SCR_SoF_UpdateScreen(void)
+{
+	if (cls.disable_screen)
+	{
+		if (Sys_Milliseconds() - cls.disable_screen > 120000)
+		{
+			cls.disable_screen = 0;
+			Com_Printf("Loading plaque timed out.\n");
+		}
+
+		return;
+	}
+
+	if (!scr_initialized || !con.initialized)
+	{
+		return;
+	}
+
+	/* a cinematic freeze of 2 or more keeps the previous image */
+	if ((cls.state == ca_active) && (CL_SoF_CurrentPS()->cinfreeze >= 2))
+	{
+		SCR_ClearPrints();
+		return;
+	}
+
+	SCR_SoF_Frame();
+}
+
+void
+SCR_UpdateScreen(void)
+{
+	int numframes;
+	int i;
+	float separation[2] = {0, 0};
+	float scale = SCR_GetMenuScale();
+
+	if (SCR_SoFMode())
+	{
+		SCR_SoF_UpdateScreen(); /* OpenMerc: SPEC-310 section 1 */
+		return;
+	}
+
+	/* if the screen is disabled (loading plaque is
+	   up, or vid mode changing) do nothing at all */
+	if (cls.disable_screen)
+	{
+		if (Sys_Milliseconds() - cls.disable_screen > 120000)
+		{
+			cls.disable_screen = 0;
+			Com_Printf("Loading plaque timed out.\n");
+		}
+
+		return;
+	}
+
+	if (!scr_initialized || !con.initialized)
+	{
+		return; /* not initialized yet */
+	}
+
+	/* one frame per update: GL3 has no stereo (the GL1 renderer that had it is gone) */
+	separation[0] = 0;
+	separation[1] = 0;
+	numframes = 1;
+
+	for (i = 0; i < numframes; i++)
+	{
+		R_BeginFrame(separation[i]);
+
+		if (scr_draw_loading == 2)
+		{
+			/* loading plaque over black screen */
+			int w, h;
+
+			R_EndWorldRenderpass();
+			if(i == 0){
+				R_SetPalette(NULL);
+			}
+
+			if(i == numframes - 1){
+				scr_draw_loading = false;
+			}
+
+			Draw_GetPicSize(&w, &h, "loading");
+			Draw_PicScaled((viddef.width - w * scale) / 2, (viddef.height - h * scale) / 2, "loading", scale);
+		}
+
+		/* if a cinematic is supposed to be running,
+		   handle menus and console specially */
+		else if (cl.cinematictime > 0)
+		{
+			if (cls.key_dest == key_menu)
+			{
+				if (cl.cinematicpalette_active)
+				{
+					R_SetPalette(NULL);
+					cl.cinematicpalette_active = false;
+				}
+
+				R_EndWorldRenderpass();
+				M_Draw();
+			}
+			else if (cls.key_dest == key_console)
+			{
+				if (cl.cinematicpalette_active)
+				{
+					R_SetPalette(NULL);
+					cl.cinematicpalette_active = false;
+				}
+
+				R_EndWorldRenderpass();
+				SCR_DrawConsole();
+			}
+			else
+			{
+				R_EndWorldRenderpass();
+				SCR_DrawCinematic();
+			}
+		}
+		else
+		{
+			/* make sure the game palette is active */
+			if (cl.cinematicpalette_active)
+			{
+				R_SetPalette(NULL);
+				cl.cinematicpalette_active = false;
+			}
+
+			/* do 3D refresh drawing, and then update the screen */
+			SCR_CalcVrect();
+
+			/* clear any dirty part of the background */
+			SCR_TileClear();
+
+			V_RenderView(separation[i]);
+
+			SCR_DrawStats();
+			SCR_DrawSpeed();
+
+			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 1)
+			{
+				SCR_DrawLayout();
+			}
+
+			if (cl.frame.playerstate.stats[STAT_LAYOUTS] & 2)
+			{
+				CL_DrawInventory();
+			}
+
+			SCR_DrawNet();
+			SCR_CheckDrawCenterString();
+
+			if (scr_timegraph->value)
+			{
+				SCR_DebugGraph(cls.rframetime * 300, 0);
+			}
+
+			if (scr_debuggraph->value || scr_timegraph->value ||
+				scr_netgraph->value)
+			{
+				SCR_DrawDebugGraph();
+			}
+
+			SCR_DrawPause();
+
+			SCR_DrawConsole();
+
+			M_Draw();
+
+			SCR_DrawLoading();
+		}
+	}
+
+	SCR_Framecounter();
+	R_EndFrame();
+}
+
+static float
+SCR_ClampScale(float scale)
+{
+	float f;
+
+	f = viddef.width / 320.0f;
+	if (scale > f)
+	{
+		scale = f;
+	}
+
+	f = viddef.height / 240.0f;
+	if (scale > f)
+	{
+		scale = f;
+	}
+
+	if (scale < 1)
+	{
+		scale = 1;
+	}
+
+	return scale;
+}
+
+/* OpenMerc V1: the aspect-correct 2D rule (see screen.h) */
+qboolean
+SCR_AspectCorrect(void)
+{
+	if (!scr_aspect)
+	{
+		scr_aspect = Cvar_Get("scr_aspect", "1", CVAR_ARCHIVE);
+	}
+
+	return scr_aspect->value != 0;
+}
+
+float
+SCR_CanvasScale(void)
+{
+	if (SCR_AspectCorrect())
+	{
+		return (float)viddef.height / 480.0f;
+	}
+
+	return (float)viddef.width * 0.0015625f; /* SPEC-800 "Coordinates and scale" */
+}
+
+int
+SCR_CanvasW(void)
+{
+	if (SCR_AspectCorrect())
+	{
+		return (int)(640.0f * SCR_CanvasScale());
+	}
+
+	return viddef.width;
+}
+
+int
+SCR_CanvasX(void)
+{
+	/* MENU-SCRATCH: the 640 s canvas is centred again (MENU2 had it
+	   left-anchored); 0 when it is the whole window (scr_aspect 0) */
+	return (viddef.width - SCR_CanvasW()) / 2;
+}
+/* OpenMerc MENU2 (docs/DEVIATIONS.md "UI scale"): one uniform 2D factor for
+   menus, HUD and console. ui_scale 0 (auto, default) = the largest whole
+   factor that fits a 640x480 canvas into the window when that is at least 2
+   (crisp nearest-sampled pics and fonts: 1080p 2, 1440p 3, 2160p 4), below
+   that the exact fit min(W/640, H/480); any other value = that factor, at
+   most the fit. With scr_aspect 0 the original's width-based scale. */
+static cvar_t *ui_scale;
+
+float
+SCR_UIScale(void)
+{
+	float fit, f;
+
+	if (!ui_scale)
+	{
+		ui_scale = Cvar_Get("ui_scale", "0", CVAR_ARCHIVE);
+	}
+
+	if (!SCR_AspectCorrect())
+	{
+		return SCR_CanvasScale();
+	}
+
+	fit = (float)viddef.width / 640.0f;
+
+	if ((float)viddef.height / 480.0f < fit)
+	{
+		fit = (float)viddef.height / 480.0f;
+	}
+
+	if (fit < 0.5f)
+	{
+		fit = 0.5f;
+	}
+
+	f = ui_scale->value;
+
+	if (f <= 0.0f)
+	{
+		f = (fit >= 2.0f) ? (float)(int)fit : fit;
+	}
+	else if (f > fit)
+	{
+		f = fit;
+	}
+
+	return (f < 0.5f) ? 0.5f : f;
+}
+
+static float
+SCR_GetDefaultScale(void)
+{
+	int i = viddef.width / 640;
+	int j = viddef.height / 240;
+
+	/* OpenMerc V1: console glyphs 8 s with the aspect-correct rule (at least 1:1) */
+	if (SCR_AspectCorrect())
+	{
+		float s = SCR_UIScale();
+
+		return (s < 1.0f) ? 1.0f : s;
+	}
+
+	if (i > j)
+	{
+		i = j;
+	}
+	if (i < 1)
+	{
+		i = 1;
+	}
+
+	return i;
+}
+
+void
+SCR_DrawCrosshair(void)
+{
+	float scale;
+
+	if (!crosshair->value)
+	{
+		return;
+	}
+
+	if (crosshair->modified)
+	{
+		crosshair->modified = false;
+		SCR_TouchPics();
+	}
+
+	if (!crosshair_pic[0])
+	{
+		return;
+	}
+
+	if (crosshair_scale->value < 0)
+	{
+		scale = SCR_GetDefaultScale();
+	}
+	else
+	{
+		scale = SCR_ClampScale(crosshair_scale->value);
+	}
+
+	float color[3];
+	color[0] = crosshair_color_r->value;
+	color[1] = crosshair_color_g->value;
+	color[2] = crosshair_color_b->value;
+
+	Draw_PicScaledCol(scr_vrect.x + (scr_vrect.width - crosshair_width * scale) / 2,
+			scr_vrect.y + (scr_vrect.height - crosshair_height * scale) / 2,
+			crosshair_pic, scale, color);
+}
+
+float
+SCR_GetHUDScale(void)
+{
+	float scale;
+
+	if (!scr_initialized)
+	{
+		scale = 1;
+	}
+	else if (r_hudscale->value < 0)
+	{
+		scale = SCR_GetDefaultScale();
+	}
+	else if (r_hudscale->value == 0) /* HACK: allow scale 0 to hide the HUD */
+	{
+		scale = 0;
+	}
+	else
+	{
+		scale = SCR_ClampScale(r_hudscale->value);
+	}
+
+	return scale;
+}
+
+float
+SCR_GetConsoleScale(void)
+{
+	float scale;
+
+	if (!scr_initialized)
+	{
+		scale = 1;
+	}
+	else if (r_consolescale->value < 0)
+	{
+		scale = SCR_GetDefaultScale();
+	}
+	else
+	{
+		scale = SCR_ClampScale(r_consolescale->value);
+	}
+
+	return scale;
+}
+
+float
+SCR_GetMenuScale(void)
+{
+	float scale;
+
+	if (!scr_initialized)
+	{
+		scale = 1;
+	}
+	else if (r_menuscale->value < 0)
+	{
+		scale = SCR_GetDefaultScale();
+	}
+	else
+	{
+		scale = SCR_ClampScale(r_menuscale->value);
+	}
+
+	return scale;
+}

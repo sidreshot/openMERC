@@ -1,0 +1,8 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): game statistics page (the stock end-of-game tables m_endstats* are kept as retail content). Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<vbar tint vbargray>
+<center>
+<cninclude menu_ingame om_stats_none>
+<cninclude menu_nostats m_endstats>
+</stm>

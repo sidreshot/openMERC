@@ -1,0 +1,8 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): footer buttons of the folder
+     screens - main menu, back to the game (only in a game), previous page.
+     The wide layout draws them as labelled buttons (m_wide.c); no models -->
+<center>
+<blank 32 32 bolt "NULL_HOME_PAGE" key mouse1 "menu main" tip "^MENU_OMSET_PG_HOME_TIP^">
+<blank 32 32 bolt "NULL_GAME" key mouse1 "return" tip "^MENU_OMSET_PG_RESUME_TIP^">
+<blank 32 32 bolt "NULL_HELP" key mouse1 "popmenu" tip "^MENU_OMSET_PG_BACK_TIP^">
+<normal>

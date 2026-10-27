@@ -1,0 +1,8 @@
+/build*/
+*.pak
+*.bsp
+*.m32
+*.ghb
+*.adp
+__pycache__/
+*.pyc

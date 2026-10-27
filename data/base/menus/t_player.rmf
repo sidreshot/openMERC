@@ -1,0 +1,18 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): folder tabs, title and ticker of "t_player". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm global>
+<backdrop omflat>
+<center>
+<image none label "^MENU_OMSET_TAB_PLAYER^" bolt "null_tab01">
+<image none label "^MENU_OMSET_TAB_JOIN^" bolt "null_tab02" key mouse1 "menu join">
+<image none label "^MENU_OMSET_TAB_START^" bolt "null_tab03" key mouse1 "menu start">
+<image none label "^MENU_OMSET_TAB_OPTIONS^" bolt "null_tab04" key mouse1 "menu options">
+
+<font type title tint normaltext atint normaltext>
+<text "^MENU_OMSET_PG_PLAYER_TITLE^" bolt "NULL_HEADER">
+
+<include control>
+
+<font type title tint orange>
+<ticker "^MENU_OMSET_PG_PLAYER_TICK^" bolt "null_ticker_tape" speed 10 width 336 xoff -160 yoff -11>
+</stm>

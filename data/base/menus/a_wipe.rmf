@@ -1,0 +1,17 @@
+<!-- OpenMerc MENU-SCRATCH (owner t104u): confirmation dialog, own page -->
+<stm>
+<key n "killmenu">
+<key y "wipe $menu_save;killmenu">
+<center>
+<hbr>
+<font type title tint orange atint orange>
+"^MENU_OMSET_PG_WIPE_Q^"<br>
+<font type title tint normaltext atint normaltext>
+"^MENU_OMSET_PG_SURE^"<br>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_NO^" ombutton btint transgray width 240 height 26 key mouse1 "killmenu">
+<br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_YES^" ombutton btint transgray width 240 height 26 key mouse1 "wipe $menu_save;killmenu"><br>
+</stm>

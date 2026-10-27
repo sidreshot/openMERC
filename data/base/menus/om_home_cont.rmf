@@ -1,0 +1,2 @@
+<text "^MENU_OMSET_HOME_CONTINUE^" ombutton btint transgray width 280 height 28 key mouse1 "om_continue"><br>
+<blank 3 3><br>

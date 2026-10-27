@@ -1,0 +1,51 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): rules of the selected server. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<vbar tint vbargray>
+<translate 0
+conv "maxclients" "^MENU_OMSET_PG_JOIN_MAXCLIENTS^"
+conv "fraglimit" "^MENU_OMSET_PG_JOIN_FRAGLIMIT^"
+conv "timelimit" "^MENU_OMSET_PG_JOIN_TIMELIMIT^"
+conv "maxspectators" "^MENU_OMSET_PG_JOIN_SPECT^"
+conv "cheats" "^MENU_OMSET_PG_JOIN_CHEATS^"
+conv "sv_suicidepenalty" "^MENU_OMSET_PG_JOIN_PENALTY^"
+>
+<translate 4
+conv "ctf_team_red" "^MENU_OMSET_PG_JOIN_RTEAM^"
+conv "ctf_team_blue" "^MENU_OMSET_PG_JOIN_BTEAM^"
+conv "ctf_loops" "^MENU_OMSET_PG_JOIN_FCAPT^"
+>
+<translate 1
+conv "g_movescale" "^MENU_OMSET_PG_JOIN_MOVESCALE^"
+>
+<translate 2
+conv "g_movescale" "^MENU_OMSET_PG_JOIN_MOVESCALE^"
+>
+<translate 3
+conv "g_movescale" "^MENU_OMSET_PG_JOIN_MOVESCALE^"
+>
+<translate 4
+conv "g_movescale" "^MENU_OMSET_PG_JOIN_MOVESCALE^"
+>
+<translate 0
+convbits "sv_violence" "^MENU_OMSET_PG_JOIN_VIOL^" "^MENU_OMSET_PG_JOIN_VIOLS^"
+>
+<translate 1
+convbits "dmflags" "^MENU_OMSET_PG_JOIN_DMFLAGS^" "^MENU_OMSET_PG_JOIN_DMF1^"
+>
+<translate 2
+convbits "dmflags" "^MENU_OMSET_PG_JOIN_DMFLAGS^" "^MENU_OMSET_PG_JOIN_DMF2^"
+>
+<translate 3
+convbits "dmflags" "^MENU_OMSET_PG_JOIN_DMFLAGS^" "^MENU_OMSET_PG_JOIN_DMF3^"
+>
+<translate 4
+convbits "dmflags" "^MENU_OMSET_PG_JOIN_DMFLAGS^" "^MENU_OMSET_PG_JOIN_DMF4^"
+>
+<translate 5
+convbits "dmflags" "^MENU_OMSET_PG_JOIN_DMFLAGS^" "^MENU_OMSET_PG_JOIN_DMF5^"
+>
+<font type medium tint normaltext atint normaltext>
+<tab 96>
+<serverdetail cvar menu_server tab title "^MENU_OMSET_PG_JOIN_RULES^">
+</stm>

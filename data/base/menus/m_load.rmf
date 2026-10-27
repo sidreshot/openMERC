@@ -1,0 +1,10 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): saved games to load. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<vbar tint vbargray>
+<font type small tint normaltext atint hilitetext>
+<center>
+<cinclude menu_nosave om_load_nosave>
+<font type small tint normaltext atint hilitetext>
+<loadbox width 520 cvar menu_save key mouse1 "disconnect;menuoff;load $menu_save" key mouse2 "menu wipe" spacing 16>
+</stm>

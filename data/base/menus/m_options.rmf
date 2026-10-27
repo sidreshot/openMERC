@@ -1,0 +1,25 @@
+<stm>
+<strings menu_omset>
+
+<vbar tint vbargray>
+
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_NET^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_TEAMS^" atext "^MENU_OMSET_TEAM^" split 230 cvari team_red_blue><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_SPECTATOR^" split 230 cvari spectator><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_NAMES^" split 230 cvari shownames><hbr>
+<list "^MENU_OMSET_WEAPSWITCHES^" match ",safe,unsafe" atext "^MENU_OMSET_WEAPSWITCH^" split 230 cvar bestweap><hbr>
+<list "^MENU_OMSET_RATES^" match "5000,8000,15000" atext "^MENU_OMSET_RATE^" split 230 cvar rate><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_DL^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_NOYES^" atext "^MENU_OMSET_DL^" split 230 cvari allow_download><hbr>
+<list "^MENU_OMSET_NOYES^" atext "^MENU_OMSET_DL_MAPS^" split 230 cvari allow_download_maps><hbr>
+<list "^MENU_OMSET_NOYES^" atext "^MENU_OMSET_DL_SOUNDS^" split 230 cvari allow_download_sounds><hbr>
+<list "^MENU_OMSET_NOYES^" atext "^MENU_OMSET_DL_STRINGS^" split 230 cvari allow_download_stringpackage><hbr>
+</stm>

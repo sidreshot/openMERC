@@ -1,0 +1,38 @@
+<stm>
+<strings menu_omset>
+
+<vbar tint vbargray>
+
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_MOUSE^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<slider cvar m_sensitivity_x min 1 max 30 step 1 atext "^MENU_OMSET_SENS_X^" split 230><hbr>
+<slider cvar m_sensitivity_y min 1 max 30 step 1 atext "^MENU_OMSET_SENS_Y^" split 230><hbr>
+<center>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_INVERT_X^" split 230 cvari m_invert_x><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_INVERT_Y^" split 230 cvari m_invert_y><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_FREELOOK^" split 230 cvari freelook><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_FILTER^" split 230 cvari m_filter><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_MOVE^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_RUN^" split 230 cvari cl_run><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_LOOKSPRING^" split 230 cvari lookspring><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_PAD^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<slider cvar joy_sensitivity min 0 max 8 step 1 atext "^MENU_OMSET_PAD_SENS^" split 230><hbr>
+<hbr>
+<center>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_KEYS^" key mouse1 "menu keys" ombutton btint transgray width 360 height 26><br>
+<hbr>
+<blank 16 16>
+</stm>

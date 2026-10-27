@@ -1,0 +1,293 @@
+VERSION 1
+ID 198
+REFERENCE OMFILL
+DESCRIPTION "OpenMerc texts for stock references without a text"
+COUNT 48
+INDEX 0
+{
+   REFERENCE BOT_MENU_ADD
+   TEXT_ENGLISH "Add"
+   TEXT_RUSSIAN "Добавить"
+}
+INDEX 1
+{
+   REFERENCE BOT_MENU_ADD_BOT
+   TEXT_ENGLISH "Add Bot"
+   TEXT_RUSSIAN "Добавить бота"
+}
+INDEX 2
+{
+   REFERENCE BOT_MENU_APPLY
+   TEXT_ENGLISH "Apply"
+   TEXT_RUSSIAN "Применить"
+}
+INDEX 3
+{
+   REFERENCE BOT_MENU_BOT_DETAILS
+   TEXT_ENGLISH "Bot Details"
+   TEXT_RUSSIAN "Сведения о боте"
+}
+INDEX 4
+{
+   REFERENCE BOT_MENU_BOT_SETTINGS
+   TEXT_ENGLISH "Bot Settings"
+   TEXT_RUSSIAN "Настройки ботов"
+}
+INDEX 5
+{
+   REFERENCE BOT_MENU_CONFIGURE_BOTS
+   TEXT_ENGLISH "Configure Bots"
+   TEXT_RUSSIAN "Настройка ботов"
+}
+INDEX 6
+{
+   REFERENCE BOT_MENU_PICK_A_BOT
+   TEXT_ENGLISH "Pick a Bot"
+   TEXT_RUSSIAN "Выбор бота"
+}
+INDEX 7
+{
+   REFERENCE BOT_MENU_REMOVE_BOT
+   TEXT_ENGLISH "Remove Bot"
+   TEXT_RUSSIAN "Убрать бота"
+}
+INDEX 8
+{
+   REFERENCE BOT_MENU_TICKER_ALTER_BOT
+   TEXT_ENGLISH "Change the bots in the match"
+   TEXT_RUSSIAN "Измените состав ботов в матче"
+}
+INDEX 9
+{
+   REFERENCE BOT_MENU_TICKER_PICK_A_BOT
+   TEXT_ENGLISH "Choose a bot for the match"
+   TEXT_RUSSIAN "Выберите бота для матча"
+}
+INDEX 10
+{
+   REFERENCE MENU_CREDITS_HGUERRERO
+   TEXT_ENGLISH " "
+   TEXT_RUSSIAN " "
+}
+INDEX 11
+{
+   REFERENCE MENU_DM_GENERIC_CONQUER_TITLE
+   TEXT_ENGLISH "Conquer"
+   TEXT_RUSSIAN "Захват"
+}
+INDEX 12
+{
+   REFERENCE MENU_DM_GENERIC_CONQUER_DESCR
+   TEXT_ENGLISH "This game mode is not part of this version."
+   TEXT_RUSSIAN "Этот режим игры не входит в данную версию."
+}
+INDEX 13
+{
+   REFERENCE MENU_DM_GENERIC_CONTROL_TITLE
+   TEXT_ENGLISH "Control"
+   TEXT_RUSSIAN "Контроль"
+}
+INDEX 14
+{
+   REFERENCE MENU_DM_GENERIC_CONTROL_DESCR
+   TEXT_ENGLISH "This game mode is not part of this version."
+   TEXT_RUSSIAN "Этот режим игры не входит в данную версию."
+}
+INDEX 15
+{
+   REFERENCE MENU_DM_GENERIC_CTB_TITLE
+   TEXT_ENGLISH "CTB"
+   TEXT_RUSSIAN "CTB"
+}
+INDEX 16
+{
+   REFERENCE MENU_DM_GENERIC_CTB_DESCR
+   TEXT_ENGLISH "This game mode is not part of this version."
+   TEXT_RUSSIAN "Этот режим игры не входит в данную версию."
+}
+INDEX 17
+{
+   REFERENCE MENU_DM_GENERIC_CONTROL_LIMIT
+   TEXT_ENGLISH "Control Limit"
+   TEXT_RUSSIAN "Лимит контроля"
+}
+INDEX 18
+{
+   REFERENCE MENU_DM_GENERIC_DELAY
+   TEXT_ENGLISH "Delay"
+   TEXT_RUSSIAN "Задержка"
+}
+INDEX 19
+{
+   REFERENCE MENU_DM_GENERIC_DM6
+   TEXT_ENGLISH "Control"
+   TEXT_RUSSIAN "Контроль"
+}
+INDEX 20
+{
+   REFERENCE MENU_DM_GENERIC_DM7
+   TEXT_ENGLISH "Conquer"
+   TEXT_RUSSIAN "Захват"
+}
+INDEX 21
+{
+   REFERENCE MENU_DM_GENERIC_PURE
+   TEXT_ENGLISH "Pure"
+   TEXT_RUSSIAN "Чист."
+}
+INDEX 22
+{
+   REFERENCE MENU_DM_GENERIC_TEAM_REDBLUE
+   TEXT_ENGLISH "Red and Blue Teams"
+   TEXT_RUSSIAN "Красные и синие"
+}
+INDEX 23
+{
+   REFERENCE MENU_DM_GENERIC_TEAM_REDBLUE_QUES
+   TEXT_ENGLISH "Play with red and blue teams?"
+   TEXT_RUSSIAN "Играть красной и синей командами?"
+}
+INDEX 24
+{
+   REFERENCE MENU_DOWNLOAD_BLUE_RED
+   TEXT_ENGLISH "Blue,Red"
+   TEXT_RUSSIAN "Синие,Красные"
+}
+INDEX 25
+{
+   REFERENCE MENU_DOWNLOAD_TEAM
+   TEXT_ENGLISH "Team"
+   TEXT_RUSSIAN "Команда"
+}
+INDEX 26
+{
+   REFERENCE MENU_IRQ3A_RECOMMENDED
+   TEXT_ENGLISH "Recommended weapons for this map"
+   TEXT_RUSSIAN "Рекомендуемое оружие для этой карты"
+}
+INDEX 27
+{
+   REFERENCE MENU_SUD3_RECOMMENDED
+   TEXT_ENGLISH "Recommended weapons for this map"
+   TEXT_RUSSIAN "Рекомендуемое оружие для этой карты"
+}
+INDEX 28
+{
+   REFERENCE MENU_KOSDM2_INFO
+   TEXT_ENGLISH "Deathmatch map."
+   TEXT_RUSSIAN "Карта для боя насмерть."
+}
+INDEX 29
+{
+   REFERENCE MENU_PLAYER_NAMES_HARD
+   TEXT_ENGLISH " "
+   TEXT_RUSSIAN " "
+}
+INDEX 30
+{
+   REFERENCE MENU_PLAYER_NAMES_NAME_ASSAULT
+   TEXT_ENGLISH "Assault"
+   TEXT_RUSSIAN "Штурмовик"
+}
+INDEX 31
+{
+   REFERENCE MENU_PLAYER_NAMES_AKA_ASSAULT
+   TEXT_ENGLISH "Assault"
+   TEXT_RUSSIAN "Штурмовик"
+}
+INDEX 32
+{
+   REFERENCE MENU_PLAYER_NAMES_INFO_ASSAULT
+   TEXT_ENGLISH "No dossier available."
+   TEXT_RUSSIAN "Досье отсутствует."
+}
+INDEX 33
+{
+   REFERENCE MENU_PLAYER_NAMES_NAME_BRICK
+   TEXT_ENGLISH "Brick"
+   TEXT_RUSSIAN "Брик"
+}
+INDEX 34
+{
+   REFERENCE MENU_PLAYER_NAMES_AKA_BRICK
+   TEXT_ENGLISH "Brick"
+   TEXT_RUSSIAN "Брик"
+}
+INDEX 35
+{
+   REFERENCE MENU_PLAYER_NAMES_INFO_BRICK
+   TEXT_ENGLISH "No dossier available."
+   TEXT_RUSSIAN "Досье отсутствует."
+}
+INDEX 36
+{
+   REFERENCE MENU_PLAYER_NAMES_NAME_COBRA
+   TEXT_ENGLISH "Cobra"
+   TEXT_RUSSIAN "Кобра"
+}
+INDEX 37
+{
+   REFERENCE MENU_PLAYER_NAMES_AKA_COBRA
+   TEXT_ENGLISH "Cobra"
+   TEXT_RUSSIAN "Кобра"
+}
+INDEX 38
+{
+   REFERENCE MENU_PLAYER_NAMES_INFO_COBRA
+   TEXT_ENGLISH "No dossier available."
+   TEXT_RUSSIAN "Досье отсутствует."
+}
+INDEX 39
+{
+   REFERENCE MENU_PLAYER_NAMES_NAME_COMMANDO
+   TEXT_ENGLISH "Commando"
+   TEXT_RUSSIAN "Коммандос"
+}
+INDEX 40
+{
+   REFERENCE MENU_PLAYER_NAMES_AKA_COMMANDO
+   TEXT_ENGLISH "Commando"
+   TEXT_RUSSIAN "Коммандос"
+}
+INDEX 41
+{
+   REFERENCE MENU_PLAYER_NAMES_INFO_COMMANDO
+   TEXT_ENGLISH "No dossier available."
+   TEXT_RUSSIAN "Досье отсутствует."
+}
+INDEX 42
+{
+   REFERENCE MENU_PLAYER_NAMES_NAME_JERSEY
+   TEXT_ENGLISH "Jersey"
+   TEXT_RUSSIAN "Джерси"
+}
+INDEX 43
+{
+   REFERENCE MENU_PLAYER_NAMES_AKA_JERSEY
+   TEXT_ENGLISH "Jersey"
+   TEXT_RUSSIAN "Джерси"
+}
+INDEX 44
+{
+   REFERENCE MENU_PLAYER_NAMES_INFO_JERSEY
+   TEXT_ENGLISH "No dossier available."
+   TEXT_RUSSIAN "Досье отсутствует."
+}
+INDEX 45
+{
+   REFERENCE MENU_PLAYER_NAMES_NAME_WIDOWMAKER
+   TEXT_ENGLISH "Widowmaker"
+   TEXT_RUSSIAN "Вдоводел"
+}
+INDEX 46
+{
+   REFERENCE MENU_PLAYER_NAMES_AKA_WIDOWMAKER
+   TEXT_ENGLISH "Widowmaker"
+   TEXT_RUSSIAN "Вдоводел"
+}
+INDEX 47
+{
+   REFERENCE MENU_PLAYER_NAMES_INFO_WIDOWMAKER
+   TEXT_ENGLISH "No dossier available."
+   TEXT_RUSSIAN "Досье отсутствует."
+}

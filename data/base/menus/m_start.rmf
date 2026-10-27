@@ -1,0 +1,30 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): start a server: name, map list, map, mode, rules, bots. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<set menu_public $public>
+<set menu_deathmatch $deathmatch>
+<set menu_maxclients $maxclients>
+<vbar tint vbargray>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_START_HOST^">
+<hr width 460 tint gray>
+<font type title tint hilitetext atint hilitetext>
+<input cvar hostname width 250 global border 8 1 gray><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_START_LIST^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "" files "maplists" "*" "lst" cvar sv_maplistfile><hbr>
+<ctext menu_map atext "^MENU_OMSET_PG_START_MAP^" split 230><hbr>
+<list "^MENU_OMSET_PG_START_TYPES^" match "1,2,3,4,5" cvar menu_deathmatch atext "^MENU_OMSET_PG_START_TYPE^" split 230><hbr>
+<list "^MENU_OMSET_NOYES^" cvari menu_public atext "^MENU_OMSET_PG_START_PUBLIC^" split 230><hbr>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_START_RULES^" ombutton btint transgray width 220 height 24 key mouse1 "menu dmflags"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_START_BOTS^" ombutton btint transgray width 220 height 24 key mouse1 "menu bots"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_START_GO^" ombutton btint transgray width 220 height 24 key mouse1 "exec menus/om_startdm.cfg"><br>
+</stm>

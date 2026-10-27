@@ -1,0 +1,11 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): every deathmatch map. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<vbar tint vbargray>
+<center>
+<font type title tint orange atint orange>
+"^MENU_OMSET_PG_START_MAPS^"
+<hr tint gray width 200>
+<font type medium tint normaltext atint hilitetext>
+<filebox "maps" "dm/*" "bsp" sort name align center cvar menu_map>
+</stm>

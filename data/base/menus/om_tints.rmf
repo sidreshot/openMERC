@@ -1,0 +1,31 @@
+<comment OpenMerc MENU-SCRATCH: colour names of the own menu pages (owner
+     t95u: own values, used instead of the stock tints page). 0xAABBGGRR.>
+<tint normaltext 0xffd8dcd0>
+<tint hilitetext 0xffffffff>
+<tint vbargray 0xff8c8478>
+<tint backtint 0xff000000>
+<tint tipback 0xff2a231c>
+<tint tip 0xfff0f0f0>
+<tint icontint 0xffffffff>
+<tint iconhilite 0xff60c0ff>
+<tint hgreen 0xff58c878>
+<tint hblue 0xffd07850>
+<tint lblue 0xffffa080>
+<tint lred 0xff4890ff>
+<tint clear 0x00000000>
+<tint black 0xff000000>
+<tint transblack 0x80000000>
+<tint smokey 0xc0000000>
+<tint transgray 0x70504438>
+<tint darkgray 0xff40382f>
+<tint gray 0xff8c8478>
+<tint white 0xffffffff>
+<tint orange 0xff2080ff>
+<tint header 0xff2080ff>
+<tint semiblack 0xa0000000>
+<tint red 0xff3a3ae0>
+<tint blue 0xffe0903a>
+<tint green 0xff50c850>
+<tint purple 0xffc050b0>
+<tint cyan 0xffd0c840>
+<defaults tiptint tip tipbtint tipback tipfont small>

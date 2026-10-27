@@ -1,0 +1,20 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): server list. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<vbar tint vbargray>
+<center>
+<tab 170 214 255 332 465 520>
+<font type medium tint normaltext atint hilitetext>
+<serverbox
+	column 0 "^MENU_OMSET_PG_JOIN_HOST^"
+	column 4 "^MENU_OMSET_PG_JOIN_PING^"
+	column 5 "^MENU_OMSET_PG_JOIN_PURE^"
+	column 3 "^MENU_OMSET_PG_JOIN_GT^"
+	column 1 "^MENU_OMSET_PG_JOIN_MAP^"
+	column 2 "^MENU_OMSET_PG_JOIN_PLAYERS^"
+	cvar menu_server
+	hostname menu_servername
+	address menu_serveraddr
+	height 100
+>
+</stm>

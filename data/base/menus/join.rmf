@@ -1,0 +1,17 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): screen "join". Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_join center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<cbuf "sset menu_nss ^MENU_OMSET_PG_JOIN_NONE^">
+<frame servers 0 150 cut main border 8 1 gray>
+<frame m_servers 0 0 page m_join cut servers>
+<frame control 170 0 page m_joincontrol cut main>
+<frame left 230 0 cut main border 8 1 gray>
+<frame m_left 0 0 page m_servers cut left>
+<frame right 0 0 cut main border 8 1 gray>
+<frame m_right 0 0 page m_players cut right>
+</stm>

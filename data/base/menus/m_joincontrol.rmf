@@ -1,0 +1,16 @@
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): server list buttons and totals. Own page in the openMERC
+     style: no stock backdrop, folder model, icons or stock strings -->
+<stm>
+<center>
+<font type title tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_JOIN_CONNECT^" ombutton btint transgray width 200 height 24 key mouse1 "connect $menu_serveraddr"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_JOIN_REFRESH^" ombutton btint transgray width 200 height 24 key mouse1 "pingservers"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_JOIN_ADV^" ombutton btint transgray width 200 height 24 key mouse1 "menu advjoin"><br>
+<hbr>
+<font type medium tint normaltext atint normaltext>
+<ctext player_summary atext "^MENU_OMSET_PG_JOIN_ST_PLAYERS^ : "><br>
+<ctext server_summary atext "^MENU_OMSET_PG_JOIN_ST_SERVERS^ : "><br>
+<ctext locked_summary atext "^MENU_OMSET_PG_JOIN_ST_LOCKED^ : "><br>
+</stm>

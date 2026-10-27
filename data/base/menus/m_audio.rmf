@@ -1,0 +1,35 @@
+<stm>
+<strings menu_omset>
+
+<vbar tint vbargray>
+
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_VOLUME^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint normaltext>
+<slider cvar s_om_gain min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_MASTER^" split 230><hbr>
+<slider cvar s_volume min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_EFFECTS^" split 230><hbr>
+<slider cvar s_om_voicevolume min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_VOICE^" split 230><hbr>
+<slider cvar s_musicvolume min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_MUSIC^" split 230><hbr>
+<hbr>
+<center>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_MUSIC_ON^" split 230 cvari s_musicenabled><hbr>
+<hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_OUTPUT^" tip "^MENU_OMSET_SND_TIP^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_DEVICE_DEFAULT^" match "default" snddevices atext "^MENU_OMSET_DEVICE^" split 230 cvar s_om_device tip "^MENU_OMSET_DEVICE_TIP^"><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_HRTF^" split 230 cvari s_om_hrtf><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_REVERB^" split 230 cvari s_om_reverb><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_LIMITER^" split 230 cvari s_om_limiter><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_FOCUSMUTE^" split 230 cvari s_om_focusmute><hbr>
+
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_SND_RESTART^" key mouse1 "snd_restart" ombutton btint transgray width 240 height 24 tip "^MENU_OMSET_SND_RESTART_TIP^"><br>
+<hbr>
+<blank 16 16>
+</stm>

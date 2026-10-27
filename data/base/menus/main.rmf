@@ -1,0 +1,20 @@
+<!-- OpenMerc MENU-SCRATCH: the main menu is the rail + landing page (owner
+     t91u/t94u); the animated ARC globe menu is removed and "menu amain"
+     opens this screen (menu.c M_OpenMenu) -->
+<stm>
+<strings menu_generic>
+<strings menu_omset>
+
+<set menu_sk_saving $sk_saving>
+<set menu_sk_spawning $sk_spawning>
+<set menu_sk_toughness $sk_toughness>
+<set menu_sk_maxencum $sk_maxencum>
+<set menu_cheats $cheats>
+
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_omhome center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame home 0 0 page m_omhome cut main>
+</stm>

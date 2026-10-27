@@ -1,0 +1,2 @@
+# Paths never published (public export, release archives). Checked by tools/legal_scan.py --export.
+docs/private/*

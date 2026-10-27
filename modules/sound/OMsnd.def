@@ -1,0 +1,27 @@
+; SPDX-License-Identifier: GPL-2.0-or-later
+; Exports of the OpenMerc sound module, by name (SPEC-004 "Exports").
+; Implements: SPEC-004
+LIBRARY OMsnd
+EXPORTS
+    S_Init
+    S_Shutdown
+    S_Touch
+    S_FreeSound
+    S_StartSound
+    S_StartLocalSound
+    S_StopAllSounds
+    S_Update
+    S_Activate
+    S_BeginRegistration
+    S_RegisterSound
+    S_EndRegistration
+    S_FindName
+    S_RegisterMusicSet
+    S_RegisterAmbientSet
+    S_SetMusicIntensity
+    S_SetMusicDesignerInfo
+    S_SetGeneralAmbientSet
+    S_SetSoundProcType
+    S_SetSoundStruct
+    SNDEAX_SetEnvironment
+    SNDEAX_SetEnvironmentLevel
