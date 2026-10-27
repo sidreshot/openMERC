@@ -1,8 +1,8 @@
 # Building OpenMerc on Linux
 
-Status 2026-10-27: branch `linux-build`, **not merged into `main`**, rebased onto `main`. Both x86_64 and
-i386 build, the unit tests pass, and both run game sessions with the stock paks (Debian 13, Mesa llvmpipe
-under Xvfb, OpenAL Soft 1.24.2 wave writer):
+Status 2026-10-27 (0.2.0): x86_64 and i386 build, the unit tests pass, and both run game sessions with the
+stock paks (Debian 13, Mesa llvmpipe under Xvfb, OpenAL Soft 1.24.2 null or wave-writer output). The x86_64
+release package `openMERC-<version>-linux-x86_64.tar.gz` comes from `tools/build/package-linux.sh`:
 
 | Check | x86_64 | i386 |
 |---|---|---|
@@ -10,14 +10,20 @@ under Xvfb, OpenAL Soft 1.24.2 wave writer):
 | client `+map tsr1` (intro cinematic, 50-60 s) | ok | ok, output WAV 49.7 s: 0 drops, 0 gaps, 0 clicks |
 | client `+map trn1` | ok | ok |
 | client `+set deathmatch 1 +map dm/nycdm1`: spawn, fire, walk | ok (pistol, HUD) | ok (pistol, HUD) |
+| install layout (openMERC folder inside the game folder): menu, new game on tsr1, walk, fire | ok | not rerun |
+| `save` / `load` in the same process and in a new process, `quit` from the console, SIGTERM | ok | not rerun |
 
 Fixed on the way (each its own commit): q2ded aborted with a double free on every quit; i386 builds reported
 `x86_64`; GCC release clients aborted on the first inventory event; x86_64 clients crashed on the first
 frame (32-bit player-state offsets); i386 GCC corrupted the stack on every movement trace; GCC i386
-release builds crashed as soon as a player moved (undefined pointer difference in `SV_SurfaceFromQ2`).
-Not yet verified: a real display and sound device, a full campaign map with combat and saves, network play
-between machines, the OMsnd focus mute (always off on Linux), and ARM or macOS. Only mode B (OpenMerc's own
-modules) can run on Linux: the original game and player modules are 32-bit Windows DLLs.
+release builds crashed as soon as a player moved (undefined pointer difference in `SV_SurfaceFromQ2`);
+x86_64 overflowed a heap block on every level load (sound precache table sized for 32-bit pointers, abort on
+quit); x86_64 could not load any save ("Illegible server message 0", inventory state skipped with its 32-bit
+size); SIGTERM queued `quit` without a newline every frame; the install-layout check of `base/pak0.pak` was
+case-sensitive.
+Not yet verified: a real display and sound device, a full campaign map, network play between machines, the
+OMsnd focus mute (always off on Linux), and ARM or macOS. Only mode B (OpenMerc's own modules) can run on
+Linux: the original game and player modules are 32-bit Windows DLLs.
 
 The fully open build works on Linux with CMake and Ninja. That is the engine, the game and player modules,
 the OMsnd sound module on OpenAL Soft, and Ghoul. x86_64 is the main target. i386 builds too, and is the
@@ -67,17 +73,32 @@ cmake --build build/engine
 
 ## Running
 
-Copy the stock game data (`base/pak0.pak` ... from your own installation) into `release/base/`. No game
-data comes with OpenMerc. Then start the game:
+No game data comes with OpenMerc. Put the `release/` folder (or the unpacked package) into a folder inside
+your Soldier of Fortune installation, next to its `base/`, and start it from there:
 
 ```sh
-cd build-linux-x86_64-Release/release
-./openMerc -portable +set vid_renderer gl3   # client
-./openMerc-ded -portable +map <map>          # dedicated server
+~/Games/SoF/openMERC/openMerc                    # client; the game data is found in the parent folder
+~/Games/SoF/openMERC/openMerc-ded +map <map>     # dedicated server
 ```
 
-`-basedir <dir>` points at another directory that holds `base/`. Loose files are found case-insensitively
+The binary changes to its own folder first, so it can be started from anywhere. It uses the parent folder as
+the game data folder when its own `base/` has no `pak0.pak` and prints `Game data: <folder>` in the log.
+Settings, saves and logs go to the `user/` folder next to the binary; nothing is written into the game folder.
+`openMERC.sh` does the same and also accepts the game folder in `game_path.txt` or asks for it.
+`-basedir <dir>` and `-cddir <dir>` set the folders by hand. Loose files and paks are found case-insensitively
 (`src/common/filesystem.c`), so stock names in mixed case work.
+
+## Binary package
+
+```sh
+tools/build/build-linux.sh && tools/build/package-linux.sh
+```
+
+`package-linux.sh [build root] [out dir]` packs `release/`, `LICENSE`, `THIRD_PARTY.md`, `openMERC.sh` and
+`dist/README-linux.txt` into `openMERC-<version>-linux-x86_64.tar.gz` with a `.sha256` file. It bundles
+`lib/libSDL3.so.0` (`OM_SDL3_LIB`, best a build of SDL 3 that loads its X11/Wayland/audio back ends at run
+time, the default of SDL's own CMake build) and `lib/libopenal.so.1` (`OM_OPENAL_LIB`, default: the system
+one). The engine, renderers and OMsnd look in their own `lib/` first (RUNPATH `$ORIGIN/lib`).
 
 ## Unit tests
 
