@@ -145,6 +145,33 @@ main(int argc, char **argv)
 			__func__, strerror(errno));
 	}
 
+	/* openMERC: like a double-click start on Windows, run from the folder of
+	   the binary, so ./base, ./user and the install layout (game data in the
+	   parent folder) work from any working directory. An explicit -basedir,
+	   -datadir or -user keeps the caller's working directory. */
+	{
+		qboolean dirarg = false;
+
+		for (int i = 1; i < argc; i++)
+		{
+			if (!strcmp(argv[i], "-basedir") || !strcmp(argv[i], "-datadir") ||
+				!strcmp(argv[i], "-user"))
+			{
+				dirarg = true;
+			}
+		}
+
+		if (!dirarg)
+		{
+			const char *bin = Sys_GetBinaryDir();
+
+			if (bin && bin[0] && (chdir(bin) != 0))
+			{
+				printf("chdir(%s) failed: %s\n", bin, strerror(errno));
+			}
+		}
+	}
+
 	// Initialize the game.
 	// Never returns.
 	Qcommon_Init(argc, argv);
