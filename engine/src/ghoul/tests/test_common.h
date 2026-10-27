@@ -13,6 +13,8 @@
 #include "../ghoul_host.h"
 
 extern int g_fail, g_pass;
+// true when the data root holds extracted stock Ghoul files; checks of stock models skip without it
+extern bool g_haveData;
 #define CHECK(c, ...)                                                                                                  \
 	do                                                                                                                 \
 	{                                                                                                                  \

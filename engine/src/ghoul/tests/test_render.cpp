@@ -384,6 +384,11 @@ void RunRenderTests(const std::string &outDir, bool quick)
 	for (auto &c : chars)
 	{
 		Built b = BuildPlayer(cl, c.gpm, false);
+		if (!g_haveData)
+		{
+			std::printf("SKIP: player model %s needs the game data\n", c.gpm);
+			continue;
+		}
 		CHECK(b.obj && b.obj->NumSequences() > 0, "player model %s", c.gpm);
 		if (!b.obj)
 			continue;
@@ -552,7 +557,10 @@ void RunRenderTests(const std::string &outDir, bool quick)
 		g_flag1000 = true;
 		int flagged = DrawInto(in, 0.0f, fr.eye, fr.target, cell, false);
 		g_flag1000 = false;
-		CHECK(flagged == plain + 6, "shadow only with flag 0x1000: %d vs %d triangles", plain, flagged);
+		if (!g_haveData)
+			std::printf("SKIP: shadow flag 0x1000 check needs the game data\n");
+		else
+			CHECK(flagged == plain + 6, "shadow only with flag 0x1000: %d vs %d triangles", plain, flagged);
 		o->Destroy();
 	}
 	// SPEC-012 vector 10: a missing slot texture prints once with the COMSKIN path

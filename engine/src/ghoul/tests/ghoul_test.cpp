@@ -599,6 +599,7 @@ int main(int argc, char **argv)
 	std::filesystem::create_directories(g_outDir, ec);
 	InstallHost(root);
 	g_host.quiet = true;
+	g_haveData = !ListFiles("ghoul", ".ghb").empty();
 	try
 	{
 		TestCodecs();

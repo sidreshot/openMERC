@@ -12,6 +12,7 @@
 #include "test_common.h"
 
 int g_fail = 0, g_pass = 0;
+bool g_haveData = false;
 TestHost g_host;
 
 static std::string Up(const std::string &s)

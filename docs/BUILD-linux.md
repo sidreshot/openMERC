@@ -86,12 +86,10 @@ cd build-linux-x86_64-Release/release
 | `engine/sofpm_test` | none | SPEC-314 player movement |
 | `player/pm_unit` | none | the SPEC-601 32-bit object-layout checks run only where `sizeof(void*) == 4` |
 | `game/g3tests [fixture dir]` | fixtures from `gen_mockmodels.py` | skips without fixtures (`OM_G3_FIXTURES=<dir>` in the script) |
-| `engine/src/ghoul/omghoul_test [data dir] [render dir]` | extracted Ghoul data | the script runs it only with `OM_GHOUL_DATA=<dir>` |
+| `engine/src/ghoul/omghoul_test [data dir] [render dir]` | extracted Ghoul data | checks of stock models skip without data (`OM_GHOUL_DATA=<dir>` in the script) |
 
-Without data, `omghoul_test` reports 142 passed and 9 failed. The same 9 checks fail on i386 and on x86_64
-without data, so these are data checks that do not skip, not a port problem: they are the network
-replication of the MESO instance (`test_savenet.cpp:310`) and the player models and shadows
-(`test_render.cpp:387`, `:555`). On i386 without SSE2 maths, x87 excess precision makes two more checks
+Without data, `omghoul_test` reports 142 passed, 0 failed: the network replication of the stock MESO
+character and the player model and shadow checks print `SKIP` instead. On i386 without SSE2 maths, x87 excess precision makes two checks
 fail (`test_runtime.cpp:250`, `test_savenet.cpp:116`). That is why the script builds i386 with `-msse2 -mfpmath=sse`.
 
 ## Notes on the port

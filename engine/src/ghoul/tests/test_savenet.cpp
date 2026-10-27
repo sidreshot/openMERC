@@ -306,12 +306,16 @@ static void TestNetwork()
 	auto checkAll = [&](const char *when) {
 		for (Inst *x : {a, b, c})
 		{
+			if (x == a && !g_haveData)
+				continue; // the stock character needs the game data
 			Inst *y = static_cast<Inst *>(L.cl->FindInstance(x->GetInstanceId()));
 			CHECK(y != nullptr, "%s: client instance %d", when, x->GetInstanceId());
 			if (y)
 				CHECK(SameState(x, y, why), "%s: instance %d differs: %s", when, x->GetInstanceId(), why.c_str());
 		}
 	};
+	if (!g_haveData)
+		std::printf("SKIP: replication of the stock character needs the game data\n");
 	checkAll("frame 1");
 	// frame 2: changes of every group
 	float c45 = std::cos(0.7f), s45 = std::sin(0.7f);
