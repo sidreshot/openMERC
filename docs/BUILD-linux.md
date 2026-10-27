@@ -10,7 +10,7 @@ release package `openMERC-<version>-linux-x86_64.tar.gz` comes from `tools/build
 | client `+map tsr1` (intro cinematic, 50-60 s) | ok | ok, output WAV 49.7 s: 0 drops, 0 gaps, 0 clicks |
 | client `+map trn1` | ok | ok |
 | client `+set deathmatch 1 +map dm/nycdm1`: spawn, fire, walk | ok (pistol, HUD) | ok (pistol, HUD) |
-| install layout (openMERC folder inside the game folder): menu, new game on tsr1, walk, fire | ok | not rerun |
+| install layout (openMERC folder inside the game folder): menu, new game on tsr1, walk, fire | ok | not rerun (layout of `docs/impl/INSTALL-LAYOUT.md` not tested on Linux yet) |
 | `save` / `load` in the same process and in a new process, `quit` from the console, SIGTERM | ok | not rerun |
 
 Fixed on the way (each its own commit): q2ded aborted with a double free on every quit; i386 builds reported
@@ -73,18 +73,21 @@ cmake --build build/engine
 
 ## Running
 
-No game data comes with OpenMerc. Put the `release/` folder (or the unpacked package) into a folder inside
-your Soldier of Fortune installation, next to its `base/`, and start it from there:
+No game data comes with OpenMerc. Unpack the package into your Soldier of Fortune installation, next to its
+`base/` (or into a folder inside it), and start it from there (layout: `docs/impl/INSTALL-LAYOUT.md`):
 
 ```sh
-~/Games/SoF/openMERC/openMerc                    # client; the game data is found in the parent folder
-~/Games/SoF/openMERC/openMerc-ded +map <map>     # dedicated server
+~/Games/SoF/openMerc                    # client
+~/Games/SoF/openMerc-ded +map <map>     # dedicated server
 ```
 
-The binary changes to its own folder first, so it can be started from anywhere. It uses the parent folder as
-the game data folder when its own `base/` has no `pak0.pak` and prints `Game data: <folder>` in the log.
-Settings, saves and logs go to the `user/` folder next to the binary; nothing is written into the game folder.
-`openMERC.sh` does the same and also accepts the game folder in `game_path.txt` or asks for it.
+The binary changes to its own folder first, so it can be started from anywhere. The game data folder is the
+first of the base folder, its parent, the binary's folder and its parent that holds `base/pak0.pak`; when it
+is not the base folder the log says `Game data: <folder>`. openMERC's own modules and `zz_openmerc.pak` are in
+`openmerc/` next to the binary and are found before the game's `base/`. Settings, saves and logs go to
+`openmerc/user/`; nothing is written into the game folder. The build's `release/` folder (modules in its own
+`base/`, user folder `release/user/`) can still be placed in a folder inside the game folder.
+`openMERC.sh` does the same and also accepts the game folder in `openmerc/game_path.txt` or asks for it.
 `-basedir <dir>` and `-cddir <dir>` set the folders by hand. Loose files and paks are found case-insensitively
 (`src/common/filesystem.c`), so stock names in mixed case work.
 

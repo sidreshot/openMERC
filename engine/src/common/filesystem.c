@@ -1924,11 +1924,75 @@ FS_SwitchToCvar(const char *sw, const char *cvarname)
 	}
 }
 
+/* OpenMerc install layout: openMERC's own folder next to openMerc.exe */
+#define OM_DATADIR "openmerc"
+static char fs_omdir[MAX_OSPATH];
+
+const char *
+FS_OpenMercDir(void)
+{
+	return fs_omdir;
+}
+
+/* true when <dir>/base/pak0.pak exists; dir becomes its real path */
+static qboolean
+FS_HasGameData(const char *in, char *dir, size_t size)
+{
+	char path[MAX_OSPATH];
+
+	if (!in[0] || !Sys_Realpath(in, dir, size))
+	{
+		return false;
+	}
+
+	Com_sprintf(path, sizeof(path), "%s/%s/pak0.pak", dir, BASEDIRNAME);
+	/* any letter case on case-sensitive hosts (PAK0.PAK of a CD install) */
+	return FS_HostFileExists(path);
+}
+
+static void
+FS_FindGameData(void)
+{
+	char cand[4][MAX_OSPATH], dir[MAX_OSPATH], base[MAX_OSPATH];
+	const char *bindir = Sys_GetBinaryDir();
+	int i;
+
+	Com_sprintf(cand[0], sizeof(cand[0]), "%s", fs_basedir->string);
+	Com_sprintf(cand[1], sizeof(cand[1]), "%s/..", fs_basedir->string);
+	Com_sprintf(cand[2], sizeof(cand[2]), "%s.", bindir ? bindir : "");
+	Com_sprintf(cand[3], sizeof(cand[3]), "%s..", bindir ? bindir : "");
+
+	if (!bindir || !bindir[0])
+	{
+		cand[2][0] = cand[3][0] = 0;
+	}
+
+	for (i = 0; i < 4; i++)
+	{
+		if (!FS_HasGameData(cand[i], dir, sizeof(dir)))
+		{
+			continue;
+		}
+
+		/* the base dir itself: nothing to add */
+		if (Sys_Realpath(fs_basedir->string, base, sizeof(base)) && !Q_stricmp(base, dir))
+		{
+			return;
+		}
+
+		FS_NormalizeSwitchValue(dir, sizeof(dir));
+		Cvar_FullSet("cddir", dir, CVAR_NOSET);
+		Com_Printf("Game data: %s\n", fs_cddir->string);
+		return;
+	}
+}
+
 void
 FS_InitFilesystem(void)
 {
 	char path[MAX_OSPATH];
 	const char *bindir;
+	qboolean usergiven;
 
 	/* Register FS commands. */
 	Cmd_AddCommand("path", FS_Path_f);
@@ -1947,6 +2011,7 @@ FS_InitFilesystem(void)
 		Cvar_FullSet("basedir", datadir, 0);
 	}
 
+	usergiven = (Cvar_VariableString("user")[0] != 0); /* -user / +set user */
 	fs_basedir = Cvar_Get("basedir", ".", CVAR_NOSET);
 	fs_cddir = Cvar_Get("cddir", "", CVAR_NOSET);
 	fs_gamedirvar = Cvar_Get("game", "", CVAR_LATCH | CVAR_SERVERINFO);
@@ -1967,34 +2032,32 @@ FS_InitFilesystem(void)
 		Com_sprintf(fs_binbase, sizeof(fs_binbase), "%s%s", bindir, BASEDIRNAME);
 	}
 
-	/* install layout: openMERC unpacked as its own folder inside the Soldier
-	   of Fortune folder (<SoF>/openMERC/openMerc.exe). Without -cddir and
-	   without game data in <basedir>/base, the parent folder is the game folder
-	   when it holds base/pak0.pak. It is only read, never written. */
-	if (!fs_cddir->string[0])
+	/* <exe dir>/openmerc: openMERC's own files and, without -user, its user folder
+	   <exe dir>/openmerc/user - never the game's own user folder */
+	fs_omdir[0] = 0;
+
+	if (bindir && bindir[0])
 	{
-		Com_sprintf(path, sizeof(path), "%s/%s/pak0.pak", fs_basedir->string, BASEDIRNAME);
+		Com_sprintf(path, sizeof(path), "%s%s", bindir, OM_DATADIR);
 
-		/* FS_HostFileExists matches the name case-insensitively on
-		   case-sensitive hosts (PAK0.PAK of a CD install) */
-		if (!FS_HostFileExists(path))
+		if (Sys_IsDir(path))
 		{
-			char parent[MAX_OSPATH];
+			Q_strlcpy(fs_omdir, path, sizeof(fs_omdir));
 
-			Com_sprintf(path, sizeof(path), "%s/..", fs_basedir->string);
-
-			if (Sys_Realpath(path, parent, sizeof(parent)))
+			if (!usergiven)
 			{
-				Com_sprintf(path, sizeof(path), "%s/%s/pak0.pak", parent, BASEDIRNAME);
-
-				if (FS_HostFileExists(path))
-				{
-					FS_NormalizeSwitchValue(parent, sizeof(parent));
-					Cvar_FullSet("cddir", parent, CVAR_NOSET);
-					Com_Printf("Game data: %s\n", fs_cddir->string);
-				}
+				Cvar_FullSet("user", OM_DATADIR "/user", CVAR_SERVERINFO | CVAR_NOSET);
 			}
 		}
+	}
+
+	/* install layout (docs/impl/INSTALL-LAYOUT.md): openMerc.exe sits in the Soldier of Fortune folder
+	   or in a folder below it, with its own files in <exe dir>/openmerc. Without -cddir, the first of
+	   <basedir>, <basedir>/.., <exe dir>, <exe dir>/.. that holds base/pak0.pak is the game folder; it
+	   is only read, never written. */
+	if (!fs_cddir->string[0])
+	{
+		FS_FindGameData();
 	}
 
 	/* 1. <cddir>/base, 2. <basedir>/base */
@@ -2006,6 +2069,12 @@ FS_InitFilesystem(void)
 
 	Com_sprintf(path, sizeof(path), "%s/%s", fs_basedir->string, BASEDIRNAME);
 	FS_AddGameDirectory(path);
+
+	/* 2b. openMERC's own files (game and player modules, zz_openmerc.pak) */
+	if (fs_omdir[0])
+	{
+		FS_AddGameDirectory(fs_omdir);
+	}
 
 	/* 3. the base layer */
 	fs_base_searchpaths = fs_searchpaths;
@@ -2028,8 +2097,16 @@ FS_InitFilesystem(void)
 		}
 	}
 
-	/* 5. the user directory, used verbatim */
-	Q_strlcpy(fs_userdir, fs_userdirvar->string, sizeof(fs_userdir));
+	/* 5. the user directory, used verbatim (the default one of the install
+	   layout is <exe dir>/openmerc/user, whatever the current directory) */
+	if (fs_omdir[0] && !usergiven)
+	{
+		Com_sprintf(fs_userdir, sizeof(fs_userdir), "%s/user", fs_omdir);
+	}
+	else
+	{
+		Q_strlcpy(fs_userdir, fs_userdirvar->string, sizeof(fs_userdir));
+	}
 	FS_AddGameDirectory(fs_userdir);
 }
 

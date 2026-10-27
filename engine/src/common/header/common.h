@@ -761,6 +761,7 @@ void FS_ShutdownFilesystem(void);
 void FS_BuildGameSpecificSearchPath(const char *dir);
 const char *FS_Gamedir(void);
 const char *FS_NextPath(const char *prevpath);
+const char *FS_OpenMercDir(void); /* <exe dir>/openmerc of the install layout, "" without it */
 int FS_LoadFile2(const char *path, void **buffer, int pad);
 int FS_LoadFile(const char *path, void **buffer);
 int FS_LoadFileShadowed(const char *path, int shadowed, void **buffer);

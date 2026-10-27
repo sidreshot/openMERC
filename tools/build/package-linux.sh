@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Pack a Linux build (tools/build/build-linux.sh) into openMERC-<version>-linux-<arch>.tar.gz + .sha256.
-# The archive holds one folder, openMERC/, to unpack inside the Soldier of Fortune folder (next to base/).
+# The archive holds openMerc, openMerc-ded, openMERC.sh, the renderer and sound modules and the folder openmerc/
+# (game and player modules, zz_openmerc.pak, bundled libraries, licences). It is unpacked into the Soldier of
+# Fortune folder (next to base/) or a folder inside it and adds no file the game has (docs/impl/INSTALL-LAYOUT.md).
 #
 # usage: tools/build/package-linux.sh [build root] [out dir]
 # env:   OM_SDL3_LIB    libSDL3.so.0 to bundle (default: the system one; best an SDL build that loads its
@@ -30,25 +32,26 @@ find_lib() { # <soname>: path of the system library
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
-P=$STAGE/openMERC
-mkdir -p "$P/base"
+P=$STAGE
+D=$P/openmerc
+mkdir -p "$D"
 cp "$REL/openMerc" "$REL/openMerc-ded" "$REL/OMsnd.so" "$P/"
 for r in ref_gl3.so ref_gles3.so; do [ -f "$REL/$r" ] && cp "$REL/$r" "$P/"; done
-cp "$REL/base/gamex86.so" "$REL/base/player.so" "$REL/base/zz_openmerc.pak" "$P/base/"
-cp "$REPO/LICENSE" "$REPO/THIRD_PARTY.md" "$P/"
-cp "$REPO/dist/README-linux.txt" "$P/README.txt"
+cp "$REL/base/gamex86.so" "$REL/base/player.so" "$REL/base/zz_openmerc.pak" "$D/"
+cp "$REPO/LICENSE" "$REPO/THIRD_PARTY.md" "$D/"
+cp "$REPO/dist/README-linux.txt" "$D/README.txt"
 install -m 755 "$REPO/dist/openMERC.sh" "$P/openMERC.sh"
-strip --strip-unneeded "$P/openMerc" "$P/openMerc-ded" "$P"/*.so "$P"/base/*.so
+strip --strip-unneeded "$P/openMerc" "$P/openMerc-ded" "$P"/*.so "$D"/*.so
 
 if [ "${OM_NO_BUNDLE:-0}" != "1" ]; then
-  mkdir -p "$P/lib"
+  mkdir -p "$D/lib"
   sdl=${OM_SDL3_LIB:-$(find_lib libSDL3.so.0)}
   oal=${OM_OPENAL_LIB:-$(find_lib libopenal.so.1)}
   [ -f "$sdl" ] && [ -f "$oal" ] || { echo "libSDL3.so.0 or libopenal.so.1 not found" >&2; exit 1; }
-  cp -L "$sdl" "$P/lib/libSDL3.so.0"
-  cp -L "$oal" "$P/lib/libopenal.so.1"
-  strip --strip-unneeded "$P"/lib/*.so.*
-  cat > "$P/lib/LICENSE-SDL3.txt" <<'TXT'
+  cp -L "$sdl" "$D/lib/libSDL3.so.0"
+  cp -L "$oal" "$D/lib/libopenal.so.1"
+  strip --strip-unneeded "$D"/lib/*.so.*
+  cat > "$D/lib/LICENSE-SDL3.txt" <<'TXT'
 libSDL3.so.0: Simple DirectMedia Layer 3, https://github.com/libsdl-org/SDL
 
 Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
@@ -69,7 +72,7 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 TXT
-  cat > "$P/lib/LICENSE-OpenAL-Soft.txt" <<'TXT'
+  cat > "$D/lib/LICENSE-OpenAL-Soft.txt" <<'TXT'
 libopenal.so.1: OpenAL Soft, https://github.com/kcat/openal-soft
 Copyright (C) Chris Robinson and the OpenAL Soft contributors.
 
@@ -83,11 +86,12 @@ system one.
 TXT
   lgpl=${OM_LGPL_TEXT:-/usr/share/common-licenses/LGPL-2}
   [ -f "$lgpl" ] || { echo "LGPL-2 text not found (OM_LGPL_TEXT)" >&2; exit 1; }
-  cp "$lgpl" "$P/lib/LGPL-2.0.txt"
+  cp "$lgpl" "$D/lib/LGPL-2.0.txt"
 fi
 
 mkdir -p "$DEST"
-tar -C "$STAGE" --owner=0 --group=0 --numeric-owner --sort=name -czf "$DEST/$NAME.tar.gz" openMERC
+DEST=$(cd "$DEST" && pwd)
+(cd "$STAGE" && tar --owner=0 --group=0 --numeric-owner --sort=name -czf "$DEST/$NAME.tar.gz" -- *)
 (cd "$DEST" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 echo "Packed $DEST/$NAME.tar.gz"
 cat "$DEST/$NAME.tar.gz.sha256"

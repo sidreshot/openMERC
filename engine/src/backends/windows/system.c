@@ -261,13 +261,27 @@ Sys_PutsUTF8(const char *s, FILE *f)
 }
 
 /* OpenMerc: portable mode keeps stdout.txt/stderr.txt/console history in
-   <exe dir>user if that folder exists (the SoF user dir), else the exe dir */
+   <exe dir>openmerc/user/ when <exe dir>openmerc exists (the install layout;
+   created if needed, never the game's own user folder), else in <exe dir>user/
+   if that folder exists, else in the exe dir */
 const char *
 Sys_GetPortableLogDir(void)
 {
 	static char dir[MAX_OSPATH];
 	WCHAR wdir[MAX_OSPATH];
 	DWORD attrib;
+
+	snprintf(dir, sizeof(dir), "%sopenmerc", Sys_GetBinaryDir());
+	MultiByteToWideChar(CP_UTF8, 0, dir, -1, wdir, MAX_OSPATH);
+	attrib = GetFileAttributesW(wdir);
+
+	if (attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_DIRECTORY))
+	{
+		snprintf(dir, sizeof(dir), "%sopenmerc/user/", Sys_GetBinaryDir());
+		MultiByteToWideChar(CP_UTF8, 0, dir, -1, wdir, MAX_OSPATH);
+		CreateDirectoryW(wdir, NULL);
+		return dir;
+	}
 
 	snprintf(dir, sizeof(dir), "%suser/", Sys_GetBinaryDir());
 	MultiByteToWideChar(CP_UTF8, 0, dir, -1, wdir, MAX_OSPATH);

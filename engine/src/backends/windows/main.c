@@ -113,14 +113,24 @@ main(int argc, char **argv)
 		}
 	}
 
-	/* OpenMerc: a file openmerc-portable.txt next to the exe makes a plain
-	   double-click launch portable too (test/install copies), same as -portable */
+	/* OpenMerc: a file openmerc-portable.txt next to the exe or in <exe dir>openmerc
+	   makes a plain double-click launch portable too (install and test copies), same
+	   as -portable */
 	if (!is_portable)
 	{
 		char mark[MAX_OSPATH];
 		WCHAR wmark[MAX_OSPATH];
 
 		snprintf(mark, sizeof(mark), "%sopenmerc-portable.txt", Sys_GetBinaryDir());
+		MultiByteToWideChar(CP_UTF8, 0, mark, -1, wmark, MAX_OSPATH);
+
+		if (GetFileAttributesW(wmark) != INVALID_FILE_ATTRIBUTES)
+		{
+			is_portable = true;
+		}
+
+		/* the install layout keeps the marker in <exe dir>openmerc */
+		snprintf(mark, sizeof(mark), "%sopenmerc/openmerc-portable.txt", Sys_GetBinaryDir());
 		MultiByteToWideChar(CP_UTF8, 0, mark, -1, wmark, MAX_OSPATH);
 
 		if (GetFileAttributesW(wmark) != INVALID_FILE_ATTRIBUTES)
