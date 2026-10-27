@@ -1106,6 +1106,90 @@ GL3_SoF_FindImage(const char *name, int softype, qboolean create)
 	return LoadSoFImage(name, softype, true);
 }
 
+/*
+ * OpenMerc GFX-modern (fb5): size of the ORIGINAL image behind a replacement.
+ * An HD pack (sofhd2024.pak: every texture 4x or 2x, same names) overrides the
+ * retail files by name; texture coordinates (world s/width, warps, 2D pic
+ * sizes and sub-rectangles, tiling) must stay on the retail size, the larger
+ * image is only sampled at higher resolution (Yamagi r_retexturing / sof_buddy
+ * rule). Reads the header of the lowest-priority copy; 0 when there is none,
+ * when r_retexturing is 0 or the import is missing (ref_omgl).
+ */
+static qboolean
+OriginalImageSize(const char *path, int *w, int *h)
+{
+	byte head[M32_OFS_HEIGHTS + 4];
+	const char *ext;
+	int got;
+
+	*w = *h = 0;
+
+	if (!r_retexturing || !r_retexturing->value || !ri.FS_ReadOriginalHead)
+	{
+		return false;
+	}
+
+	got = ri.FS_ReadOriginalHead(path, head, sizeof(head));
+	ext = COM_FileExtension(path);
+
+	if (!Q_stricmp(ext, "m32"))
+	{
+		if ((got < (int)sizeof(head)) || (M32Int(head, 0) != M32_VERSION))
+		{
+			return false;
+		}
+
+		*w = M32Int(head, M32_OFS_WIDTHS);
+		*h = M32Int(head, M32_OFS_HEIGHTS);
+	}
+	else if (!Q_stricmp(ext, "tga"))
+	{
+		if (got < 18)
+		{
+			return false;
+		}
+
+		*w = head[12] | (head[13] << 8);
+		*h = head[14] | (head[15] << 8);
+	}
+	else if (!Q_stricmp(ext, "pcx"))
+	{
+		if ((got < 12) || (head[0] != 0x0a))
+		{
+			return false;
+		}
+
+		*w = (head[8] | (head[9] << 8)) - (head[4] | (head[5] << 8)) + 1;
+		*h = (head[10] | (head[11] << 8)) - (head[6] | (head[7] << 8)) + 1;
+	}
+	else
+	{
+		return false;
+	}
+
+	return (*w > 0) && (*h > 0) && (*w <= 32768) && (*h <= 32768);
+}
+
+/* keeps width/height (coordinates) on the original size, the upload stays HD */
+static void
+UseOriginalSize(gl3image_t *image, const char *path)
+{
+	int ow, oh;
+
+	if (!image || !OriginalImageSize(path, &ow, &oh))
+	{
+		return;
+	}
+
+	if ((ow != image->width) || (oh != image->height))
+	{
+		R_Printf(PRINT_DEVELOPER, "%s: replacement %dx%d, coordinates on the original %dx%d\n",
+			path, image->width, image->height, ow, oh);
+		image->width = ow;
+		image->height = oh;
+	}
+}
+
 static gl3image_t *
 LoadSoFImage(const char *name, int softype, qboolean substitute)
 {
@@ -1204,6 +1288,7 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 		(softype == SOFIMG_SPRITE) ? it_sprite : it_wall;
 	image->width = M32Int(m, M32_OFS_WIDTHS);
 	image->height = M32Int(m, M32_OFS_HEIGHTS);
+	UseOriginalSize(image, path);
 	image->m32flags = flags;
 	image->kind = kind;
 	image->animrate = value & 0xFF;
@@ -1561,6 +1646,13 @@ GL3_FindImage(const char *originname, imagetype_t type)
 	//
 	image = (gl3image_t *)R_LoadImage(name, namewe, ext, type,
 		r_retexturing->value, (loadimage_t)GL3_LoadPic);
+
+	/* fb5: a replaced .tga/.pcx keeps the original size for coordinates (the
+	   .wal/.m32 substitution above already passes realwidth) */
+	if (image && (image->width > 0) && (!Q_stricmp(ext, "tga") || !Q_stricmp(ext, "pcx")))
+	{
+		UseOriginalSize(image, name);
+	}
 
 	if (!image && r_validation->value)
 	{

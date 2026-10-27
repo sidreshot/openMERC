@@ -1002,6 +1002,82 @@ FS_LoadFileShadowed(const char *path, int shadowed, void **buffer)
 	return size;
 }
 
+/*
+ * OpenMerc GFX-modern (fb5): reads up to len bytes from the start of the
+ * LOWEST-priority copy of a file (the retail original under a replacement
+ * pak such as an HD texture pack). Returns the bytes read or -1. Used by the
+ * renderers to keep texture coordinates on the original image size when a
+ * higher-priority pak replaces the image with a larger one.
+ */
+int
+FS_ReadOriginalHead(const char *rawname, void *buf, int len)
+{
+	char upper[MAX_OSPATH], display[MAX_OSPATH], path[MAX_OSPATH];
+	char found[MAX_OSPATH];
+	fsSearchPath_t *search;
+	long offset = 0;
+	int size = -1, got;
+	FILE *file;
+
+	if (!rawname || !rawname[0] || !buf || (len <= 0))
+	{
+		return -1;
+	}
+
+	FS_NormalizeName(rawname, upper, display, sizeof(upper));
+	found[0] = 0;
+
+	for (search = fs_searchpaths; search; search = search->next)
+	{
+		if (search->pack)
+		{
+			int i = FS_PackFind(search->pack, upper);
+
+			if (i >= 0)
+			{
+				Q_strlcpy(found, search->pack->filename, sizeof(found));
+				offset = search->pack->files[i].offset;
+				size = search->pack->files[i].size;
+			}
+
+			continue;
+		}
+
+#ifdef _WIN32
+		Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, upper);
+#else
+		Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, display);
+#endif
+		file = FS_OpenHost(path);
+
+		if (file)
+		{
+			size = FS_FileLength(file);
+			fclose(file);
+			Q_strlcpy(found, path, sizeof(found));
+			offset = 0;
+		}
+	}
+
+	if (!found[0] || (size < 0))
+	{
+		return -1;
+	}
+
+	file = FS_OpenHost(found);
+
+	if (!file)
+	{
+		return -1;
+	}
+
+	fseek(file, offset, SEEK_SET);
+	got = (int)fread(buf, 1, (size < len) ? size : len, file);
+	fclose(file);
+
+	return got;
+}
+
 /* exported FS_LoadFile: third argument accepted and ignored */
 int
 FS_SoFLoadFile(const char *name, void **buffer, int unused)

@@ -777,6 +777,7 @@ strlist_t FS_ListMods(void);
 /* properly handles partial reads */
 
 void FS_FreeFile(void *buffer);
+int FS_ReadOriginalHead(const char *name, void *buf, int len); /* OpenMerc fb5 */
 void FS_CreatePath(const char *path);
 
 /* MISC */

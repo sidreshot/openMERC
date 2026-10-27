@@ -124,7 +124,7 @@ typedef enum {
 	RESTART_PARTIAL
 } ref_restart_t;
 
-#define	API_VERSION		8
+#define	API_VERSION		9 // OpenMerc fb5: refimport_t.FS_ReadOriginalHead
 #define EXPORT
 #define IMPORT
 
@@ -258,6 +258,11 @@ typedef struct
 	qboolean	(IMPORT *GLimp_GetDesktopMode)(int *pwidth, int *pheight);
 
 	void		(IMPORT *Vid_RequestRestart)(ref_restart_t rs);
+
+	// OpenMerc fb5: first len bytes of the lowest-priority copy of a file
+	// (the original under a replacement pak), -1 if absent; NULL under the
+	// SoF-compatible import (ref_omgl)
+	int		(IMPORT *FS_ReadOriginalHead)(const char *name, void *buf, int len);
 } refimport_t;
 
 // this is the only function actually exported at the linker level

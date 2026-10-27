@@ -497,6 +497,7 @@ VID_LoadRenderer(void)
 	ri.FS_FreeFile = FS_FreeFile;
 	ri.FS_Gamedir = FS_Gamedir;
 	ri.FS_LoadFile = FS_LoadFile;
+	ri.FS_ReadOriginalHead = FS_ReadOriginalHead;
 	ri.GLimp_InitGraphics = GLimp_InitGraphics;
 	ri.GLimp_GetDesktopMode = GLimp_GetDesktopMode;
 	ri.Sys_Error = Com_Error;
