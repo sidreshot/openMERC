@@ -18,7 +18,7 @@
 #endif
 
 #ifndef OM_VERSION
-#define OM_VERSION "0.2.0"
+#define OM_VERSION "0.2.1"
 #endif
 
 #ifndef OM_BUILD
