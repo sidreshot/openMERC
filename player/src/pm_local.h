@@ -157,6 +157,9 @@ static_assert(offsetof(InvState, items) == 0x1A0, "items");
 static_assert(offsetof(InvState, seqName) == 0x214, "seqName");
 static_assert(offsetof(InvState, spread) == 0x254, "spread");
 static_assert(offsetof(InvState, lastAutoShot) == 0x27C, "lastAutoShot");
+#elif defined(_M_X64) || defined(__x86_64__)
+/* the svc 30 full state is this block verbatim; the engine skips CLP_STATE_BYTES (cl_player.c) */
+static_assert(sizeof(InvState) == 656, "64-bit state block: 640 + 3 pointers of 8 bytes");
 #endif
 
 /* events queued per inventory (server: outgoing; client: received, SPEC-003 svc 28) */

@@ -52,7 +52,10 @@ void SV_Ghoul_PreloadList(const char *folder, const char *name);
 int SV_Ghoul_RegisterList(const char *folder, const char *name, void *object);
 void SV_Ghoul_PartsOff(const char *folder, const char *name, void *object, void *instance);
 
-#define CLP_STATE_BYTES 640
+/* svc 30 payload: the player module's inventory state block, 640 bytes on 32-bit x86. Three of its
+   members are pointers (two in-view instances, the owner context), so it is 16 bytes larger with
+   64-bit pointers (player/src/pm_local.h asserts both sizes). */
+#define CLP_STATE_BYTES (640 + 4 * ((int)sizeof(void *) - 4))
 #define CLP_NOTE_VOLUME 0.6f
 
 static cvar_t *om_clplayer;   /* OpenMerc test switch: 0 = no client side (as before I1d) */
