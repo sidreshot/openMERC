@@ -2383,6 +2383,15 @@ CL_SoF_AddPacketEntities(frame_t *frame)
 			continue;
 		}
 
+		/* fb4: with the Ghoul renderer running, whatever is left here has nothing to draw: model index 0 with only a
+		   second index (effect anchors, e.g. the hanging lamps of tsr1 and the signs of jpn1: index 0 / 255,
+		   effects 0x100) or a Ghoul entity the client system refused. The development marker below (the renderer's
+		   null-model octahedron, lit like the world) showed up as solid grey "pyramids" under lamps. */
+		if (CL_Ghoul_Active())
+		{
+			continue;
+		}
+
 		/* Ghoul model without a Ghoul renderer: the renderer's null model marks the spot */
 		ent.model = NULL;
 		V_AddEntity(&ent);

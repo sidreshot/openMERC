@@ -201,6 +201,7 @@ GL3_SoF_RegisterCvars(void)
 	Get("r_om_pdlight_max", "32", CVAR_ARCHIVE);
 	Get("r_om_pdlight_scale", "1", CVAR_ARCHIVE);
 	Get("r_om_pdlight_normal", "0", CVAR_ARCHIVE);
+	Get("r_om_pdlight_soft", "40", CVAR_ARCHIVE);
 	Get("r_om_softparticles", "0", CVAR_ARCHIVE);
 	Get("r_om_softparticles_dist", "12", CVAR_ARCHIVE);
 	Get("r_om_softparticles_add", "1", CVAR_ARCHIVE);

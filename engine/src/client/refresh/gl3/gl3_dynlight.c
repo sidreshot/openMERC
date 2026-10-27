@@ -301,7 +301,7 @@ GL3_DynLight_Face(msurface_t *surf)
  * dlight bits as vertex light flags instead of a CPU-filled layer.
  * ------------------------------------------------------------------ */
 
-static cvar_t *r_om_pdlight, *r_om_pdlight_max, *r_om_pdlight_scale, *r_om_pdlight_normal;
+static cvar_t *r_om_pdlight, *r_om_pdlight_max, *r_om_pdlight_scale, *r_om_pdlight_normal, *r_om_pdlight_soft;
 static qboolean pdlview;
 
 static void
@@ -313,6 +313,8 @@ PdlCvars(void)
 		r_om_pdlight_max = ri.Cvar_Get("r_om_pdlight_max", "32", CVAR_ARCHIVE);
 		r_om_pdlight_scale = ri.Cvar_Get("r_om_pdlight_scale", "1", CVAR_ARCHIVE);
 		r_om_pdlight_normal = ri.Cvar_Get("r_om_pdlight_normal", "0", CVAR_ARCHIVE);
+		/* fb4: width of the soft edge of a dlight pool in texture units (0 = the SoF 16-unit step) */
+		r_om_pdlight_soft = ri.Cvar_Get("r_om_pdlight_soft", "40", CVAR_ARCHIVE);
 	}
 }
 
@@ -328,7 +330,7 @@ GL3_DynLight_SetupView(gl3Uni3D_t *u)
 	u->omPdl.X = pdlview ? 1.0f : 0.0f;
 	u->omPdl.Y = r_om_pdlight_scale->value;
 	u->omPdl.Z = Q_max(0.0f, Q_min(r_om_pdlight_normal->value, 1.0f));
-	u->omPdl.W = 0.0f;
+	u->omPdl.W = Q_max(0.0f, Q_min(r_om_pdlight_soft->value, 128.0f));
 	u->omTexDim.X = u->omTexDim.Y = 0.0f;
 }
 
