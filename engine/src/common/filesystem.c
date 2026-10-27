@@ -1954,7 +1954,9 @@ FS_InitFilesystem(void)
 	{
 		Com_sprintf(path, sizeof(path), "%s/%s/pak0.pak", fs_basedir->string, BASEDIRNAME);
 
-		if (!Sys_IsFile(path))
+		/* FS_HostFileExists matches the name case-insensitively on
+		   case-sensitive hosts (PAK0.PAK of a CD install) */
+		if (!FS_HostFileExists(path))
 		{
 			char parent[MAX_OSPATH];
 
@@ -1964,7 +1966,7 @@ FS_InitFilesystem(void)
 			{
 				Com_sprintf(path, sizeof(path), "%s/%s/pak0.pak", parent, BASEDIRNAME);
 
-				if (Sys_IsFile(path))
+				if (FS_HostFileExists(path))
 				{
 					FS_NormalizeSwitchValue(parent, sizeof(parent));
 					Cvar_FullSet("cddir", parent, CVAR_NOSET);
