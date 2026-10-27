@@ -33,8 +33,9 @@ writes into it.
     load and run; AI, some scripted sequences and some weapon details are unfinished.
 - **Multiplayer**: openMERC servers and clients play with each other. Original 1.07f servers, clients and demos are
   **not** compatible (see *Clean room*), and no compatibility mode is planned.
-- **Platforms**: Windows (32-bit engine on 64-bit Windows 10/11). Linux build scripts are included
-  (`tools/build/build-linux.sh`, [docs/BUILD-linux.md](docs/BUILD-linux.md)) and are experimental.
+- **Platforms**: Windows (32-bit engine on 64-bit Windows 10/11). Linux x86_64
+  (64-bit, OpenMerc's own game modules only): unpack `openMERC-<version>-linux-x86_64.tar.gz` into the game
+  folder and run `./openMerc`; building: [docs/BUILD-linux.md](docs/BUILD-linux.md).
 
 ## Build (Windows)
 
@@ -124,8 +125,9 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
     загружаются и работают, но ИИ противников, часть скриптовых сцен и детали оружия ещё не доделаны.
 - **Сетевая игра**: серверы и клиенты openMERC играют друг с другом. С оригинальными серверами, клиентами и демо
   1.07f openMERC **не совместим** (см. «Чистая комната»), режима совместимости не будет.
-- **Платформы**: Windows (32-битный движок на 64-битной Windows 10/11). Скрипты сборки для Linux есть
-  (`tools/build/build-linux.sh`, [docs/BUILD-linux.md](docs/BUILD-linux.md)), но это экспериментально.
+- **Платформы**: Windows (32-битный движок на 64-битной Windows 10/11). Linux x86_64
+  (64 бита, только собственные игровые модули OpenMerc): распакуйте `openMERC-<версия>-linux-x86_64.tar.gz`
+  в папку игры и запустите `./openMerc`; сборка: [docs/BUILD-linux.md](docs/BUILD-linux.md).
 
 ### Сборка (Windows)
 
