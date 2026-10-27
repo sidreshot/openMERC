@@ -211,10 +211,17 @@ FS_HashName(const char *s)
  * host file access
  * --------------------------------------------------------------------- */
 
+/* opens a host file for reading; <resolved> (optional) receives the name that
+   was opened, in its real letter case */
 static FILE *
-FS_OpenHost(const char *path)
+FS_OpenHostEx(const char *path, char *resolved, size_t resolvedsize)
 {
 	FILE *f = Q_fopen(path, "rb");
+
+	if (f && resolved)
+	{
+		Q_strlcpy(resolved, path, resolvedsize);
+	}
 
 #ifndef _WIN32
 	/* case-insensitive match of loose files on case-sensitive hosts */
@@ -289,10 +296,21 @@ FS_OpenHost(const char *path)
 		}
 
 		f = Q_fopen(built, "rb");
+
+		if (f && resolved)
+		{
+			Q_strlcpy(resolved, built, resolvedsize);
+		}
 	}
 #endif
 
 	return f;
+}
+
+static FILE *
+FS_OpenHost(const char *path)
+{
+	return FS_OpenHostEx(path, NULL, 0);
 }
 
 static int
@@ -1030,8 +1048,11 @@ FS_LoadPAK(const char *packPath)
 	fsPack_t *pack;
 	FILE *handle;
 	int i, numFiles;
+	char realPath[MAX_OSPATH];
 
-	handle = Q_fopen(packPath, "rb");
+	/* pak names in any letter case on case-sensitive hosts (PAK0.PAK of a CD
+	   install); the pak is reopened later under the name that was found */
+	handle = FS_OpenHostEx(packPath, realPath, sizeof(realPath));
 
 	if (handle == NULL)
 	{
@@ -1074,7 +1095,7 @@ FS_LoadPAK(const char *packPath)
 	}
 
 	pack = Z_Malloc(sizeof(fsPack_t));
-	Q_strlcpy(pack->filename, packPath, sizeof(pack->filename));
+	Q_strlcpy(pack->filename, realPath, sizeof(pack->filename));
 	pack->handle = handle;
 	pack->numfiles = numFiles;
 	pack->files = Z_Malloc((numFiles ? numFiles : 1) * sizeof(fsPackFile_t));
