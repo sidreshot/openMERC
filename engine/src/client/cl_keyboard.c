@@ -930,7 +930,21 @@ Key_HistoryPath(char *path, size_t size)
 		#ifdef _WIN32
 		Com_sprintf(path, size, "%sconsole_history.txt", Sys_GetPortableLogDir());
 #else
-		Com_sprintf(path, size, "%sconsole_history.txt", Sys_GetBinaryDir());
+		/* the user folder <binary dir>/openmerc/user when openMERC's folder is
+		   there (docs/impl/INSTALL-LAYOUT.md), never the game folder */
+		char dir[MAX_OSPATH];
+
+		Com_sprintf(dir, sizeof(dir), "%sopenmerc", Sys_GetBinaryDir());
+		if (Sys_IsDir(dir))
+		{
+			Com_sprintf(dir, sizeof(dir), "%sopenmerc/user", Sys_GetBinaryDir());
+			Sys_Mkdir(dir);
+			Com_sprintf(path, size, "%s/console_history.txt", dir);
+		}
+		else
+		{
+			Com_sprintf(path, size, "%sconsole_history.txt", Sys_GetBinaryDir());
+		}
 #endif
 	}
 	else
