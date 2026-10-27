@@ -20,5 +20,11 @@
 <font type title tint normaltext atint hilitetext>
 <list "^MENU_OMSET_CORPSE_OPTS^" match "2,5,10,20" atext "^MENU_OMSET_CORPSES^" split 230 cvar ai_maxcorpses><hbr>
 <hbr>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_SAVE^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_AUTOSAVE_OPTS^" match "0,1,2,3,4,5" atext "^MENU_OMSET_AUTOSAVE^" split 230 cvar om_autosave_interval><hbr>
+<hbr>
 <blank 16 16>
 </stm>

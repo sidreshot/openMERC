@@ -42,8 +42,8 @@ INDEX 5
 INDEX 6
 {
    REFERENCE MENU_GENERIC_ADJUST_DYNAMIC
-   TEXT_ENGLISH "Gameplay: view and world"
-   TEXT_RUSSIAN "ָדנא: מבחמנ ט לטנ"
+   TEXT_ENGLISH "Gameplay: view, world, saving"
+   TEXT_RUSSIAN "ָדנא: מבחמנ, לטנ, סמץנאםוםטו"
 }
 INDEX 7
 {
@@ -60,8 +60,8 @@ INDEX 8
 INDEX 9
 {
    REFERENCE MENU_SCALE_TICKER
-   TEXT_ENGLISH "*** VIEW AND WORLD SETTINGS ***"
-   TEXT_RUSSIAN "*** ְֽׁׂ׀־ֹÊָ ־ֱַ־׀ְ ָ ָּ׀ְ ***"
+   TEXT_ENGLISH "*** VIEW, WORLD AND SAVING SETTINGS ***"
+   TEXT_RUSSIAN "*** ְֽׁׂ׀־ֹÊָ ־ֱַ־׀ְ, ָּ׀ְ ָ ׁ־ױ׀ְֵָֽֽß ***"
 }
 INDEX 10
 {

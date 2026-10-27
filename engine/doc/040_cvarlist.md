@@ -326,6 +326,27 @@ it's `+set busywait 0` (setting the `busywait` cvar) and `-portable`
 
 * **nextserver**: Used for looping the introduction demos.
 
+* **om_autosave_interval** (OpenMerc, archived): timed autosave in the
+  single-player campaign, in minutes of game time (`0` off, at most `5`,
+  default `3`). Paused time, menus and the console do not count; the
+  timer starts again at the level start, after a load and after any
+  save. When it runs out, the save waits for a quiet moment: alive,
+  walking on walkable solid ground (not stuck in solid), no cinematic,
+  no menu, console or loading plaque, and 3 s of that without damage
+  taken, a fire button or an `EmergencySnapPosition()`. It writes the
+  older of the slots `autotime1` / `autotime2` (shown in the load menu
+  as "Autosave" / "Автосохранение" with the date and time; manual saves
+  and the level-start `auto` save are never touched, `save autotime1`
+  is refused) and prints the localized notice to the console notify
+  lines. Not in deathmatch or coop. An autosave does not spend the
+  limited saves of the harder skills (set `0` to keep that limit
+  strict). See `docs/impl/AUTOSAVE.md`.
+
+* **om_autosave_debug** (OpenMerc): if set to `1`, every timed autosave
+  prints slot, map, position, write and thumbnail milliseconds and how
+  long it waited for a quiet moment (with `0` the line is a developer
+  message, unless the write took more than 50 ms).
+
 
 ## Audio
 

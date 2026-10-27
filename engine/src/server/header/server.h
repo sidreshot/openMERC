@@ -383,6 +383,7 @@ void SV_TraceTest_f(void);
 
 /* ---- sv_pmove.c ---- */
 void SV_Pmove(sof_pmove_t *pm);
+extern int sv_pmove_snaps;
 
 /* ---- sv_msg.c (SoF primitives) ---- */
 void SV_WriteCoord(sizebuf_t *sb, float f);
@@ -443,6 +444,10 @@ void SV_InitOperatorCommands(void);
 
 /* ---- sv_save.c ---- */
 void SV_InitSaveHost(void);
+/* OpenMerc timed autosave: after every game frame that ran (not paused),
+   and once at the end of every server frame */
+void SV_AutoSaveGameFrame(void);
+void SV_AutoSaveFrame(void);
 int SV_WriteChunk(int id, const void *data, int length);
 int SV_ReadChunk(int id, void *buffer, int length, void **allocated);
 

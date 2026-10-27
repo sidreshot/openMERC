@@ -104,6 +104,31 @@ void SG_InitCommands(void);
    section); deletefirst: map deletes auto.sof first, gamemap does not */
 void SG_AutoSave(qboolean deletefirst);
 
+/* OpenMerc timed autosave (om_autosave_interval, docs/impl/AUTOSAVE.md).
+   The two reserved slots autotime1 / autotime2 are written in turn (the
+   older one is replaced); "save" refuses every name starting with
+   "autotime", so manual saves, quicksaves and "auto" are never touched. */
+#define SG_TIMED_PREFIX "autotime"
+qboolean SG_IsTimedSlot(const char *name);
+/* "Autosave" / Russian (om_language), CP1251 like the SoF fonts */
+const char *SG_AutosaveLabel(void);
+/* successful saves written so far (any kind): the server restarts its
+   autosave timer when this changes */
+int SG_SaveCount(void);
+/* the server asks the client for a thumbnail of its next game frame */
+void SG_RequestTimedShot(void);
+void SG_CancelTimedShot(void);
+int SG_TimedShotState(void); /* 0 idle, 1 asked, 2 taken, 3 failed */
+/* client, every drawn frame just before the buffer swap: whether the
+   player is in the game (no menu, console, loading plaque) and the
+   thumbnail reader (renderer slot 0xd4) */
+void SG_ClientEndFrame(qboolean ingame, qboolean (*grab)(byte *rgba65536));
+/* the client drew an in-game frame within the last quarter second */
+qboolean SG_ClientInGame(void);
+/* writes the timed autosave now (the caller checked the moment); slot
+   name and the milliseconds of thumbnail and write are reported */
+qboolean SG_TimedAutoSave(char *slot, size_t slotsize, int *writems, int *shotms);
+
 /* <user>/save/<name>.sof */
 void SG_SavePath(const char *name, char *out, size_t size);
 

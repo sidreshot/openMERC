@@ -75,6 +75,10 @@ SV_DropClientWithReason(client_t *drop, int stringid)
 {
 	edict_t *ent = CL_EDICT(drop);
 
+	Com_DPrintf("SV_DropClient: client %i (state %i) reason %i, reliable %i bytes%s\n",
+		(int)(drop - svs.clients), drop->state, stringid, drop->netchan.message.cursize,
+		drop->netchan.message.overflowed ? " overflowed" : "");
+
 	/* add the disconnect */
 	MSG_WriteByte(&drop->netchan.message, sofsvc_disconnect);
 	MSG_WriteShort(&drop->netchan.message, stringid);
@@ -389,6 +393,7 @@ SV_RunGameFrame(void)
 	SV_GameRunFrame(sv.framenum);
 	SV_Watchdog_Mark("after game RunFrame");
 	SV_ImportTrace_ScanEdicts();
+	SV_AutoSaveGameFrame();
 
 	/* SPEC-001 cinematic fast-forward: frames back to back while
 	   sv_jumpcinematic is set and a cinematic is running */
@@ -418,6 +423,39 @@ SV_RunGameFrame(void)
 		}
 
 		svs.realtime = sv.time;
+	}
+}
+
+/*
+ * svs.realtime jumps forward to the game clock when it is far behind (the
+ * lowclamp below). After loading a savegame the game clock restarts at the
+ * saved frame number (SVH_SetFrameNumber), e.g. 3 min into the level, while
+ * svs.realtime was reset to 0 by SV_SpawnServer and the reconnecting local
+ * client got lastmessage = that small realtime: the jump made the client
+ * look silent for longer than `timeout` (180 s), SV_CheckTimeouts dropped it
+ * before its "new" was read and the load never finished (KNOWN_ISSUES "Some
+ * savegames never finish loading": every save made more than ~3 min into a
+ * level). Move the clients' message times with the clock.
+ */
+static void
+SV_ShiftClientTimes(int delta)
+{
+	int i;
+	client_t *cl;
+
+	if (delta <= 0)
+	{
+		return;
+	}
+
+	for (i = 0, cl = svs.clients; i < svs.numclients; i++, cl++)
+	{
+		if (cl->state == cs_free)
+		{
+			continue;
+		}
+
+		cl->lastmessage += delta;
 	}
 }
 
@@ -472,6 +510,7 @@ SV_Frame(int usec)
 				Com_Printf("sv lowclamp\n");
 			}
 
+			SV_ShiftClientTimes(sv.time - 100 - svs.realtime);
 			svs.realtime = sv.time - 100;
 		}
 
@@ -510,6 +549,10 @@ SV_Frame(int usec)
 
 	/* SPEC-202 s3.1: the events of all entities are cleared after every frame */
 	SV_ClearEntityEvents();
+
+	/* OpenMerc: the timed autosave writes between frames, where a console
+	   "save" would run */
+	SV_AutoSaveFrame();
 }
 
 /*

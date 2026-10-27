@@ -1843,7 +1843,9 @@ LB_List(mpage_t *pg, mwidget_t *w)
 			*dot = 0;
 		}
 
-		if (!Q_stricmp(s->name, "current") || (d->saving && !Q_stricmp(s->name, "auto")))
+		/* OpenMerc: the timed autosave slots are not offered for saving */
+		if (!Q_stricmp(s->name, "current") ||
+			(d->saving && (!Q_stricmp(s->name, "auto") || SG_IsTimedSlot(s->name))))
 		{
 			continue;
 		}
@@ -1872,6 +1874,12 @@ LB_List(mpage_t *pg, mwidget_t *w)
 			else
 			{
 				Q_strlcpy(s->level, comm, sizeof(s->level));
+			}
+
+			/* OpenMerc: a timed autosave says so in its third line */
+			if (SG_IsTimedSlot(s->name))
+			{
+				Q_strlcpy(s->skill, SG_AutosaveLabel(), sizeof(s->skill));
 			}
 
 			Com_sprintf(picname, sizeof(picname), "save/%s", s->name);

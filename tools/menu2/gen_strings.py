@@ -241,8 +241,7 @@ SET = [
     ('HOME_QUIT', 'EXIT', 'ВЫХОД'),
     ('HOME_LASTSAVE', 'LAST SAVE', 'ПОСЛЕДНЕЕ СОХРАНЕНИЕ'),
     ('HOME_NOSAVE', 'No saved games yet', 'Сохранённых игр пока нет'),
-    # gameplay page: timed autosave (cvar om_autosave_interval, minutes, 0 = off); the row
-    # is not on the page until the autosave code is merged (a control that does nothing)
+    # gameplay page: timed autosave (cvar om_autosave_interval, minutes, 0 = off)
     ('SECTION_SAVE', 'SAVING', 'СОХРАНЕНИЕ'),
     ('AUTOSAVE', 'Timed Autosave', 'Автосохранение по таймеру'),
     ('AUTOSAVE_OPTS', 'Off,1 min,2 min,3 min,4 min,5 min', 'Выкл,1 мин,2 мин,3 мин,4 мин,5 мин'),
@@ -304,10 +303,10 @@ OVR = [
     ('MENU_GENERIC_ALTER_KEYS', 'Controls: key bindings and presets', 'Управление: привязки клавиш и раскладки'),
     ('MENU_GENERIC_ALTER_DISPLAY', 'Video: screen, scaling, picture quality', 'Видео: экран, масштаб, качество изображения'),
     ('MENU_GENERIC_ALTER_AUDIO', 'Audio: volume and sound output', 'Звук: громкость и вывод звука'),
-    ('MENU_GENERIC_ADJUST_DYNAMIC', 'Gameplay: view and world', 'Игра: обзор и мир'),
+    ('MENU_GENERIC_ADJUST_DYNAMIC', 'Gameplay: view, world, saving', 'Игра: обзор, мир, сохранение'),
     ('MENU_GENERIC_MISC', 'Mouse, movement and gamepad', 'Мышь, передвижение и геймпад'),
     ('MENU_SCALE_TITLE', 'GAMEPLAY', 'ИГРОВОЙ ПРОЦЕСС'),
-    ('MENU_SCALE_TICKER', '*** VIEW AND WORLD SETTINGS ***', '*** НАСТРОЙКИ ОБЗОРА И МИРА ***'),
+    ('MENU_SCALE_TICKER', '*** VIEW, WORLD AND SAVING SETTINGS ***', '*** НАСТРОЙКИ ОБЗОРА, МИРА И СОХРАНЕНИЯ ***'),
     ('MENU_KEYS_TITLE2', 'MOUSE AND MOVEMENT', 'МЫШЬ И ПЕРЕДВИЖЕНИЕ'),
     ('MENU_KEYS_MISC_TICKER', '*** MOUSE, MOVEMENT AND GAMEPAD ***', '*** МЫШЬ, ПЕРЕДВИЖЕНИЕ И ГЕЙМПАД ***'),
     ('MENU_AUDIO_TICKER', "*** OUTPUT SETTINGS APPLY AT ONCE *** 'SOUND RESTART' RELOADS EVERY SOUND ***",

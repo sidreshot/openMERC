@@ -144,6 +144,14 @@ static void
 SVPM_DevPrint(void *ctx, const char *msg)
 {
 	(void)ctx;
+
+	/* EmergencySnapPosition / Bad InitialSnapPosition: the mover was stuck in
+	   solid; the timed autosave waits for a few quiet seconds after one */
+	if (strstr(msg, "SnapPosition"))
+	{
+		sv_pmove_snaps++;
+	}
+
 	Com_DPrintf("%s", msg);
 }
 
@@ -196,6 +204,8 @@ SVPM_FindMover(const sof_pmove_t *pm)
 
 	return sv_player;
 }
+
+int sv_pmove_snaps; /* stuck-in-solid placements so far (any mover) */
 
 static void
 SVPM_DebugDump(const sof_pmove_t *block)

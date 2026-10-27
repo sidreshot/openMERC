@@ -65,4 +65,7 @@ const char *SP_NameOwned(int owner, int index);
 /* reloads every package (sp_language change) */
 void SP_ReloadAll(void);
 
+/* OpenMerc MENU2: true while Russian texts are taken (om_language) */
+qboolean SP_RussianActive(void);
+
 #endif

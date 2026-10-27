@@ -14,11 +14,14 @@
  */
 
 #include "header/common.h"
+#include <sys/stat.h>
 
 static FILE *sg_file;
 static qboolean sg_writing;
 static int sg_written; /* bytes written to the open file */
 static sg_host_t sg_host;
+static int sg_savecount;              /* successful saves (timed autosave timer) */
+static const byte *sg_shotoverride;   /* SHOT of the timed autosave */
 
 static const char *sg_skillnames[6] = {
 	"Effortless", "Easy", "Medium", "Challenging", "Unfair", "Custom"
@@ -402,6 +405,10 @@ SG_WriteFile(qboolean autosave)
 			FS_FreeFile(raw);
 		}
 	}
+	else if (sg_shotoverride)
+	{
+		memcpy(shot, sg_shotoverride, SG_SHOT_SIZE);
+	}
 	else if (sg_host.Screenshot)
 	{
 		if (!sg_host.Screenshot(shot))
@@ -581,7 +588,7 @@ SG_CopyFile(const char *from, const char *to, int *copied)
 }
 
 /* writes <name>.sof through current.sof (SPEC-303 §1, after the checks) */
-static void
+static qboolean
 SG_WriteSave(const char *name, qboolean autosave)
 {
 	char cur[MAX_OSPATH], dst[MAX_OSPATH];
@@ -596,7 +603,7 @@ SG_WriteSave(const char *name, qboolean autosave)
 	{
 		Com_Printf("Failed to create new savegame file current\n");
 		Com_Printf("Failed to create savegame\n");
-		return;
+		return false;
 	}
 
 	SG_WriteFile(autosave);
@@ -607,10 +614,12 @@ SG_WriteSave(const char *name, qboolean autosave)
 		Sys_Remove(cur);
 		Sys_Remove(dst);
 		Com_Printf("Failed to copy savegame %s - deleting source and destination\n", name);
-		return;
+		return false;
 	}
 
 	Sys_Remove(cur);
+	sg_savecount++;
+	return true;
 }
 
 static qboolean
@@ -647,6 +656,13 @@ SG_Save_f(void)
 	if (!Q_stricmp(name, "auto"))
 	{
 		Com_Printf("Can't save to 'auto'\n");
+		return;
+	}
+
+	/* OpenMerc: the timed autosave's slots (om_autosave_interval) */
+	if (SG_IsTimedSlot(name))
+	{
+		Com_Printf("Can't save to '%s' (reserved for the timed autosave)\n", name);
 		return;
 	}
 
@@ -703,6 +719,153 @@ SG_AutoSave(qboolean deletefirst)
 
 	FS_CreatePath(path);
 	SG_WriteSave("auto", true);
+}
+
+/* ---------------------------------------------------------------------
+ * OpenMerc timed autosave (om_autosave_interval; the moment is chosen by
+ * the server, sv_save.c): a full save (level section, real time in COMM)
+ * to the older of autotime1 / autotime2, with the client's last game
+ * frame as the thumbnail. docs/impl/AUTOSAVE.md
+ * --------------------------------------------------------------------- */
+
+static byte sg_tshot[SG_SHOT_SIZE];
+static int sg_tshotstate;
+static int sg_tshotms;
+static int sg_clientframe = -100000; /* Sys_Milliseconds of the last in-game frame */
+
+qboolean
+SG_IsTimedSlot(const char *name)
+{
+	return name && !Q_strncasecmp(name, SG_TIMED_PREFIX, (int)strlen(SG_TIMED_PREFIX));
+}
+
+const char *
+SG_AutosaveLabel(void)
+{
+	/* "Avtosokhranenie" in CP1251 */
+	return SP_RussianActive() ?
+		"\xC0\xE2\xF2\xEE\xF1\xEE\xF5\xF0\xE0\xED\xE5\xED\xE8\xE5" : "Autosave";
+}
+
+int
+SG_SaveCount(void)
+{
+	return sg_savecount;
+}
+
+void
+SG_RequestTimedShot(void)
+{
+	if (sg_tshotstate == 0)
+	{
+		sg_tshotstate = 1;
+	}
+}
+
+void
+SG_CancelTimedShot(void)
+{
+	sg_tshotstate = 0;
+}
+
+int
+SG_TimedShotState(void)
+{
+	return sg_tshotstate;
+}
+
+void
+SG_ClientEndFrame(qboolean ingame, qboolean (*grab)(byte *rgba65536))
+{
+	if (!ingame)
+	{
+		sg_clientframe = -100000;
+		return;
+	}
+
+	sg_clientframe = Sys_Milliseconds();
+
+	if ((sg_tshotstate == 1) && grab)
+	{
+		int t0 = Sys_Milliseconds();
+
+		sg_tshotstate = grab(sg_tshot) ? 2 : 3;
+		sg_tshotms = Sys_Milliseconds() - t0;
+	}
+}
+
+qboolean
+SG_ClientInGame(void)
+{
+	int d = Sys_Milliseconds() - sg_clientframe;
+
+	return (d >= 0) && (d < 250);
+}
+
+qboolean
+SG_TimedAutoSave(char *slot, size_t slotsize, int *writems, int *shotms)
+{
+	char a[MAX_OSPATH], b[MAX_OSPATH];
+	struct stat sa, sb;
+	qboolean ea, eb, ok;
+	byte *shot;
+	int t0;
+
+	SG_SavePath(SG_TIMED_PREFIX "1", a, sizeof(a));
+	SG_SavePath(SG_TIMED_PREFIX "2", b, sizeof(b));
+	ea = (stat(a, &sa) == 0);
+	eb = (stat(b, &sb) == 0);
+
+	/* the empty slot first, then the older one */
+	if (!ea)
+	{
+		Q_strlcpy(slot, SG_TIMED_PREFIX "1", slotsize);
+	}
+	else if (!eb)
+	{
+		Q_strlcpy(slot, SG_TIMED_PREFIX "2", slotsize);
+	}
+	else
+	{
+		Q_strlcpy(slot, (sa.st_mtime <= sb.st_mtime) ? SG_TIMED_PREFIX "1" : SG_TIMED_PREFIX "2", slotsize);
+	}
+
+	/* the client's frame, else the level picture maps/<map>.raw (as "auto") */
+	shot = Z_Malloc(SG_SHOT_SIZE);
+
+	if (sg_tshotstate == 2)
+	{
+		memcpy(shot, sg_tshot, SG_SHOT_SIZE);
+		*shotms = sg_tshotms;
+	}
+	else
+	{
+		byte *raw;
+		int len = FS_LoadFile(va("maps/%s.raw", SG_MapCommand()), (void **)&raw);
+
+		if (len == SG_SHOT_SIZE)
+		{
+			memcpy(shot, raw, SG_SHOT_SIZE);
+		}
+
+		if (len >= 0)
+		{
+			FS_FreeFile(raw);
+		}
+
+		*shotms = -1;
+	}
+
+	sg_tshotstate = 0;
+	FS_CreatePath(a);
+	sg_shotoverride = shot;
+	t0 = Sys_Milliseconds();
+	ok = SG_WriteSave(slot, false);
+	*writems = Sys_Milliseconds() - t0;
+	sg_shotoverride = NULL;
+	Z_Free(shot);
+
+	return ok;
 }
 
 /* reads the engine part of current.sof and hands over to the host */

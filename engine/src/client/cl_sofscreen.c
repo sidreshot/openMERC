@@ -16,6 +16,10 @@
 #include "input/header/input.h"
 #include "../common/header/sof/refapi.h"
 #include "../common/header/sof/engine.h"
+#include "../common/header/sof/savegame.h"
+
+/* menu/m_draw.c: 128 x 128 RGBA of the drawn frame (renderer slot 0xd4) */
+qboolean MR_Thumbnail(byte *out128x128);
 
 static cvar_t *cinem_centertime;
 static cvar_t *scr_centertime_c;
@@ -807,6 +811,11 @@ SCR_SoF_EndFrame(void)
 {
 	SCR_SoF_DebugPrints();
 	SCR_OmCaptures();
+
+	/* OpenMerc timed autosave: whether the game itself is on screen, and
+	   its thumbnail when the server asked for one (before the swap) */
+	SG_ClientEndFrame((cls.state == ca_active) && (cls.key_dest == key_game) &&
+			cl.refresh_prepped && !cls.disable_screen, MR_Thumbnail);
 }
 
 void

@@ -124,6 +124,9 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
   keyboard; menu text fields (player name, server address) still take only the SoF layout table's characters.
 - **Gore chunks** (fixed in `7508977`, confirmed by the owner 2026-10-27): flesh debris was drawn with the large rock
   meshes ("half a person"); see `docs/DEVIATIONS.md` "Gore chunk size".
+- **Saves made more than 3 min into a level never finished loading** (both modes; fixed in `70a073d`, branch
+  `autosave`): the reconnecting client was dropped as timed out because the restored level clock jumped the
+  server's real time forward (`docs/impl/AUTOSAVE.md`).
 
 ## Mode-B specific (own game and player modules)
 
