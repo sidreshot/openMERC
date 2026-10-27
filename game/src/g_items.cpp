@@ -655,10 +655,13 @@ edict_t *DropWeaponItem(edict_t *ent, int weapon, int rounds)
 		                           "DROPPED_9MMSUPSMG", "DROPPED_556SMG", "DROPPED_SNIPER", "DROPPED_SLUGTHROWER",
 		                           "DROPPED_SHOTGUN",   "DROPPED_HVYMACH", "DROPPED_ROCKETLAUNCHER", "DROPPED_MPG",
 		                           "DROPPED_FLAMEGUN"};
+		// "Dropped a %s" takes the weapon's name as text (SPEC-781), not its string id: the engine read a string at
+		// that number and crashed (`weapondrop`, issue #3)
 		int textid = SP_Id("dm_generic", "TEXT_DROPPED_WEAPON");
 		int nameid = (weapon >= 2 && weapon <= 12) ? SP_Id("items", dn[weapon]) : -1;
-		if (textid >= 0 && nameid >= 0)
-			gix.SP_Print(ent, textid, nameid);
+		const char *name = (nameid >= 0 && gix.SP_GetStringText) ? gix.SP_GetStringText(nameid) : NULL;
+		if (textid >= 0 && name && *name)
+			gix.SP_Print(ent, textid, name);
 	}
 	return d;
 }
