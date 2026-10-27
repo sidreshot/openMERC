@@ -342,6 +342,278 @@ SG_ConfigString(int i)
 }
 
 /* ---------------------------------------------------------------------
+ * OpenMerc: which game modules wrote a save (docs/impl/SAVE-COMPAT.md)
+ *
+ * The game chunks of a save are the private state of the game module that
+ * wrote them: the original gamex86.dll cannot read those of openMERC's own
+ * game module (mode B) and the other way round, and trying it hung the
+ * load. openMERC saves carry the saved cvar om_savegame "openMERC 1 B" or
+ * "openMERC 1 A" (written among the CVAR chunks, so the file stays a valid
+ * 1.07f save); older openMERC mode B saves are recognised by the module's
+ * own level chunk OMCN. A save without both was written by the original
+ * modules (the original game, or openMERC mode A before the marker).
+ * --------------------------------------------------------------------- */
+
+#define SG_MARKER_CVAR "om_savegame"
+
+static int
+SG_FileKind(const char *path)
+{
+	FILE *f = Q_fopen(path, "rb");
+	unsigned id, len, sum;
+	int kind = SG_KIND_ANY, ncvar = -1, chunk = 0;
+	qboolean level = false, wantvalue = false;
+
+	if (!f)
+	{
+		return SG_KIND_UNREADABLE;
+	}
+
+	while (fread(&id, 1, 4, f) == 4 && fread(&len, 1, 4, f) == 4 && fread(&sum, 1, 4, f) == 4)
+	{
+		id = LittleLong(id);
+		len = LittleLong(len);
+
+		if (len > 64 * 1024 * 1024)
+		{
+			break;
+		}
+
+		if (chunk == 3 && id == SG_ID('C', 'V', 'C', 'N') && len == 4)
+		{
+			if (fread(&ncvar, 1, 4, f) != 4)
+			{
+				break;
+			}
+
+			ncvar = LittleLong(ncvar);
+			fseek(f, 4, SEEK_CUR);
+			chunk++;
+			continue;
+		}
+
+		if (id == SG_ID('C', 'V', 'A', 'R') && len == sizeof(SG_MARKER_CVAR))
+		{
+			char name[sizeof(SG_MARKER_CVAR)];
+
+			if (fread(name, 1, len, f) != len)
+			{
+				break;
+			}
+
+			wantvalue = !memcmp(name, SG_MARKER_CVAR, sizeof(SG_MARKER_CVAR));
+			fseek(f, 4, SEEK_CUR);
+			chunk++;
+			continue;
+		}
+
+		if (id == SG_ID('V', 'A', 'L', 'U') && wantvalue && len > 0 && len < 64)
+		{
+			char value[64];
+
+			if (fread(value, 1, len, f) != len)
+			{
+				break;
+			}
+
+			value[len - 1] = 0;
+			wantvalue = false;
+
+			if (!strncmp(value, "openMERC ", 9))
+			{
+				const char *m = strrchr(value, ' ');
+
+				fclose(f);
+				return (m && m[1] == 'B') ? SG_KIND_OPENMERC_B : SG_KIND_OPENMERC_A;
+			}
+
+			fseek(f, 4, SEEK_CUR);
+			chunk++;
+			continue;
+		}
+
+		if (id == SG_ID('L', 'V', 'L', 'C') || id == SG_ID('F', 'T', 'S', 'Z'))
+		{
+			level = true;
+		}
+
+		if (id == SG_ID('O', 'M', 'C', 'N'))
+		{
+			fclose(f);
+			return SG_KIND_OPENMERC_B;
+		}
+
+		fseek(f, (long)len + 4, SEEK_CUR);
+		chunk++;
+	}
+
+	fclose(f);
+
+	if (chunk < 4)
+	{
+		return SG_KIND_UNREADABLE;
+	}
+
+	/* a level section without the marker and without OMCN: the original modules */
+	if (level)
+	{
+		kind = SG_KIND_ORIGINAL;
+	}
+
+	return kind;
+}
+
+int
+SG_SaveKind(const char *name)
+{
+	char path[MAX_OSPATH];
+
+	SG_SavePath(name, path, sizeof(path));
+	return SG_FileKind(path);
+}
+
+/* the game module the server loads (or has loaded): the first gamex86 in
+   the loader's order (sv_game.c); openMERC's own module exports
+   OpenMerc_Module, so the file holds that name */
+static qboolean
+SG_FileHasText(const char *path, const char *text)
+{
+	static char lastpath[MAX_OSPATH];
+	static long lastsize = -1, lastmtime;
+	static qboolean lastresult;
+	struct stat st;
+	FILE *f;
+	byte *buf;
+	long n, i, tl = (long)strlen(text);
+	qboolean found = false;
+
+	if (stat(path, &st) != 0)
+	{
+		return false;
+	}
+
+	if (!strcmp(path, lastpath) && lastsize == (long)st.st_size && lastmtime == (long)st.st_mtime)
+	{
+		return lastresult;
+	}
+
+	f = Q_fopen(path, "rb");
+
+	if (!f)
+	{
+		return false;
+	}
+
+	n = (long)st.st_size;
+	buf = malloc(n > 0 ? n : 1);
+
+	if (buf && fread(buf, 1, n, f) == (size_t)n)
+	{
+		for (i = 0; i + tl <= n; i++)
+		{
+			if (buf[i] == (byte)text[0] && !memcmp(buf + i, text, tl))
+			{
+				found = true;
+				break;
+			}
+		}
+	}
+
+	free(buf);
+	fclose(f);
+	Q_strlcpy(lastpath, path, sizeof(lastpath));
+	lastsize = (long)st.st_size;
+	lastmtime = (long)st.st_mtime;
+	lastresult = found;
+	return found;
+}
+
+qboolean
+SG_OwnGameModule(void)
+{
+	char name[MAX_OSPATH], cwd[MAX_OSPATH];
+	const char *path = NULL;
+#ifdef _WIN32
+	const char *lib = "gamex86.dll";
+#else
+	const char *lib = "gamex86.so";
+#endif
+
+	if (Sys_Realpath(".", cwd, sizeof(cwd)))
+	{
+		Com_sprintf(name, sizeof(name), "%s/final/%s", cwd, lib);
+
+		if (Sys_IsFile(name))
+		{
+			return SG_FileHasText(name, "OpenMerc_Module");
+		}
+
+		Com_sprintf(name, sizeof(name), "%s/%s", cwd, lib);
+
+		if (Sys_IsFile(name))
+		{
+			return SG_FileHasText(name, "OpenMerc_Module");
+		}
+	}
+
+	while ((path = FS_NextPath(path)) != NULL)
+	{
+		Com_sprintf(name, sizeof(name), "%s/%s", path, lib);
+
+		if (Sys_IsFile(name))
+		{
+			return SG_FileHasText(name, "OpenMerc_Module");
+		}
+	}
+
+	return false;
+}
+
+qboolean
+SG_KindLoads(int kind)
+{
+	if (kind == SG_KIND_ANY)
+	{
+		return true;
+	}
+
+	if (SG_OwnGameModule())
+	{
+		return kind == SG_KIND_OPENMERC_B;
+	}
+
+	return (kind == SG_KIND_ORIGINAL) || (kind == SG_KIND_OPENMERC_A);
+}
+
+const char *
+SG_IncompatibleLabel(void)
+{
+	return SP_RussianActive() ? "\xCD\xE5\xF1\xEE\xE2\xEC\xE5\xF1\xF2\xE8\xEC\xEE" : "Not compatible";
+}
+
+const char *
+SG_IncompatibleText(int kind)
+{
+	if (kind == SG_KIND_OPENMERC_B)
+	{
+		return SP_RussianActive() ? "\xD1\xEE\xF5\xF0\xE0\xED\xE5\xED\xE8\xE5 \xF1\xE4\xE5\xEB\xE0\xED\xEE \xE2 \xF0\xE5\xE6\xE8\xEC\xE5 B openMERC: \xEE\xF0\xE8\xE3\xE8\xED\xE0\xEB\xFC\xED\xFB\xE5 \xEC\xEE\xE4\xF3\xEB\xE8 \xE8\xE3\xF0\xFB (\xF0\xE5\xE6\xE8\xEC A) \xED\xE5 \xEC\xEE\xE3\xF3\xF2 \xE5\xE3\xEE \xE7\xE0\xE3\xF0\xF3\xE7\xE8\xF2\xFC." :
+			"This save was made in openMERC mode B: the original game modules (mode A) cannot load it.";
+	}
+
+	return SP_RussianActive() ? "\xD1\xEE\xF5\xF0\xE0\xED\xE5\xED\xE8\xE5 \xEE\xF0\xE8\xE3\xE8\xED\xE0\xEB\xFC\xED\xEE\xE9 Soldier of Fortune: \xF1\xEE\xE1\xF1\xF2\xE2\xE5\xED\xED\xFB\xE5 \xEC\xEE\xE4\xF3\xEB\xE8 openMERC (\xF0\xE5\xE6\xE8\xEC B) \xED\xE5 \xEC\xEE\xE3\xF3\xF2 \xE5\xE3\xEE \xE7\xE0\xE3\xF0\xF3\xE7\xE8\xF2\xFC." :
+		"This save was made with the original Soldier of Fortune game modules: openMERC's own modules (mode B) cannot load it.";
+}
+
+static void
+SG_SetMarker(void)
+{
+	cvar_t *v = Cvar_Get(SG_MARKER_CVAR, "", CVAR_LATCH);
+
+	(void)v;
+	Cvar_FullSet(SG_MARKER_CVAR, SG_OwnGameModule() ? "openMERC 1 B" : "openMERC 1 A", CVAR_LATCH);
+}
+
+/* ---------------------------------------------------------------------
  * the engine chunks (SPEC-303 "Engine chunk sequence")
  * --------------------------------------------------------------------- */
 
@@ -425,7 +697,8 @@ SG_WriteFile(qboolean autosave)
 	Q_strlcpy(mpcm, SG_MapCommand(), sizeof(mpcm));
 	SG_WriteChunk(SG_ID('M', 'P', 'C', 'M'), mpcm, SG_MPCM_SIZE);
 
-	/* CVCN + CVAR/VALU/FLGS, newest-created first */
+	/* CVCN + CVAR/VALU/FLGS, newest-created first (with the openMERC marker) */
+	SG_SetMarker();
 	count = 0;
 
 	for (var = cvar_vars; var; var = var->next)
@@ -906,6 +1179,17 @@ SG_Load_f(void)
 	{
 		Com_Printf("No quicksave to load\n");
 		return;
+	}
+
+	/* OpenMerc: a save of the other game modules is refused instead of hanging */
+	{
+		int kind = SG_FileKind(src);
+
+		if ((kind != SG_KIND_UNREADABLE) && !SG_KindLoads(kind))
+		{
+			Com_Printf("Can't load \"%s\": %s\n", name, SG_IncompatibleText(kind));
+			return;
+		}
 	}
 
 	Com_Printf("Loading game \"%s\"...\n", name);

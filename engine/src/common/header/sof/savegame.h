@@ -132,6 +132,19 @@ qboolean SG_TimedAutoSave(char *slot, size_t slotsize, int *writems, int *shotms
 /* <user>/save/<name>.sof */
 void SG_SavePath(const char *name, char *out, size_t size);
 
+/* OpenMerc (docs/impl/SAVE-COMPAT.md): which game modules wrote a save, and
+   whether the game module the server loads can read it */
+#define SG_KIND_UNREADABLE 0
+#define SG_KIND_ANY 1         /* no level section and no marker: either */
+#define SG_KIND_ORIGINAL 2    /* the original gamex86.dll */
+#define SG_KIND_OPENMERC_A 3  /* openMERC with the original modules */
+#define SG_KIND_OPENMERC_B 4  /* openMERC with its own modules */
+int SG_SaveKind(const char *name);
+qboolean SG_OwnGameModule(void);
+qboolean SG_KindLoads(int kind);
+const char *SG_IncompatibleLabel(void); /* short, for the load menu */
+const char *SG_IncompatibleText(int kind);
+
 /* reads COMM and SHOT of a save (menus); false when unreadable */
 qboolean SG_ReadInfo(const char *name, char *comment, size_t commentsize,
 		byte *shot65536);

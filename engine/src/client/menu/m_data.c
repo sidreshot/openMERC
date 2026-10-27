@@ -1667,6 +1667,8 @@ typedef struct
 	char name[64];
 	char level[64], time[64], skill[32];
 	long mtime;
+	int kind;          /* SG_KIND_*, OpenMerc */
+	qboolean blocked;  /* written by the other game modules: not loadable */
 } msave_t;
 
 typedef struct
@@ -1755,6 +1757,12 @@ M_NewestSave(char *name, size_t namesize, char *level, size_t levelsize,
 		}
 
 		if (!Q_stricmp(nm, "current") || stat(path, &st) != 0)
+		{
+			continue;
+		}
+
+		/* OpenMerc: saves of the other game modules cannot be continued */
+		if (!SG_KindLoads(SG_SaveKind(nm)))
 		{
 			continue;
 		}
@@ -1880,6 +1888,16 @@ LB_List(mpage_t *pg, mwidget_t *w)
 			if (SG_IsTimedSlot(s->name))
 			{
 				Q_strlcpy(s->skill, SG_AutosaveLabel(), sizeof(s->skill));
+			}
+
+			/* OpenMerc: a save of the other game modules is shown greyed out
+			   with "Not compatible" and cannot be picked for loading */
+			s->kind = SG_SaveKind(s->name);
+			s->blocked = !d->saving && !SG_KindLoads(s->kind);
+
+			if (s->blocked)
+			{
+				Q_strlcpy(s->skill, SG_IncompatibleLabel(), sizeof(s->skill));
 			}
 
 			Com_sprintf(picname, sizeof(picname), "save/%s", s->name);
@@ -2055,8 +2073,13 @@ LB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 		const msave_t *s = &d->saves[i];
 		int center = cx + 64;
 
+		if (s->blocked)
+		{
+			c = (c & 0xFF000000u) | 0x00808080u;
+		}
+
 		/* SPEC-803 open question 4: last argument 6 (passed through) */
-		MR_StretchPic(cx, cy, 128, 96, 0xFFFFFFFF, va("save/%s", s->name), 6);
+		MR_StretchPic(cx, cy, 128, 96, s->blocked ? 0xFF505050u : 0xFFFFFFFFu, va("save/%s", s->name), 6);
 		MR_DrawString(center - MR_StringWidth(s->level, w->font) / 2, cy + 96, s->level, c, w->font, 0);
 		MR_DrawString(center - MR_StringWidth(s->time, w->font) / 2, cy + 96 + L, s->time, c, w->font, 0);
 		MR_DrawString(center - MR_StringWidth(s->skill, w->font) / 2, cy + 96 + 2 * L, s->skill, c, w->font, 0);
@@ -2071,6 +2094,14 @@ LB_Key(mpage_t *pg, mwidget_t *w, int key)
 
 	if ((key == K_MOUSE1 || key == K_MOUSE2) && i >= 0)
 	{
+		/* a save of the other game modules can still be deleted (right click) */
+		if (d->saves[i].blocked && key == K_MOUSE1)
+		{
+			Com_Printf("%s\n", SG_IncompatibleText(d->saves[i].kind));
+			M_PlaySound("menu/small/invalid.wav");
+			return false;
+		}
+
 		if (w->cvar)
 		{
 			Cvar_Set(w->cvar->name, d->saves[i].name);
