@@ -685,3 +685,22 @@ Measured (shadows on vs ghl_shadows 0, owner config, 2560x1440): darkened area g
 Shots: box /workspace/gfx_check/fb3/*_zoom_before_after_off.jpg (before | after | shadows off).
 
 Drawbacks: in sun the 30% blob overlaps the CSM shadow at the feet (slight double darkening); the larger flat quad at ground Z can spill onto an adjacent step or wall base; mode 2 (mask) unchanged.
+
+## 20. fb5: HD texture pack (sofhd2024.pak) and the "black doorway"
+
+Report: release 0.2.0 with sofhd2024.pak (4316 replacement files, same names as retail:
+textures/*.m32 and ghoul/*.tga, mostly 4x, some 2x, aspect never changed).
+
+* Cause: world/warp/2D texture coordinates divide by image->width/height, which came from the
+  HD m32 header, so every HD wall was stretched 4x (sof04 stone, green door slab).
+* Fix (engine common + gl3): FS_ReadOriginalHead() reads the header of the lowest-priority copy
+  of a file (retail pak); gl3 uses those dimensions for coords and samples the HD pixels
+  (yquake2 r_retexturing logic). Only with r_retexturing != 0. refimport API_VERSION 8 -> 9;
+  omgl (SoF import) is unchanged and gets no fix.
+* Ghoul skins: upload was capped at 256 (SoF rule); new cvar ghl_om_maxtexsize (2048).
+  Visible gain is small: most HD character skins are 512 wide.
+* "Door opens onto void / passage shorter": not an areaportal bug. Door *17 (areaportal t1)
+  opens and the room beyond renders; the flat dark green "void" in sof03/sof04 is the closed
+  door texture stretched 4x.
+* Drawbacks: a mod that ships a deliberately different-size replacement keeps the retail scale
+  (r_retexturing 0 restores old behaviour); one extra small read per texture load; more VRAM.
