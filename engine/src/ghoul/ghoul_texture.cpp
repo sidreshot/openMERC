@@ -343,6 +343,10 @@ static void Upload(Texture *t)
 		g->TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_NEAREST);
 		g->TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
 	}
+	// openMERC GFX-modern (r_om_beams): a painted light cone (".../BEAM") is announced to the renderer,
+	// which may draw a volumetric beam in its place; renderers that do not know the hint ignore it
+	if (t->name.size() >= 5 && t->name.compare(t->name.size() - 5, 5, "/BEAM") == 0)
+		g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 1);
 	t->uploaded = true;
 }
 

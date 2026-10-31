@@ -1291,6 +1291,46 @@ GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride)
 	}
 }
 
+/* depth of the static world casters and the given world-space triangles (3 floats per vertex) with the
+   view-projection vp into the bound depth target - used by the light beams (gl3_post.c) on maps with
+   or without a sun; the caller sets the framebuffer, viewport and depth state */
+qboolean
+GL3_CSM_DrawDepth(const float *vp, const float *dyn, int numdynfloats, qboolean world)
+{
+	if (C.failed || !gl3_worldmodel || !CreateObjects())
+	{
+		return false;
+	}
+
+	if (C.built != gl3_worldmodel)
+	{
+		BuildStatic();
+	}
+
+	GL3_UseProgram(C.prog);
+	glUniformMatrix4fv(C.u_vp, 1, GL_FALSE, vp);
+
+	if (world && C.numstatic)
+	{
+		GL3_BindVAO(C.vao);
+		GL3_BindVBO(C.vbo);
+		qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+		glDrawArrays(GL_TRIANGLES, 0, C.numstatic);
+	}
+
+	if (dyn && (numdynfloats >= 9))
+	{
+		GL3_BindVAO(C.vao);
+		GL3_BindVBO(C.dynvbo);
+		glBufferData(GL_ARRAY_BUFFER, numdynfloats * sizeof(float), dyn, GL_STREAM_DRAW);
+		qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
+		glDrawArrays(GL_TRIANGLES, 0, numdynfloats / 3);
+	}
+
+	GL3_BindVAO(0);
+	return true;
+}
+
 qboolean
 GL3_CSM_ReplaceGhoul(void)
 {

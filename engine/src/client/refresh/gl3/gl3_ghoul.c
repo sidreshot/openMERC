@@ -930,6 +930,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		qboolean viewer = (flags & SOF_RF_VIEWERMODEL) != 0;
 
 		GL3_GhoulEmu_SetCsm(GL3_CSM_Active() && !weapon && !viewer && !hack, GL3_CSM_ReplaceGhoul() && !viewer && !weapon);
+		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack); /* shadows in light beams */
 	}
 
 	Ghl_Draw(inst, &P);
@@ -938,6 +939,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 	{
 		GL3_GhoulEmu_SetEntityGlow(0.0f);
 		GL3_GhoulEmu_SetCsm(false, false);
+		GL3_GhoulEmu_SetCaster(false);
 	}
 
 	/* step 12: restore */

@@ -119,6 +119,9 @@ static struct
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
 	GLint u_invpv, u_csmrepl;
+
+	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
+	qboolean casts;
 } E;
 
 static ghlff_t emuff;
@@ -935,6 +938,13 @@ Flush(void)
 		return;
 	}
 
+	/* GFX-modern light beams: a painted light cone is taken over by the volumetric beam pass */
+	if ((mode == GL_TRIANGLES) && GL3_Beam_IsBeam(E.boundtex) &&
+		GL3_Beam_Capture(out[0].pos, n, sizeof(emuvtx_t) / sizeof(float), E.boundtex))
+	{
+		return;
+	}
+
 	GL3_UseProgram(E.prog);
 	GL3_BindVAO(E.vao);
 	GL3_BindVBO(E.vbo);
@@ -998,6 +1008,11 @@ Flush(void)
 		if (E.csmcapture && (mode == GL_TRIANGLES) && E.depthmask && !E.blendon && !E.alphatest)
 		{
 			GL3_CSM_AddCasterTris(out[0].pos, n, sizeof(emuvtx_t) / sizeof(float));
+		}
+
+		if (E.casts && (mode == GL_TRIANGLES) && E.depthmask && !E.blendon && !E.alphatest)
+		{
+			GL3_Beam_AddCasterTris(out[0].pos, n, sizeof(emuvtx_t) / sizeof(float));
 		}
 	}
 
@@ -1236,6 +1251,7 @@ Emu_DeleteTextures(GLsizei n, const GLuint *textures)
 		}
 
 		SetTexSwizzle(textures[i], SWZ_RGBA);
+		GL3_Beam_ForgetTexture(textures[i]);
 	}
 
 	glDeleteTextures(n, textures);
@@ -1639,6 +1655,15 @@ Emu_TexParameteri(GLenum target, GLenum pname, GLint param)
 	}
 	else if (pname == 0x8191) /* GL_GENERATE_MIPMAP */
 	{
+		return;
+	}
+	else if (pname == OM_GHL_BEAM_HINT) /* openMERC: the bound texture is a painted light cone */
+	{
+		if (param)
+		{
+			GL3_Beam_MarkTexture(E.boundtex);
+		}
+
 		return;
 	}
 
@@ -2170,6 +2195,7 @@ GL3_GhoulEmu_Begin(void)
 		E.depthmask = (dm != 0);
 	}
 	E.csmcapture = E.csmrepl = false;
+	E.casts = false;
 }
 
 /* GFX-modern: whether the entity being drawn casts a sun shadow and lets its ground shadow give way to it */
@@ -2178,6 +2204,13 @@ GL3_GhoulEmu_SetCsm(qboolean capture, qboolean replace)
 {
 	E.csmcapture = capture;
 	E.csmrepl = replace;
+}
+
+/* GFX-modern: whether the entity being drawn casts a shadow into light beams (independent of the sun) */
+void
+GL3_GhoulEmu_SetCaster(qboolean casts)
+{
+	E.casts = casts;
 }
 
 /* GFX-modern: bloom weight of the whole entity being drawn (RF_FULLBRIGHT / RF_GLOW), 0 after it */

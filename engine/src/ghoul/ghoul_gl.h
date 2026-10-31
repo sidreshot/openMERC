@@ -63,6 +63,9 @@ enum : unsigned int
 	// takes it out before OpenGL). params[0] = how strongly the next primitive is a light source: the
 	// self-illumination, 1 for additive materials, 0 for none. It applies to the next Begin/End only.
 	OM_BLOOM_SOURCE = 0x7F10,
+	// OpenMerc GFX-modern: TexParameteri name (not an OpenGL enumerant) - the bound texture is a painted
+	// light cone ("/BEAM"), param 1; the renderer may draw a volumetric beam in its place (r_om_beams)
+	OM_BEAM_HINT = 0x7EA0,
 	TEXTURE_MAG_FILTER = 0x2800,
 	TEXTURE_MIN_FILTER = 0x2801,
 	TEXTURE_WRAP_S = 0x2802,

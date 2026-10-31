@@ -363,6 +363,17 @@ char *GL3_CSM_Prepend(const char *src);
 void GL3_CSM_BindProgram(GLuint prog);
 const float *GL3_CSM_InvPV(void);
 void GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride);
+qboolean GL3_CSM_DrawDepth(const float *vp, const float *dyn, int numdynfloats, qboolean world);
+
+/* GFX-modern: volumetric light beams in place of the painted Ghoul light cones (gl3_post.c, r_om_beams).
+   The Ghoul system marks a texture whose name ends in "/BEAM" with TexParameteri(OM_GHL_BEAM_HINT, 1). */
+#define OM_GHL_BEAM_HINT 0x7EA0
+void GL3_Beam_MarkTexture(GLuint tex);
+void GL3_Beam_ForgetTexture(GLuint tex);
+qboolean GL3_Beam_IsBeam(GLuint tex);
+qboolean GL3_Beam_Capture(const float *clip, int numverts, int stride, GLuint tex);
+void GL3_Beam_AddCasterTris(const float *clip, int numverts, int stride);
+void GL3_Post_Beams(void);
 
 
 #endif

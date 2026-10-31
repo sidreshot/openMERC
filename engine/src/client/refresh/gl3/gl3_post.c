@@ -36,6 +36,9 @@ static cvar_t *r_om_overbright, *r_om_overbright_scale, *r_om_overbright_models;
 
 static qboolean VolFogWanted(void);
 static void VolFogShutdown(void);
+static qboolean BeamsWanted(void);
+static void BeamsBeginView(void);
+static void BeamShutdown(void);
 
 static struct
 {
@@ -893,6 +896,7 @@ GL3_Post_Shutdown(void)
 	if (P.progcomp) glDeleteProgram(P.progcomp);
 	if (P.vao) glDeleteVertexArrays(1, &P.vao);
 	VolFogShutdown();
+	BeamShutdown();
 
 	if ((gl3state.currentShaderProgram == P.progdown) || (gl3state.currentShaderProgram == P.progup) ||
 		(gl3state.currentShaderProgram == P.progcomp))
@@ -915,10 +919,11 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 {
 	static const float zero[4] = {0, 0, 0, 0};
 	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
-	qboolean bloom, soft, volfog;
+	qboolean bloom, soft, volfog, beams;
 
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
 	P.bound = P.depthcopied = false;
+	BeamsBeginView();
 
 	if (P.failed || !r_om_bloom || (r_newrefdef.rdflags & RDF_NOWORLDMODEL) || !gl3_worldmodel)
 	{
@@ -928,8 +933,9 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	bloom = (r_om_bloom->value != 0) && !nv;
 	soft = (r_om_softparticles->value != 0);
 	volfog = VolFogWanted() && !nv;
+	beams = BeamsWanted() && !nv;
 
-	if (!bloom && !soft && !volfog && !r_om_post_debug->value)
+	if (!bloom && !soft && !volfog && !beams && !r_om_post_debug->value)
 	{
 		return false;
 	}
@@ -1474,4 +1480,1037 @@ VolFogShutdown(void)
 	}
 
 	memset(&V, 0, sizeof(V));
+}
+
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_beams: volumetric light beams. Some Ghoul light models
+ * carry a painted, additive light cone (street lamps, search lights: a part
+ * textured ".../BEAM"). The Ghoul system marks such textures
+ * (OM_GHL_BEAM_HINT); the emulation hands their triangles here instead of
+ * drawing them. At the end of the view each captured cone is fitted (axis,
+ * narrow and wide radius), gets a perspective shadow map from its narrow end
+ * (static world and this frame's Ghoul casters) and is ray-marched over the
+ * full depth of the view: soft edges, slow dust and the shadows of the
+ * characters inside the beam. A shot lamp loses its beam part (its _OFF
+ * model) and the beam is gone; a moving search light moves its beam.
+ * ------------------------------------------------------------------ */
+
+#define BEAM_MAXTEX 64
+#define BEAM_MAXCAP 16
+#define BEAM_DRAW 4
+#define BEAM_SHADOW 512
+#define BEAM_UNIT 9         /* GL_TEXTURE9 */
+#define BEAM_MAXDYN (3 * 1024 * 1024)
+
+#ifndef GL_TEXTURE_2D_ARRAY
+#define GL_TEXTURE_2D_ARRAY 0x8C1A
+#endif
+
+static cvar_t *r_om_beams, *r_om_beams_intensity, *r_om_beams_shadows, *r_om_beams_noise, *r_om_beams_debug;
+
+typedef struct
+{
+	GLuint tex;
+	float *v;       /* world-space vertices, 3 floats each */
+	int nv, cap;    /* floats */
+	vec3_t mins, maxs;
+} beamcap_t;
+
+typedef struct
+{
+	vec3_t apex, axis, color;
+	float len, r0, r1, dist;
+} beam_t;
+
+static struct
+{
+	GLuint marked[BEAM_MAXTEX];
+	float markcol[BEAM_MAXTEX][3];
+	int nmarked;
+
+	beamcap_t cap[BEAM_MAXCAP];
+	int ncap;
+
+	float *dyn, *flt;      /* this view's Ghoul casters (world space); per-beam filtered copy */
+	int numdyn, maxdyn, maxflt;
+	float *tmp;
+	int maxtmp;
+
+	qboolean tried;
+	GLuint prog, shadowtex, shadowfbo;
+	GLint u_depth, u_shadow, u_invpv, u_eye, u_prm, u_prm2, u_b0, u_b1, u_b2, u_bvp, u_rect;
+} B;
+
+static const char *beam_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform sampler2DArrayShadow beamshadow;\n"
+	"uniform mat4 invpv;\n"
+	"uniform vec4 eye;\n"     /* xyz, time */
+	"uniform vec4 prm;\n"     /* depth range min, max; intensity; noise */
+	"uniform vec4 prm2;\n"    /* beams, steps, shadows */
+	"uniform vec4 b0[4];\n"   /* narrow end, length */
+	"uniform vec4 b1[4];\n"   /* axis (narrow to wide), narrow radius */
+	"uniform vec4 b2[4];\n"   /* colour, wide radius */
+	"uniform mat4 bvp[4];\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmissive;\n"
+	"float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n"
+	"float vnoise(vec3 x)\n"
+	"{\n"
+	"	vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);\n"
+	"	return mix(mix(mix(h3(i), h3(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h3(i + vec3(0.0, 1.0, 0.0)), h3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),\n"
+	"		mix(mix(h3(i + vec3(0.0, 0.0, 1.0)), h3(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h3(i + vec3(0.0, 1.0, 1.0)), h3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	float z = texture(depthtex, uv).r;\n"
+	"	float nz = (z - prm.x) / (prm.y - prm.x) * 2.0 - 1.0;\n"
+	"	vec4 w = invpv * vec4(vuv * 2.0 - 1.0, nz, 1.0);\n"
+	"	vec3 ro = eye.xyz;\n"
+	"	vec3 dv = w.xyz / w.w - ro;\n"
+	"	float tmax = length(dv);\n"
+	"	if (w.w <= 0.0) tmax = 1e6;\n"
+	"	vec3 rd = dv / max(tmax, 0.001);\n"
+	"	float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
+	"	int n = int(prm2.x + 0.5);\n"
+	"	int steps = int(prm2.y + 0.5);\n"
+	"	vec3 acc = vec3(0.0);\n"
+	"	for (int i = 0; i < 4; i++)\n"
+	"	{\n"
+	"		if (i >= n) break;\n"
+	"		vec3 A = b0[i].xyz; float L = b0[i].w;\n"
+	"		vec3 ax = b1[i].xyz; float r0 = b1[i].w; float r1 = b2[i].w;\n"
+	/* the eye ray against the enclosing cylinder (radius r1, 0 <= h <= L) */
+	"		vec3 oc = ro - A;\n"
+	"		float ho = dot(oc, ax), hd = dot(rd, ax);\n"
+	"		vec3 o2 = oc - ho * ax, d2 = rd - hd * ax;\n"
+	"		float qa = dot(d2, d2), qb = 2.0 * dot(o2, d2), qc = dot(o2, o2) - r1 * r1;\n"
+	"		float t0 = 0.0, t1 = tmax;\n"
+	"		if (qa < 1e-6) { if (qc > 0.0) continue; }\n"
+	"		else\n"
+	"		{\n"
+	"			float disc = qb * qb - 4.0 * qa * qc;\n"
+	"			if (disc <= 0.0) continue;\n"
+	"			float sq = sqrt(disc);\n"
+	"			t0 = max(t0, (-qb - sq) / (2.0 * qa));\n"
+	"			t1 = min(t1, (-qb + sq) / (2.0 * qa));\n"
+	"		}\n"
+	"		if (abs(hd) < 1e-6) { if (ho < 0.0 || ho > L) continue; }\n"
+	"		else\n"
+	"		{\n"
+	"			float ta = -ho / hd, tb = (L - ho) / hd;\n"
+	"			t0 = max(t0, min(ta, tb));\n"
+	"			t1 = min(t1, max(ta, tb));\n"
+	"		}\n"
+	"		if (t1 <= t0) continue;\n"
+	"		float ds = (t1 - t0) / float(steps);\n"
+	"		float sum = 0.0;\n"
+	"		for (int s = 0; s < 48; s++)\n"
+	"		{\n"
+	"			if (s >= steps) break;\n"
+	"			vec3 p = ro + rd * (t0 + (float(s) + jit) * ds);\n"
+	"			vec3 q = p - A;\n"
+	"			float h = dot(q, ax);\n"
+	"			float hn = clamp(h / L, 0.0, 1.0);\n"
+	"			float R = max(mix(r0, r1, hn), 0.5);\n"
+	"			float d = 1.0 - smoothstep(0.45, 1.0, length(q - h * ax) / R);\n"
+	"			if (d <= 0.0) continue;\n"
+	"			d *= smoothstep(0.0, 0.04, hn) * pow(1.0 - hn, 1.5);\n"
+	"			if (prm.w > 0.0) d *= 1.0 + prm.w * (vnoise(p * 0.045 + vec3(eye.w * 0.11, eye.w * 0.07, -eye.w * 0.15)) * 2.0 - 1.0);\n"
+	"			if (prm2.z > 0.5)\n"
+	"			{\n"
+	"				vec4 sp = bvp[i] * vec4(p, 1.0);\n"
+	"				vec3 sc = sp.xyz / sp.w * 0.5 + 0.5;\n"
+	"				d *= texture(beamshadow, vec4(sc.xy, float(i), sc.z - 0.0015));\n"
+	"			}\n"
+	"			sum += d * ds / (2.0 * max(R, 1.0));\n"
+	"		}\n"
+	"		acc += b2[i].rgb * sum;\n"
+	"	}\n"
+	"	outColor = vec4(acc * prm.z, 0.0);\n"
+	"	outEmissive = vec4(0.0);\n"
+	"}\n";
+
+static void
+BeamCvars(void)
+{
+	if (!r_om_beams)
+	{
+		r_om_beams = ri.Cvar_Get("r_om_beams", "1", CVAR_ARCHIVE);
+		r_om_beams_intensity = ri.Cvar_Get("r_om_beams_intensity", "1.5", CVAR_ARCHIVE);
+		r_om_beams_shadows = ri.Cvar_Get("r_om_beams_shadows", "1", CVAR_ARCHIVE);
+		r_om_beams_noise = ri.Cvar_Get("r_om_beams_noise", "0.35", CVAR_ARCHIVE);
+		r_om_beams_debug = ri.Cvar_Get("r_om_beams_debug", "0", 0); /* 1: also draw the painted cone, 2: only it */
+	}
+}
+
+static qboolean
+BeamsWanted(void)
+{
+	BeamCvars();
+	return (r_om_beams->value != 0) && (B.nmarked > 0);
+}
+
+static void
+BeamsBeginView(void)
+{
+	int i;
+
+	for (i = 0; i < B.ncap; i++)
+	{
+		B.cap[i].nv = 0;
+	}
+
+	B.ncap = 0;
+	B.numdyn = 0;
+}
+
+static int
+BeamTexIndex(GLuint tex)
+{
+	int i;
+
+	for (i = 0; i < B.nmarked; i++)
+	{
+		if (B.marked[i] == tex)
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+qboolean
+GL3_Beam_IsBeam(GLuint tex)
+{
+	return tex && (B.nmarked > 0) && (BeamTexIndex(tex) >= 0);
+}
+
+/* the texture bound now is a painted light cone: remember it and its colour (alpha-weighted mean) */
+void
+GL3_Beam_MarkTexture(GLuint tex)
+{
+	float col[3] = {1.0f, 0.92f, 0.75f};
+	int idx;
+
+	if (!tex)
+	{
+		return;
+	}
+
+	idx = BeamTexIndex(tex);
+
+	if (idx < 0)
+	{
+		if (B.nmarked >= BEAM_MAXTEX)
+		{
+			return;
+		}
+
+		idx = B.nmarked++;
+		B.marked[idx] = tex;
+	}
+
+#ifndef YQ2_GL3_GLES3
+	{
+		GLint w = 0, h = 0;
+
+		GL3_SelectTMU(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		gl3state.currenttexture = tex;
+		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+
+		if ((w > 0) && (h > 0) && (w * h <= (1 << 20)))
+		{
+			byte *px = malloc((size_t)w * h * 4);
+
+			if (px)
+			{
+				double s[3] = {0, 0, 0}, ws = 0;
+				int i;
+
+				glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+
+				for (i = 0; i < w * h; i++)
+				{
+					double wt = (px[i * 4 + 3] / 255.0) * ((px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2]) / 765.0);
+
+					s[0] += px[i * 4] * wt;
+					s[1] += px[i * 4 + 1] * wt;
+					s[2] += px[i * 4 + 2] * wt;
+					ws += wt;
+				}
+
+				if (ws > 0)
+				{
+					double m;
+
+					s[0] /= ws; s[1] /= ws; s[2] /= ws;
+					m = Q_max(s[0], Q_max(s[1], s[2]));
+
+					if (m > 0)
+					{
+						col[0] = (float)(s[0] / m);
+						col[1] = (float)(s[1] / m);
+						col[2] = (float)(s[2] / m);
+					}
+				}
+
+				free(px);
+			}
+		}
+	}
+#endif
+
+	VectorCopy(col, B.markcol[idx]);
+	R_Printf(PRINT_DEVELOPER, "r_om_beams: texture %u is a light cone (colour %.2f %.2f %.2f)\n", tex, col[0], col[1], col[2]);
+}
+
+void
+GL3_Beam_ForgetTexture(GLuint tex)
+{
+	int idx = BeamTexIndex(tex);
+
+	if (idx >= 0)
+	{
+		B.nmarked--;
+		B.marked[idx] = B.marked[B.nmarked];
+		VectorCopy(B.markcol[B.nmarked], B.markcol[idx]);
+	}
+}
+
+/* clip-space vertices of this view -> world space into *dst (grown as needed); false when out of memory */
+static qboolean
+ClipToWorld(const float *clip, int numverts, int stride, float **dst, int *have, int *cap, int limit)
+{
+	const float *m = GL3_CSM_InvPV();
+	int i;
+
+	if (*have + numverts * 3 > *cap)
+	{
+		int want = *have + numverts * 3, c = *cap ? *cap : 4096;
+		float *d;
+
+		while (c < want)
+		{
+			c *= 2;
+		}
+
+		if (c > limit)
+		{
+			return false;
+		}
+
+		d = realloc(*dst, c * sizeof(float));
+
+		if (!d)
+		{
+			return false;
+		}
+
+		*dst = d;
+		*cap = c;
+	}
+
+	for (i = 0; i < numverts; i++, clip += stride)
+	{
+		float x = clip[0], y = clip[1], z = clip[2], w = clip[3];
+		float ow = m[3] * x + m[7] * y + m[11] * z + m[15] * w;
+		float *o = *dst + *have;
+
+		if (fabsf(ow) < 1e-8f)
+		{
+			ow = 1e-8f;
+		}
+
+		o[0] = (m[0] * x + m[4] * y + m[8] * z + m[12] * w) / ow;
+		o[1] = (m[1] * x + m[5] * y + m[9] * z + m[13] * w) / ow;
+		o[2] = (m[2] * x + m[6] * y + m[10] * z + m[14] * w) / ow;
+		*have += 3;
+	}
+
+	return true;
+}
+
+/* triangles of a painted cone (clip space): kept for the beam pass; true when they must not be drawn */
+qboolean
+GL3_Beam_Capture(const float *clip, int numverts, int stride, GLuint tex)
+{
+	beamcap_t *c = NULL;
+	vec3_t mn = {1e30f, 1e30f, 1e30f}, mx = {-1e30f, -1e30f, -1e30f};
+	int i, k, have = 0;
+
+	BeamCvars();
+
+	if (!P.bound || !r_om_beams->value || (r_om_beams_debug->value == 2) || (numverts < 3))
+	{
+		return false;
+	}
+
+	if (!ClipToWorld(clip, numverts, stride, &B.tmp, &have, &B.maxtmp, 1 << 20))
+	{
+		return false;
+	}
+
+	for (i = 0; i < have; i += 3)
+	{
+		for (k = 0; k < 3; k++)
+		{
+			mn[k] = Q_min(mn[k], B.tmp[i + k]);
+			mx[k] = Q_max(mx[k], B.tmp[i + k]);
+		}
+	}
+
+	/* parts of one cone drawn in several batches join the cone they touch */
+	for (i = 0; i < B.ncap; i++)
+	{
+		beamcap_t *o = &B.cap[i];
+
+		if ((o->tex == tex) && (mn[0] <= o->maxs[0] + 16) && (mx[0] >= o->mins[0] - 16) && (mn[1] <= o->maxs[1] + 16) &&
+			(mx[1] >= o->mins[1] - 16) && (mn[2] <= o->maxs[2] + 16) && (mx[2] >= o->mins[2] - 16))
+		{
+			c = o;
+			break;
+		}
+	}
+
+	if (!c)
+	{
+		if (B.ncap >= BEAM_MAXCAP)
+		{
+			return r_om_beams_debug->value != 1;
+		}
+
+		c = &B.cap[B.ncap++];
+		c->tex = tex;
+		c->nv = 0;
+		VectorCopy(mn, c->mins);
+		VectorCopy(mx, c->maxs);
+	}
+
+	if (c->nv + have > c->cap)
+	{
+		int nc = c->cap ? c->cap : 1024;
+		float *d;
+
+		while (nc < c->nv + have)
+		{
+			nc *= 2;
+		}
+
+		d = realloc(c->v, nc * sizeof(float));
+
+		if (!d)
+		{
+			return false;
+		}
+
+		c->v = d;
+		c->cap = nc;
+	}
+
+	memcpy(c->v + c->nv, B.tmp, have * sizeof(float));
+	c->nv += have;
+
+	for (k = 0; k < 3; k++)
+	{
+		c->mins[k] = Q_min(c->mins[k], mn[k]);
+		c->maxs[k] = Q_max(c->maxs[k], mx[k]);
+	}
+
+	return r_om_beams_debug->value != 1;
+}
+
+/* opaque Ghoul triangles of this view (clip space): the casters of the beam shadows */
+void
+GL3_Beam_AddCasterTris(const float *clip, int numverts, int stride)
+{
+	if (!P.bound || !r_om_beams || !r_om_beams->value || !r_om_beams_shadows->value || !B.nmarked || (numverts < 3))
+	{
+		return;
+	}
+
+	ClipToWorld(clip, numverts - numverts % 3, stride, &B.dyn, &B.numdyn, &B.maxdyn, BEAM_MAXDYN);
+}
+
+/* axis, length and radii of a captured cone from its vertices */
+static qboolean
+FitBeam(const beamcap_t *c, beam_t *b)
+{
+	double cen[3] = {0, 0, 0}, cov[3][3] = {{0}}, v[3], ext[3];
+	double hmin = 1e30, hmax = -1e30, rlo = 0, rhi = 0, band;
+	int n = c->nv / 3, i, j, k, nlo = 0, nhi = 0, it;
+
+	if (n < 3)
+	{
+		return false;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		for (k = 0; k < 3; k++)
+		{
+			cen[k] += c->v[i * 3 + k];
+		}
+	}
+
+	for (k = 0; k < 3; k++)
+	{
+		cen[k] /= n;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		double d[3];
+
+		for (k = 0; k < 3; k++)
+		{
+			d[k] = c->v[i * 3 + k] - cen[k];
+		}
+
+		for (j = 0; j < 3; j++)
+		{
+			for (k = 0; k < 3; k++)
+			{
+				cov[j][k] += d[j] * d[k];
+			}
+		}
+	}
+
+	/* principal axis by power iteration, started along the longest box side */
+	for (k = 0; k < 3; k++)
+	{
+		ext[k] = c->maxs[k] - c->mins[k];
+	}
+
+	v[0] = (ext[0] >= ext[1] && ext[0] >= ext[2]) ? 1 : 0.1;
+	v[1] = (ext[1] > ext[0] && ext[1] >= ext[2]) ? 1 : 0.1;
+	v[2] = (ext[2] > ext[0] && ext[2] > ext[1]) ? 1 : 0.1;
+
+	for (it = 0; it < 32; it++)
+	{
+		double nv[3], l;
+
+		for (j = 0; j < 3; j++)
+		{
+			nv[j] = cov[j][0] * v[0] + cov[j][1] * v[1] + cov[j][2] * v[2];
+		}
+
+		l = sqrt(nv[0] * nv[0] + nv[1] * nv[1] + nv[2] * nv[2]);
+
+		if (l < 1e-12)
+		{
+			return false;
+		}
+
+		for (j = 0; j < 3; j++)
+		{
+			v[j] = nv[j] / l;
+		}
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		double h = 0;
+
+		for (k = 0; k < 3; k++)
+		{
+			h += (c->v[i * 3 + k] - cen[k]) * v[k];
+		}
+
+		hmin = Q_min(hmin, h);
+		hmax = Q_max(hmax, h);
+	}
+
+	band = 0.2 * (hmax - hmin);
+
+	for (i = 0; i < n; i++)
+	{
+		double h = 0, q[3], r;
+
+		for (k = 0; k < 3; k++)
+		{
+			h += (c->v[i * 3 + k] - cen[k]) * v[k];
+		}
+
+		for (k = 0; k < 3; k++)
+		{
+			q[k] = c->v[i * 3 + k] - cen[k] - h * v[k];
+		}
+
+		r = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
+
+		if (h <= hmin + band)
+		{
+			rlo += r;
+			nlo++;
+		}
+
+		if (h >= hmax - band)
+		{
+			rhi += r;
+			nhi++;
+		}
+	}
+
+	rlo = nlo ? rlo / nlo : 0;
+	rhi = nhi ? rhi / nhi : 0;
+
+	/* the axis runs from the narrow end (at the lamp) to the wide end */
+	if (rlo > rhi)
+	{
+		double t;
+
+		for (k = 0; k < 3; k++)
+		{
+			v[k] = -v[k];
+		}
+
+		t = hmin;
+		hmin = -hmax;
+		hmax = -t;
+		t = rlo;
+		rlo = rhi;
+		rhi = t;
+	}
+
+	b->len = (float)(hmax - hmin);
+
+	if ((b->len < 8) || (rhi < 1))
+	{
+		return false;
+	}
+
+	for (k = 0; k < 3; k++)
+	{
+		b->axis[k] = (float)v[k];
+		b->apex[k] = (float)(cen[k] + v[k] * hmin);
+	}
+
+	b->r0 = (float)Q_max(rlo, 0.5);
+	b->r1 = (float)rhi;
+
+	{
+		int t = BeamTexIndex(c->tex);
+		const float *col = (t >= 0) ? B.markcol[t] : vec3_origin;
+
+		VectorCopy(col, b->color);
+	}
+
+	/* distance from the eye to the axis segment, for the choice of the nearest beams */
+	{
+		vec3_t d;
+		float h;
+
+		VectorSubtract(r_newrefdef.vieworg, b->apex, d);
+		h = Q_clamp(DotProduct(d, b->axis), 0.0f, b->len);
+		VectorMA(b->apex, h, b->axis, d);
+		VectorSubtract(r_newrefdef.vieworg, d, d);
+		b->dist = VectorLength(d);
+	}
+
+	return true;
+}
+
+/* column-major view-projection of a beam's shadow map: from the narrow end along the axis */
+static void
+BeamViewProj(const beam_t *b, float *vp)
+{
+	/* the near plane lies a bit down the beam: the lamp housing around the narrow end casts nothing */
+	float view[16], proj[16], fov, t, n = Q_max(2.0f, b->len * 0.15f + 6.0f), f = b->len * 1.3f + 16.0f;
+	vec3_t fw, up = {0, 0, 1}, s, u;
+	int i, j;
+
+	VectorCopy(b->axis, fw);
+
+	if (fabsf(fw[2]) > 0.95f)
+	{
+		VectorSet(up, 1, 0, 0);
+	}
+
+	CrossProduct(fw, up, s);
+	VectorNormalize(s);
+	CrossProduct(s, fw, u);
+
+	view[0] = s[0]; view[1] = u[0]; view[2] = -fw[0]; view[3] = 0;
+	view[4] = s[1]; view[5] = u[1]; view[6] = -fw[1]; view[7] = 0;
+	view[8] = s[2]; view[9] = u[2]; view[10] = -fw[2]; view[11] = 0;
+	view[12] = -DotProduct(s, b->apex);
+	view[13] = -DotProduct(u, b->apex);
+	view[14] = DotProduct(fw, b->apex);
+	view[15] = 1;
+
+	fov = 2.0f * atanf(b->r1 / b->len) + 0.17f;
+	fov = Q_min(fov, 2.9f);
+	t = 1.0f / tanf(fov * 0.5f);
+	memset(proj, 0, sizeof(proj));
+	proj[0] = t;
+	proj[5] = t;
+	proj[10] = (f + n) / (n - f);
+	proj[11] = -1;
+	proj[14] = 2 * f * n / (n - f);
+
+	for (i = 0; i < 4; i++)
+	{
+		for (j = 0; j < 4; j++)
+		{
+			vp[i * 4 + j] = proj[j] * view[i * 4] + proj[4 + j] * view[i * 4 + 1] + proj[8 + j] * view[i * 4 + 2] +
+				proj[12 + j] * view[i * 4 + 3];
+		}
+	}
+}
+
+/* this view's casters without the lamp itself (triangles behind or around the narrow end) */
+static int
+FilterCasters(const beam_t *b)
+{
+	float keep = b->r0 * 1.5f + 12.0f;
+	int i, n = 0;
+
+	if (B.maxflt < B.numdyn)
+	{
+		float *d = realloc(B.flt, B.numdyn * sizeof(float));
+
+		if (!d)
+		{
+			return 0;
+		}
+
+		B.flt = d;
+		B.maxflt = B.numdyn;
+	}
+
+	for (i = 0; i + 9 <= B.numdyn; i += 9)
+	{
+		int k, behind = 0, close = 0;
+
+		for (k = 0; k < 3; k++)
+		{
+			const float *p = B.dyn + i + k * 3;
+			vec3_t d;
+			float h;
+
+			VectorSubtract(p, b->apex, d);
+			h = DotProduct(d, b->axis);
+			behind += (h < 4.0f);
+			close += (VectorLength(d) < keep);
+		}
+
+		if ((behind == 3) || (close == 3))
+		{
+			continue;
+		}
+
+		memcpy(B.flt + n, B.dyn + i, 9 * sizeof(float));
+		n += 9;
+	}
+
+	return n;
+}
+
+static qboolean
+BeamProgram(void)
+{
+	GLuint v, f, p;
+	GLint ok = 0;
+
+	if (B.tried)
+	{
+		return B.prog != 0;
+	}
+
+	B.tried = true;
+	v = CompilePost(GL_VERTEX_SHADER, post_vs);
+	f = CompilePost(GL_FRAGMENT_SHADER, beam_fs);
+
+	if (!v || !f)
+	{
+		if (v) glDeleteShader(v);
+		if (f) glDeleteShader(f);
+		R_Printf(PRINT_ALL, "r_om_beams: shader failed, light beams stay painted\n");
+		return false;
+	}
+
+	p = glCreateProgram();
+	glAttachShader(p, v);
+	glAttachShader(p, f);
+	GL3_Post_BindOutputs(p);
+	glLinkProgram(p);
+	glDeleteShader(v);
+	glDeleteShader(f);
+	glGetProgramiv(p, GL_LINK_STATUS, &ok);
+
+	if (!ok)
+	{
+		char log[2048];
+
+		glGetProgramInfoLog(p, sizeof(log), NULL, log);
+		R_Printf(PRINT_ALL, "r_om_beams: link failed: %s\n", log);
+		glDeleteProgram(p);
+		return false;
+	}
+
+	B.prog = p;
+	B.u_depth = glGetUniformLocation(p, "depthtex");
+	B.u_shadow = glGetUniformLocation(p, "beamshadow");
+	B.u_invpv = glGetUniformLocation(p, "invpv");
+	B.u_eye = glGetUniformLocation(p, "eye");
+	B.u_prm = glGetUniformLocation(p, "prm");
+	B.u_prm2 = glGetUniformLocation(p, "prm2");
+	B.u_b0 = glGetUniformLocation(p, "b0");
+	B.u_b1 = glGetUniformLocation(p, "b1");
+	B.u_b2 = glGetUniformLocation(p, "b2");
+	B.u_bvp = glGetUniformLocation(p, "bvp");
+	B.u_rect = glGetUniformLocation(p, "rect");
+	GL3_UseProgram(p);
+	glUniform1i(B.u_depth, 7);
+	glUniform1i(B.u_shadow, BEAM_UNIT);
+	return true;
+}
+
+static qboolean
+BeamShadowTargets(void)
+{
+	GLenum st, none = GL_NONE;
+
+	if (B.shadowfbo)
+	{
+		return true;
+	}
+
+	glGenTextures(1, &B.shadowtex);
+	GL3_SelectTMU(GL_TEXTURE0 + BEAM_UNIT);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, B.shadowtex);
+	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, BEAM_SHADOW, BEAM_SHADOW, BEAM_DRAW, 0, GL_DEPTH_COMPONENT,
+		GL_UNSIGNED_INT, NULL);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+	GL3_SelectTMU(GL_TEXTURE0);
+
+	glGenFramebuffers(1, &B.shadowfbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, B.shadowfbo);
+	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, 0);
+	glDrawBuffers(1, &none);
+	glReadBuffer(GL_NONE);
+	st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+
+	if (st != GL_FRAMEBUFFER_COMPLETE)
+	{
+		R_Printf(PRINT_ALL, "r_om_beams: shadow framebuffer incomplete (0x%x), beams without shadows\n", st);
+		glDeleteFramebuffers(1, &B.shadowfbo);
+		glDeleteTextures(1, &B.shadowtex);
+		B.shadowfbo = B.shadowtex = 0;
+		return false;
+	}
+
+	return true;
+}
+
+/* before the end of the view: the volumetric beams of the cones captured this view */
+void
+GL3_Post_Beams(void)
+{
+	beam_t bl[BEAM_MAXCAP];
+	float b0[BEAM_DRAW * 4], b1[BEAM_DRAW * 4], b2[BEAM_DRAW * 4], vps[BEAM_DRAW * 16];
+	int nb = 0, i, j;
+	qboolean shadows = false;
+	float fw, fh;
+
+	if (!P.bound || !B.ncap)
+	{
+		return;
+	}
+
+	BeamCvars();
+
+	for (i = 0; i < B.ncap; i++)
+	{
+		if (FitBeam(&B.cap[i], &bl[nb]))
+		{
+			nb++;
+		}
+	}
+
+	if (!nb || !r_om_beams->value || !BeamProgram())
+	{
+		return;
+	}
+
+	/* the nearest ones */
+	for (i = 1; i < nb; i++)
+	{
+		for (j = i; (j > 0) && (bl[j].dist < bl[j - 1].dist); j--)
+		{
+			beam_t t = bl[j];
+
+			bl[j] = bl[j - 1];
+			bl[j - 1] = t;
+		}
+	}
+
+	nb = Q_min(nb, BEAM_DRAW);
+
+	if (r_om_beams_debug->value >= 3)
+	{
+		for (i = 0; i < nb; i++)
+		{
+			R_Printf(PRINT_ALL, "OMBEAM %d/%d: lamp %.0f %.0f %.0f axis %.2f %.2f %.2f len %.0f r %.1f..%.1f dist %.0f (%d verts, %d casters)\n",
+				i, nb, bl[i].apex[0], bl[i].apex[1], bl[i].apex[2], bl[i].axis[0], bl[i].axis[1], bl[i].axis[2],
+				bl[i].len, bl[i].r0, bl[i].r1, bl[i].dist, B.cap[i].nv / 3, B.numdyn / 9);
+		}
+	}
+
+	GL3_Draw3DBatchesNow();
+	GL3_FX_Flush();
+
+	/* the full depth of the view (models and effects included) for the march */
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	P.depthcopied = true;
+
+	for (i = 0; i < nb; i++)
+	{
+		float *p0 = &b0[i * 4], *p1 = &b1[i * 4], *p2 = &b2[i * 4];
+
+		BeamViewProj(&bl[i], vps + i * 16);
+		VectorCopy(bl[i].apex, p0);
+		p0[3] = bl[i].len;
+		VectorCopy(bl[i].axis, p1);
+		p1[3] = bl[i].r0;
+		VectorCopy(bl[i].color, p2);
+		p2[3] = bl[i].r1;
+	}
+
+	/* shadow maps: static world + this view's Ghoul casters, seen from each beam's lamp. The array exists
+	   even without shadows: the shader's shadow sampler must always have a depth texture behind it. */
+	if (!BeamShadowTargets())
+	{
+		return;
+	}
+
+	if (r_om_beams_shadows->value)
+	{
+		GLint oldfunc;
+		GLfloat oldrange[2];
+		GLboolean wasblend = glIsEnabled(GL_BLEND), wascull = glIsEnabled(GL_CULL_FACE);
+		GLboolean wasoffset = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+
+		glGetIntegerv(GL_DEPTH_FUNC, &oldfunc);
+		glGetFloatv(GL_DEPTH_RANGE, oldrange);
+		glBindFramebuffer(GL_FRAMEBUFFER, B.shadowfbo);
+		glViewport(0, 0, BEAM_SHADOW, BEAM_SHADOW);
+		glDisable(GL_BLEND);
+		glDisable(GL_CULL_FACE);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LESS);
+		glDepthRange(0, 1);
+		glDepthMask(GL_TRUE);
+		glEnable(GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset(1.5f, 2.0f);
+		shadows = true;
+
+		for (i = 0; i < nb; i++)
+		{
+			static const float one = 1.0f;
+			int mode = (int)r_om_beams_shadows->value; /* 1 all, 2 world only, 3 models only (tests) */
+			int nf = (mode == 2) ? 0 : FilterCasters(&bl[i]);
+
+			glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, i);
+			glClearBufferfv(GL_DEPTH, 0, &one);
+
+			if (!GL3_CSM_DrawDepth(vps + i * 16, B.flt, nf, mode != 3))
+			{
+				shadows = false;
+			}
+		}
+
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		glViewport(P.vx, P.vy, P.vw, P.vh);
+		glDepthFunc(oldfunc);
+		glDepthRange(oldrange[0], oldrange[1]);
+		glPolygonOffset(0, 0);
+
+		if (!wasoffset) glDisable(GL_POLYGON_OFFSET_FILL);
+		if (wasblend) glEnable(GL_BLEND);
+		if (wascull) glEnable(GL_CULL_FACE);
+	}
+
+	fw = (float)P.w;
+	fh = (float)P.h;
+
+	GL3_UseProgram(B.prog);
+	glUniform4f(B.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	glUniformMatrix4fv(B.u_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
+	glUniform4f(B.u_eye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2], r_newrefdef.time);
+	glUniform4f(B.u_prm, gl3depthmin, gl3depthmax, Q_clamp(r_om_beams_intensity->value, 0.0f, 4.0f),
+		Q_clamp(r_om_beams_noise->value, 0.0f, 0.9f));
+	glUniform4f(B.u_prm2, (float)nb, 24.0f, shadows ? 1.0f : 0.0f, 0.0f);
+	glUniform4fv(B.u_b0, nb, b0);
+	glUniform4fv(B.u_b1, nb, b1);
+	glUniform4fv(B.u_b2, nb, b2);
+	glUniformMatrix4fv(B.u_bvp, nb, GL_FALSE, vps);
+
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+
+	if (B.shadowtex)
+	{
+		GL3_SelectTMU(GL_TEXTURE0 + BEAM_UNIT);
+		glBindTexture(GL_TEXTURE_2D_ARRAY, B.shadowtex);
+	}
+
+	GL3_SelectTMU(GL_TEXTURE0);
+
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+	DrawQuad();
+
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+}
+
+static void
+BeamShutdown(void)
+{
+	int i;
+
+	if (B.prog)
+	{
+		if (gl3state.currentShaderProgram == B.prog)
+		{
+			gl3state.currentShaderProgram = 0;
+		}
+
+		glDeleteProgram(B.prog);
+	}
+
+	if (B.shadowfbo) glDeleteFramebuffers(1, &B.shadowfbo);
+	if (B.shadowtex) glDeleteTextures(1, &B.shadowtex);
+
+	for (i = 0; i < BEAM_MAXCAP; i++)
+	{
+		free(B.cap[i].v);
+	}
+
+	free(B.dyn);
+	free(B.flt);
+	free(B.tmp);
+	memset(&B, 0, sizeof(B));
 }

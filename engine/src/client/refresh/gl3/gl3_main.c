@@ -1951,6 +1951,9 @@ GL3_RenderView(refdef_t *fd)
 	// make sure all remaining batched 3D stuff is drawn
 	GL3_Draw3DBatchesNow();
 
+	/* GFX-modern: volumetric light beams in place of the painted Ghoul light cones */
+	GL3_Post_Beams();
+
 	/* GFX-modern: bloom and the copy of the view into the window */
 	GL3_Post_EndView();
 
