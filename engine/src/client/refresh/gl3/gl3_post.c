@@ -1508,6 +1508,9 @@ VolFogShutdown(void)
 #endif
 
 static cvar_t *r_om_beams, *r_om_beams_intensity, *r_om_beams_shadows, *r_om_beams_noise, *r_om_beams_debug;
+static cvar_t *r_om_beams_motes;
+
+#define BEAM_MOTES 220      /* dust motes per beam at r_om_beams_motes 1 */
 
 typedef struct
 {
@@ -1544,7 +1547,64 @@ static struct
 	qboolean tried;
 	GLuint prog, shadowtex, shadowfbo;
 	GLint u_depth, u_shadow, u_invpv, u_eye, u_prm, u_prm2, u_b0, u_b1, u_b2, u_b3, u_bvp, u_rect;
+
+	/* dust motes */
+	qboolean mtried;
+	GLuint mprog;
+	GLint m_pv, m_eye, m_prm, m_b0, m_b1, m_b2, m_b3, m_bvp, m_layer, m_shadow;
 } B;
+
+/* dust motes: points placed and moved from their index and the clock alone, lit by the beam profile and
+   its shadow map, depth-tested against the scene */
+static const char *mote_vs =
+	"uniform mat4 pv;\n"
+	"uniform vec4 eye;\n"     /* xyz, time */
+	"uniform vec4 prm;\n"     /* brightness, pixels per unit at distance 1, shadows */
+	"uniform vec4 b0, b1, b2, b3;\n"
+	"uniform mat4 bvp;\n"
+	"uniform float layer;\n"
+	"uniform sampler2DArrayShadow beamshadow;\n"
+	"out vec3 vcol;\n"
+	"float hash(float n) { return fract(sin(n) * 43758.5453); }\n"
+	"void main()\n"
+	"{\n"
+	"	float s = float(gl_VertexID) + layer * 1013.0;\n"
+	"	float h1 = hash(s * 1.13 + 0.1), h2 = hash(s * 2.71 + 0.3), h3 = hash(s * 3.37 + 0.7), h4 = hash(s * 5.19 + 0.9);\n"
+	/* slow settling along the beam, wrapping from its end back to its start (faded at both) */
+	"	float fall = fract(h1 + eye.w * (0.004 + 0.006 * h4));\n"
+	"	float hn = mix(b3.x, b3.y, fall);\n"
+	"	float R = mix(b1.w, b2.w, hn);\n"
+	"	vec3 ax = b1.xyz;\n"
+	"	vec3 up = abs(ax.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);\n"
+	"	vec3 sx = normalize(cross(ax, up)), sy = cross(ax, sx);\n"
+	"	float ang = 6.2831853 * h2 + eye.w * 0.05 * (h3 - 0.5);\n"
+	"	float rr = sqrt(h3) * R * 0.85;\n"
+	"	vec3 p = b0.xyz + ax * (hn * b0.w) + (sx * cos(ang) + sy * sin(ang)) * rr;\n"
+	"	p += vec3(sin(eye.w * 0.37 + h4 * 40.0), sin(eye.w * 0.29 + h2 * 40.0), sin(eye.w * 0.33 + h1 * 40.0)) * 1.5;\n"
+	"	float a = (1.0 - smoothstep(0.45, 1.0, rr / max(R, 0.5))) * smoothstep(0.0, 0.12, fall) * pow(1.0 - fall, 1.3);\n"
+	"	a *= 0.55 + 0.45 * sin(eye.w * (1.5 + 2.0 * h4) + h1 * 60.0);\n"   /* a glint as it turns */
+	"	if (prm.z > 0.5)\n"
+	"	{\n"
+	"		vec4 sp = bvp * vec4(p, 1.0);\n"
+	"		vec3 sc = sp.xyz / sp.w * 0.5 + 0.5;\n"
+	"		a *= texture(beamshadow, vec4(sc.xy, layer, sc.z - 0.0015));\n"
+	"	}\n"
+	"	vec4 cp = pv * vec4(p, 1.0);\n"
+	"	gl_Position = cp;\n"
+	"	gl_PointSize = clamp(prm.y * (0.5 + 0.5 * h2) / max(cp.w, 1.0), 1.0, 5.0);\n"
+	"	vcol = b2.rgb * prm.x * max(a, 0.0);\n"
+	"}\n";
+
+static const char *mote_fs =
+	"in vec3 vcol;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmissive;\n"
+	"void main()\n"
+	"{\n"
+	"	float f = 1.0 - smoothstep(0.15, 0.5, length(gl_PointCoord - vec2(0.5)));\n"
+	"	outColor = vec4(vcol * f, 0.0);\n"
+	"	outEmissive = vec4(0.0);\n"
+	"}\n";
 
 static const char *beam_fs =
 	"uniform sampler2D depthtex;\n"
@@ -1650,6 +1710,7 @@ BeamCvars(void)
 		r_om_beams_shadows = ri.Cvar_Get("r_om_beams_shadows", "1", CVAR_ARCHIVE);
 		r_om_beams_noise = ri.Cvar_Get("r_om_beams_noise", "0.35", CVAR_ARCHIVE);
 		r_om_beams_debug = ri.Cvar_Get("r_om_beams_debug", "0", 0); /* 1: also draw the painted cone, 2: only it */
+		r_om_beams_motes = ri.Cvar_Get("r_om_beams_motes", "1", CVAR_ARCHIVE); /* dust motes, 0 off */
 	}
 }
 
@@ -2403,6 +2464,64 @@ BeamProgram(void)
 }
 
 static qboolean
+MoteProgram(void)
+{
+	GLuint v, f, p;
+	GLint ok = 0;
+
+	if (B.mtried)
+	{
+		return B.mprog != 0;
+	}
+
+	B.mtried = true;
+	v = CompilePost(GL_VERTEX_SHADER, mote_vs);
+	f = CompilePost(GL_FRAGMENT_SHADER, mote_fs);
+
+	if (!v || !f)
+	{
+		if (v) glDeleteShader(v);
+		if (f) glDeleteShader(f);
+		R_Printf(PRINT_ALL, "r_om_beams: dust mote shader failed, beams without motes\n");
+		return false;
+	}
+
+	p = glCreateProgram();
+	glAttachShader(p, v);
+	glAttachShader(p, f);
+	GL3_Post_BindOutputs(p);
+	glLinkProgram(p);
+	glDeleteShader(v);
+	glDeleteShader(f);
+	glGetProgramiv(p, GL_LINK_STATUS, &ok);
+
+	if (!ok)
+	{
+		char log[2048];
+
+		glGetProgramInfoLog(p, sizeof(log), NULL, log);
+		R_Printf(PRINT_ALL, "r_om_beams: dust mote link failed: %s\n", log);
+		glDeleteProgram(p);
+		return false;
+	}
+
+	B.mprog = p;
+	B.m_pv = glGetUniformLocation(p, "pv");
+	B.m_eye = glGetUniformLocation(p, "eye");
+	B.m_prm = glGetUniformLocation(p, "prm");
+	B.m_b0 = glGetUniformLocation(p, "b0");
+	B.m_b1 = glGetUniformLocation(p, "b1");
+	B.m_b2 = glGetUniformLocation(p, "b2");
+	B.m_b3 = glGetUniformLocation(p, "b3");
+	B.m_bvp = glGetUniformLocation(p, "bvp");
+	B.m_layer = glGetUniformLocation(p, "layer");
+	B.m_shadow = glGetUniformLocation(p, "beamshadow");
+	GL3_UseProgram(p);
+	glUniform1i(B.m_shadow, BEAM_UNIT);
+	return true;
+}
+
+static qboolean
 BeamShadowTargets(void)
 {
 	GLenum st, none = GL_NONE;
@@ -2634,6 +2753,39 @@ GL3_Post_Beams(void)
 	glBlendFunc(GL_ONE, GL_ONE);
 	DrawQuad();
 
+	/* dust motes in the beams, depth-tested against the scene (the view's depth function and range stay) */
+	if ((r_om_beams_motes->value > 0) && MoteProgram())
+	{
+		int count = (int)(BEAM_MOTES * Q_min(r_om_beams_motes->value, 4.0f));
+		float pxu = P.vh / (2.0f * tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f));
+
+		GL3_UseProgram(B.mprog);
+		glUniformMatrix4fv(B.m_pv, 1, GL_FALSE, &gl3state.uni3DData.transProjViewMat4.Elements[0][0]);
+		glUniform4f(B.m_eye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2], r_newrefdef.time);
+		glUniform4f(B.m_prm, 0.5f * Q_clamp(r_om_beams_intensity->value, 0.0f, 4.0f), pxu, shadows ? 1.0f : 0.0f, 0.0f);
+		glEnable(GL_DEPTH_TEST);
+#ifndef YQ2_GL3_GLES3
+		glEnable(GL_PROGRAM_POINT_SIZE);
+#endif
+		GL3_BindVAO(P.vao);
+
+		for (i = 0; i < nb; i++)
+		{
+			glUniform4fv(B.m_b0, 1, b0 + i * 4);
+			glUniform4fv(B.m_b1, 1, b1 + i * 4);
+			glUniform4fv(B.m_b2, 1, b2 + i * 4);
+			glUniform4fv(B.m_b3, 1, b3 + i * 4);
+			glUniformMatrix4fv(B.m_bvp, 1, GL_FALSE, vps + i * 16);
+			glUniform1f(B.m_layer, (float)i);
+			glDrawArrays(GL_POINTS, 0, count);
+		}
+
+#ifndef YQ2_GL3_GLES3
+		glDisable(GL_PROGRAM_POINT_SIZE);
+#endif
+		glDisable(GL_DEPTH_TEST);
+	}
+
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDisable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
@@ -2653,6 +2805,16 @@ BeamShutdown(void)
 		}
 
 		glDeleteProgram(B.prog);
+	}
+
+	if (B.mprog)
+	{
+		if (gl3state.currentShaderProgram == B.mprog)
+		{
+			gl3state.currentShaderProgram = 0;
+		}
+
+		glDeleteProgram(B.mprog);
 	}
 
 	if (B.shadowfbo) glDeleteFramebuffers(1, &B.shadowfbo);
