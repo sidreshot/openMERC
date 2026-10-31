@@ -1556,7 +1556,11 @@ static struct
 	/* character shadows on lit surfaces */
 	qboolean stried;
 	GLuint sprog;
-	GLint s_depth, s_shadow, s_invpv, s_prm, s_b0, s_b1, s_b2, s_b3, s_bvp, s_rect;
+	GLint s_depth, s_shadow, s_invpv, s_eye, s_prm, s_b0, s_b1, s_b2, s_b3, s_bvp, s_rect;
+
+	/* the beams of the last view, for the Ghoul ground shadows drawn before this view's beams are known */
+	float pools[BEAM_DRAW * 16];
+	int npools;
 } B;
 
 /* character shadows in a lamp's pool: a surface point inside a beam that the static world leaves lit (the
@@ -1566,6 +1570,8 @@ static const char *beamshade_fs =
 	"uniform sampler2D depthtex;\n"
 	"uniform sampler2DArrayShadow beamshadow;\n"
 	"uniform mat4 invpv;\n"
+	"uniform vec4 eye;\n"     /* xyz; mode: 0 darken (the lamp's character shadows), 1 lighten (the lamp fills
+	                             the sun's character shadow inside its pool; output = extra factor - 1) */
 	"uniform vec4 prm;\n"     /* depth range min, max; strength; beams */
 	"uniform vec4 b0[4];\n"
 	"uniform vec4 b1[4];\n"
@@ -1582,7 +1588,7 @@ static const char *beamshade_fs =
 	"	float nz = (z - prm.x) / (prm.y - prm.x) * 2.0 - 1.0;\n"
 	"	vec4 w = invpv * vec4(vuv * 2.0 - 1.0, nz, 1.0);\n"
 	"	vec3 p = w.xyz / w.w;\n"
-	"	float f = 1.0;\n"
+	"	float f = 1.0, fill = 0.0;\n"
 	"	int n = int(prm.w + 0.5);\n"
 	"	for (int i = 0; i < 4; i++)\n"
 	"	{\n"
@@ -1603,10 +1609,33 @@ static const char *beamshade_fs =
 	/* only points on the static surface the lamp sees (the lightmap holds the pool there); a model in
 	   front of it (the character itself, the lamp housing) lies nearer than that surface and is left */
 	"		float onworld = 1.0 - texture(beamshadow, vec4(sc.xy, float(i + 4), sc.z + 0.008));\n"
-	"		f *= 1.0 - prm.z * lworld * onworld * (1.0 - lall) * rad * smoothstep(b3[i].x, b3[i].x + 0.1, hn);\n"
+	"		float pool = lworld * onworld * rad * smoothstep(b3[i].x, b3[i].x + 0.1, hn);\n"
+	"		f *= 1.0 - prm.z * pool * (1.0 - lall);\n"
+	"		fill = max(fill, pool * lall);\n"
 	"	}\n"
-	"	outColor = vec4(f, f, f, 1.0);\n"
-	"	outEmissive = vec4(1.0);\n"
+	"	if (eye.w < 0.5)\n"
+	"	{\n"
+	"		outColor = vec4(f, f, f, 1.0);\n"
+	"		outEmissive = vec4(1.0);\n"
+	"		return;\n"
+	"	}\n"
+	/* where the lamp reaches, it fills most of the sun's (moon's) character shadow that the world shaders
+	   took from the lightmap (gl3_csm.c omCsmApply), so a character does not throw two hard shadows */
+	"	float g = 0.0;\n"
+	"	if (fill > 0.0 && omCsmSun.w > 0.5)\n"
+	"	{\n"
+	"		vec3 nr = normalize(cross(dFdx(p), dFdy(p)));\n"
+	"		if (dot(nr, eye.xyz - p) < 0.0) nr = -nr;\n"
+	"		float ndl = dot(nr, omCsmSun.xyz), fade;\n"
+	"		int c = omCsmCascade(p, fade);\n"
+	"		if (c >= 0 && ndl > 0.0)\n"
+	"		{\n"
+	"			float k = omCsmParams.x * omCsmStatic(c, p, nr) * omCsmDynamic(c, p, nr) * fade * smoothstep(0.0, 0.3, ndl);\n"
+	"			g = (1.0 / max(1.0 - k, 0.5) - 1.0) * 0.85 * fill;\n"
+	"		}\n"
+	"	}\n"
+	"	outColor = vec4(g, g, g, 0.0);\n"
+	"	outEmissive = vec4(0.0);\n"
 	"}\n";
 
 /* dust motes: points placed and moved from their index and the clock alone, lit by the beam profile and
@@ -1806,6 +1835,15 @@ BeamTexIndex(GLuint tex)
 	}
 
 	return -1;
+}
+
+/* the lamp pools of the last view (per beam 16 floats: narrow end + length, axis + narrow radius,
+   colour + wide radius, light start/end): a Ghoul ground shadow inside one gives way to the lamp's shadow */
+int
+GL3_Beam_Pools(const float **data)
+{
+	*data = B.pools;
+	return B.npools;
 }
 
 qboolean
@@ -2590,8 +2628,18 @@ ShadeProgram(void)
 	}
 
 	B.stried = true;
-	v = CompilePost(GL_VERTEX_SHADER, post_vs);
-	f = CompilePost(GL_FRAGMENT_SHADER, beamshade_fs);
+	{
+		char *src = GL3_CSM_Prepend(beamshade_fs);
+
+		if (!src)
+		{
+			return false;
+		}
+
+		v = CompilePost(GL_VERTEX_SHADER, post_vs);
+		f = CompilePost(GL_FRAGMENT_SHADER, src);
+		free(src);
+	}
 
 	if (!v || !f)
 	{
@@ -2624,6 +2672,7 @@ ShadeProgram(void)
 	B.s_depth = glGetUniformLocation(p, "depthtex");
 	B.s_shadow = glGetUniformLocation(p, "beamshadow");
 	B.s_invpv = glGetUniformLocation(p, "invpv");
+	B.s_eye = glGetUniformLocation(p, "eye");
 	B.s_prm = glGetUniformLocation(p, "prm");
 	B.s_b0 = glGetUniformLocation(p, "b0");
 	B.s_b1 = glGetUniformLocation(p, "b1");
@@ -2632,6 +2681,7 @@ ShadeProgram(void)
 	B.s_bvp = glGetUniformLocation(p, "bvp");
 	B.s_rect = glGetUniformLocation(p, "rect");
 	GL3_UseProgram(p);
+	GL3_CSM_BindProgram(p);
 	glUniform1i(B.s_depth, 7);
 	glUniform1i(B.s_shadow, BEAM_UNIT);
 	return true;
@@ -2690,6 +2740,8 @@ GL3_Post_Beams(void)
 	int nb = 0, i, j;
 	qboolean shadows = false;
 	float fw, fh;
+
+	B.npools = 0;
 
 	if (!P.bound || !B.ncap)
 	{
@@ -2780,7 +2832,15 @@ GL3_Post_Beams(void)
 		b3[i * 4] = bl[i].hs;
 		b3[i * 4 + 1] = bl[i].he;
 		b3[i * 4 + 2] = b3[i * 4 + 3] = 0;
+
+		/* kept for the next view's Ghoul ground shadows */
+		memcpy(B.pools + i * 16, p0, 4 * sizeof(float));
+		memcpy(B.pools + i * 16 + 4, p1, 4 * sizeof(float));
+		memcpy(B.pools + i * 16 + 8, p2, 4 * sizeof(float));
+		memcpy(B.pools + i * 16 + 12, b3 + i * 4, 4 * sizeof(float));
 	}
+
+	B.npools = (r_om_beams_groundshadow->value > 0) ? nb : 0;
 
 	/* shadow maps: static world + this view's Ghoul casters, seen from each beam's lamp. The array exists
 	   even without shadows: the shader's shadow sampler must always have a depth texture behind it. */
@@ -2887,8 +2947,18 @@ GL3_Post_Beams(void)
 		glUniform4fv(B.s_b2, nb, b2);
 		glUniform4fv(B.s_b3, nb, b3);
 		glUniformMatrix4fv(B.s_bvp, nb, GL_FALSE, vps);
+		glUniform4f(B.s_eye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2], 0.0f);
 		glBlendFunc(GL_ZERO, GL_SRC_COLOR);
 		DrawQuad();
+
+		/* inside the pools the lamp fills the sun's character shadow: dst * (1 + src) */
+		if (GL3_CSM_Active())
+		{
+			glUniform4f(B.s_eye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2], 1.0f);
+			glBlendFunc(GL_DST_COLOR, GL_ONE);
+			DrawQuad();
+		}
+
 		GL3_UseProgram(B.prog);
 	}
 

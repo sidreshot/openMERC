@@ -118,7 +118,7 @@ static struct
 	/* GFX-modern sun shadows (gl3_csm.c): the depth mask as set, whether the entity casts and whether its
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
-	GLint u_invpv, u_csmrepl;
+	GLint u_invpv, u_csmrepl, u_beamn, u_beam;
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
@@ -556,6 +556,25 @@ static const char *emu_fs =
 	"in vec4 vPos;\n"
 	"uniform mat4 omInvPV;\n"
 	"uniform int omCsmRepl;\n"
+	/* GFX-modern light beams (gl3_post.c): the lamp pools of the last view; a ground shadow in one gives
+	   way to the lamp's own shadow of the character */
+	"uniform int omBeamN;\n"
+	"uniform vec4 omBeam[16];\n"
+	"float omBeamKeep(vec3 wp)\n"
+	"{\n"
+	"	float pool = 0.0;\n"
+	"	for (int i = 0; i < 4; i++)\n"
+	"	{\n"
+	"		if (i >= omBeamN) break;\n"
+	"		vec3 q = wp - omBeam[i * 4].xyz;\n"
+	"		vec3 ax = omBeam[i * 4 + 1].xyz;\n"
+	"		float h = dot(q, ax), hn = h / omBeam[i * 4].w;\n"
+	"		if (hn < omBeam[i * 4 + 3].x || hn > 1.3) continue;\n"
+	"		float R = max(mix(omBeam[i * 4 + 1].w, omBeam[i * 4 + 2].w, hn), 0.5);\n"
+	"		pool = max(pool, (1.0 - smoothstep(0.6, 1.0, length(q - h * ax) / R)) * smoothstep(omBeam[i * 4 + 3].x, omBeam[i * 4 + 3].x + 0.1, hn));\n"
+	"	}\n"
+	"	return 1.0 - 0.85 * pool;\n"
+	"}\n"
 	"out vec4 outColor;\n"
 	"void main()\n"
 	"{\n"
@@ -598,10 +617,11 @@ static const char *emu_fs =
 	"	}\n"
 	"	vec3 omPre = (fogon != 0) ? c.rgb * vFog : c.rgb;\n"
 	"	if (fogon != 0) c.rgb = mix(fogcolor.rgb, c.rgb, vFog);\n"
-	"	if (omCsmRepl != 0)\n"
+	"	if (omCsmRepl != 0 || omBeamN > 0)\n"
 	"	{\n"
 	"		vec4 w = omInvPV * vPos;\n"
-	"		c.a *= omCsmGhoulShadowKeep(w.xyz / w.w);\n"
+	"		if (omCsmRepl != 0) c.a *= omCsmGhoulShadowKeep(w.xyz / w.w);\n"
+	"		if (omBeamN > 0) c.a *= omBeamKeep(w.xyz / w.w);\n"
 	"	}\n"
 	"	bool pass = true;\n"
 	"	if (alphafunc == 0) pass = false;\n"
@@ -713,6 +733,8 @@ CreateObjects(void)
 	E.u_emis = glGetUniformLocation(E.prog, "omEmis");
 	E.u_invpv = glGetUniformLocation(E.prog, "omInvPV");
 	E.u_csmrepl = glGetUniformLocation(E.prog, "omCsmRepl");
+	E.u_beamn = glGetUniformLocation(E.prog, "omBeamN");
+	E.u_beam = glGetUniformLocation(E.prog, "omBeam");
 	GL3_UseProgram(E.prog);
 	GL3_CSM_BindProgram(E.prog);
 
@@ -996,11 +1018,26 @@ Flush(void)
 	/* GFX-modern sun shadows: the ground shadow pass (blend 0, 1 - src alpha, ghoul_draw) gives way to the
 	   sun shadow where the ground is in the sun; opaque depth-writing triangles are casters */
 	{
-		int repl = (E.csmrepl && E.blendon && (E.bsrc == GL_ZERO) && (E.bdst == GL_ONE_MINUS_SRC_ALPHA)) ? 1 : 0;
+		qboolean ground = E.blendon && (E.bsrc == GL_ZERO) && (E.bdst == GL_ONE_MINUS_SRC_ALPHA);
+		int repl = (E.csmrepl && ground) ? 1 : 0, nbeam = 0;
+
+		/* light beams: inside a lamp's pool the lamp's shadow of the character replaces this one */
+		if (E.casts && ground)
+		{
+			const float *pools;
+
+			nbeam = GL3_Beam_Pools(&pools);
+
+			if (nbeam > 0)
+			{
+				glUniform4fv(E.u_beam, nbeam * 4, pools);
+			}
+		}
 
 		glUniform1i(E.u_csmrepl, repl);
+		glUniform1i(E.u_beamn, nbeam);
 
-		if (repl)
+		if (repl || nbeam)
 		{
 			glUniformMatrix4fv(E.u_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
 		}

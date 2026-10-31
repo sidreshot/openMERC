@@ -373,6 +373,7 @@ void GL3_Beam_ForgetTexture(GLuint tex);
 qboolean GL3_Beam_IsBeam(GLuint tex);
 qboolean GL3_Beam_Capture(const float *clip, const float *st, int numverts, int stride, GLuint tex);
 void GL3_Beam_AddCasterTris(const float *clip, int numverts, int stride);
+int GL3_Beam_Pools(const float **data);
 void GL3_Post_Beams(void);
 
 
