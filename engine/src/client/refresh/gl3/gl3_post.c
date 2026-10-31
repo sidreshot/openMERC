@@ -1501,6 +1501,7 @@ VolFogShutdown(void)
 #define BEAM_SHADOW 512
 #define BEAM_UNIT 9         /* GL_TEXTURE9 */
 #define BEAM_MAXDYN (3 * 1024 * 1024)
+#define BEAM_PROF 32        /* brightness of the painted cone texture along t */
 
 #ifndef GL_TEXTURE_2D_ARRAY
 #define GL_TEXTURE_2D_ARRAY 0x8C1A
@@ -1513,6 +1514,8 @@ typedef struct
 	GLuint tex;
 	float *v;       /* world-space vertices, 3 floats each */
 	int nv, cap;    /* floats */
+	float *t;       /* texture coordinate t of each vertex */
+	int tcap;
 	vec3_t mins, maxs;
 } beamcap_t;
 
@@ -1520,12 +1523,14 @@ typedef struct
 {
 	vec3_t apex, axis, color;
 	float len, r0, r1, dist;
+	float hs, he;   /* where the painted light starts and ends, as fractions of len */
 } beam_t;
 
 static struct
 {
 	GLuint marked[BEAM_MAXTEX];
 	float markcol[BEAM_MAXTEX][3];
+	float markprof[BEAM_MAXTEX][BEAM_PROF];
 	int nmarked;
 
 	beamcap_t cap[BEAM_MAXCAP];
@@ -1538,7 +1543,7 @@ static struct
 
 	qboolean tried;
 	GLuint prog, shadowtex, shadowfbo;
-	GLint u_depth, u_shadow, u_invpv, u_eye, u_prm, u_prm2, u_b0, u_b1, u_b2, u_bvp, u_rect;
+	GLint u_depth, u_shadow, u_invpv, u_eye, u_prm, u_prm2, u_b0, u_b1, u_b2, u_b3, u_bvp, u_rect;
 } B;
 
 static const char *beam_fs =
@@ -1551,6 +1556,7 @@ static const char *beam_fs =
 	"uniform vec4 b0[4];\n"   /* narrow end, length */
 	"uniform vec4 b1[4];\n"   /* axis (narrow to wide), narrow radius */
 	"uniform vec4 b2[4];\n"   /* colour, wide radius */
+	"uniform vec4 b3[4];\n"   /* light start, end (fractions of the length, from the painted texture) */
 	"uniform mat4 bvp[4];\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
@@ -1616,8 +1622,9 @@ static const char *beam_fs =
 	"			float hn = clamp(h / L, 0.0, 1.0);\n"
 	"			float R = max(mix(r0, r1, hn), 0.5);\n"
 	"			float d = 1.0 - smoothstep(0.45, 1.0, length(q - h * ax) / R);\n"
-	"			if (d <= 0.0) continue;\n"
-	"			d *= smoothstep(0.0, 0.04, hn) * pow(1.0 - hn, 1.5);\n"
+	"			float fall = (hn - b3[i].x) / max(b3[i].y - b3[i].x, 0.05);\n"
+	"			if (d <= 0.0 || fall <= 0.0 || fall >= 1.0) continue;\n"
+	"			d *= smoothstep(0.0, 0.12, fall) * pow(1.0 - fall, 1.3);\n"
 	"			if (prm.w > 0.0) d *= 1.0 + prm.w * (vnoise(p * 0.045 + vec3(eye.w * 0.11, eye.w * 0.07, -eye.w * 0.15)) * 2.0 - 1.0);\n"
 	"			if (prm2.z > 0.5)\n"
 	"			{\n"
@@ -1693,12 +1700,17 @@ GL3_Beam_IsBeam(GLuint tex)
 void
 GL3_Beam_MarkTexture(GLuint tex)
 {
-	float col[3] = {1.0f, 0.92f, 0.75f};
-	int idx;
+	float col[3] = {1.0f, 0.92f, 0.75f}, prof[BEAM_PROF];
+	int idx, r;
 
 	if (!tex)
 	{
 		return;
+	}
+
+	for (r = 0; r < BEAM_PROF; r++)
+	{
+		prof[r] = 1.0f; /* unknown: lit along the whole length */
 	}
 
 	idx = BeamTexIndex(tex);
@@ -1760,6 +1772,35 @@ GL3_Beam_MarkTexture(GLuint tex)
 					}
 				}
 
+				/* brightness by row (texture t from 0 at the first row): where the painted light is */
+				{
+					float pmax = 0;
+
+					for (r = 0; r < BEAM_PROF; r++)
+					{
+						int y0 = r * h / BEAM_PROF, y1 = Q_max((r + 1) * h / BEAM_PROF, y0 + 1), x, y;
+						double acc = 0;
+
+						for (y = y0; y < y1 && y < h; y++)
+						{
+							for (x = 0; x < w; x++)
+							{
+								const byte *q = px + ((size_t)y * w + x) * 4;
+
+								acc += (q[3] / 255.0) * ((q[0] + q[1] + q[2]) / 765.0);
+							}
+						}
+
+						prof[r] = (float)(acc / ((double)(y1 - y0) * w));
+						pmax = Q_max(pmax, prof[r]);
+					}
+
+					for (r = 0; r < BEAM_PROF; r++)
+					{
+						prof[r] = (pmax > 0) ? prof[r] / pmax : 1.0f;
+					}
+				}
+
 				free(px);
 			}
 		}
@@ -1767,7 +1808,9 @@ GL3_Beam_MarkTexture(GLuint tex)
 #endif
 
 	VectorCopy(col, B.markcol[idx]);
-	R_Printf(PRINT_DEVELOPER, "r_om_beams: texture %u is a light cone (colour %.2f %.2f %.2f)\n", tex, col[0], col[1], col[2]);
+	memcpy(B.markprof[idx], prof, sizeof(prof));
+	R_Printf(PRINT_DEVELOPER, "r_om_beams: texture %u is a light cone (colour %.2f %.2f %.2f, rows %.2f %.2f %.2f %.2f ... %.2f)\n",
+		tex, col[0], col[1], col[2], prof[0], prof[4], prof[8], prof[16], prof[BEAM_PROF - 1]);
 }
 
 void
@@ -1780,6 +1823,7 @@ GL3_Beam_ForgetTexture(GLuint tex)
 		B.nmarked--;
 		B.marked[idx] = B.marked[B.nmarked];
 		VectorCopy(B.markcol[B.nmarked], B.markcol[idx]);
+		memcpy(B.markprof[idx], B.markprof[B.nmarked], sizeof(B.markprof[0]));
 	}
 }
 
@@ -1838,7 +1882,7 @@ ClipToWorld(const float *clip, int numverts, int stride, float **dst, int *have,
 
 /* triangles of a painted cone (clip space): kept for the beam pass; true when they must not be drawn */
 qboolean
-GL3_Beam_Capture(const float *clip, int numverts, int stride, GLuint tex)
+GL3_Beam_Capture(const float *clip, const float *st, int numverts, int stride, GLuint tex)
 {
 	beamcap_t *c = NULL;
 	vec3_t mn = {1e30f, 1e30f, 1e30f}, mx = {-1e30f, -1e30f, -1e30f};
@@ -1911,6 +1955,25 @@ GL3_Beam_Capture(const float *clip, int numverts, int stride, GLuint tex)
 
 		c->v = d;
 		c->cap = nc;
+	}
+
+	if ((c->nv + have) / 3 > c->tcap)
+	{
+		int nt = c->cap / 3;
+		float *d = realloc(c->t, nt * sizeof(float));
+
+		if (!d)
+		{
+			return false;
+		}
+
+		c->t = d;
+		c->tcap = nt;
+	}
+
+	for (i = 0; i < have / 3; i++)
+	{
+		c->t[c->nv / 3 + i] = st[i * stride + 1];
 	}
 
 	memcpy(c->v + c->nv, B.tmp, have * sizeof(float));
@@ -2085,6 +2148,72 @@ FitBeam(const beamcap_t *c, beam_t *b)
 		return false;
 	}
 
+	/* where along the cone the painted texture actually shows light: t(h) by least squares over the
+	   vertices, then the texture's row brightness; the dark tip above the lamp is no light */
+	b->hs = 0.0f;
+	b->he = 1.0f;
+	{
+		int ti = BeamTexIndex(c->tex);
+		double sh = 0, st = 0, shh = 0, sht = 0, den, slope, icpt;
+
+		for (i = 0; i < n && c->t; i++)
+		{
+			double h = -hmin, t = c->t[i];
+
+			for (k = 0; k < 3; k++)
+			{
+				h += (c->v[i * 3 + k] - cen[k]) * v[k];
+			}
+
+			sh += h; st += t; shh += h * h; sht += h * t;
+		}
+
+		den = n * shh - sh * sh;
+
+		if ((ti >= 0) && c->t && (fabs(den) > 1e-9))
+		{
+			float best = 0, prof[65];
+			int s, first = -1, last = -1;
+
+			slope = (n * sht - sh * st) / den;
+			icpt = (st - slope * sh) / n;
+
+			for (s = 0; s <= 64; s++)
+			{
+				double t = icpt + slope * b->len * s / 64.0, f, x;
+				int r0i, r1i;
+
+				t -= floor(t);
+				x = t * BEAM_PROF - 0.5;
+				r0i = (int)floor(x);
+				f = x - r0i;
+				r1i = (r0i + 1 + BEAM_PROF) % BEAM_PROF;
+				r0i = (r0i + BEAM_PROF) % BEAM_PROF;
+				prof[s] = (float)(B.markprof[ti][r0i] * (1 - f) + B.markprof[ti][r1i] * f);
+				best = Q_max(best, prof[s]);
+			}
+
+			for (s = 0; s <= 64; s++)
+			{
+				if (prof[s] >= 0.2f * best)
+				{
+					if (first < 0)
+					{
+						first = s;
+					}
+
+					last = s;
+				}
+			}
+
+			if ((first >= 0) && (last > first))
+			{
+				b->hs = Q_min(first / 64.0f, 0.6f);
+				b->he = Q_max(last / 64.0f, b->hs + 0.2f);
+			}
+		}
+	}
+
 	for (k = 0; k < 3; k++)
 	{
 		b->axis[k] = (float)v[k];
@@ -2120,8 +2249,8 @@ FitBeam(const beamcap_t *c, beam_t *b)
 static void
 BeamViewProj(const beam_t *b, float *vp)
 {
-	/* the near plane lies a bit down the beam: the lamp housing around the narrow end casts nothing */
-	float view[16], proj[16], fov, t, n = Q_max(2.0f, b->len * 0.15f + 6.0f), f = b->len * 1.3f + 16.0f;
+	/* the near plane lies where the light starts, below the lamp housing, which so casts nothing */
+	float view[16], proj[16], fov, t, n = Q_max(2.0f, b->len * Q_max(b->hs, 0.1f) + 4.0f), f = b->len * 1.3f + 16.0f;
 	vec3_t fw, up = {0, 0, 1}, s, u;
 	int i, j;
 
@@ -2264,6 +2393,7 @@ BeamProgram(void)
 	B.u_b0 = glGetUniformLocation(p, "b0");
 	B.u_b1 = glGetUniformLocation(p, "b1");
 	B.u_b2 = glGetUniformLocation(p, "b2");
+	B.u_b3 = glGetUniformLocation(p, "b3");
 	B.u_bvp = glGetUniformLocation(p, "bvp");
 	B.u_rect = glGetUniformLocation(p, "rect");
 	GL3_UseProgram(p);
@@ -2320,7 +2450,7 @@ void
 GL3_Post_Beams(void)
 {
 	beam_t bl[BEAM_MAXCAP];
-	float b0[BEAM_DRAW * 4], b1[BEAM_DRAW * 4], b2[BEAM_DRAW * 4], vps[BEAM_DRAW * 16];
+	float b0[BEAM_DRAW * 4], b1[BEAM_DRAW * 4], b2[BEAM_DRAW * 4], b3[BEAM_DRAW * 4], vps[BEAM_DRAW * 16];
 	int nb = 0, i, j;
 	qboolean shadows = false;
 	float fw, fh;
@@ -2359,13 +2489,33 @@ GL3_Post_Beams(void)
 
 	nb = Q_min(nb, BEAM_DRAW);
 
+	if (r_om_beams_debug->value >= 4)
+	{
+		/* the raw cone vertices relative to the fitted narrow end: h along the axis, r off it */
+		for (i = 0; i < B.ncap; i++)
+		{
+			for (j = 0; j + 2 < B.cap[i].nv; j += 3)
+			{
+				const float *p = B.cap[i].v + j;
+				vec3_t d, q;
+				float h;
+
+				VectorSubtract(p, bl[0].apex, d);
+				h = DotProduct(d, bl[0].axis);
+				VectorMA(d, -h, bl[0].axis, q);
+				R_Printf(PRINT_ALL, "OMBEAMV %d: %.1f %.1f %.1f  h %.1f r %.1f t %.3f\n", i, p[0], p[1], p[2], h,
+					VectorLength(q), B.cap[i].t ? B.cap[i].t[j / 3] : -1.0f);
+			}
+		}
+	}
+
 	if (r_om_beams_debug->value >= 3)
 	{
 		for (i = 0; i < nb; i++)
 		{
-			R_Printf(PRINT_ALL, "OMBEAM %d/%d: lamp %.0f %.0f %.0f axis %.2f %.2f %.2f len %.0f r %.1f..%.1f dist %.0f (%d verts, %d casters)\n",
+			R_Printf(PRINT_ALL, "OMBEAM %d/%d: lamp %.0f %.0f %.0f axis %.2f %.2f %.2f len %.0f r %.1f..%.1f light %.2f..%.2f dist %.0f (%d verts, %d casters)\n",
 				i, nb, bl[i].apex[0], bl[i].apex[1], bl[i].apex[2], bl[i].axis[0], bl[i].axis[1], bl[i].axis[2],
-				bl[i].len, bl[i].r0, bl[i].r1, bl[i].dist, B.cap[i].nv / 3, B.numdyn / 9);
+				bl[i].len, bl[i].r0, bl[i].r1, bl[i].hs, bl[i].he, bl[i].dist, B.cap[i].nv / 3, B.numdyn / 9);
 		}
 	}
 
@@ -2391,6 +2541,9 @@ GL3_Post_Beams(void)
 		p1[3] = bl[i].r0;
 		VectorCopy(bl[i].color, p2);
 		p2[3] = bl[i].r1;
+		b3[i * 4] = bl[i].hs;
+		b3[i * 4 + 1] = bl[i].he;
+		b3[i * 4 + 2] = b3[i * 4 + 3] = 0;
 	}
 
 	/* shadow maps: static world + this view's Ghoul casters, seen from each beam's lamp. The array exists
@@ -2460,6 +2613,7 @@ GL3_Post_Beams(void)
 	glUniform4fv(B.u_b0, nb, b0);
 	glUniform4fv(B.u_b1, nb, b1);
 	glUniform4fv(B.u_b2, nb, b2);
+	glUniform4fv(B.u_b3, nb, b3);
 	glUniformMatrix4fv(B.u_bvp, nb, GL_FALSE, vps);
 
 	GL3_SelectTMU(GL_TEXTURE7);
@@ -2507,6 +2661,7 @@ BeamShutdown(void)
 	for (i = 0; i < BEAM_MAXCAP; i++)
 	{
 		free(B.cap[i].v);
+		free(B.cap[i].t);
 	}
 
 	free(B.dyn);

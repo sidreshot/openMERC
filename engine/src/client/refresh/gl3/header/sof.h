@@ -371,7 +371,7 @@ qboolean GL3_CSM_DrawDepth(const float *vp, const float *dyn, int numdynfloats, 
 void GL3_Beam_MarkTexture(GLuint tex);
 void GL3_Beam_ForgetTexture(GLuint tex);
 qboolean GL3_Beam_IsBeam(GLuint tex);
-qboolean GL3_Beam_Capture(const float *clip, int numverts, int stride, GLuint tex);
+qboolean GL3_Beam_Capture(const float *clip, const float *st, int numverts, int stride, GLuint tex);
 void GL3_Beam_AddCasterTris(const float *clip, int numverts, int stride);
 void GL3_Post_Beams(void);
 

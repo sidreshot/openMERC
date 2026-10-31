@@ -940,7 +940,7 @@ Flush(void)
 
 	/* GFX-modern light beams: a painted light cone is taken over by the volumetric beam pass */
 	if ((mode == GL_TRIANGLES) && GL3_Beam_IsBeam(E.boundtex) &&
-		GL3_Beam_Capture(out[0].pos, n, sizeof(emuvtx_t) / sizeof(float), E.boundtex))
+		GL3_Beam_Capture(out[0].pos, out[0].st, n, sizeof(emuvtx_t) / sizeof(float), E.boundtex))
 	{
 		return;
 	}
