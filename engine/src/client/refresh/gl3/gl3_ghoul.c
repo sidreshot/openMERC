@@ -141,7 +141,7 @@ static cvar_t *ghl_max_lights, *ghl_fast_lights, *ghl_light_multiply, *ghl_gllig
 static cvar_t *ghl_gllight_directional, *ghl_gllight_attenuation, *ghl_gllight_max_lights;
 static cvar_t *ghl_shadows, *ghl_player_shadow, *ghl_shadow_darkness, *ghl_shadow_dist, *ghl_obj_fog;
 static cvar_t *ghl_no_render, *ghl_wireframe, *ghl_no_cull, *ghl_pre_cull, *ghl_no_texture_stack;
-static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess_weapon, *r_om_tess_models, *r_om_ppl_models;
+static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess, *r_om_tess_weapon, *r_om_tess_models, *r_om_ppl_models;
 
 static void
 GetCvars(void)
@@ -172,11 +172,13 @@ GetCvars(void)
 	r_om_ghlemu = ri.Cvar_Get("r_om_ghlemu", "0", 0);
 	/* OpenMerc only: print the render-parameter block of every Ghoul entity once */
 	r_om_ghldebug = ri.Cvar_Get("r_om_ghldebug", "0", 0);
-	/* GFX-modern: curved PN tessellation, triangles split into level^2 (0/1 off, max 4; characters max 3),
-	   r_om_tess_strength of the way to the PN surface. The stock view weapons are faceted with split
-	   normals and gain nothing (off); characters get rounder helmets, shoulders and limbs */
+	/* GFX-modern: curved PN tessellation. r_om_tess 0..10 (fractions allowed) is how strongly the surface
+	   is curved: 0 off, 10 the full PN surface (rounder but "inflated"), 5 halfway. r_om_tess_models is
+	   the subdivision of the characters (triangles split into level^2, 2..3), r_om_tess_weapon that of
+	   the view weapon (0 off: the stock weapons are faceted with split normals and gain nothing) */
+	r_om_tess = ri.Cvar_Get("r_om_tess", "5", CVAR_ARCHIVE);
 	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "0", CVAR_ARCHIVE);
-	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "2", CVAR_ARCHIVE);
+	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "3", CVAR_ARCHIVE);
 	/* GFX-modern: the GL lighting of Ghoul models (ghl_light_method 3) per pixel instead of per vertex */
 	r_om_ppl_models = ri.Cvar_Get("r_om_ppl_models", "1", CVAR_ARCHIVE);
 }
@@ -940,8 +942,13 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack); /* shadows in light beams */
 		/* characters (the models that cast a ground shadow) only: vehicles and props carry flat decals
 		   that part from a curved body */
-		GL3_GhoulEmu_SetTess(weapon ? (int)r_om_tess_weapon->value :
-			((flags & SOF_RF_CASTSHADOW) ? (int)Q_min(r_om_tess_models->value, 3) : 0));
+		{
+			float k = Q_clamp(r_om_tess->value, 0.0f, 10.0f) / 10.0f;
+			int level = (k <= 0) ? 0 : weapon ? (int)r_om_tess_weapon->value :
+				((flags & SOF_RF_CASTSHADOW) ? (int)Q_clamp(r_om_tess_models->value, 0.0f, 3.0f) : 0);
+
+			GL3_GhoulEmu_SetTess(level, k);
+		}
 		GL3_GhoulEmu_SetPPL(r_om_ppl_models->value != 0);
 	}
 
@@ -952,7 +959,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		GL3_GhoulEmu_SetEntityGlow(0.0f);
 		GL3_GhoulEmu_SetCsm(false, false);
 		GL3_GhoulEmu_SetCaster(false);
-		GL3_GhoulEmu_SetTess(0);
+		GL3_GhoulEmu_SetTess(0, 0.0f);
 		GL3_GhoulEmu_SetPPL(false);
 	}
 

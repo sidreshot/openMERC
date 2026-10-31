@@ -129,7 +129,7 @@ static struct
 	/* GFX-modern tessellation: subdivision level of the entity being drawn (curved PN triangles), < 2 off;
 	   the depth function as set, to recognise a second pass over the same triangles */
 	int tess;
-	float tessk;    /* how far toward the PN surface (r_om_tess_strength) */
+	float tessk;    /* how far toward the PN surface (r_om_tess / 10) */
 	qboolean ppl;   /* per-pixel lighting of the entity being drawn (r_om_ppl_models) */
 	GLenum depthfunc;
 	emuvtx_t *tessbuf;
@@ -138,7 +138,6 @@ static struct
 
 static ghlff_t emuff;
 static cvar_t *r_om_tessdebug; /* print what the weapon tessellation does (test aid) */
-static cvar_t *r_om_tess_strength;
 static void *emutable[52];
 
 /* ------------------------------------------------------------------
@@ -2536,18 +2535,18 @@ GL3_GhoulEmu_SetPPL(qboolean on)
 	E.ppl = on;
 }
 
-/* GFX-modern: PN tessellation level of the entity being drawn (0 or 1 off) */
+/* GFX-modern: PN tessellation of the entity being drawn - subdivision level (0 or 1 off) and how far the
+   new vertices go from the flat triangle toward the PN surface (0..1) */
 void
-GL3_GhoulEmu_SetTess(int level)
+GL3_GhoulEmu_SetTess(int level, float strength)
 {
 	if (!r_om_tessdebug)
 	{
 		r_om_tessdebug = ri.Cvar_Get("r_om_tessdebug", "0", 0);
-		r_om_tess_strength = ri.Cvar_Get("r_om_tess_strength", "0.5", CVAR_ARCHIVE);
 	}
 
 	E.tess = (level > 4) ? 4 : level;
-	E.tessk = Q_clamp(r_om_tess_strength->value, 0.0f, 1.0f);
+	E.tessk = Q_clamp(strength, 0.0f, 1.0f);
 }
 
 /* GFX-modern: whether the entity being drawn casts a shadow into light beams (independent of the sun) */
