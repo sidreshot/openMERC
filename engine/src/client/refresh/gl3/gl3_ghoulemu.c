@@ -41,6 +41,9 @@ typedef struct
 	float rgba[4];
 	float st[2];
 	float fog;      /* 1 = no fog */
+	/* GFX-modern tessellation (r_om_tess_weapon): eye-space position and unit normal, not uploaded */
+	float eye[3];
+	float en[3];
 } emuvtx_t;
 
 typedef struct
@@ -122,9 +125,15 @@ static struct
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
+
+	/* GFX-modern tessellation: subdivision level of the entity being drawn (curved PN triangles), < 2 off */
+	int tess;
+	emuvtx_t *tessbuf;
+	int maxtess;
 } E;
 
 static ghlff_t emuff;
+static cvar_t *r_om_tessdebug; /* print what the weapon tessellation does (test aid) */
 static void *emutable[52];
 
 /* ------------------------------------------------------------------
@@ -517,6 +526,20 @@ Emit(float x, float y, float z)
 	{
 		v->fog = 1;
 	}
+
+	if (E.tess > 1)
+	{
+		float n[3], l, w = (eye[3] != 0) ? eye[3] : 1;
+
+		EyeNormal(E.normal, n);
+		l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		v->eye[0] = eye[0] / w;
+		v->eye[1] = eye[1] / w;
+		v->eye[2] = eye[2] / w;
+		v->en[0] = (l > 0) ? n[0] / l : 0;
+		v->en[1] = (l > 0) ? n[1] / l : 0;
+		v->en[2] = (l > 0) ? n[2] / l : 0;
+	}
 }
 
 /* ------------------------------------------------------------------
@@ -843,6 +866,111 @@ AddTri(emuvtx_t *out, int *n, int a, int b, int c, int provoking)
 	*n += 3;
 }
 
+/*
+ * GFX-modern tessellation: each triangle becomes tess^2 triangles on the curved PN triangle (Vlachos et al.)
+ * of its eye-space corners and normals; colour, texture coordinates and fog are interpolated linearly
+ * (the lighting stays per original vertex). An edge whose end normals stand perpendicular to it - a hard
+ * edge with split normals, a flat face - stays straight, so neighbours keep meeting without cracks.
+ */
+static emuvtx_t *
+Tessellate(emuvtx_t *in, int *n)
+{
+	int L = E.tess, per = L * L * 3, t, nt = *n / 3, o = 0;
+
+	if (E.maxtess < nt * per)
+	{
+		emuvtx_t *p = realloc(E.tessbuf, nt * per * sizeof(*p));
+
+		if (!p)
+		{
+			return in;
+		}
+
+		E.tessbuf = p;
+		E.maxtess = nt * per;
+	}
+
+	for (t = 0; t < nt; t++)
+	{
+		const emuvtx_t *a = &in[t * 3], *b = &in[t * 3 + 1], *c = &in[t * 3 + 2];
+		const float *P1 = a->eye, *P2 = b->eye, *P3 = c->eye;
+		const float *N1 = a->en, *N2 = b->en, *N3 = c->en;
+		float cp[10][3], Ev[3], V[3];
+		int i, j, k;
+
+#define PN_W(Pi, Pj, Ni) (((Pj)[0] - (Pi)[0]) * (Ni)[0] + ((Pj)[1] - (Pi)[1]) * (Ni)[1] + ((Pj)[2] - (Pi)[2]) * (Ni)[2])
+		/* control points: 0 b210, 1 b120, 2 b021, 3 b012, 4 b102, 5 b201, 6 b111 */
+		for (k = 0; k < 3; k++)
+		{
+			cp[0][k] = (2 * P1[k] + P2[k] - PN_W(P1, P2, N1) * N1[k]) / 3;
+			cp[1][k] = (2 * P2[k] + P1[k] - PN_W(P2, P1, N2) * N2[k]) / 3;
+			cp[2][k] = (2 * P2[k] + P3[k] - PN_W(P2, P3, N2) * N2[k]) / 3;
+			cp[3][k] = (2 * P3[k] + P2[k] - PN_W(P3, P2, N3) * N3[k]) / 3;
+			cp[4][k] = (2 * P3[k] + P1[k] - PN_W(P3, P1, N3) * N3[k]) / 3;
+			cp[5][k] = (2 * P1[k] + P3[k] - PN_W(P1, P3, N1) * N1[k]) / 3;
+			Ev[k] = (cp[0][k] + cp[1][k] + cp[2][k] + cp[3][k] + cp[4][k] + cp[5][k]) / 6;
+			V[k] = (P1[k] + P2[k] + P3[k]) / 3;
+			cp[6][k] = Ev[k] + (Ev[k] - V[k]) / 2;
+		}
+#undef PN_W
+
+		for (i = 0; i < L; i++)
+		{
+			for (j = 0; i + j < L; j++)
+			{
+				/* (i, j): u = i / L weights corner 1, v = j / L corner 2; same winding as the original */
+				int tri[2][3][2] = {{{i, j}, {i + 1, j}, {i, j + 1}}, {{i + 1, j}, {i + 1, j + 1}, {i, j + 1}}};
+				int q, nq = (i + j < L - 1) ? 2 : 1;
+
+				for (q = 0; q < nq; q++)
+				{
+					int m;
+
+					for (m = 0; m < 3; m++)
+					{
+						emuvtx_t *v = &E.tessbuf[o++];
+						float u = (float)tri[q][m][0] / L, w2 = (float)tri[q][m][1] / L, w = 1.0f - u - w2;
+						float p[4], *proj = E.proj[E.projdepth];
+						int r;
+
+						for (r = 0; r < 3; r++)
+						{
+							p[r] = P1[r] * u * u * u + P2[r] * w2 * w2 * w2 + P3[r] * w * w * w +
+								3 * (cp[0][r] * u * u * w2 + cp[1][r] * u * w2 * w2 + cp[5][r] * u * u * w +
+								cp[2][r] * w2 * w2 * w + cp[4][r] * u * w * w + cp[3][r] * w2 * w * w) +
+								6 * cp[6][r] * u * w2 * w;
+						}
+
+						p[3] = 1;
+						MatVec(proj, p, v->pos);
+
+						for (r = 0; r < 4; r++)
+						{
+							v->rgba[r] = a->rgba[r] * u + b->rgba[r] * w2 + c->rgba[r] * w;
+						}
+
+						v->st[0] = a->st[0] * u + b->st[0] * w2 + c->st[0] * w;
+						v->st[1] = a->st[1] * u + b->st[1] * w2 + c->st[1] * w;
+						v->fog = a->fog * u + b->fog * w2 + c->fog * w;
+						memcpy(v->eye, p, sizeof(v->eye));
+						memcpy(v->en, a->en, sizeof(v->en));
+					}
+				}
+			}
+		}
+	}
+
+	*n = o;
+
+	if (r_om_tessdebug && r_om_tessdebug->value)
+	{
+		R_Printf(PRINT_ALL, "OMTESS level %d: %d -> %d triangles, first corner eye %.1f %.1f %.1f n %.2f %.2f %.2f\n", L, nt,
+			o / 3, in[0].eye[0], in[0].eye[1], in[0].eye[2], in[0].en[0], in[0].en[1], in[0].en[2]);
+	}
+
+	return E.tessbuf;
+}
+
 static void
 Flush(void)
 {
@@ -958,6 +1086,12 @@ Flush(void)
 	if (!n)
 	{
 		return;
+	}
+
+	/* GFX-modern tessellation of the entity being drawn (the view weapon) */
+	if ((mode == GL_TRIANGLES) && (E.tess > 1))
+	{
+		out = Tessellate(out, &n);
 	}
 
 	/* GFX-modern light beams: a painted light cone is taken over by the volumetric beam pass */
@@ -2241,6 +2375,18 @@ GL3_GhoulEmu_SetCsm(qboolean capture, qboolean replace)
 {
 	E.csmcapture = capture;
 	E.csmrepl = replace;
+}
+
+/* GFX-modern: PN tessellation level of the entity being drawn (0 or 1 off) */
+void
+GL3_GhoulEmu_SetTess(int level)
+{
+	if (!r_om_tessdebug)
+	{
+		r_om_tessdebug = ri.Cvar_Get("r_om_tessdebug", "0", 0);
+	}
+
+	E.tess = (level > 4) ? 4 : level;
 }
 
 /* GFX-modern: whether the entity being drawn casts a shadow into light beams (independent of the sun) */
