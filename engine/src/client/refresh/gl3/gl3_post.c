@@ -1508,7 +1508,7 @@ VolFogShutdown(void)
 #endif
 
 static cvar_t *r_om_beams, *r_om_beams_intensity, *r_om_beams_shadows, *r_om_beams_noise, *r_om_beams_debug;
-static cvar_t *r_om_beams_motes;
+static cvar_t *r_om_beams_motes, *r_om_beams_groundshadow;
 
 #define BEAM_MOTES 220      /* dust motes per beam at r_om_beams_motes 1 */
 
@@ -1552,7 +1552,62 @@ static struct
 	qboolean mtried;
 	GLuint mprog;
 	GLint m_pv, m_eye, m_prm, m_b0, m_b1, m_b2, m_b3, m_bvp, m_layer, m_shadow;
+
+	/* character shadows on lit surfaces */
+	qboolean stried;
+	GLuint sprog;
+	GLint s_depth, s_shadow, s_invpv, s_prm, s_b0, s_b1, s_b2, s_b3, s_bvp, s_rect;
 } B;
+
+/* character shadows in a lamp's pool: a surface point inside a beam that the static world leaves lit (the
+   lightmap holds the lamp there) but a Ghoul caster blocks loses part of its light; multiplied into the
+   scene before the beams are added. Layers 0..3 hold world + casters, layers 4..7 the world alone. */
+static const char *beamshade_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform sampler2DArrayShadow beamshadow;\n"
+	"uniform mat4 invpv;\n"
+	"uniform vec4 prm;\n"     /* depth range min, max; strength; beams */
+	"uniform vec4 b0[4];\n"
+	"uniform vec4 b1[4];\n"
+	"uniform vec4 b2[4];\n"
+	"uniform vec4 b3[4];\n"
+	"uniform mat4 bvp[4];\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmissive;\n"
+	"void main()\n"
+	"{\n"
+	"	float z = texture(depthtex, uv).r;\n"
+	"	float nz = (z - prm.x) / (prm.y - prm.x) * 2.0 - 1.0;\n"
+	"	vec4 w = invpv * vec4(vuv * 2.0 - 1.0, nz, 1.0);\n"
+	"	vec3 p = w.xyz / w.w;\n"
+	"	float f = 1.0;\n"
+	"	int n = int(prm.w + 0.5);\n"
+	"	for (int i = 0; i < 4; i++)\n"
+	"	{\n"
+	"		if (i >= n) break;\n"
+	"		vec3 q = p - b0[i].xyz;\n"
+	"		float h = dot(q, b1[i].xyz);\n"
+	"		float hn = h / b0[i].w;\n"
+	/* the pool lies on the ground at and a little beyond the painted cone's wide end */
+	"		if (hn < b3[i].x || hn > 1.3) continue;\n"
+	"		float R = max(mix(b1[i].w, b2[i].w, hn), 0.5);\n"
+	"		float rad = 1.0 - smoothstep(0.6, 1.0, length(q - h * b1[i].xyz) / R);\n"
+	"		if (rad <= 0.0) continue;\n"
+	"		vec4 sp = bvp[i] * vec4(p, 1.0);\n"
+	"		vec3 sc = sp.xyz / sp.w * 0.5 + 0.5;\n"
+	"		if (any(lessThan(sc, vec3(0.0))) || any(greaterThan(sc, vec3(1.0)))) continue;\n"
+	"		float lall = texture(beamshadow, vec4(sc.xy, float(i), sc.z - 0.004));\n"
+	"		float lworld = texture(beamshadow, vec4(sc.xy, float(i + 4), sc.z - 0.004));\n"
+	/* only points on the static surface the lamp sees (the lightmap holds the pool there); a model in
+	   front of it (the character itself, the lamp housing) lies nearer than that surface and is left */
+	"		float onworld = 1.0 - texture(beamshadow, vec4(sc.xy, float(i + 4), sc.z + 0.008));\n"
+	"		f *= 1.0 - prm.z * lworld * onworld * (1.0 - lall) * rad * smoothstep(b3[i].x, b3[i].x + 0.1, hn);\n"
+	"	}\n"
+	"	outColor = vec4(f, f, f, 1.0);\n"
+	"	outEmissive = vec4(1.0);\n"
+	"}\n";
 
 /* dust motes: points placed and moved from their index and the clock alone, lit by the beam profile and
    its shadow map, depth-tested against the scene */
@@ -1711,6 +1766,8 @@ BeamCvars(void)
 		r_om_beams_noise = ri.Cvar_Get("r_om_beams_noise", "0.35", CVAR_ARCHIVE);
 		r_om_beams_debug = ri.Cvar_Get("r_om_beams_debug", "0", 0); /* 1: also draw the painted cone, 2: only it */
 		r_om_beams_motes = ri.Cvar_Get("r_om_beams_motes", "1", CVAR_ARCHIVE); /* dust motes, 0 off */
+		/* how much a character's shadow takes from the lamp's pool on the ground, 0 off */
+		r_om_beams_groundshadow = ri.Cvar_Get("r_om_beams_groundshadow", "0.55", CVAR_ARCHIVE);
 	}
 }
 
@@ -2522,6 +2579,65 @@ MoteProgram(void)
 }
 
 static qboolean
+ShadeProgram(void)
+{
+	GLuint v, f, p;
+	GLint ok = 0;
+
+	if (B.stried)
+	{
+		return B.sprog != 0;
+	}
+
+	B.stried = true;
+	v = CompilePost(GL_VERTEX_SHADER, post_vs);
+	f = CompilePost(GL_FRAGMENT_SHADER, beamshade_fs);
+
+	if (!v || !f)
+	{
+		if (v) glDeleteShader(v);
+		if (f) glDeleteShader(f);
+		R_Printf(PRINT_ALL, "r_om_beams: ground shadow shader failed\n");
+		return false;
+	}
+
+	p = glCreateProgram();
+	glAttachShader(p, v);
+	glAttachShader(p, f);
+	GL3_Post_BindOutputs(p);
+	glLinkProgram(p);
+	glDeleteShader(v);
+	glDeleteShader(f);
+	glGetProgramiv(p, GL_LINK_STATUS, &ok);
+
+	if (!ok)
+	{
+		char log[2048];
+
+		glGetProgramInfoLog(p, sizeof(log), NULL, log);
+		R_Printf(PRINT_ALL, "r_om_beams: ground shadow link failed: %s\n", log);
+		glDeleteProgram(p);
+		return false;
+	}
+
+	B.sprog = p;
+	B.s_depth = glGetUniformLocation(p, "depthtex");
+	B.s_shadow = glGetUniformLocation(p, "beamshadow");
+	B.s_invpv = glGetUniformLocation(p, "invpv");
+	B.s_prm = glGetUniformLocation(p, "prm");
+	B.s_b0 = glGetUniformLocation(p, "b0");
+	B.s_b1 = glGetUniformLocation(p, "b1");
+	B.s_b2 = glGetUniformLocation(p, "b2");
+	B.s_b3 = glGetUniformLocation(p, "b3");
+	B.s_bvp = glGetUniformLocation(p, "bvp");
+	B.s_rect = glGetUniformLocation(p, "rect");
+	GL3_UseProgram(p);
+	glUniform1i(B.s_depth, 7);
+	glUniform1i(B.s_shadow, BEAM_UNIT);
+	return true;
+}
+
+static qboolean
 BeamShadowTargets(void)
 {
 	GLenum st, none = GL_NONE;
@@ -2534,8 +2650,9 @@ BeamShadowTargets(void)
 	glGenTextures(1, &B.shadowtex);
 	GL3_SelectTMU(GL_TEXTURE0 + BEAM_UNIT);
 	glBindTexture(GL_TEXTURE_2D_ARRAY, B.shadowtex);
-	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, BEAM_SHADOW, BEAM_SHADOW, BEAM_DRAW, 0, GL_DEPTH_COMPONENT,
-		GL_UNSIGNED_INT, NULL);
+	/* layers 0..3: world + Ghoul casters, 4..7: the world alone (character shadows on the ground) */
+	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, BEAM_SHADOW, BEAM_SHADOW, 2 * BEAM_DRAW, 0,
+		GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -2706,6 +2823,13 @@ GL3_Post_Beams(void)
 			{
 				shadows = false;
 			}
+
+			if (r_om_beams_groundshadow->value > 0)
+			{
+				glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, BEAM_DRAW + i);
+				glClearBufferfv(GL_DEPTH, 0, &one);
+				GL3_CSM_DrawDepth(vps + i * 16, NULL, 0, true);
+			}
 		}
 
 		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
@@ -2750,6 +2874,24 @@ GL3_Post_Beams(void)
 	glDepthMask(GL_FALSE);
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
+
+	/* the characters' shadows in the lamps' pools first (multiplied), then the light of the beams */
+	if (shadows && (r_om_beams_groundshadow->value > 0) && ShadeProgram())
+	{
+		GL3_UseProgram(B.sprog);
+		glUniform4f(B.s_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniformMatrix4fv(B.s_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
+		glUniform4f(B.s_prm, gl3depthmin, gl3depthmax, Q_clamp(r_om_beams_groundshadow->value, 0.0f, 1.0f), (float)nb);
+		glUniform4fv(B.s_b0, nb, b0);
+		glUniform4fv(B.s_b1, nb, b1);
+		glUniform4fv(B.s_b2, nb, b2);
+		glUniform4fv(B.s_b3, nb, b3);
+		glUniformMatrix4fv(B.s_bvp, nb, GL_FALSE, vps);
+		glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+		DrawQuad();
+		GL3_UseProgram(B.prog);
+	}
+
 	glBlendFunc(GL_ONE, GL_ONE);
 	DrawQuad();
 
@@ -2815,6 +2957,16 @@ BeamShutdown(void)
 		}
 
 		glDeleteProgram(B.mprog);
+	}
+
+	if (B.sprog)
+	{
+		if (gl3state.currentShaderProgram == B.sprog)
+		{
+			gl3state.currentShaderProgram = 0;
+		}
+
+		glDeleteProgram(B.sprog);
 	}
 
 	if (B.shadowfbo) glDeleteFramebuffers(1, &B.shadowfbo);
