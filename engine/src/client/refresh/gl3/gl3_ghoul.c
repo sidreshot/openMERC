@@ -173,10 +173,11 @@ GetCvars(void)
 	/* OpenMerc only: print the render-parameter block of every Ghoul entity once */
 	r_om_ghldebug = ri.Cvar_Get("r_om_ghldebug", "0", 0);
 	/* GFX-modern: curved PN tessellation. r_om_tess 0..10 (fractions allowed) is how strongly the surface
-	   is curved: 0 off, 10 the full PN surface (rounder but "inflated"), 5 halfway. r_om_tess_models is
+	   is curved: 0 off, 10 the full PN surface (rounder but "inflated"), 8 by default (chosen by eye in
+	   game: round characters, no visible inflation, no slowdown). r_om_tess_models is
 	   the subdivision of the characters (triangles split into level^2, 2..3), r_om_tess_weapon that of
 	   the view weapon (0 off: the stock weapons are faceted with split normals and gain nothing) */
-	r_om_tess = ri.Cvar_Get("r_om_tess", "5", CVAR_ARCHIVE);
+	r_om_tess = ri.Cvar_Get("r_om_tess", "8", CVAR_ARCHIVE);
 	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "0", CVAR_ARCHIVE);
 	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "3", CVAR_ARCHIVE);
 	/* GFX-modern: the GL lighting of Ghoul models (ghl_light_method 3) per pixel instead of per vertex */
