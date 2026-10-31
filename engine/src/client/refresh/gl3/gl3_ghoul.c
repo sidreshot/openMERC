@@ -141,7 +141,7 @@ static cvar_t *ghl_max_lights, *ghl_fast_lights, *ghl_light_multiply, *ghl_gllig
 static cvar_t *ghl_gllight_directional, *ghl_gllight_attenuation, *ghl_gllight_max_lights;
 static cvar_t *ghl_shadows, *ghl_player_shadow, *ghl_shadow_darkness, *ghl_shadow_dist, *ghl_obj_fog;
 static cvar_t *ghl_no_render, *ghl_wireframe, *ghl_no_cull, *ghl_pre_cull, *ghl_no_texture_stack;
-static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess_weapon;
+static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess_weapon, *r_om_tess_models;
 
 static void
 GetCvars(void)
@@ -172,8 +172,12 @@ GetCvars(void)
 	r_om_ghlemu = ri.Cvar_Get("r_om_ghlemu", "0", 0);
 	/* OpenMerc only: print the render-parameter block of every Ghoul entity once */
 	r_om_ghldebug = ri.Cvar_Get("r_om_ghldebug", "0", 0);
-	/* GFX-modern: curved PN tessellation of the view weapon, triangles split into level^2 (0/1 off, max 4) */
-	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "3", CVAR_ARCHIVE);
+	/* GFX-modern: curved PN tessellation, triangles split into level^2 (0/1 off, max 4; models max 3).
+	   Off by default: the stock view weapons are faceted with split normals and gain nothing; characters
+	   change little at play distances, and decals lying flat on a body (the police car's lights) part
+	   from it once both are curved */
+	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "0", CVAR_ARCHIVE);
+	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "0", CVAR_ARCHIVE);
 }
 
 /* ⌊v + 0.5⌋ clamped to lo..hi (SPEC-411 "rounded") */
@@ -933,7 +937,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 		GL3_GhoulEmu_SetCsm(GL3_CSM_Active() && !weapon && !viewer && !hack, GL3_CSM_ReplaceGhoul() && !viewer && !weapon);
 		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack); /* shadows in light beams */
-		GL3_GhoulEmu_SetTess(weapon ? (int)r_om_tess_weapon->value : 0);
+		GL3_GhoulEmu_SetTess(weapon ? (int)r_om_tess_weapon->value : (int)Q_min(r_om_tess_models->value, 3));
 	}
 
 	Ghl_Draw(inst, &P);

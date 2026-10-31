@@ -126,8 +126,10 @@ static struct
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
 
-	/* GFX-modern tessellation: subdivision level of the entity being drawn (curved PN triangles), < 2 off */
+	/* GFX-modern tessellation: subdivision level of the entity being drawn (curved PN triangles), < 2 off;
+	   the depth function as set, to recognise a second pass over the same triangles */
 	int tess;
+	GLenum depthfunc;
 	emuvtx_t *tessbuf;
 	int maxtess;
 } E;
@@ -1088,8 +1090,11 @@ Flush(void)
 		return;
 	}
 
-	/* GFX-modern tessellation of the entity being drawn (the view weapon) */
-	if ((mode == GL_TRIANGLES) && (E.tess > 1))
+	/* GFX-modern tessellation of the entity being drawn: every pass over its surfaces gets the same curved
+	   triangles (a decal or glass pass drawn over a tessellated body must not z-fight with it), but not the
+	   ground shadow quad nor a painted light cone */
+	if ((mode == GL_TRIANGLES) && (E.tess > 1) &&
+		!(E.blendon && (E.bsrc == GL_ZERO) && (E.bdst == GL_ONE_MINUS_SRC_ALPHA)) && !GL3_Beam_IsBeam(E.boundtex))
 	{
 		out = Tessellate(out, &n);
 	}
@@ -1394,6 +1399,7 @@ Emu_CullFace(GLenum mode)
 static void GHLAPI
 Emu_DepthFunc(GLenum f)
 {
+	E.depthfunc = f;
 	glDepthFunc(f);
 }
 
