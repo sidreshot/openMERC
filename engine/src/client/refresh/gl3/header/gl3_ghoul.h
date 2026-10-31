@@ -179,6 +179,7 @@ void GL3_GhoulEmu_SetEntityGlow(float glow);
 void GL3_GhoulEmu_SetCsm(qboolean capture, qboolean replace);
 void GL3_GhoulEmu_SetCaster(qboolean casts);
 void GL3_GhoulEmu_SetTess(int level);
+void GL3_GhoulEmu_SetPPL(qboolean on);
 void GL3_GhoulEmu_End(void);
 void GL3_GhoulEmu_Shutdown(void);
 

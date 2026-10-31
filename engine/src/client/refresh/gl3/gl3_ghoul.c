@@ -141,7 +141,7 @@ static cvar_t *ghl_max_lights, *ghl_fast_lights, *ghl_light_multiply, *ghl_gllig
 static cvar_t *ghl_gllight_directional, *ghl_gllight_attenuation, *ghl_gllight_max_lights;
 static cvar_t *ghl_shadows, *ghl_player_shadow, *ghl_shadow_darkness, *ghl_shadow_dist, *ghl_obj_fog;
 static cvar_t *ghl_no_render, *ghl_wireframe, *ghl_no_cull, *ghl_pre_cull, *ghl_no_texture_stack;
-static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess_weapon, *r_om_tess_models;
+static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess_weapon, *r_om_tess_models, *r_om_ppl_models;
 
 static void
 GetCvars(void)
@@ -177,6 +177,8 @@ GetCvars(void)
 	   normals and gain nothing (off); characters get rounder helmets, shoulders and limbs */
 	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "0", CVAR_ARCHIVE);
 	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "2", CVAR_ARCHIVE);
+	/* GFX-modern: the GL lighting of Ghoul models (ghl_light_method 3) per pixel instead of per vertex */
+	r_om_ppl_models = ri.Cvar_Get("r_om_ppl_models", "1", CVAR_ARCHIVE);
 }
 
 /* ⌊v + 0.5⌋ clamped to lo..hi (SPEC-411 "rounded") */
@@ -940,6 +942,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		   that part from a curved body */
 		GL3_GhoulEmu_SetTess(weapon ? (int)r_om_tess_weapon->value :
 			((flags & SOF_RF_CASTSHADOW) ? (int)Q_min(r_om_tess_models->value, 3) : 0));
+		GL3_GhoulEmu_SetPPL(r_om_ppl_models->value != 0);
 	}
 
 	Ghl_Draw(inst, &P);
@@ -950,6 +953,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		GL3_GhoulEmu_SetCsm(false, false);
 		GL3_GhoulEmu_SetCaster(false);
 		GL3_GhoulEmu_SetTess(0);
+		GL3_GhoulEmu_SetPPL(false);
 	}
 
 	/* step 12: restore */

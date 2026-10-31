@@ -121,7 +121,7 @@ static struct
 	/* GFX-modern sun shadows (gl3_csm.c): the depth mask as set, whether the entity casts and whether its
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
-	GLint u_invpv, u_csmrepl, u_beamn, u_beam;
+	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM;
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
@@ -130,6 +130,7 @@ static struct
 	   the depth function as set, to recognise a second pass over the same triangles */
 	int tess;
 	float tessk;    /* how far toward the PN surface (r_om_tess_strength) */
+	qboolean ppl;   /* per-pixel lighting of the entity being drawn (r_om_ppl_models) */
 	GLenum depthfunc;
 	emuvtx_t *tessbuf;
 	int maxtess;
@@ -445,7 +446,17 @@ Emit(float x, float y, float z)
 	MatVec(E.mv[E.mvdepth], obj, eye);
 	MatVec(E.proj[E.projdepth], eye, v->pos);
 
-	if (E.lighting)
+	if (E.lighting && E.ppl)
+	{
+		/* lit per fragment: the vertex carries the colour-material colour only */
+		int k;
+
+		for (k = 0; k < 4; k++)
+		{
+			v->rgba[k] = Clamp01(E.color[k]);
+		}
+	}
+	else if (E.lighting)
 	{
 		Lighting(eye, v->rgba);
 	}
@@ -531,7 +542,7 @@ Emit(float x, float y, float z)
 		v->fog = 1;
 	}
 
-	if (E.tess > 1)
+	if ((E.tess > 1) || (E.lighting && E.ppl))
 	{
 		float n[3], l, w = (eye[3] != 0) ? eye[3] : 1;
 
@@ -555,16 +566,22 @@ static const char *emu_vs =
 	"in vec2 texCoord;\n"
 	"in vec4 vertColor;\n"
 	"in float fogFactor;\n"
+	"in vec3 eyeNormal;\n"   /* GFX-modern per-pixel lighting: eye-space normal and position */
+	"in vec3 eyePos;\n"
 	"out vec4 vColor;\n"
 	"out vec2 vTex;\n"
 	"out float vFog;\n"
 	"out vec4 vPos;\n"
+	"out vec3 vEN;\n"
+	"out vec3 vEP;\n"
 	"void main()\n"
 	"{\n"
 	"	vPos = position;\n"
 	"	vColor = vertColor;\n"
 	"	vTex = texCoord;\n"
 	"	vFog = fogFactor;\n"
+	"	vEN = eyeNormal;\n"
+	"	vEP = eyePos;\n"
 	"	gl_Position = position;\n"
 	"}\n";
 
@@ -583,6 +600,60 @@ static const char *emu_fs =
 	"in vec4 vPos;\n"
 	"uniform mat4 omInvPV;\n"
 	"uniform int omCsmRepl;\n"
+	/* GFX-modern per-pixel lighting (r_om_ppl_models): the GL 1.1 lighting of Lighting() in gl3_ghoulemu.c
+	   per fragment, on the interpolated, renormalised normal. Per light 6 vec4: eye position; ambient + on;
+	   diffuse; specular; spot direction + cos(cutoff) (-2 = no spot); attenuation k0 k1 k2 + spot exponent.
+	   Material: ambient, diffuse, specular, emission, (shininess, colour material, local viewer), model ambient */
+	"in vec3 vEN;\n"
+	"in vec3 vEP;\n"
+	"uniform int omPPL;\n"
+	"uniform vec4 omL[48];\n"
+	"uniform vec4 omM[6];\n"
+	"vec4 omLit(vec4 vc)\n"
+	"{\n"
+	"	vec3 n = normalize(vEN);\n"
+	"	bool cm = omM[4].y > 0.5;\n"
+	"	vec4 ma = cm ? vc : omM[0];\n"
+	"	vec4 md = cm ? vc : omM[1];\n"
+	"	vec3 c = omM[3].rgb + ma.rgb * omM[5].rgb;\n"
+	"	for (int i = 0; i < 8; i++)\n"
+	"	{\n"
+	"		if (omL[i * 6 + 1].w < 0.5) continue;\n"
+	"		vec4 P = omL[i * 6];\n"
+	"		vec3 L;\n"
+	"		float att = 1.0, spot = 1.0, spec = 0.0;\n"
+	"		if (P.w != 0.0)\n"
+	"		{\n"
+	"			L = P.xyz / P.w - vEP;\n"
+	"			float d = length(L);\n"
+	"			if (d > 0.0) L /= d;\n"
+	"			vec3 k = omL[i * 6 + 5].xyz;\n"
+	"			float a = k.x + k.y * d + k.z * d * d;\n"
+	"			att = (a > 0.0) ? 1.0 / a : 1.0;\n"
+	"		}\n"
+	"		else L = normalize(P.xyz);\n"
+	"		vec4 sd = omL[i * 6 + 4];\n"
+	"		if (sd.w > -1.5)\n"
+	"		{\n"
+	"			float sl = length(sd.xyz);\n"
+	"			float cs = (sl > 0.0) ? -dot(L, sd.xyz) / sl : 0.0;\n"
+	"			spot = (cs < sd.w) ? 0.0 : pow(max(cs, 0.0), omL[i * 6 + 5].w);\n"
+	"		}\n"
+	"		float ndl = max(dot(n, L), 0.0);\n"
+	"		if (ndl > 0.0)\n"
+	"		{\n"
+	"			vec3 h = (omM[4].z > 0.5) ? L - normalize(vEP) : L + vec3(0.0, 0.0, 1.0);\n"
+	"			float hl = length(h);\n"
+	"			if (hl > 0.0)\n"
+	"			{\n"
+	"				float nh = dot(n, h) / hl;\n"
+	"				spec = (nh > 0.0) ? ((omM[4].x > 0.0) ? pow(nh, omM[4].x) : 1.0) : 0.0;\n"
+	"			}\n"
+	"		}\n"
+	"		c += att * spot * (omL[i * 6 + 1].rgb * ma.rgb + ndl * omL[i * 6 + 2].rgb * md.rgb + spec * omL[i * 6 + 3].rgb * omM[2].rgb);\n"
+	"	}\n"
+	"	return vec4(clamp(c, 0.0, 1.0), clamp(md.a, 0.0, 1.0));\n"
+	"}\n"
 	/* GFX-modern light beams (gl3_post.c): the lamp pools of the last view; a ground shadow in one gives
 	   way to the lamp's own shadow of the character */
 	"uniform int omBeamN;\n"
@@ -605,7 +676,7 @@ static const char *emu_fs =
 	"out vec4 outColor;\n"
 	"void main()\n"
 	"{\n"
-	"	vec4 c = vColor;\n"
+	"	vec4 c = (omPPL != 0) ? omLit(vColor) : vColor;\n"
 	"	if (texenv != 0)\n"
 	"	{\n"
 	"		vec4 r = texture(tex, vTex);\n"
@@ -733,6 +804,8 @@ CreateObjects(void)
 	glBindAttribLocation(E.prog, GL3_ATTRIB_TEXCOORD, "texCoord");
 	glBindAttribLocation(E.prog, GL3_ATTRIB_LMTEXCOORD, "fogFactor");
 	glBindAttribLocation(E.prog, GL3_ATTRIB_COLOR, "vertColor");
+	glBindAttribLocation(E.prog, GL3_ATTRIB_NORMAL, "eyeNormal");
+	glBindAttribLocation(E.prog, GL3_ATTRIB_LIGHTFLAGS, "eyePos");
 	GL3_Post_BindOutputs(E.prog);
 	glLinkProgram(E.prog);
 	glDeleteShader(vs);
@@ -760,6 +833,9 @@ CreateObjects(void)
 	E.u_emis = glGetUniformLocation(E.prog, "omEmis");
 	E.u_invpv = glGetUniformLocation(E.prog, "omInvPV");
 	E.u_csmrepl = glGetUniformLocation(E.prog, "omCsmRepl");
+	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
+	E.u_pplL = glGetUniformLocation(E.prog, "omL");
+	E.u_pplM = glGetUniformLocation(E.prog, "omM");
 	E.u_beamn = glGetUniformLocation(E.prog, "omBeamN");
 	E.u_beam = glGetUniformLocation(E.prog, "omBeam");
 	GL3_UseProgram(E.prog);
@@ -777,6 +853,10 @@ CreateObjects(void)
 	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(emuvtx_t), offsetof(emuvtx_t, st));
 	glEnableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
 	qglVertexAttribPointer(GL3_ATTRIB_LMTEXCOORD, 1, GL_FLOAT, GL_FALSE, sizeof(emuvtx_t), offsetof(emuvtx_t, fog));
+	glEnableVertexAttribArray(GL3_ATTRIB_NORMAL);
+	qglVertexAttribPointer(GL3_ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, sizeof(emuvtx_t), offsetof(emuvtx_t, en));
+	glEnableVertexAttribArray(GL3_ATTRIB_LIGHTFLAGS);
+	qglVertexAttribPointer(GL3_ATTRIB_LIGHTFLAGS, 3, GL_FLOAT, GL_FALSE, sizeof(emuvtx_t), offsetof(emuvtx_t, eye));
 	GL3_BindVAO(0);
 	return true;
 }
@@ -962,7 +1042,25 @@ Tessellate(emuvtx_t *in, int *n)
 						v->st[1] = a->st[1] * u + b->st[1] * w2 + c->st[1] * w;
 						v->fog = a->fog * u + b->fog * w2 + c->fog * w;
 						memcpy(v->eye, p, sizeof(v->eye));
-						memcpy(v->en, a->en, sizeof(v->en));
+
+						/* the normal for per-pixel lighting, interpolated across the original triangle */
+						{
+							float nl;
+
+							for (r = 0; r < 3; r++)
+							{
+								v->en[r] = N1[r] * u + N2[r] * w2 + N3[r] * w;
+							}
+
+							nl = sqrtf(v->en[0] * v->en[0] + v->en[1] * v->en[1] + v->en[2] * v->en[2]);
+
+							if (nl > 0)
+							{
+								v->en[0] /= nl;
+								v->en[1] /= nl;
+								v->en[2] /= nl;
+							}
+						}
 					}
 				}
 			}
@@ -1196,6 +1294,47 @@ Flush(void)
 		if (E.casts && (mode == GL_TRIANGLES) && E.depthmask && !E.blendon && !E.alphatest)
 		{
 			GL3_Beam_AddCasterTris(out[0].pos, n, sizeof(emuvtx_t) / sizeof(float));
+		}
+	}
+
+	/* GFX-modern per-pixel lighting: this primitive's light and material state for omLit() */
+	{
+		int ppl = (E.lighting && E.ppl) ? 1 : 0;
+
+		glUniform1i(E.u_ppl, ppl);
+
+		if (ppl)
+		{
+			float L[NUM_LIGHTS * 6 * 4], M[6 * 4];
+			int i;
+
+			for (i = 0; i < NUM_LIGHTS; i++)
+			{
+				const emulight_t *l = &E.light[i];
+				float *q = L + i * 24;
+
+				memcpy(q, l->position, 4 * sizeof(float));
+				memcpy(q + 4, l->ambient, 3 * sizeof(float));
+				q[7] = l->on ? 1.0f : 0.0f;
+				memcpy(q + 8, l->diffuse, 4 * sizeof(float));
+				memcpy(q + 12, l->specular, 4 * sizeof(float));
+				memcpy(q + 16, l->spotdir, 3 * sizeof(float));
+				q[19] = (l->spotcut == 180) ? -2.0f : cosf(l->spotcut * (float)M_PI / 180.0f);
+				memcpy(q + 20, l->k, 3 * sizeof(float));
+				q[23] = l->spotexp;
+			}
+
+			memcpy(M, E.mat.ambient, 4 * sizeof(float));
+			memcpy(M + 4, E.mat.diffuse, 4 * sizeof(float));
+			memcpy(M + 8, E.mat.specular, 4 * sizeof(float));
+			memcpy(M + 12, E.mat.emission, 4 * sizeof(float));
+			M[16] = E.mat.shininess;
+			M[17] = E.colormaterial ? 1.0f : 0.0f;
+			M[18] = E.localviewer ? 1.0f : 0.0f;
+			M[19] = 0;
+			memcpy(M + 20, E.lmambient, 4 * sizeof(float));
+			glUniform4fv(E.u_pplL, NUM_LIGHTS * 6, L);
+			glUniform4fv(E.u_pplM, 6, M);
 		}
 	}
 
@@ -2388,6 +2527,13 @@ GL3_GhoulEmu_SetCsm(qboolean capture, qboolean replace)
 {
 	E.csmcapture = capture;
 	E.csmrepl = replace;
+}
+
+/* GFX-modern: per-pixel lighting of the entity being drawn */
+void
+GL3_GhoulEmu_SetPPL(qboolean on)
+{
+	E.ppl = on;
 }
 
 /* GFX-modern: PN tessellation level of the entity being drawn (0 or 1 off) */
