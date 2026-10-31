@@ -129,6 +129,7 @@ static struct
 	/* GFX-modern tessellation: subdivision level of the entity being drawn (curved PN triangles), < 2 off;
 	   the depth function as set, to recognise a second pass over the same triangles */
 	int tess;
+	float tessk;    /* how far toward the PN surface (r_om_tess_strength) */
 	GLenum depthfunc;
 	emuvtx_t *tessbuf;
 	int maxtess;
@@ -136,6 +137,7 @@ static struct
 
 static ghlff_t emuff;
 static cvar_t *r_om_tessdebug; /* print what the weapon tessellation does (test aid) */
+static cvar_t *r_om_tess_strength;
 static void *emutable[52];
 
 /* ------------------------------------------------------------------
@@ -937,10 +939,15 @@ Tessellate(emuvtx_t *in, int *n)
 
 						for (r = 0; r < 3; r++)
 						{
-							p[r] = P1[r] * u * u * u + P2[r] * w2 * w2 * w2 + P3[r] * w * w * w +
+							float lin = P1[r] * u + P2[r] * w2 + P3[r] * w;
+							float pn = P1[r] * u * u * u + P2[r] * w2 * w2 * w2 + P3[r] * w * w * w +
 								3 * (cp[0][r] * u * u * w2 + cp[1][r] * u * w2 * w2 + cp[5][r] * u * u * w +
 								cp[2][r] * w2 * w2 * w + cp[4][r] * u * w * w + cp[3][r] * w2 * w * w) +
 								6 * cp[6][r] * u * w2 * w;
+
+							/* part of the way from the flat triangle to the PN surface: rounder silhouettes
+							   with less of the PN "inflation" */
+							p[r] = lin + E.tessk * (pn - lin);
 						}
 
 						p[3] = 1;
@@ -2390,9 +2397,11 @@ GL3_GhoulEmu_SetTess(int level)
 	if (!r_om_tessdebug)
 	{
 		r_om_tessdebug = ri.Cvar_Get("r_om_tessdebug", "0", 0);
+		r_om_tess_strength = ri.Cvar_Get("r_om_tess_strength", "0.5", CVAR_ARCHIVE);
 	}
 
 	E.tess = (level > 4) ? 4 : level;
+	E.tessk = Q_clamp(r_om_tess_strength->value, 0.0f, 1.0f);
 }
 
 /* GFX-modern: whether the entity being drawn casts a shadow into light beams (independent of the sun) */

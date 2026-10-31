@@ -172,12 +172,11 @@ GetCvars(void)
 	r_om_ghlemu = ri.Cvar_Get("r_om_ghlemu", "0", 0);
 	/* OpenMerc only: print the render-parameter block of every Ghoul entity once */
 	r_om_ghldebug = ri.Cvar_Get("r_om_ghldebug", "0", 0);
-	/* GFX-modern: curved PN tessellation, triangles split into level^2 (0/1 off, max 4; models max 3).
-	   Off by default: the stock view weapons are faceted with split normals and gain nothing; characters
-	   change little at play distances, and decals lying flat on a body (the police car's lights) part
-	   from it once both are curved */
+	/* GFX-modern: curved PN tessellation, triangles split into level^2 (0/1 off, max 4; characters max 3),
+	   r_om_tess_strength of the way to the PN surface. The stock view weapons are faceted with split
+	   normals and gain nothing (off); characters get rounder helmets, shoulders and limbs */
 	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "0", CVAR_ARCHIVE);
-	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "0", CVAR_ARCHIVE);
+	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "2", CVAR_ARCHIVE);
 }
 
 /* ⌊v + 0.5⌋ clamped to lo..hi (SPEC-411 "rounded") */
@@ -937,7 +936,10 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 		GL3_GhoulEmu_SetCsm(GL3_CSM_Active() && !weapon && !viewer && !hack, GL3_CSM_ReplaceGhoul() && !viewer && !weapon);
 		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack); /* shadows in light beams */
-		GL3_GhoulEmu_SetTess(weapon ? (int)r_om_tess_weapon->value : (int)Q_min(r_om_tess_models->value, 3));
+		/* characters (the models that cast a ground shadow) only: vehicles and props carry flat decals
+		   that part from a curved body */
+		GL3_GhoulEmu_SetTess(weapon ? (int)r_om_tess_weapon->value :
+			((flags & SOF_RF_CASTSHADOW) ? (int)Q_min(r_om_tess_models->value, 3) : 0));
 	}
 
 	Ghl_Draw(inst, &P);
