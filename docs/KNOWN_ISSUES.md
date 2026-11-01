@@ -128,6 +128,36 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
   `autosave`): the reconnecting client was dropped as timed out because the restored level clock jumped the
   server's real time forward (`docs/impl/AUTOSAVE.md`).
 
+## GitHub issues #4-#10 (status 2026-11-01, branch `issue-fixes`)
+
+- **#9 vending machine / damaged textures (both modes): fixed.** The engine's game import #25 was a stub, so no
+  world texture ever changed to its damaged image. It now follows SPEC-313 s4 / SPEC-AMEND-005 G18.23 (texture table
+  from the `.m32` headers, counter and stage per surface, `svc_damagetexture` in front of the impact) and the client
+  switches the texinfo (renderer slot 0xa8). Mode B also applies the 25 points on single-player bullet and knife
+  hits (TE 7 on a stage change). Checked: tsr1 vending machine breaks on the first pistol shot (`sv_showdamage 1`:
+  `Changing to subway/1_soda_front_a3, level 1`); in mode A the original game calls the import (`Doing 25 damage`).
+- **#9 ceiling TVs in the security office (mode B): fixed.** The broken screen spun for ever: the swing tested the x
+  axis of the `face` bolt, which lies on the hinge. Now the screen normal (bolt z) is tested and the screen turns
+  face-down; the second shot drops the TV (its box, which reaches into the ceiling and the wall, is drawn in so the
+  all-solid ground rule no longer holds it). Checked on tsr1.
+- **#8 blood pools: fixed.** Both modes: the client decal of `gore/bloodpool` started on the floor surface (game trace
+  end rounded on the wire) and inside the corpse's box, so it was always refused; the decal trace now starts 2 units
+  back and goes on the world below an entity box it starts in. Mode B also never sent the pool (human models have no
+  `ooze` note); the corpse now sends it once when it comes to rest. Checked on tsr1 (pool under the corpse).
+- **#5 texture packs: done.** With `r_retexturing 1` (default) a `.tga`, `.png`, `.jpg` and now also `.dds`
+  (uncompressed 24/32-bit, DXT1/3/5) with the same path as the original texture replaces it, e.g.
+  `user\textures\subway\1_soda_front_a.dds`. Ghoul model skins are `.tga` files and are replaced by name.
+- **#4 limbs do not fly off / #7 corpse stops reacting: not reproduced.** Corpses take hits in both modes (mode A:
+  every hit restarts the corpse twitch; mode B: wounds, knife severs a limb after more than 500 points on the zone,
+  as SPEC-721 rule 3). Torso hits never sever (rule 3). Needed: mode, map, weapon and where the body was hit.
+- **#6 crash when knifing a corpse (mode B): not reproduced.** About 300 knife hits on corpses of `m_nyc_mskinhead1`,
+  `m_nyc_mskinhead2a` and `m_nyc_mpunk` on tsr1, including a severed leg and hits on the piece: no crash. Needed:
+  `g18crash.log` (start with `+set g18_crashlog 1`) and `user\sof.log`.
+- **#10 enemies cannot be shot and do not hurt the player (Linux x86_64): not reproduced** (no Linux machine). Checked
+  in code: no pointer truncation in a 64-bit build of the modules, no `long` in shared data, the engine/game layouts
+  (`edict_t`, entity state, Ghoul hit record, movement block) agree on 64 bits. Needed: `sof.log` from Linux and the
+  video of the report.
+
 ## Mode-B specific (own game and player modules)
 
 - Pistol recoil starts one frame later than the original (I1d). The sniper zoom sound now plays the same in both
