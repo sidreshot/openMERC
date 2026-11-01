@@ -77,6 +77,59 @@ Bump_Blur(const float *src, int w, int h, int r)
 	return a;
 }
 
+/* one-axis box blur with wrap-around: axis 0 along x, 1 along y */
+static float *
+Bump_Blur1(const float *src, int w, int h, int r, int axis)
+{
+	float *o = malloc(sizeof(float) * w * h);
+	int x, y, k;
+
+	if (!o)
+	{
+		return NULL;
+	}
+
+	if (axis == 0)
+	{
+		for (y = 0; y < h; y++)
+		{
+			const float *row = src + (size_t)y * w;
+			float s = 0;
+
+			for (k = -r; k <= r; k++)
+			{
+				s += row[((k % w) + w) % w];
+			}
+
+			for (x = 0; x < w; x++)
+			{
+				o[(size_t)y * w + x] = s / (2 * r + 1);
+				s += row[(x + r + 1) % w] - row[((x - r) % w + w) % w];
+			}
+		}
+	}
+	else
+	{
+		for (x = 0; x < w; x++)
+		{
+			float s = 0;
+
+			for (k = -r; k <= r; k++)
+			{
+				s += src[(size_t)(((k % h) + h) % h) * w + x];
+			}
+
+			for (y = 0; y < h; y++)
+			{
+				o[(size_t)y * w + x] = s / (2 * r + 1);
+				s += src[(size_t)((y + r + 1) % h) * w + x] - src[(size_t)(((y - r) % h + h) % h) * w + x];
+			}
+		}
+	}
+
+	return o;
+}
+
 static void
 Bump_Store(GLuint texnum, GLuint nm)
 {
@@ -156,43 +209,67 @@ GL3_Bump_Make(GLuint texnum, const byte *rgba, int w, int h)
 		}
 	}
 
-	/* detail height. Thin features - grout, mortar, seams, cracks - are grooves whether they are darker or lighter
-	   than their surroundings (light mortar between bricks is recessed too): -|L - narrow blur|. Broad brightness
-	   changes add a little (brighter = higher): narrow blur minus a blur over 1/16 of the texture. */
+	/* detail height from the lines of the texture. Grout, mortar, seams and panel edges are long straight lines
+	   along the texture axes and are grooves whether darker or lighter than their surroundings (light mortar is
+	   recessed too). Line response across one axis (|L - its blur across x|, resp. y) is averaged over a long
+	   stretch along the other axis: straight lines keep their full response, stains and grain average out. A soft
+	   threshold at the mean response keeps what is left inside a tile or brick flat. */
 	{
-		float *narrow = Bump_Blur(L, w, h, (w > h ? w : h) / 96 + 1);
+		int rn = (w > h ? w : h) / 96 + 1, rl = (w > h ? w : h) / 24 + 2;
+		float *bx = Bump_Blur1(L, w, h, rn, 0), *by = Bump_Blur1(L, w, h, rn, 1);
+		float *dx = NULL, *dy = NULL, *rv = NULL, *rh = NULL, mr = 0;
 
-		low = Bump_Blur(L, w, h, (w > h ? w : h) / 32 + 2);
+		low = NULL;
 		H = malloc(sizeof(float) * n);
+		dx = malloc(sizeof(float) * n);
+		dy = malloc(sizeof(float) * n);
 
-		if (!narrow || !low || !H)
+		if (bx && by && dx && dy && H)
 		{
-			free(narrow);
+			for (i = 0; i < n; i++)
+			{
+				dx[i] = fabsf(L[i] - bx[i]); /* vertical lines */
+				dy[i] = fabsf(L[i] - by[i]); /* horizontal lines */
+			}
+
+			rv = Bump_Blur1(dx, w, h, rl, 1); /* along a vertical line */
+			rh = Bump_Blur1(dy, w, h, rl, 0); /* along a horizontal line */
+		}
+
+		if (!rv || !rh)
+		{
+			free(bx);
+			free(by);
+			free(dx);
+			free(dy);
+			free(rv);
+			free(rh);
 			free(L);
-			free(low);
 			free(H);
 			free(out);
 			return;
 		}
 
-		/* soft threshold at half the mean line response: stains and grain inside a tile or brick stay flat */
-		float mabs = 0;
+		for (i = 0; i < n; i++)
+		{
+			H[i] = rv[i] > rh[i] ? rv[i] : rh[i];
+			mr += H[i];
+		}
+
+		mr /= n;
 
 		for (i = 0; i < n; i++)
 		{
-			mabs += fabsf(L[i] - narrow[i]);
+			float d = H[i] - mr;
+			H[i] = -(d > 0 ? d : 0);
 		}
 
-		mabs /= n;
-
-		for (i = 0; i < n; i++)
-		{
-			float d = fabsf(L[i] - narrow[i]) - 0.5f * mabs;
-
-			H[i] = -(d > 0 ? d : 0) * 2.0f + 0.25f * (narrow[i] - low[i]);
-		}
-
-		free(narrow);
+		free(bx);
+		free(by);
+		free(dx);
+		free(dy);
+		free(rv);
+		free(rh);
 	}
 
 	Hs = Bump_Blur(H, w, h, (w > h ? w : h) >= 512 ? 2 : 1);

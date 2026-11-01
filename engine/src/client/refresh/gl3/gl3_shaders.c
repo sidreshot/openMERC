@@ -789,6 +789,7 @@ static const char* fragmentSrcOmBump =
 	"uniform float omBumpWalls; // 1: walls only (|normal z| < 0.7), floors and ceilings stay flat\n"
 	"uniform sampler2D omDeluxe;\n"
 	"uniform sampler2D omNormalMap;\n"
+	"uniform vec4 omBumpView; // xyz eye position, w specular strength (0 = no highlights)\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
 	"	if(omBump.x <= 0.0 || omEmissive > 0.0)\n"
@@ -830,7 +831,18 @@ static const char* fragmentSrcOmBump =
 	"	float fl = max(dot(N, Ld), 0.25);\n"
 	"	float ratio = clamp(max(dot(Nb, Ld), 0.0) / fl, 0.0, 2.0);\n"
 	"	float cav = 1.0 + omBump.y * (nm.a * 2.0 - 1.0);\n"
-	"	return lm * ((1.0 - k) + k * ratio) * cav;\n"
+	"	vec3 res = lm * ((1.0 - k) + k * ratio) * cav;\n"
+	"	// view-dependent highlight (Blinn-Phong) on the bumped normal: it slides over the relief as the view moves.\n"
+	"	// Flat raised parts (tile and brick faces) are glossier than grooves; it scales with the light reaching the face.\n"
+	"	if(omBumpView.w > 0.0)\n"
+	"	{\n"
+	"		vec3 V = normalize(omBumpView.xyz - passWorldCoord);\n"
+	"		vec3 Hh = normalize(Ld + V);\n"
+	"		float gloss = smoothstep(-0.6, 0.2, nm.a * 2.0 - 1.0);\n"
+	"		float sp = pow(max(dot(Nb, Hh), 0.0), 40.0) * omBumpView.w * gloss * (0.4 + 0.6 * k);\n"
+	"		res += lm * sp;\n"
+	"	}\n"
+	"	return res;\n"
 	"}\n"
 	;
 static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
@@ -2031,19 +2043,26 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 
 		if (loc != -1)
 		{
-			static cvar_t *bump, *bumpcavity, *bumpcontrast, *bumpshare, *bumpwalls;
+			static cvar_t *bump, *bumpcavity, *bumpcontrast, *bumpshare, *bumpwalls, *bumpspec;
 
 			if (!bump)
 			{
-				bump = ri.Cvar_Get("r_om_bump", "1", CVAR_ARCHIVE);
+				bump = ri.Cvar_Get("r_om_bump", "1.5", CVAR_ARCHIVE);
 				bumpcavity = ri.Cvar_Get("r_om_bump_cavity", "0.25", CVAR_ARCHIVE);
 				bumpcontrast = ri.Cvar_Get("r_om_bump_contrast", "2", CVAR_ARCHIVE);
 				bumpshare = ri.Cvar_Get("r_om_bump_share", "0.6", CVAR_ARCHIVE);
 				bumpwalls = ri.Cvar_Get("r_om_bump_walls", "1", CVAR_ARCHIVE);
+				bumpspec = ri.Cvar_Get("r_om_bump_spec", "0.3", CVAR_ARCHIVE);
 			}
 
 			GL3_UseProgram(si[i]->shaderProgram);
 			glUniform4f(loc, fullbright ? 0.0f : bump->value, bumpcavity->value, bumpcontrast->value, bumpshare->value);
+			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpView");
+			if (loc != -1)
+			{
+				glUniform4f(loc, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2],
+						fullbright ? 0.0f : bumpspec->value);
+			}
 			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpWalls");
 			if (loc != -1)
 			{
