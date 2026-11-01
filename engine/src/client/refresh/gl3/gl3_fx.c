@@ -33,7 +33,7 @@ static gl3fxstate_t fxstate;      /* state of the pending vertices */
 static qboolean fxstate_valid;
 
 static GLint u_texmode, u_alphatest, u_fogmode, u_fogstart, u_fogend, u_fogcolor, u_fogplane;
-static GLint u_emis, u_softp, u_softv, u_depth; /* GFX-modern (gl3_post.c) */
+static GLint u_emis, u_softp, u_softv, u_depth, u_fxmat; /* GFX-modern (gl3_post.c) */
 static GLint u_pf0, u_pf1, u_pf2, u_pfpl; /* GFX-modern r_om_ppfog (gl3_fog.c) */
 
 static GLuint u_program; /* program the uniform locations belong to */
@@ -52,6 +52,7 @@ QueryUniforms(void)
 	u_fogcolor = glGetUniformLocation(prog, "fogcolor");
 	u_fogplane = glGetUniformLocation(prog, "fogplane");
 	u_emis = glGetUniformLocation(prog, "omEmis");
+	u_fxmat = glGetUniformLocation(prog, "omFxMat");
 	u_softp = glGetUniformLocation(prog, "omSoftP");
 	u_softv = glGetUniformLocation(prog, "omSoftV");
 	u_depth = glGetUniformLocation(prog, "omDepth");
@@ -189,6 +190,7 @@ GL3_FX_Flush(void)
 
 		GL3_Post_FxEmis(st->blend, emis);
 		glUniform4fv(u_emis, 1, emis);
+		glUniform4f(u_fxmat, st->matrefl, st->matrough, 0, 0);
 
 		if (soft)
 		{

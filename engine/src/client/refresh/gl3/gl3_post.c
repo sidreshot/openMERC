@@ -867,6 +867,13 @@ GL3_Post_SceneDrawBuffers(void)
 	SceneBuffers();
 }
 
+/* r_om_ssr: this view writes the material target */
+qboolean
+GL3_Post_SSRActive(void)
+{
+	return P.bound && P.mat;
+}
+
 /* r_om_ssr: off while a pass modulates faces already drawn (their reflectivity stays) */
 void
 GL3_Post_MaterialWrites(qboolean on)
@@ -4125,6 +4132,40 @@ SSAOShutdown(void)
 #define BOLT_MAXPTS 512
 
 static cvar_t *r_om_rain, *r_om_rain_density, *r_om_rain_sky, *r_om_lightning, *r_om_lightning_rate;
+static cvar_t *r_om_storm_maps, *r_om_aa, *r_om_aa_maps;
+
+/* the loaded map's name ("trn1") is a word of the list */
+static qboolean
+MapListed(const char *list)
+{
+	char name[MAX_QPATH], *dot;
+	const char *base, *p;
+	size_t n;
+
+	if (!gl3_worldmodel || !list || !list[0])
+	{
+		return false;
+	}
+
+	base = strrchr(gl3_worldmodel->name, '/');
+	Q_strlcpy(name, base ? base + 1 : gl3_worldmodel->name, sizeof(name));
+	dot = strrchr(name, '.');
+	if (dot)
+	{
+		*dot = 0;
+	}
+	n = strlen(name);
+
+	for (p = list; (p = Q_strcasestr(p, name)) != NULL; p += n)
+	{
+		if (((p == list) || (p[-1] == ' ') || (p[-1] == ',')) && ((p[n] == 0) || (p[n] == ' ') || (p[n] == ',')))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
 
 static float
 frand(void)
@@ -4135,6 +4176,12 @@ frand(void)
 static struct
 {
 	qboolean maprain, failed, active;
+	qboolean rain, storm, aa;   /* this map: rain (and lightning), distant lightning only, anti-aircraft fire */
+	GLuint progaa;
+	GLint a_vp, a_eye, a_time, a_guns, a_params;
+	float guns[8][4];           /* anti-aircraft guns: position, seed */
+	vec3_t gunanchor;
+	const void *gunmodel;
 	GLuint occtex, occfbo;
 	float occvp[16], occc[3];
 	const void *occmodel;
@@ -4198,7 +4245,13 @@ WeatherWanted(void)
 		r_om_rain_sky = ri.Cvar_Get("r_om_rain_sky", "0.45", CVAR_ARCHIVE);
 		r_om_lightning = ri.Cvar_Get("r_om_lightning", "1", CVAR_ARCHIVE);
 		r_om_lightning_rate = ri.Cvar_Get("r_om_lightning_rate", "1", CVAR_ARCHIVE);
+		/* distant thunderstorm without rain (the train in the night); anti-aircraft fire in the sky of the war maps */
+		r_om_storm_maps = ri.Cvar_Get("r_om_storm_maps", "trn1", CVAR_ARCHIVE);
+		r_om_aa = ri.Cvar_Get("r_om_aa", "1", CVAR_ARCHIVE);
+		r_om_aa_maps = ri.Cvar_Get("r_om_aa_maps", "kos1 kos2 kos3", CVAR_ARCHIVE);
 	}
+
+	WX.rain = WX.storm = WX.aa = false;
 
 #ifdef YQ2_GL3_GLES3
 	return false;
@@ -4208,7 +4261,10 @@ WeatherWanted(void)
 		return false;
 	}
 
-	return (r_om_rain->value >= 2) || ((r_om_rain->value >= 1) && WX.maprain);
+	WX.rain = (r_om_rain->value >= 2) || ((r_om_rain->value >= 1) && WX.maprain);
+	WX.storm = !WX.rain && (r_om_rain->value >= 1) && MapListed(r_om_storm_maps->string);
+	WX.aa = (r_om_aa->value > 0) && MapListed(r_om_aa_maps->string);
+	return WX.rain || WX.storm || WX.aa;
 #endif
 }
 
@@ -4294,7 +4350,7 @@ LightningThink(void)
 		/* far out in the sky, high above the horizon, roughly where the player looks (seen through the gaps
 		   between the buildings; the world in front hides it by depth) */
 		float az = (r_newrefdef.viewangles[YAW] + (frand() * 2 - 1) * 55.0f) * (float)M_PI / 180.0f;
-		float dist = 5500 + frand() * 1500;
+		float dist = WX.storm ? 6500 + frand() * 1500 : 5500 + frand() * 1500;
 		vec3_t top, bottom;
 		int i;
 
@@ -4309,7 +4365,7 @@ LightningThink(void)
 
 		top[0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
 		top[1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
-		top[2] = r_newrefdef.vieworg[2] + 4200 + frand() * 1500;
+		top[2] = r_newrefdef.vieworg[2] + (WX.storm ? 2600 + frand() * 900 : 4200 + frand() * 1500); /* a distant storm: low over the horizon */
 		VectorCopy(top, bottom);
 		bottom[0] += (frand() * 2 - 1) * 900;
 		bottom[1] += (frand() * 2 - 1) * 900;
@@ -4343,17 +4399,18 @@ GL3_Post_WeatherFrame(void)
 
 	WX.active = WeatherWanted();
 
-	if (WX.active)
+	if (WX.active && (WX.rain || WX.storm))
 	{
 		float bolt[4], col[4] = {0.72f, 0.8f, 1.0f, 0};
 
 		LightningThink();
-		tint = Q_max(0.05f, Q_min(r_om_rain_sky->value, 1.0f));
-		add = LightningFlash() * 1.2f;
+		/* a distant storm leaves the sky as it is and lights the world less */
+		tint = WX.rain ? Q_max(0.05f, Q_min(r_om_rain_sky->value, 1.0f)) : 1.0f;
+		add = LightningFlash() * (WX.rain ? 1.2f : 0.6f);
 
 		/* the lightning lights the open world through the world shaders */
 		VectorCopy(WX.boltpos, bolt);
-		bolt[3] = WX.occvalid ? LightningFlash() * 1.4f : 0;
+		bolt[3] = WX.occvalid ? LightningFlash() * (WX.rain ? 1.4f : 0.5f) : 0;
 		GL3_SoF_LightningUniforms(bolt, col, WX.occvalid ? WX.occvp : NULL, WX.occvalid ? WX.occtex : 0);
 	}
 	else
@@ -4377,7 +4434,7 @@ GL3_Post_WeatherFrame(void)
 		if (SSRWanted() && !nv)
 		{
 			ssr[0] = 1;
-			ssr[1] = (WX.active && WX.occvalid) ? Q_max(0.0f, Q_min(r_om_ssr_wet->value, 1.0f)) : 0;
+			ssr[1] = (WX.active && WX.rain && WX.occvalid) ? Q_max(0.0f, Q_min(r_om_ssr_wet->value, 1.0f)) : 0;
 			ssr[2] = Q_max(0.0f, r_om_ssr_glint->value);
 			ssr[3] = Q_max(0.0f, Q_min(r_om_ssr_damp->value, 1.0f));
 		}
@@ -4544,6 +4601,105 @@ static const char *wx_bolt_fs =
 	"	outEmis = vec4(color.rgb * a, 1.0);\n"
 	"}\n";
 
+/* anti-aircraft fire in the sky: up to eight guns far beyond the map fire bursts of tracers that climb, slow and
+   bend down; some end in a flak burst. All from gl_VertexID, 6 vertices per tracer, 40 tracers per gun; the
+   world in front hides them by depth (like the lightning bolt) */
+static const char *wx_aa_vs =
+	"uniform mat4 vp;\n"
+	"uniform vec3 eye;\n"
+	"uniform float time;\n"
+	"uniform vec4 guns[8];\n"   /* position, seed (0 = no gun) */
+	"uniform vec4 params;\n"    /* tracer interval (s), muzzle speed, brightness, - */
+	"out vec2 vUV;\n"
+	"out vec3 vCol;\n"
+	"out float vA;\n"
+	"out float vK;\n"
+	"float H(float n) { return fract(sin(n) * 43758.5453); }\n"
+	"void main()\n"
+	"{\n"
+	"	const int PER = 40;\n"
+	"	int id = gl_VertexID / 6, c = gl_VertexID - id * 6;\n"
+	"	int g = id / PER, k = id - g * PER;\n"
+	"	vec4 gun = guns[min(g, 7)];\n"
+	"	vec2 cr = vec2((c == 1 || c == 2 || c == 5) ? 1.0 : -1.0, (c == 2 || c == 4 || c == 5) ? 1.0 : -1.0);\n"
+	"	vUV = cr;\n"
+	"	gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"	vA = 0.0; vK = 0.0; vCol = vec3(0.0);\n"
+	"	if (gun.w <= 0.0) return;\n"
+	"	float s = gun.w, dt = params.x * (0.8 + 0.4 * H(s * 3.1));\n"
+	"	float slot = floor(time / dt) - float(k);\n"
+	"	float ts = slot * dt, age = time - ts;\n"
+	/* bursts: each gun fires in its own rhythm (on 45..70 % of a 3..8 s period) */
+	"	float per = 3.0 + 5.0 * H(s * 7.7);\n"
+	"	if (fract(ts / per + H(s * 1.9)) > 0.45 + 0.25 * H(s * 5.3)) return;\n"
+	/* the barrel sweeps slowly; every round leaves with a little scatter */
+	"	float yaw = H(s * 2.3) * 6.2832 + 0.7 * sin(ts * (0.2 + 0.3 * H(s * 4.1)) + s * 9.0);\n"
+	"	float pitch = radians(48.0 + 22.0 * sin(ts * (0.3 + 0.2 * H(s * 8.3)) + s * 3.0));\n"
+	"	yaw += (H(slot * 13.17 + s) - 0.5) * 0.04;\n"
+	"	pitch += (H(slot * 7.31 + s) - 0.5) * 0.04;\n"
+	"	vec3 dir = vec3(cos(pitch) * cos(yaw), cos(pitch) * sin(yaw), sin(pitch));\n"
+	"	float life = 2.4 + 0.8 * H(slot * 3.7 + s);\n"
+	"	bool flak = H(slot * 5.9 + s * 1.3) < 0.18;\n"
+	"	float v = params.y;\n"
+	"	vec3 grav = vec3(0.0, 0.0, -260.0);\n"
+	"	if (age > life + (flak ? 0.7 : 0.0)) return;\n"
+	"	vec3 col = H(s * 6.1) < 0.3 ? vec3(0.45, 1.0, 0.35) : (H(s * 6.1) < 0.6 ? vec3(1.0, 0.3, 0.12) : vec3(1.0, 0.62, 0.2));\n"
+	"	if (age > life)\n"
+	"	{\n"
+	/* the flak burst where the round ends: a ball of light that grows and fades */
+	"		float ta = age - life;\n"
+	"		vec3 p = gun.xyz + dir * v * life + 0.5 * grav * life * life;\n"
+	"		vec3 to = normalize(p - eye);\n"
+	"		vec3 r = normalize(cross(to, vec3(0.0, 0.0, 1.0)));\n"
+	"		vec3 u = cross(r, to);\n"
+	"		float sz = (60.0 + 260.0 * sqrt(ta / 0.7)) * (1.0 + length(p - eye) * 0.0002);\n"
+	"		vA = (1.0 - ta / 0.7) * (ta < 0.06 ? 1.6 : 1.0);\n"
+	"		vK = 1.0;\n"
+	"		vCol = mix(vec3(1.0, 0.95, 0.8), vec3(1.0, 0.5, 0.15), clamp(ta * 3.0, 0.0, 1.0));\n"
+	"		gl_Position = vp * vec4(p + (r * cr.x + u * cr.y) * sz, 1.0);\n"
+	"		return;\n"
+	"	}\n"
+	"	vec3 vel = dir * v + grav * age;\n"
+	"	vec3 head = gun.xyz + dir * v * age + 0.5 * grav * age * age;\n"
+	"	vec3 tail = head - normalize(vel) * (90.0 + 0.06 * length(vel));\n"
+	"	vec3 a = (c == 0 || c == 1 || c == 4) ? tail : head;\n"
+	"	float dist = length(a - eye);\n"
+	"	vec3 side = normalize(cross(head - tail, a - eye)) * (4.0 + dist * 0.0028);\n"
+	"	a += (c == 1 || c == 2 || c == 5) ? side : -side;\n"
+	"	vA = smoothstep(0.0, 0.08, age) * (1.0 - smoothstep(life - 0.7, life, age)) * (0.75 + 0.25 * sin(age * 40.0 + s));\n"
+	"	vCol = col;\n"
+	"	gl_Position = vp * vec4(a, 1.0);\n"
+	"}\n";
+
+static const char *wx_aa_fs =
+	"uniform vec4 params;\n"
+	"in vec2 vUV;\n"
+	"in vec3 vCol;\n"
+	"in float vA;\n"
+	"in float vK;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmis;\n"
+	"void main()\n"
+	"{\n"
+	"	float a;\n"
+	"	vec3 c = vCol;\n"
+	"	if (vK > 0.5)\n"
+	"	{\n"
+	"		float r = length(vUV);\n"
+	"		a = pow(max(1.0 - r, 0.0), 2.0) * vA * 0.9;\n"
+	"	}\n"
+	"	else\n"
+	"	{\n"
+	/* a hot white core along the streak, the colour around it, brighter at the head */
+	"		float w = 1.0 - abs(vUV.x);\n"
+	"		a = pow(w, 1.5) * vA * mix(0.35, 1.0, vUV.y * 0.5 + 0.5);\n"
+	"		c = mix(vCol, vec3(1.0, 0.95, 0.85), pow(w, 6.0));\n"
+	"	}\n"
+	"	if (a <= 0.003) discard;\n"
+	"	outColor = vec4(c * a * params.z, 1.0);\n"
+	"	outEmis = vec4(c * a * params.z * 0.8, 1.0);\n"
+	"}\n";
+
 static GLuint
 WXLink(const char *vs, const char *fs, qboolean twoout)
 {
@@ -4600,11 +4756,18 @@ WXCreate(void)
 	WX.progsplash = WXLink(wx_splash_vs, wx_splash_fs, false);
 	WX.progflash = WXLink(NULL, wx_flash_fs, false);
 	WX.progbolt = WXLink(wx_bolt_vs, wx_bolt_fs, true);
+	WX.progaa = WXLink(wx_aa_vs, wx_aa_fs, true);
 
-	if (!WX.prograin || !WX.progsplash || !WX.progflash || !WX.progbolt)
+	if (!WX.prograin || !WX.progsplash || !WX.progflash || !WX.progbolt || !WX.progaa)
 	{
 		return false;
 	}
+
+	WX.a_vp = glGetUniformLocation(WX.progaa, "vp");
+	WX.a_eye = glGetUniformLocation(WX.progaa, "eye");
+	WX.a_time = glGetUniformLocation(WX.progaa, "time");
+	WX.a_guns = glGetUniformLocation(WX.progaa, "guns");
+	WX.a_params = glGetUniformLocation(WX.progaa, "params");
 
 	WX.r_vp = glGetUniformLocation(WX.prograin, "vp");
 	WX.r_eye = glGetUniformLocation(WX.prograin, "eye");
@@ -4852,6 +5015,51 @@ GL3_Post_Weather(void)
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	GL3_BindVAO(WX.vao);
 
+	/* anti-aircraft fire (r_om_aa) */
+	if (WX.aa)
+	{
+		static const GLenum two[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+		vec3_t d;
+
+		/* the guns stay where they were placed for this map until the player has gone far from them */
+		VectorSubtract(r_newrefdef.vieworg, WX.gunanchor, d);
+		if (WX.gunmodel != gl3_worldmodel || VectorLength(d) > 5000)
+		{
+			int i, n = 5 + (rand() % 3);
+
+			WX.gunmodel = gl3_worldmodel;
+			VectorCopy(r_newrefdef.vieworg, WX.gunanchor);
+			memset(WX.guns, 0, sizeof(WX.guns));
+
+			for (i = 0; i < n; i++)
+			{
+				float az = (i + 0.5f * frand()) * 2 * (float)M_PI / n, dist = 4500 + frand() * 3500;
+
+				WX.guns[i][0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
+				WX.guns[i][1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
+				WX.guns[i][2] = r_newrefdef.vieworg[2] - 300 + frand() * 200;
+				WX.guns[i][3] = 1 + frand() * 100;
+			}
+		}
+
+		glDrawBuffers(2, two);
+		glBlendFunc(GL_ONE, GL_ONE);
+		GL3_UseProgram(WX.progaa);
+		glUniformMatrix4fv(WX.a_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+		glUniform3fv(WX.a_eye, 1, r_newrefdef.vieworg);
+		glUniform1f(WX.a_time, fmodf(r_newrefdef.time, 3600.0f));
+		glUniform4fv(WX.a_guns, 8, &WX.guns[0][0]);
+		glUniform4f(WX.a_params, 0.075f, 2300.0f, 1.6f * Q_max(0.0f, r_om_aa->value), 0);
+		glDrawArrays(GL_TRIANGLES, 0, 6 * 40 * 8);
+		glDrawBuffers(1, one);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
+
+	if (!WX.rain)
+	{
+		goto nodrops;
+	}
+
 	/* drops */
 	GL3_UseProgram(WX.prograin);
 	glUniformMatrix4fv(WX.r_vp, 1, GL_FALSE, &pv.Elements[0][0]);
@@ -4880,6 +5088,8 @@ GL3_Post_Weather(void)
 		glUniform4f(WX.s_color, 0.7f + flash * 0.5f, 0.72f + flash * 0.5f, 0.78f + flash * 0.5f, 0.16f);
 		glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(1500 * dens));
 	}
+
+nodrops:
 
 	/* lightning: the bolt far in the sky (a soft glow and a bright core), into the scene and the emissive target;
 	   its light on the world comes from the world shaders (omLightningLight, GL3_SoF_LightningUniforms) */
@@ -5152,8 +5362,13 @@ static const char *ssr_fs =
 	"	}\n"
 	"	vec2 sh = s0 + ds * b;\n"
 	"	vec3 H = Pos(sh);\n"
+	/* the sky: mirrors (water, puddles) show it where the ray reaches it, other faces keep the scene */
 	"	if (-H.z > params.z)\n"
-	"		discard;\n"   /* the sky */
+	"	{\n"
+	"		if (refl < 0.2)\n"
+	"			discard;\n"
+	"		H = P + R * params.x;\n"
+	"	}\n"
 	"	float dist = length(H - P);\n"
 	/* the colour of the hit in the last frame */
 	"	vec4 pc = reproj * vec4(H, 1.0);\n"
@@ -5175,7 +5390,11 @@ static const char *ssr_fs =
 	"		c = mix(fc, c, conf / max(mix(fw, 1.0, conf), 1e-3));\n"
 	"		w = clamp(k * strength * mix(fw, 1.0, conf) * (1.0 - smoothstep(0.35, 0.9, R.z)), 0.0, 0.85);\n"
 	"	}\n"
-	"	if (dbg == 1)\n"
+	"	if (dbg == 4)\n"
+	"		outColor = vec4(c, 1.0);\n"
+	"	else if (dbg == 5)\n"
+	"		outColor = vec4(su, textureLod(coltex, su, 0.0).g * 4.0, 1.0);\n"
+	"	else if (dbg == 1)\n"
 	"		outColor = vec4(vec3(w), 1.0);\n"
 	/* premultiplied (filtered up without dark fringes). Mirrors (puddles, glass) replace the scene by the reflection;
 	   dry floors and metal mostly add it, so bright lamps shine on them and dark walls don't darken them (their

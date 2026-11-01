@@ -822,3 +822,17 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   NaN guards: normals from a degenerate depth neighbourhood, NaN/Inf dropped in every r_om_ssr pass and in the HDR
   luminance (a NaN fed back through the last frame's colour and spread as black blotches).
 * Follow-up 4 (owner: "everything shines the same; less shine on walls, floors as they are"): outside mirrors and glass, walls get 0.3 of their class reflectivity, ceilings 0.15 (blended by the floor factor); damp walls 0.04 instead of 0.12. Floors unchanged.
+
+## Water reflections, anti-aircraft fire, distant storm
+
+* Liquids (gl3_liquid.c, drawn with the FX shader) write the material target through the new FX uniform omFxMat
+  (reflectivity 0.5, roughness 0.05); a translucent liquid writes its depth while r_om_ssr is on, so the trace starts
+  at its surface. Mirror-like faces (reflectivity >= 0.2) also reflect the sky where the ray reaches it.
+  r_om_ssr_debug 4 shows the reflected colour.
+* r_om_aa 1 (strength, 0 = off) on the maps of r_om_aa_maps ("kos1 kos2 kos3"): 5..7 guns 4500..8000 units around the
+  player (placed again after he has gone 5000 units) fire bursts of tracers into the sky - per gun its own rhythm,
+  sweep and colour (orange, red, green), rounds climbing at 2300 u/s and bending down, 18 % ending in a flak burst
+  (a growing, fading ball). One draw of 6 x 40 x 8 vertices from gl_VertexID, additive into the scene and the
+  emissive target (bloom), the world in front hides them by depth.
+* r_om_storm_maps ("trn1"): lightning without rain - bolts 6500..8000 units away, low over the horizon, the sky not
+  darkened, the world lit at a third of the rain strength; thunder as with the rain.

@@ -1520,6 +1520,8 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			return floor(al) / 255.0 * omPF2.z;
 		}
 
+		uniform vec4 omFxMat; // GFX-modern r_om_ssr: reflectivity, roughness of liquids (0 = the default material)
+
 		float omEyeDist(float z)
 		{
 			float ndc = (z - omSoftP.z) / (omSoftP.w - omSoftP.z) * 2.0 - 1.0;
@@ -1566,6 +1568,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 			if(omEmis.w > 1.5) outEmissive = vec4(omEmis.xyz, outColor.a);
 			else if(omEmis.w > 0.5) outEmissive = vec4(outColor.rgb * omEmis.x, outColor.a);
+			if(omFxMat.x > 0.0) outMaterial = vec4(omFxMat.x, omFxMat.x * omFxMat.y, 0.0, outColor.a);
 		}
 );
 

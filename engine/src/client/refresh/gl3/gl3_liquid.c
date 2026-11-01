@@ -186,6 +186,19 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 
 	GL3_Fog_SetHardwareFxState(fogregion, &st);
 
+	/* GFX-modern r_om_ssr: liquids are mirrors with a little roughness (the trace adds ripples); a translucent
+	   one writes its depth too, so the reflection is traced from its surface and not from the bottom below */
+	if (GL3_Post_SSRActive())
+	{
+		st.matrefl = 0.5f;
+		st.matrough = 0.05f;
+
+		if (translucent)
+		{
+			st.depthwrite = true;
+		}
+	}
+
 	/* pass 0: the liquid; pass 1 (image with an environment second-pass texture): the base texture again,
 	   sphere-mapped, colour 1, the same wave height (SPEC-AMEND-006 I4c.1) */
 	for (pass = 0; pass < (sphere ? 2 : 1); pass++)

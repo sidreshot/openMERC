@@ -187,7 +187,9 @@ typedef struct
 	float pf1[4];        /* start, range, max alpha (0..255), height falloff */
 	float pf2[4];        /* maxs z, size z, alpha scale, number of planes */
 	float pfpl[5][4];    /* boundary planes still shortening: normal, dist */
+	float matrefl, matrough; /* GFX-modern r_om_ssr: material of liquids (0 = default) */
 } gl3fxstate_t;
+qboolean GL3_Post_SSRActive(void);
 
 void GL3_FX_SetState(const gl3fxstate_t *st);
 void GL3_FX_DefaultState(gl3fxstate_t *st);
