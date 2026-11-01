@@ -860,3 +860,4 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   synthesises three booms once (sound/om/boom0..2.wav: a low thump falling in pitch and a short rumble) and plays
   them after distance / 1200 s from a queue (explosions come more often than the sound takes).
 * Cost: sib1 snow and kos2 war each under 0.3 ms (1080p, GTX 1050 Ti).
+* Snow follow-up (owner: "it hits you in the face, it must be fine particles", "and into the distance"): flakes are 0.5..1 units, kept between 0.8 and 1.6 pixels on the screen, none closer than ~45..110 units; three layers in depth, each fading in where the nearer one ends (box 700 / 1800 / 3600 units, 12000 / 16000 / 14000 flakes), so the fall reaches into the fog.

@@ -4179,7 +4179,7 @@ static struct
 	qboolean rain, storm, aa;   /* this map: rain (and lightning), distant lightning only, anti-aircraft fire */
 	qboolean snow;              /* this map: snowfall */
 	GLuint progaa, progsnow;
-	GLint n_vp, n_eye, n_time, n_params, n_occ, n_occvp, n_color, n_wind;
+	GLint n_vp, n_eye, n_time, n_params, n_occ, n_occvp, n_color, n_wind, n_px, n_layer;
 	float windx, windy, windt;  /* snow: the wind drift integrated over time (world units) */
 	/* war on the aa maps: distant explosions (position, start), fires with smoke (position, seed) */
 	GLuint progwar, progsmoke;
@@ -4769,12 +4769,14 @@ static const char *wx_snow_vs =
 	"uniform float time;\n"
 	"uniform vec4 params;\n"   /* box size, box height, fall speed, flake size */
 	"uniform vec4 wind;\n"     /* drift x, y (units), wind x, y (units/s) */
+	"uniform float pxsize;\n"  /* one pixel in world units at distance 1 */
+	"uniform vec4 layer;\n"    /* fade in from x to y (where the nearer layer ends), seed, - */
 	"uniform sampler2D occ;\n"
 	"uniform mat4 occvp;\n"
 	"out vec2 vUV;\n"
 	"out float vA;\n"
 	"uint Hu(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }\n"
-	"float H(float n) { return float(Hu(uint(gl_VertexID / 6) * 977u + uint(n * 16.0))) / 4294967295.0; }\n"
+	"float H(float n) { return float(Hu(uint(gl_VertexID / 6) * 977u + uint(n * 16.0) + uint(layer.z) * 7919u)) / 4294967295.0; }\n"
 	"void main()\n"
 	"{\n"
 	"	int id = gl_VertexID / 6, c = gl_VertexID - id * 6;\n"
@@ -4794,13 +4796,15 @@ static const char *wx_snow_vs =
 	"	float od = texture(occ, ou).r;\n"
 	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0002);\n"
 	"	float dist = length(p - eye);\n"
-	"	vA = open ? clamp(1.0 - dist / (B * 0.5), 0.0, 1.0) * smoothstep(12.0, 50.0, dist) : 0.0;\n"
+	/* nothing right in front of the eye (flakes there were blots flying into the face) */
+	"	vA = open ? (1.0 - smoothstep(B * 0.35, B * 0.5, dist)) * smoothstep(layer.x, layer.y, dist) : 0.0;\n"
 	"	vec2 cr = vec2((c == 1 || c == 2 || c == 5) ? 1.0 : -1.0, (c == 2 || c == 4 || c == 5) ? 1.0 : -1.0);\n"
 	"	vUV = cr;\n"
 	"	vec3 to = normalize(p - eye);\n"
 	"	vec3 r = normalize(cross(to, vec3(0.0, 0.0, 1.0)));\n"
 	"	vec3 u = cross(r, to);\n"
-	"	float s = params.w * (0.6 + 0.8 * H(f * 8.3)) * (1.0 + dist * 0.0015);\n"
+	/* a real flake is small: its world size, kept between 1 and 2.5 pixels on the screen */
+	"	float s = clamp(params.w * (0.6 + 0.8 * H(f * 8.3)), dist * pxsize * 0.8, dist * pxsize * 1.6);\n"
 	"	gl_Position = vA > 0.0 ? vp * vec4(p + (r * cr.x + u * cr.y) * s, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);\n"
 	"}\n";
 
@@ -5009,6 +5013,8 @@ WXCreate(void)
 	WX.n_occvp = glGetUniformLocation(WX.progsnow, "occvp");
 	WX.n_color = glGetUniformLocation(WX.progsnow, "color");
 	WX.n_wind = glGetUniformLocation(WX.progsnow, "wind");
+	WX.n_px = glGetUniformLocation(WX.progsnow, "pxsize");
+	WX.n_layer = glGetUniformLocation(WX.progsnow, "layer");
 
 	WX.a_vp = glGetUniformLocation(WX.progaa, "vp");
 	WX.a_eye = glGetUniformLocation(WX.progaa, "eye");
@@ -5367,7 +5373,7 @@ GL3_Post_Weather(void)
 		glUniformMatrix4fv(WX.n_vp, 1, GL_FALSE, &pv.Elements[0][0]);
 		glUniform3fv(WX.n_eye, 1, r_newrefdef.vieworg);
 		glUniform1f(WX.n_time, fmodf(r_newrefdef.time, 3600.0f));
-		glUniform4f(WX.n_params, 900.0f, 700.0f, ash ? 38.0f : 75.0f, ash ? 1.0f : 2.2f);
+		glUniform1f(WX.n_px, 2.0f / (gl3state.projMat3D.Elements[1][1] * Q_max(P.vh, 1)));
 		glUniform4f(WX.n_wind, WX.windx, WX.windy, wx, wy);
 		glUniform1i(WX.n_occ, 0);
 		glUniformMatrix4fv(WX.n_occvp, 1, GL_FALSE, WX.occvp);
@@ -5377,10 +5383,36 @@ GL3_Post_Weather(void)
 		}
 		else
 		{
-			glUniform4f(WX.n_color, 0.93f * light, 0.95f * light, 1.0f * light, 0.95f);
+			glUniform4f(WX.n_color, 0.95f * light, 0.97f * light, 1.0f * light, 1.0f);
 		}
 		BindTex(GL_TEXTURE0, WX.occtex);
-		glDrawArrays(GL_TRIANGLES, 0, 6 * (int)((ash ? 1800 : 14000) * Q_min(ash ? 1.0f : r_om_snow->value, 3.0f)));
+
+		if (ash)
+		{
+			glUniform4f(WX.n_params, 900.0f, 700.0f, 38.0f, 0.8f);
+			glUniform4f(WX.n_layer, 40.0f, 120.0f, 0, 0);
+			glDrawArrays(GL_TRIANGLES, 0, 6 * 1800);
+		}
+		else
+		{
+			/* three layers in depth, each starting where the nearer one ends: clear flakes near, a dense fall in
+			   the middle, a veil of falling snow far into the fog */
+			static const float lay[3][6] = {
+				/* box, height, fade from, fade to, flakes, size */
+				{700.0f, 600.0f, 45.0f, 110.0f, 12000.0f, 0.5f},
+				{1800.0f, 1300.0f, 250.0f, 340.0f, 16000.0f, 0.7f},
+				{3600.0f, 2200.0f, 650.0f, 880.0f, 14000.0f, 1.0f},
+			};
+			float dens = Q_min(r_om_snow->value, 3.0f);
+			int l;
+
+			for (l = 0; l < 3; l++)
+			{
+				glUniform4f(WX.n_params, lay[l][0], lay[l][1], 70.0f, lay[l][5]);
+				glUniform4f(WX.n_layer, lay[l][2], lay[l][3], (float)l, 0);
+				glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(lay[l][4] * dens));
+			}
+		}
 	}
 
 	if (!WX.rain)
