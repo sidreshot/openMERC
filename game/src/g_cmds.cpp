@@ -121,6 +121,22 @@ static void Cmd_OmSetPos_f(edict_t *ent)
 		gi.argc() >= 6 ? gi.argv(5) : "-");
 }
 
+/* test aid: uses every entity with the given targetname (as a trigger would, the player activating) */
+static void Cmd_OmFire_f(edict_t *ent)
+{
+	if (!CheatsOK(ent) || gi.argc() < 2)
+		return;
+	int n = 0;
+	edict_t *t = NULL;
+	while ((t = G_Find(t, FOFS(targetname), gi.argv(1)))) {
+		if (t->use) {
+			t->use(t, ent, ent);
+			n++;
+		}
+	}
+	gi.cprintf(ent, PRINT_HIGH, "omfire %s: %d used\n", gi.argv(1), n);
+}
+
 /* test aid: prints the nearest dead character (origin, solid, svflags, box) */
 static void Cmd_OmCorpse_f(edict_t *ent)
 {
@@ -516,6 +532,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_Gimme_f(ent);
 	else if (Q_stricmp(cmd, "omcorpse") == 0)
 		Cmd_OmCorpse_f(ent);
+	else if (Q_stricmp(cmd, "omfire") == 0)
+		Cmd_OmFire_f(ent);
 	else if (Q_stricmp(cmd, "defaultweapons") == 0) {
 		if (CheatsOK(ent))
 			GM_DefaultWeapons(ent); /* G9: SPEC-790 the level's default weapons */
