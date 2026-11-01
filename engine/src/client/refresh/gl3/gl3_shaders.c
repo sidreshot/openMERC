@@ -619,6 +619,7 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			lmTex     += texture(lightmap2, passLMcoord) * lmScales[2];
 			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
+			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
 			if(passLightFlags != 0u && omPdl.x > 0.5)
@@ -773,6 +774,82 @@ static const char* fragmentSrcOmPdl =
 	"}\n"
 	;
 
+/*
+ * GFX-modern r_om_bump: relief lighting of the world surfaces from the game's own textures. The height is the
+ * luminance of the face texture (a blurred mip, so pixel noise does not turn into embossing); its gradient tilts the
+ * normal. The static light keeps its brightness: only its direction is estimated, from the gradient of the
+ * lightmap (light comes from the brighter side, plus the surface normal for the part that falls on the face
+ * straight on), and the lightmap is scaled by how much the tilted normal faces that direction compared with the
+ * flat one. omBump: x strength (0 = off), y lightmap gradient weight, z shading contrast, w texture lod bias.
+ * The height is a detail height (fine luminance minus a mip two levels coarser): grout, cracks and seams give
+ * relief, large stains do not. With the omlight deluxe map (gl3_relight.c) the light direction is the baked one
+ * and only the directional share of the light is shaded; without it, the lightmap gradient stands in.
+ */
+static const char* fragmentSrcOmBump =
+	"uniform vec4 omBump;\n"
+	"uniform sampler2D omDeluxe;\n"
+	"float omBumpLum(vec2 uv, float lod)\n"
+	"{\n"
+	"	return dot(textureLod(tex, uv, lod).rgb, vec3(0.299, 0.587, 0.114));\n"
+	"}\n"
+	"float omBumpLmLum(vec2 uv)\n"
+	"{\n"
+	"	return dot(textureLod(lightmap0, uv, 0.0).rgb, vec3(0.299, 0.587, 0.114));\n"
+	"}\n"
+	"vec3 omBumpLight(vec3 lm)\n"
+	"{\n"
+	"	if(omBump.x <= 0.0 || omEmissive > 0.0)\n"
+	"		return lm;\n"
+	"	vec3 N = normalize(passNormal);\n"
+	"	vec3 dp1 = dFdx(passWorldCoord);\n"
+	"	vec3 dp2 = dFdy(passWorldCoord);\n"
+	"	vec2 duv1 = dFdx(passTexCoord);\n"
+	"	vec2 duv2 = dFdy(passTexCoord);\n"
+	"	// world directions of increasing s and t on the face (cotangent frame)\n"
+	"	vec3 dp2perp = cross(dp2, N);\n"
+	"	vec3 dp1perp = cross(N, dp1);\n"
+	"	vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;\n"
+	"	vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;\n"
+	"	if(dot(T, T) < 1.0e-12 || dot(B, B) < 1.0e-12)\n"
+	"		return lm;\n"
+	"	T = normalize(T);\n"
+	"	B = normalize(B);\n"
+	"	// height gradient per texel on a blurred mip\n"
+	"	vec2 ts = vec2(textureSize(tex, 0));\n"
+	"	float lod = max(log2(max(length(duv1 * ts), length(duv2 * ts))), 0.0) + omBump.w;\n"
+	"	vec2 o = exp2(lod) / ts;\n"
+	"	// detail height: fine luminance minus a mip two levels coarser, so grout, cracks and seams make relief and\n"
+	"	// large stains do not; the gradient is taken per texel on both and subtracted\n"
+	"	vec2 o2 = o * 4.0;\n"
+	"	vec2 gf = vec2(omBumpLum(passTexCoord + vec2(o.x, 0.0), lod) - omBumpLum(passTexCoord - vec2(o.x, 0.0), lod),\n"
+	"		omBumpLum(passTexCoord + vec2(0.0, o.y), lod) - omBumpLum(passTexCoord - vec2(0.0, o.y), lod)) * (0.5 / exp2(lod));\n"
+	"	vec2 gc = vec2(omBumpLum(passTexCoord + vec2(o2.x, 0.0), lod + 2.0) - omBumpLum(passTexCoord - vec2(o2.x, 0.0), lod + 2.0),\n"
+	"		omBumpLum(passTexCoord + vec2(0.0, o2.y), lod + 2.0) - omBumpLum(passTexCoord - vec2(0.0, o2.y), lod + 2.0)) * (0.125 / exp2(lod));\n"
+	"	vec2 g = gf - gc;\n"
+	"	vec3 Nb = normalize(N - omBump.x * (g.x * T + g.y * B));\n"
+	"	// baked light direction (omlight deluxe map): world vector, length = the directional share of the light\n"
+	"	vec3 dv = texture(omDeluxe, passLMcoord).rgb * 2.0 - 1.0;\n"
+	"	float k = length(dv);\n"
+	"	if(k > 0.02)\n"
+	"	{\n"
+	"		vec3 Ld = dv / k;\n"
+	"		float fl = max(dot(N, Ld), 0.15);\n"
+	"		float ratio = clamp(max(dot(Nb, Ld), 0.0) / fl, 0.0, 2.5);\n"
+	"		k = clamp(k * omBump.z, 0.0, 1.0);\n"
+	"		return lm * ((1.0 - k) + k * ratio);\n"
+	"	}\n"
+	"	// no deluxe map: light direction from the lightmap gradient along s and t and the normal\n"
+	"	vec2 ls = 1.0 / vec2(textureSize(lightmap0, 0));\n"
+	"	float lc = max(omBumpLmLum(passLMcoord), 1.0 / 255.0);\n"
+	"	vec2 lg = vec2(omBumpLmLum(passLMcoord + vec2(ls.x, 0.0)) - omBumpLmLum(passLMcoord - vec2(ls.x, 0.0)),\n"
+	"		omBumpLmLum(passLMcoord + vec2(0.0, ls.y)) - omBumpLmLum(passLMcoord - vec2(0.0, ls.y))) * (0.5 / lc);\n"
+	"	lg = clamp(lg, -1.0, 1.0) * omBump.y;\n"
+	"	vec3 L = normalize(N + lg.x * T + lg.y * B);\n"
+	"	float f = 1.0 + omBump.z * (dot(Nb, L) - dot(N, L));\n"
+	"	return lm * clamp(f, 0.3, 1.7);\n"
+	"}\n"
+	;
+
 static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 
 		// it gets attributes and uniforms from fragmentCommon3D
@@ -838,6 +915,7 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			lmTex     += texture(lightmap2, passLMcoord) * lmScales[2];
 			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
+			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
 			if(passLightFlags != 0u && omPdl.x > 0.5)
@@ -1569,6 +1647,13 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 	}
 
 	/* OpenMerc (I4c): dynamic light layer of the lightmap page on GL_TEXTURE6 (gl3_dynlight.c) */
+	/* GFX-modern r_om_bump: light directions of the lightmap page on GL_TEXTURE10 (gl3_relight.c) */
+	GLint dxLoc = glGetUniformLocation(prog, "omDeluxe");
+	if(dxLoc != -1)
+	{
+		glUniform1i(dxLoc, 10);
+	}
+
 	GLint dlLoc = glGetUniformLocation(prog, "omDynLight");
 	if(dlLoc != -1)
 	{
@@ -1693,15 +1778,16 @@ static qboolean createShaders(void)
 		const char *lmsrc = (gl3_colorlight->value == 0.0f) ? fragmentSrc3DlmNoColor : fragmentSrc3Dlm;
 		const char *m = strstr(lmsrc, "void main()");
 		size_t pre = m ? (size_t)(m - lmsrc) : strlen(lmsrc);
-		size_t ins = strlen(fragmentSrcOmPdl);
-		char *joined = malloc(strlen(lmsrc) + ins + 1);
+		size_t ins = strlen(fragmentSrcOmPdl), insb = strlen(fragmentSrcOmBump);
+		char *joined = malloc(strlen(lmsrc) + ins + insb + 1);
 		if(joined == NULL)
 		{
 			return false;
 		}
 		memcpy(joined, lmsrc, pre);
 		memcpy(joined + pre, fragmentSrcOmPdl, ins);
-		strcpy(joined + pre + ins, lmsrc + pre);
+		memcpy(joined + pre + ins, fragmentSrcOmBump, insb); /* GFX-modern r_om_bump */
+		strcpy(joined + pre + ins + insb, lmsrc + pre);
 		lmFragCsm = GL3_CSM_Prepend(joined);
 		free(joined);
 	}
@@ -1949,6 +2035,26 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 		{
 			GL3_UseProgram(si[i]->shaderProgram);
 			glUniform1i(loc, mode);
+		}
+
+		/* GFX-modern r_om_bump: relief lighting of the world surfaces (off with r_fullbright / night vision) */
+		loc = glGetUniformLocation(si[i]->shaderProgram, "omBump");
+
+		if (loc != -1)
+		{
+			static cvar_t *bump, *bumplight, *bumpcontrast, *bumplod;
+
+			if (!bump)
+			{
+				bump = ri.Cvar_Get("r_om_bump", "1", CVAR_ARCHIVE);
+				bumplight = ri.Cvar_Get("r_om_bump_light", "1.5", CVAR_ARCHIVE);
+				bumpcontrast = ri.Cvar_Get("r_om_bump_contrast", "2.5", CVAR_ARCHIVE);
+				bumplod = ri.Cvar_Get("r_om_bump_lod", "0.7", CVAR_ARCHIVE);
+			}
+
+			GL3_UseProgram(si[i]->shaderProgram);
+			glUniform4f(loc, fullbright ? 0.0f : 8.0f * bump->value, bumplight->value, bumpcontrast->value,
+					bumplod->value);
 		}
 	}
 }

@@ -535,6 +535,11 @@ extern const byte* GL3_Mod_ClusterPVS(int cluster, const gl3model_t *model);
 
 // gl3_relight.c: the local lightmap re-bake cache (omlight)
 extern void GL3_Relight_Apply(const char *mapname, byte *lightdata, int size);
+// light-direction pages beside the lightmap pages (r_om_bump)
+extern void GL3_Deluxe_BeginBuild(void);
+extern void GL3_Deluxe_Surface(const msurface_t *surf);
+extern void GL3_Deluxe_UploadPage(int page);
+extern void GL3_Deluxe_BindPage(int page);
 
 // gl3_draw.c
 extern void GL3_Draw_InitLocal(void);

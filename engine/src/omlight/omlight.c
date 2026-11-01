@@ -750,7 +750,7 @@ static void cos_dir(const float *n, float u1, float u2, float *d)
 }
 
 /* direct terms at one point (point, surf, sun, sky, spot) x RGB; returns 0 if the point is in solid */
-static int direct_terms(const float *p0, const float *n, uint32_t seed, float out[ND][3], int soft)
+static int direct_terms(const float *p0, const float *n, uint32_t seed, float out[ND][3], int soft, float (*dirs)[3])
 {
 	float p[3];
 	int leaf, cl, i, k, nsky;
@@ -760,6 +760,7 @@ static int direct_terms(const float *p0, const float *n, uint32_t seed, float ou
 	if (leafs[leaf].contents & CONTENTS_SOLID) return 0;
 	cl = leafs[leaf].cluster;
 	memset(out, 0, sizeof(float) * ND * 3);
+	if (dirs) memset(dirs, 0, sizeof(float) * ND * 3);
 	for (i = 0; i < npoints; i++)
 	{
 		light_t *lt = &points[i];
@@ -787,6 +788,8 @@ static int direct_terms(const float *p0, const float *n, uint32_t seed, float ou
 		}
 		if (blocked(p, tgt)) continue;
 		for (k = 0; k < 3; k++) out[lt->spot ? 4 : 0][k] += lt->color[k] * fall * cs * axis;
+		if (dirs) /* light direction weighted by the luminance it adds (deluxe map) */
+			for (k = 0; k < 3; k++) dirs[lt->spot ? 4 : 0][k] += dv[k] / dist * (lt->color[0] + lt->color[1] + lt->color[2]) / 3 * fall * cs * axis;
 	}
 	for (i = 0; i < nsurfs; i++)
 	{
@@ -810,6 +813,8 @@ static int direct_terms(const float *p0, const float *n, uint32_t seed, float ou
 			for (k = 0; k < 3; k++) tgt[k] = lt->o[k] - dv[k] / dist * 2.0f; /* step off the emitter toward the sample */
 		if (blocked(p, tgt)) continue;
 		for (k = 0; k < 3; k++) out[1][k] += lt->color[k] * sc;
+		if (dirs)
+			for (k = 0; k < 3; k++) dirs[1][k] += dv[k] / dist * (lt->color[0] + lt->color[1] + lt->color[2]) / 3 * sc;
 	}
 	{
 		float cs = dot3(n, sundir), d[3], hit[3];
@@ -825,7 +830,11 @@ static int direct_terms(const float *p0, const float *n, uint32_t seed, float ou
 				norm3(d);
 			}
 			if (ray_face(p, d, skyplane, 0, hit) >= 0)
+			{
 				for (k = 0; k < 3; k++) out[2][k] += cs * suncolor[k];
+				if (dirs)
+					for (k = 0; k < 3; k++) dirs[2][k] += d[k] * cs * (suncolor[0] + suncolor[1] + suncolor[2]) / 3;
+			}
 		}
 	}
 	nsky = 0;
@@ -837,7 +846,11 @@ static int direct_terms(const float *p0, const float *n, uint32_t seed, float ou
 			for (b = 0; b < sq; b++)
 			{
 				cos_dir(n, (a + rnd(&s)) / sq, (b + rnd(&s)) / sq, d);
-				if (ray_face(p, d, skyplane, 0, hit) >= 0) nsky++;
+				if (ray_face(p, d, skyplane, 0, hit) >= 0)
+				{
+					nsky++;
+					if (dirs) for (k = 0; k < 3; k++) dirs[3][k] += d[k] / (sq * sq);
+				}
 			}
 		for (k = 0; k < 3; k++) out[3][k] = (float)nsky / (sq * sq);
 	}
@@ -908,7 +921,7 @@ static void bake_native(void)
 				int idx = f->lofs + j * w + i;
 				float t[ND][3];
 				face_point(f, f->mins[0] + lss * i, f->mins[1] + lst * j, p);
-				V[idx] = (unsigned char)direct_terms(p, f->normal, hash32(idx * 7919u + 1), t, 0);
+				V[idx] = (unsigned char)direct_terms(p, f->normal, hash32(idx * 7919u + 1), t, 0, NULL);
 				E[idx] = (texinfos[f->texinfo].flags & SURF_LIGHT) != 0;
 				if (V[idx]) memcpy(T + (size_t)idx * NT * 3, t, sizeof(t));
 				for (k = 0; k < 3; k++) O[idx * 3 + k] = lighting[f->lightofs + (j * w + i) * 3 + k];
@@ -1413,6 +1426,7 @@ int main(int argc, char **argv)
 		long long total = 0;
 		FILE *hf;
 		float **res = xmalloc(sizeof(float *) * nbfaces);
+		float **resd = xmalloc(sizeof(float *) * nbfaces); /* light directions (deluxe map), 3 per sample */
 		int *rw = xmalloc(sizeof(int) * nbfaces), *rh = xmalloc(sizeof(int) * nbfaces);
 		for (i = 0; i < nsamp; i++) for (k = 0; k < 3; k++) BN[i * 3 + k] = T[((size_t)i * NT + TB) * 3 + k];
 		for (i = 0; i < nbfaces; i++)
@@ -1428,36 +1442,46 @@ int main(int argc, char **argv)
 			float lss, lst, p[3], bn[3];
 			int w, h, x, y, a, b, k2;
 			unsigned char *vv;
-			float *rgb;
+			float *rgb, *dir;
 			face_grid(f, opt_ls > 0 ? opt_ls : 0, &lss, &lst, &w, &h);
 			rgb = xmalloc(sizeof(float) * w * h * 3);
+			dir = xmalloc(sizeof(float) * w * h * 3);
 			vv = xmalloc(w * h);
 			for (y = 0; y < h; y++)
 				for (x = 0; x < w; x++)
 				{
-					float acc[3] = {0, 0, 0};
+					float acc[3] = {0, 0, 0}, dacc[3] = {0, 0, 0}, lacc = 0;
 					int nv = 0;
 					for (a = 0; a < opt_ss; a++)
 						for (b = 0; b < opt_ss; b++)
 						{
-							float t[ND][3], s0 = f->mins[0] + lss * (x + ((b + 0.5f) / opt_ss - 0.5f));
+							float t[ND][3], td[ND][3], s0 = f->mins[0] + lss * (x + ((b + 0.5f) / opt_ss - 0.5f));
 							float tt0 = f->mins[1] + lst * (y + ((a + 0.5f) / opt_ss - 0.5f));
 							uint32_t seed = hash32((uint32_t)(bfaces[i] * 7349 + (y * w + x) * 31 + a * opt_ss + b));
 							face_point(f, s0, tt0, p);
-							if (!direct_terms(p, f->normal, seed, t, 1)) continue;
+							if (!direct_terms(p, f->normal, seed, t, 1, td)) continue;
 							sample_native(BN, f, p, bn);
 							for (k2 = 0; k2 < 3; k2++)
 								acc[k2] += (float)(w2[0] * t[0][k2] + w2[1] * t[1][k2] + w2[2] * t[2][k2] + w2[3] * t[3][k2] +
 								                   w2[4] * t[4][k2] + w2[TB] * bn[k2]);
+							/* direct light adds its directions, the bounce only its luminance (no direction) */
+							for (k2 = 0; k2 < 3; k2++)
+								dacc[k2] += (float)(w2[0] * td[0][k2] + w2[1] * td[1][k2] + w2[2] * td[2][k2] + w2[3] * td[3][k2] +
+								                    w2[4] * td[4][k2]);
+							for (k2 = 0; k2 < 3; k2++)
+								lacc += (float)(w2[0] * t[0][k2] + w2[1] * t[1][k2] + w2[2] * t[2][k2] + w2[3] * t[3][k2] +
+								                w2[4] * t[4][k2] + w2[TB] * bn[k2]) / 3;
 							nv++;
 						}
 					vv[y * w + x] = nv > 0;
 					for (k2 = 0; k2 < 3; k2++) rgb[(y * w + x) * 3 + k2] = nv ? acc[k2] / nv : 0;
+					for (k2 = 0; k2 < 3; k2++) dir[(y * w + x) * 3 + k2] = lacc > 1e-3f ? dacc[k2] / lacc : 0;
 					clamp_rgb(rgb + (y * w + x) * 3);
 				}
 			fill_invalid(rgb, 3, vv, w, h);
+			fill_invalid(dir, 3, vv, w, h);
 			free(vv);
-			res[i] = rgb; rw[i] = w; rh[i] = h;
+			res[i] = rgb; resd[i] = dir; rw[i] = w; rh[i] = h;
 			total += (long long)w * h;
 		}
 		t1 = omp_get_wtime();
@@ -1480,7 +1504,10 @@ int main(int argc, char **argv)
 		if (opt_ls < 0)
 		{
 			int lo, ll, s, nemis = 0;
+			unsigned char *dlx;
 			lo = lump(7, &ll);
+			dlx = xmalloc(ll);
+			memset(dlx, 128, ll); /* no direction where nothing was baked */
 			for (i = 0; i < nbfaces; i++)
 			{
 				face_t *f = &faces[bfaces[i]];
@@ -1492,6 +1519,11 @@ int main(int argc, char **argv)
 					int ofs = f->lightofs + s;
 					if (ofs < 0 || ofs >= ll) break;
 					bspdata[lo + ofs] = (unsigned char)(v < 0 ? 0 : (v > 255 ? 255 : v));
+					{
+						float dv = resd[i][s];
+						dv = dv < -1 ? -1 : (dv > 1 ? 1 : dv);
+						dlx[ofs] = (unsigned char)(128.0f + 127.0f * dv + 0.5f);
+					}
 				}
 			}
 
@@ -1499,7 +1531,7 @@ int main(int argc, char **argv)
 			{
 				/* the cache file, renamed into place only when complete */
 				char tmp[1100];
-				int ver = 1;
+				int ver = 2;
 				uint32_t h[2] = {(uint32_t)oldhash, (uint32_t)(oldhash >> 32)};
 				FILE *of;
 
@@ -1511,6 +1543,7 @@ int main(int argc, char **argv)
 				fwrite(&ll, 4, 1, of);
 				fwrite(h, 4, 2, of);
 				fwrite(bspdata + lo, 1, ll, of);
+				fwrite(dlx, 1, ll, of); /* light directions, same layout */
 				if (fclose(of) != 0) { fprintf(stderr, "cannot write %s\n", tmp); remove(tmp); return 1; }
 				remove(outfile);
 				if (rename(tmp, outfile) != 0) { fprintf(stderr, "cannot rename %s\n", tmp); remove(tmp); return 1; }
@@ -1526,7 +1559,7 @@ int main(int argc, char **argv)
 				printf("wrote %s\n", opt_outbsp);
 			}
 		}
-		for (i = 0; i < nbfaces; i++) free(res[i]);
+		for (i = 0; i < nbfaces; i++) { free(res[i]); free(resd[i]); }
 	}
 	return 0;
 }

@@ -345,6 +345,7 @@ GL3_BindLightmap(int lightmapnum)
 	}
 
 	GL3_DynLight_BindPage(lightmapnum); /* OpenMerc (I4c): dynamic light layer on GL_TEXTURE6 */
+	GL3_Deluxe_BindPage(lightmapnum); /* GFX-modern r_om_bump: light directions on GL_TEXTURE10 */
 }
 
 /*
