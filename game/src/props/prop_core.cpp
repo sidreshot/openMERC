@@ -878,18 +878,48 @@ void Riders(edict_t *self)
 {
 	/* openMERC: characters standing on the prop ride too (the spec names players only); otherwise the people on
 	   the tsr1 subway trains stayed in the air and fell when the train drove off in the cinematic */
+	static cvar_t *dbg;
+	if (!dbg)
+		dbg = gi.cvar("om_ridersdebug", "0", 0);
+	for (int i = 1; dbg->value && i < globals.num_edicts; i++) {
+		/* test aid: characters above the prop's footprint and what they stand on */
+		edict_t *p = g_edicts + i;
+		if (!p->inuse || !p->ai || p == self)
+			continue;
+		if (p->s.origin[0] < self->absmin[0] || p->s.origin[0] > self->absmax[0] || p->s.origin[1] < self->absmin[1] ||
+		    p->s.origin[1] > self->absmax[1] || p->s.origin[2] < self->absmax[2] - 16)
+			continue;
+		gi.dprintf("OMRIDE train %d y %.0f v %.0f %.0f: ent %d %s y %.0f z %.0f ground %d movetype %d solid %d health %d\n",
+		           G_EdictNum(self), self->s.origin[1], self->velocity[0], self->velocity[1], i, p->classname,
+		           p->s.origin[1], p->s.origin[2],
+		           p->groundentity ? G_EdictNum(p->groundentity) : -1, p->movetype, (int)p->solid, p->health);
+	}
 	for (int i = 1; i < globals.num_edicts; i++) {
 		edict_t *p = g_edicts + i;
-		if (!p->inuse || p->groundentity != self || p == self)
+		if (!p->inuse || p == self)
 			continue;
 		if (!p->client && !p->ai)
+			continue;
+		/* standing on it: the ground entity, or (characters) the feet within a few units of the roof inside its
+		   outline - characters woken on the tsr1 train settled on the roof without the ground entity being set */
+		bool on = p->groundentity == self;
+		if (!on && p->ai && p->health > 0) {
+			float feet = p->s.origin[2] + p->mins[2], top = self->absmax[2];
+			on = feet >= top - 4 && feet <= top + 6 && p->s.origin[0] >= self->absmin[0] &&
+			     p->s.origin[0] <= self->absmax[0] && p->s.origin[1] >= self->absmin[1] &&
+			     p->s.origin[1] <= self->absmax[1];
+		}
+		if (!on)
 			continue;
 		if (p->movetype == MOVETYPE_NONE || p->movetype == MOVETYPE_NOCLIP || p->movetype == MOVETYPE_PUSH ||
 		    p->movetype == MOVETYPE_STOP)
 			continue;
-		vec3_t np;
+		vec3_t np, lo;
 		VectorMA(p->s.origin, FRAMETIME, self->velocity, np);
-		trace_t tr = gi.trace(np, p->mins, p->maxs, np, p, p->client ? 0x02010003 : MASK_MONSTERSOLID);
+		/* the bottom 2 units, which touch the roof, are not tested */
+		VectorCopy(p->mins, lo);
+		lo[2] += 2;
+		trace_t tr = gi.trace(np, lo, p->maxs, np, p, p->client ? 0x02010003 : MASK_MONSTERSOLID);
 		if (tr.startsolid || tr.allsolid)
 			continue;
 		VectorCopy(np, p->s.origin);
