@@ -625,6 +625,7 @@ set(GL3-Source
 	${REF_SRC_DIR}/gl3/gl3_terrain.c
 	${REF_SRC_DIR}/gl3/gl3_liquid.c
 	${REF_SRC_DIR}/gl3/gl3_avi.c
+	${REF_SRC_DIR}/gl3/gl3_relight.c
 	${REF_SRC_DIR}/gl3/gl3_dynlight.c
 	${REF_SRC_DIR}/gl3/gl3_sofapi.c
 	${REF_SRC_DIR}/gl3/gl3_ghoul.c
@@ -774,6 +775,21 @@ endif()
 endif()
 
 add_subdirectory(src/ghoul) # OpenMerc I3: Ghoul model system library (C++, SPEC-010..014, 120, 121)
+
+# OpenMerc GFX-modern: omlight, the lightmap re-bake the GL3 renderer starts in the background for a map
+# without a cached bake (r_om_relight); it reads the player's own paks and writes user/lightmaps/<map>.oml
+add_executable(omlight src/omlight/omlight.c)
+set_target_properties(omlight PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/release)
+find_package(OpenMP)
+if(OpenMP_C_FOUND)
+	target_link_libraries(omlight OpenMP::OpenMP_C)
+endif()
+if(MSVC)
+	target_compile_definitions(omlight PRIVATE _CRT_SECURE_NO_WARNINGS)
+	target_compile_options(omlight PRIVATE /fp:fast)
+else()
+	target_link_libraries(omlight m)
+endif()
 
 # OpenMerc ENG2: SPEC-314 player-movement test vectors (sofpm_test, exit code = failures)
 option(OM_SOFPM_TESTS "Build the SPEC-314 player-movement test program" ON)
