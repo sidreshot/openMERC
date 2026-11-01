@@ -87,3 +87,4 @@ behaviour where that makes sense.
 - **Death animations:** a falling death (`_2bk`, `_2frnt`, `blown`) is chosen only when the floor it needs is free
   of walls (64 units, 112 for the blown-back throw); otherwise the chain falls through to an in-place death. The
   blown-back throw is scaled down by the room behind the body. The original had no check and bodies fell into walls.
+| Light probe (GL3 renderer) | the first lightmapped face along the probe, either side; a direction probe that hits nothing in 256 units gives 0.1 | only faces turned towards the probe count; a direction probe that hits nothing falls back to the probe straight down | the view weapon and characters went black under beams and in the open (ger1 dock, irq1b, sib1) | — |

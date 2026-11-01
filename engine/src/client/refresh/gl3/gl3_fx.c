@@ -388,6 +388,13 @@ LightTrace(mnode_t *node, const vec3_t start, const vec3_t end, vec3_t color)
 			continue;
 		}
 
+		/* openMERC: only a face turned towards the probe counts; the underside of a beam just below the eye
+		   (ger1 dock) gave its own shadowed lightmap and the view weapon went black */
+		if (((surf->flags & SURF_PLANEBACK) != 0) != (side != 0))
+		{
+			continue;
+		}
+
 		s = (int)(DotProduct(mid, tex->vecs[0]) + tex->vecs[0][3]);
 		t = (int)(DotProduct(mid, tex->vecs[1]) + tex->vecs[1][3]);
 
@@ -465,6 +472,19 @@ StaticLight(const vec3_t p, int dir, vec3_t color)
 
 	if (LightTrace(gl3_worldmodel->nodes, p, end, color) < 0)
 	{
+		/* openMERC: a probe along a direction that reaches nothing within 256 units (the open sky outdoors, a wide
+		   lift shaft) takes the light of the ground below instead of near black: the view weapon and characters
+		   went black in sunny places while they were lit indoors */
+		if (dir != 255)
+		{
+			VectorSet(end, p[0], p[1], p[2] - 2048);
+
+			if (LightTrace(gl3_worldmodel->nodes, p, end, color) >= 0)
+			{
+				return;
+			}
+		}
+
 		VectorSet(color, 0.1f, 0.1f, 0.1f);
 	}
 }
