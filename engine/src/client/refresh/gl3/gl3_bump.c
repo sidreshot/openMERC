@@ -377,7 +377,7 @@ GL3_Bump_Bind(GLuint texnum)
  * the map's lamps for per-pixel relief and highlights (lump 20)
  * --------------------------------------------------------------------- */
 
-#define BUMP_MAX_VIEW_LIGHTS 16
+#define BUMP_MAX_VIEW_LIGHTS 8
 
 typedef struct
 {
@@ -460,7 +460,7 @@ GL3_Bump_ViewLights(GLuint prog, const float *eye)
 		VectorSubtract(l->origin, eye, d);
 		dist = VectorLength(d);
 
-		if (dist > l->radius + 1200.0f)
+		if (dist > l->radius + 700.0f)
 		{
 			continue;
 		}
