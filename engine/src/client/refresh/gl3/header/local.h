@@ -541,7 +541,7 @@ extern void GL3_Deluxe_Surface(const msurface_t *surf);
 extern void GL3_Deluxe_UploadPage(int page);
 extern void GL3_Deluxe_BindPage(int page);
 // gl3_bump.c: normal maps of the world textures made from the textures (r_om_bump)
-extern void GL3_Bump_Make(GLuint texnum, const byte *rgba, int w, int h);
+extern void GL3_Bump_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h);
 extern void GL3_Bump_Free(GLuint texnum);
 extern void GL3_Bump_Bind(GLuint texnum);
 extern void GL3_Bump_SetLights(const byte *lights, int len);

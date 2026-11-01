@@ -159,15 +159,35 @@ Bump_Store(GLuint texnum, GLuint nm)
 
 /* builds and uploads the normal map of a wall texture (rgba: w x h, 4 bytes per texel) */
 void
-GL3_Bump_Make(GLuint texnum, const byte *rgba, int w, int h)
+GL3_Bump_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 {
-	float *L, *low, *H, *Hs, sum = 0, sum2 = 0, mean, sd, scale;
+	/* pictures on the walls stay flat: paintings, posters, signs, maps, screens, vending fronts */
+	static const char *flat[] = {"painting", "poster", "sign", "/1_map", "directory", "news_", "soda_", "vend",
+		"screen", "static", "_cam", "whiteboard", "danger", "warning", "restroom", "elenumber", "fishtank", "meter",
+		"button", "/med_", "light", NULL};
+	float *L, *low, *H, *Hs, sum = 0, sum2 = 0, mean, sd, scale, strength = 0;
 	byte *out;
 	int x, y, step = 1, i, n;
 
 	if (!texnum || !rgba || (w < 8) || (h < 8))
 	{
 		return;
+	}
+
+	if (name)
+	{
+		char lname[MAX_QPATH];
+
+		Q_strlcpy(lname, name, sizeof(lname));
+		Q_strlwr(lname);
+
+		for (i = 0; flat[i]; i++)
+		{
+			if (strstr(lname, flat[i]))
+			{
+				return;
+			}
+		}
 	}
 
 	/* large replacement textures are measured at most 1024 wide */
@@ -258,10 +278,44 @@ GL3_Bump_Make(GLuint texnum, const byte *rgba, int w, int h)
 
 		mr /= n;
 
-		for (i = 0; i < n; i++)
+		/* how strongly the texture is built of lines: their spread against the mean response. Only clear joints
+		   become grooves (threshold above the mean); a texture without them (plaster, stains) stays flat. */
 		{
-			float d = H[i] - mr;
-			H[i] = -(d > 0 ? d : 0);
+			float s2 = 0, sr, th;
+
+			for (i = 0; i < n; i++)
+			{
+				s2 += (H[i] - mr) * (H[i] - mr);
+			}
+
+			sr = sqrtf(s2 / n);
+			strength = sr / fmaxf(mr, 1.0e-4f);
+			th = mr + 0.75f * sr;
+
+			for (i = 0; i < n; i++)
+			{
+				float d = H[i] - th;
+				H[i] = -(d > 0 ? d : 0);
+			}
+
+			R_Printf(PRINT_DEVELOPER, "OMBUMP %s %dx%d lines %.2f mean %.4f\n", name ? name : "?", w, h, strength, mr);
+		}
+
+		/* no clear joints (plaster, smooth metal, plain stone; strength < 0.35 on jpn1) or nearly one colour:
+		   relief would only be noise */
+		if ((strength < 0.35f) || (mr < 0.004f))
+		{
+			free(bx);
+			free(by);
+			free(dx);
+			free(dy);
+			free(rv);
+			free(rh);
+			free(L);
+			free(H);
+			free(out);
+			GL3_Bump_Free(texnum);
+			return;
 		}
 
 		free(bx);
@@ -520,7 +574,7 @@ GL3_Bump_ViewLights(GLuint prog, const float *eye)
 
 /* the gloss class of a face from its SoF surface material (high byte of the texinfo flags, SPEC-401 table),
  * passed to the world shader as -class in the emissive slot of non-light faces:
- * 1 stone/brick/concrete/earth, 2 wood/paper, 3 metal, 4 glass/panels, 0 unknown */
+ * 1 stone/brick/concrete/earth, 2 wood, 3 metal, 4 glass, 5 pictures and screens (flat), 0 unknown */
 float
 GL3_Bump_SurfClass(const msurface_t *surf)
 {
@@ -532,6 +586,12 @@ GL3_Bump_SurfClass(const msurface_t *surf)
 	}
 
 	m = (surf->texinfo->flags >> 24) & 0xff;
+
+	/* computers and screens, lit glass panels, vending machines, paintings: no relief at all */
+	if (m == 32 || m == 38 || m == 39 || m == 40)
+	{
+		return -5.0f;
+	}
 
 	if (m == 0 || (m >= 2 && m <= 9) || (m >= 17 && m <= 24) || m == 33 || m == 34)
 	{

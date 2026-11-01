@@ -590,7 +590,7 @@ GL3_LoadPic(char *name, byte *pic, int width, int realwidth,
 
 			if (image->type == it_wall) /* GFX-modern r_om_bump: replacement wall textures too */
 			{
-				GL3_Bump_Make(texNum, pic, width, height);
+				GL3_Bump_Make(texNum, image->name, pic, width, height);
 			}
 		}
 
@@ -1315,7 +1315,7 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 
 		if ((ofs0 > 0) && (w0 > 0) && (h0 > 0) && (ofs0 + w0 * h0 * 4 <= size))
 		{
-			GL3_Bump_Make(image->texnum, m + ofs0, w0, h0);
+			GL3_Bump_Make(image->texnum, image->name, m + ofs0, w0, h0);
 		}
 	}
 
