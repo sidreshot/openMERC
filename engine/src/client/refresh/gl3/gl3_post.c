@@ -6280,6 +6280,29 @@ GL3_Mirror_Render(void)
 		GL3_FX_BeginFrame3D();
 		GL3_Fog_BeginFrame();
 		GL3_DrawWorld();
+
+		/* the brush entities too (doors, func_walls, lifts): without them the mirror shows a black hole where
+		   the door stands */
+		if (r_drawentities->value)
+		{
+			int en;
+
+			glDepthMask(GL_TRUE);
+
+			for (en = 0; en < r_newrefdef.num_entities; en++)
+			{
+				entity_t *ent = &r_newrefdef.entities[en];
+
+				if (ent->model && !(ent->flags & (SOF_RF_GHOUL | SOF_RF_WEAPONMODEL | RF_TRANSLUCENT)) &&
+					(((gl3model_t *)ent->model)->type == mod_brush))
+				{
+					GL3_DrawBrushModel(ent, (gl3model_t *)ent->model);
+				}
+			}
+
+			GL3_FX_Flush();
+		}
+
 		GL3_Draw3DBatchesNow();
 		MR.inpass = false;
 
