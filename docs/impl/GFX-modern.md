@@ -821,3 +821,4 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   liquids/puddles are a bit rougher, so the arch ribs over the water reflect softly instead of as sharp lines.
   NaN guards: normals from a degenerate depth neighbourhood, NaN/Inf dropped in every r_om_ssr pass and in the HDR
   luminance (a NaN fed back through the last frame's colour and spread as black blotches).
+* Follow-up 4 (owner: "everything shines the same; less shine on walls, floors as they are"): outside mirrors and glass, walls get 0.3 of their class reflectivity, ceilings 0.15 (blended by the floor factor); damp walls 0.04 instead of 0.12. Floors unchanged.

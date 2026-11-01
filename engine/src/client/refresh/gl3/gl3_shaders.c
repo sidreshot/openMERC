@@ -898,12 +898,16 @@ static const char* fragmentSrcOmBump =
 	"	else if (mc == 12) { r = fl * 0.13; rough = 0.3; damp = 1.0; }\n"
 	"	else if (mc == 2) { r = fl * 0.1 * mix(0.3, 1.0, sm); rough = mix(0.5, 0.25, sm); }\n"
 	"	else if (mc == 1 || mc == 0) { r = fl * 0.13 * mix(0.3, 1.0, sm); rough = mix(0.45, 0.15, sm); }\n"
+	/* walls shine about a third as much as floors, ceilings less still (corridor walls seen at grazing angles made
+	   everything look equally glossy); mirrors and glass keep theirs */
+	"	if (mc != 11 && mc != 4)\n"
+	"		r *= mix(N.z < -0.7 ? 0.15 : 0.3, 1.0, fl);\n"
 	/* wet: open to the rain, or damp by nature (sewers, catacombs): floors with puddles, damp walls glisten */
 	"	wet = max(omWet(wp, N), damp * omSsr.w);\n"
 	"	if (wet > 0.0)\n"
 	"	{\n"
 	"		float pud = smoothstep(0.56, 0.6, omVN(wp.xy / 96.0) * 0.7 + omVN(wp.xy / 23.0) * 0.3) * fl;\n"
-	"		r = mix(r, max(r, mix(0.16, 0.5, pud) * fl + 0.12 * damp * (1.0 - fl)), wet);\n"
+	"		r = mix(r, max(r, mix(0.16, 0.5, pud) * fl + 0.04 * damp * (1.0 - fl)), wet);\n"
 	"		rough = mix(rough, mix(0.3, 0.06, pud) - 0.1 * damp * (1.0 - fl), wet);\n"
 	"		wet *= 0.6 + 0.4 * pud;\n"
 	"	}\n"
