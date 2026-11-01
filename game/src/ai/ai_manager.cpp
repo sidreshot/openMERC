@@ -121,6 +121,9 @@ static void AdvanceSight(void)
 			break;
 		}
 	}
+	/* the navigation searches (hidden spawn spot of the world spawner), the script host and the node editor read
+	   the level's copy: it was never set, so the world spawner never found a spot */
+	level.sight_client = mgr.sight_client;
 	int first = maxc + 1, count = globals.num_edicts - first;
 	if (count <= 0) {
 		mgr.sight_character = nullptr;
@@ -546,7 +549,7 @@ void CinematicEndActors(void)
 			e->flags &= ~FL_CINEMATIC_FROZEN;
 			float delay = e->nextthink < 0 ? -e->nextthink : 0.1f;
 			e->nextthink = now + delay;
-			e->solid = SOLID_BBOX;
+			e->solid = e->health > 0 ? SOLID_BBOX : SOLID_CORPSE; /* a corpse stays a corpse after a cinematic */
 			gi.linkentity(e);
 			if (e->ghoulInst)
 				e->ghoulInst->SetOnOff(true, now);

@@ -83,6 +83,8 @@ int Nav_LookAroundNode(const vec3_t p, int n, vec3_t out);
 int Nav_StepTest(edict_t *ent, float step_height, const vec3_t move);
 /* Rule 10. Returns 1 and the node origin (with the +14 load offset; the spawner adds its own 8). */
 int Nav_HiddenSpawnSpot(vec3_t out, int allow_seen);
+/* openMERC: wider hidden spot search when rule 10 finds nothing */
+int Nav_HiddenSpawnSpotWide(vec3_t out);
 /* Rule 11. */
 int Nav_InCone(const vec3_t a, float ra, const vec3_t b, float rb, const vec3_t p);
 

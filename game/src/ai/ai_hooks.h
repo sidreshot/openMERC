@@ -20,6 +20,10 @@ void ExplosionStimulus(const float center[3], float radius, float strength); /* 
 void NoiseAlert(struct edict_s *source, const float where[3], float radius); /* G_ReportNoise: alert sound kind 2 */
 void FlashMute(const float origin[3], float radius);                        /* WhiteOut */
 void ShotAtNotice(struct edict_s *shooter, const float start[3], const float end[3]); /* a bullet hit the world */
+/* world spawner (SPEC-761 8): true when e is a character; then it is marked spawner-made */
+bool MarkSpawnerMade(struct edict_s *e);
+/* number of live characters within radius of p */
+int CharactersNear(const float p[3], float radius);
 /* savegames (SPEC-752 1.2 step 6), called by G10's level save/load after the script chunks, before
  * GG_WriteAttached / GG_ReadAttached; see ai_api.h */
 void WriteLevelAI(void);

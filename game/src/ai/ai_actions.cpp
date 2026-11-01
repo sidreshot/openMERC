@@ -586,10 +586,21 @@ public:
 			return;
 		MakeDead(ent, ai);
 		if (record && !strcmp(record->name, "std_sblown_2bk_n_n") && ent->velocity[2] < 10) {
-			vec3_t f;
+			vec3_t f, end, mins = {-16, -16, 0}, maxs = {16, 16, 8};
 			AngleVectors(ent->s.angles, f, nullptr, nullptr);
-			ent->velocity[0] = -200 * f[0];
-			ent->velocity[1] = -200 * f[1];
+			// openMERC: thrown only as far as the room behind allows (the corpse box is +-8, the drawn body
+			// lies about 56 units behind the origin, so a full throw put it into the wall)
+			float k = 1.0f;
+			mins[2] = ent->mins[2] + 18;
+			VectorMA(ent->s.origin, -120, f, end);
+			end[2] = ent->s.origin[2];
+			trace_t tr = gi.trace(ent->s.origin, mins, maxs, end, ent, MASK_SOLID);
+			if (tr.startsolid)
+				k = 0;
+			else if (tr.fraction < 1.0f)
+				k = fmaxf(0.0f, (tr.fraction * 120.0f - 56.0f) / 64.0f);
+			ent->velocity[0] = -200 * k * f[0];
+			ent->velocity[1] = -200 * k * f[1];
 			ent->velocity[2] = 100;
 			ent->maxs[2] -= 26;
 			ent->s.origin[2] += 26;

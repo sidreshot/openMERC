@@ -668,6 +668,68 @@ int Nav_HiddenSpawnSpot(vec3_t out, int allow_seen)
 	return 1;
 }
 
+/* openMERC: wider search when rule 10 finds nothing (it only takes nodes nearer than 600 outside the PVS, which open
+ * areas rarely have, so noise brought no waves): any node 256-1200 units from the player that the player can't see
+ * (line of sight blocked, or behind him beyond 400 units) and that has room for a character; one of the nearest
+ * few at random. */
+int Nav_HiddenSpawnSpotWide(vec3_t out)
+{
+	edict_t *sight = level.sight_client;
+	if (NoNodes() || Nav_NodeCount() < 1 || !sight)
+		return 0;
+	vec3_t eye, fw;
+	VectorCopy(sight->s.origin, eye);
+	eye[2] += sight->viewheight;
+	AngleVectors(sight->s.angles, fw, NULL, NULL);
+	static const float mins[3] = {-16, -16, -32}, maxs[3] = {16, 16, 41};
+	enum { KEEP = 6 };
+	int best[KEEP];
+	float bestd[KEEP];
+	int nb = 0;
+	for (int q = 1; q < g_nav.data.n; q++) {
+		const NavNode &nd = g_nav.data.nodes[q];
+		if (nd.ignore)
+			continue;
+		vec3_t D;
+		VectorSubtract(nd.origin, sight->s.origin, D);
+		float d = VectorLength(D);
+		if (d < 256 || d > 1200 || fabsf(D[2]) > 256)
+			continue;
+		if (nb == KEEP && d >= bestd[KEEP - 1])
+			continue;
+		vec3_t head;
+		VectorCopy(nd.origin, head);
+		head[2] += 40;
+		trace_t tr = gi.trace(eye, vec3_origin, vec3_origin, head, sight, MASK_OPAQUE);
+		bool hidden = tr.fraction < 1.0f;
+		if (!hidden && d > 400) {
+			vec3_t u;
+			VectorScale(D, 1.0f / d, u);
+			hidden = DotProduct(u, fw) < 0.3f;
+		}
+		if (!hidden)
+			continue;
+		vec3_t p;
+		VectorCopy(nd.origin, p);
+		p[2] += 8;
+		tr = gi.trace(p, mins, maxs, p, NULL, MASK_MONSTERSOLID);
+		if (tr.startsolid || tr.allsolid)
+			continue;
+		int k = nb < KEEP ? nb++ : KEEP - 1;
+		while (k > 0 && bestd[k - 1] > d) {
+			best[k] = best[k - 1];
+			bestd[k] = bestd[k - 1];
+			k--;
+		}
+		best[k] = q;
+		bestd[k] = d;
+	}
+	if (!nb)
+		return 0;
+	VectorCopy(g_nav.data.nodes[best[gix.irand(0, nb - 1)]].origin, out);
+	return 1;
+}
+
 //==========================================================================================
 // rule 11: cone helper
 

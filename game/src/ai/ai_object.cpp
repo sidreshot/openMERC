@@ -86,7 +86,10 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 		mins[2] = bottom;
 		maxs[2] = bottom + height;
 	}
-	if (maxs[2] < ent->viewheight - 4)
+	/* openMERC: only a living, standing character's box is raised to its eyes. The view height lags behind the
+	   posture (it comes from the mouth bolt), so corpses and cowering or lying civilians kept a ~60-unit invisible
+	   column above them that stopped shots and blocked the way (deviation from SPEC-700 rule 15) */
+	if (ent->health > 0 && i == 0 && maxs[2] < ent->viewheight - 4)
 		maxs[2] = (float)ent->viewheight;
 	if (ent->movetype != MOVETYPE_NOCLIP) {
 		trace_t tr = Trace(org, mins, maxs, org, ent, 0x2020003);
@@ -902,6 +905,30 @@ void FreeCharacter(edict_t *ent)
 }
 
 bool HasAI(edict_t *ent) { return ent && ent->inuse && ent->ai != nullptr; }
+
+bool MarkSpawnerMade(edict_t *e)
+{
+	if (!HasAI(e))
+		return false;
+	e->flags |= FL_SPAWNER_MADE;
+	e->ai->spawner_made = 1;
+	return true;
+}
+
+int CharactersNear(const float p[3], float radius)
+{
+	int n = 0;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || !e->ai || e->ai->dead || e->health <= 0)
+			continue;
+		vec3_t d;
+		VectorSubtract(e->s.origin, p, d);
+		if (VectorLength(d) <= radius)
+			n++;
+	}
+	return n;
+}
 
 } /* namespace om_ai */
 

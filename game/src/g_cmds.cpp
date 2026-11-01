@@ -121,6 +121,33 @@ static void Cmd_OmSetPos_f(edict_t *ent)
 		gi.argc() >= 6 ? gi.argv(5) : "-");
 }
 
+/* test aid: prints the nearest dead character (origin, solid, svflags, box) */
+static void Cmd_OmCorpse_f(edict_t *ent)
+{
+	if (!CheatsOK(ent))
+		return;
+	edict_t *best = NULL;
+	float bd = 1e9f;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || e->client || !e->ai || e->health > 0)
+			continue;
+		vec3_t d;
+		VectorSubtract(e->s.origin, ent->s.origin, d);
+		if (VectorLength(d) < bd) {
+			bd = VectorLength(d);
+			best = e;
+		}
+	}
+	if (!best) {
+		gi.cprintf(ent, PRINT_HIGH, "omcorpse: none\n");
+		return;
+	}
+	gi.cprintf(ent, PRINT_HIGH, "omcorpse %s at %s solid %d svflags 0x%x clipmask 0x%x mins %s maxs %s\n",
+		best->classname, vtos(best->s.origin), (int)best->solid, best->svflags, best->clipmask, vtos(best->mins),
+		vtos(best->maxs));
+}
+
 static void Cmd_Gimme_f(edict_t *ent)
 {
 	if (!CheatsOK(ent) || gi.argc() < 2)
@@ -487,6 +514,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_OmSetPos_f(ent);
 	else if (Q_stricmp(cmd, "gimme") == 0)
 		Cmd_Gimme_f(ent);
+	else if (Q_stricmp(cmd, "omcorpse") == 0)
+		Cmd_OmCorpse_f(ent);
 	else if (Q_stricmp(cmd, "defaultweapons") == 0) {
 		if (CheatsOK(ent))
 			GM_DefaultWeapons(ent); /* G9: SPEC-790 the level's default weapons */

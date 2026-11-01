@@ -8,6 +8,7 @@
 #include "g_local.h"
 #include "bots/bot_api.h" /* G5 */
 #include "ai/ai_hooks.h" /* G2 */
+#include "nav/nav_api.h" /* world spawner: Nav_HiddenSpawnSpot */
 
 void ED_CallSpawn(edict_t *ent);
 
@@ -831,6 +832,63 @@ void G_AlertNoise(float amount)
 		level.alert = cap;
 }
 
+// SPEC-761 8 world spawn: a character from the worldspawn keys spawn1..3 at a hidden nav spot near the player
+static void G_WorldSpawn(edict_t *p)
+{
+	level.last_world_spawn = level.time;
+	if (om_ai::CharactersNear(p->s.origin, 600) > (int)game.spawn_maxnear + 1) {
+		if (ei_show->value)
+			gi.dprintf("World can't spawn - too many guys nearby\n");
+		return;
+	}
+	vec3_t spot;
+	if (!Nav_HiddenSpawnSpot(spot, 0) && !Nav_HiddenSpawnSpotWide(spot)) {
+		if (ei_show->value)
+			gi.dprintf("World can't spawn - no spots available for spawning\n");
+		return;
+	}
+	const char *cls[3];
+	int n = 0;
+	for (int i = 0; i < 3; i++)
+		if (level.spawn_classes[i][0])
+			cls[n++] = level.spawn_classes[i];
+	if (!n) {
+		if (ei_show->value)
+			gi.dprintf("World spawn trying to spawn, but no fields set\n");
+		return;
+	}
+	edict_t *e = G_Spawn();
+	e->classname = (char *)cls[rand() % n];
+	VectorCopy(spot, e->s.origin);
+	e->s.origin[2] += 8;
+	vec3_t d;
+	VectorSubtract(p->s.origin, e->s.origin, d);
+	e->s.angles[YAW] = vectoyaw(d);
+	VectorSet(e->mins, -16, -16, -32);
+	VectorSet(e->maxs, 16, 16, 41);
+	trace_t tr = gi.trace(e->s.origin, e->mins, e->maxs, e->s.origin, e, MASK_MONSTERSOLID);
+	if (tr.startsolid) {
+		G_FreeEdict(e);
+		if (ei_show->value)
+			gi.dprintf("World spawn trying to spawn, but spot is occupied\n");
+		return;
+	}
+	spawn_temp_t save = st;
+	memset(&st, 0, sizeof(st));
+	ED_CallSpawn(e);
+	st = save;
+	if (!e->inuse)
+		return;
+	if (!om_ai::MarkSpawnerMade(e)) {
+		G_FreeEdict(e);
+		return;
+	}
+	if (ei_show->value) {
+		gi.dprintf("World spawned in a guy\n");
+		gi.sound(e, CHAN_AUTO, gi.soundindex("Weapons/mpg/fire.wav"), 1, ATTN_NORM, 0);
+	}
+}
+
 void G_WorldSpawnerFrame(void)
 {
 	edict_t *p = G_FirstPlayer();
@@ -855,6 +913,11 @@ void G_WorldSpawnerFrame(void)
 			gi.sound(p, CHAN_AUTO, gi.soundindex("misc/padd/max.wav"), 1, ATTN_NONE, 0);
 			level.last_alert_sound = level.time;
 		}
+		// characters are alerted towards the player; a world spawn every Im seconds
+		if (level.time - level.last_world_spawn >= game.spawn_maxinterval) {
+			om_ai::NoiseAlert(p, p->s.origin, 2048);
+			G_WorldSpawn(p);
+		}
 		return;
 	}
 	if (enabled && level.time < C + F) {
@@ -875,6 +938,8 @@ void G_WorldSpawnerFrame(void)
 		gi.sound(p, CHAN_AUTO, gi.soundindex("misc/padd/warning.wav"), 0.4f, ATTN_NONE, 0);
 		level.last_alert_warning = level.time;
 	}
+	if (level.alert > 0.5f && level.time - level.last_world_spawn >= game.spawn_interval)
+		G_WorldSpawn(p);
 }
 
 //======================================================================

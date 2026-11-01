@@ -73,3 +73,17 @@ behaviour where that makes sense.
 | Command buffer size | 8192 bytes (SPEC-302 "Command buffer"); an `exec` of a larger file is dropped whole with `Cbuf_AddText: overflow` | 32768 bytes | the engine's own `config.cfg` passes 8 KB, so every saved setting was lost at start | — |
 | `//` comments in command text | a `;` inside a comment still splits the line (Quake II) | a `//` outside quotes at the start of a word comments out the rest of the line, `;` included | a comment "...; the same values" ran the command `the` | — |
 | Timed autosave | a save is written only by the player and at the level start (`auto`, SPEC-303) | every `om_autosave_interval` minutes of game time (default 3) the next quiet moment in the single-player campaign is saved to `autotime1` / `autotime2` (rotating, shown as "Autosave" in the load menu, a localized console notice); it does not spend the limited saves of the harder skills | owner request t95u: lose at most a few minutes of play | `om_autosave_interval 0` |
+
+## Mode B game module, 2026-11-01
+
+- **World spawner (SPEC-761 8):** the world spawn step was missing (the alert meter rose but no character was ever
+  created). Implemented as specified; `level.sight_client` is now kept up to date by the AI manager (it was never
+  set, so `Nav_HiddenSpawnSpot` always failed). Deviation: when the rule-10 search finds nothing (it only takes nodes
+  nearer than 600 outside the PVS, rare in open areas), `Nav_HiddenSpawnSpotWide` takes one of the six nearest nodes
+  256-1200 units away that the player cannot see (line of sight blocked, or behind him beyond 400) and that have room.
+- **Character boxes (SPEC-700 rule 15):** the top is raised to the view height only for living standing characters.
+  Corpses and cowering or lying civilians kept a ~60-unit invisible column above them that stopped shots.
+  After a cinematic, corpses get SOLID_CORPSE back instead of SOLID_BBOX.
+- **Death animations:** a falling death (`_2bk`, `_2frnt`, `blown`) is chosen only when the floor it needs is free
+  of walls (64 units, 112 for the blown-back throw); otherwise the chain falls through to an in-place death. The
+  blown-back throw is scaled down by the room behind the body. The original had no check and bodies fell into walls.

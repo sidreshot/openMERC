@@ -2133,10 +2133,41 @@ public:
 	// ---------------------------------------------------------------------------------------------------
 	// deaths (SPEC-722 "Death animation choice", "Dying follow-up", "Dying and corpse state")
 	// ---------------------------------------------------------------------------------------------------
+	// how far the drawn body travels along the facing in a falling death (negative: backwards), 0 = in place
+	static float DeathTravel(const char *n)
+	{
+		if (strstr(n, "blown"))
+			return -112; // thrown back (DyingAction gives it 200 u/s) and the body length
+		if (strstr(n, "_2bk") || strstr(n, "_2bck"))
+			return -64;
+		if (strstr(n, "_2frnt"))
+			return 64;
+		return 0;
+	}
+
+	// openMERC: a falling death is only chosen when the floor area it needs is free of walls; the original
+	// had no such check and bodies fell through walls (the corpse box is only +-8 wide)
+	bool DeathFits(const char *n)
+	{
+		float t = DeathTravel(n);
+		if (t == 0)
+			return true;
+		vec3_t f, l, u, end, mins = {-12, -12, 0}, maxs = {12, 12, 8};
+		G3_EntityAxes(ent, f, l, u);
+		f[2] = 0;
+		if (VectorNormalize(f) == 0)
+			return true;
+		mins[2] = ent->mins[2] + 18; // above steps and the floor
+		VectorMA(ent->s.origin, t, f, end);
+		trace_t tr;
+		gix.trace(ent->s.origin, mins, maxs, end, ent, MASK_SOLID, &tr);
+		return !tr.startsolid && tr.fraction >= 1.0f;
+	}
+
 	const G3Anim *Death(const char *n, const char *voice, int variants, bool commit, bool mute)
 	{
 		const G3Anim *a = Avail(n);
-		if (!a)
+		if (!a || !DeathFits(n))
 			return NULL;
 		if (voice)
 			GeneralVoice(voice, variants, 0.8f);
@@ -2255,10 +2286,17 @@ public:
 			owner->Velocity(v);
 		else
 			VectorCopy(ent->velocity, v);
-		if (G3_irand(0, 3) != 0 && DotProduct(v, v) > 40 &&
-		    (a = Avail(G3_irand(0, 1) ? "std_sstumble_2frnt_n_n" : "std_sstumble_2bk_p_n")))
-			return a;
+		if (G3_irand(0, 3) != 0 && DotProduct(v, v) > 40) {
+			const char *st = G3_irand(0, 1) ? "std_sstumble_2frnt_n_n" : "std_sstumble_2bk_p_n";
+			if ((a = Avail(st)) && DeathFits(st))
+				return a;
+		}
 		if ((a = Death("std_stoknees_2bk_n_n", "Scream", 8, true, true)))
+			return a;
+		if ((a = Avail("std_shead_2frnt_n_n")) && DeathFits("std_shead_2frnt_n_n"))
+			return a;
+		// no room to fall either way: the in-place death
+		if ((a = Avail("std_sviolent_n_n_n")))
 			return a;
 		return Avail("std_shead_2frnt_n_n");
 	}
@@ -2279,7 +2317,7 @@ public:
 			G3_Printf("eek. That hurt my neck.\n");
 			return NULL;
 		case SEG_HEAD:
-			if ((a = Avail("std_shead_2frnt_n_n"))) {
+			if ((a = Avail("std_shead_2frnt_n_n")) && DeathFits("std_shead_2frnt_n_n")) {
 				if (!cine && g3hooks.statistic)
 					g3hooks.statistic(1);
 				return a;
