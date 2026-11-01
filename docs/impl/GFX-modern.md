@@ -803,3 +803,13 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   ground (a ring under a recessed ceiling panel showed in an arm1 room); drops are open only within 1 unit.
   Lightning: the openness walk goes on to ~520 units along the light through the top-down map as a height field.
 * Mirrors are not real yet: screen space cannot show what is behind the eye; they need a planar reflection pass.
+* Follow-up 2 (owner: "seams between textures are visible, balance it so it looks natural"): the material target
+  is RGBA8 (reflectivity, x roughness, wetness, light = lightmap luminance in alpha; opaque world faces are drawn
+  without blending). A half-size pass smooths it over r_om_ssr_smooth (32) world units, horizontal then vertical,
+  9 taps, only between samples on the plane of the centre pixel (floor with floor, never the wall or a character),
+  radius at most 8 % of the view. The trace and the apply read the smoothed material. Wet darkening and the lamp
+  glints moved from the world shaders into the apply pass, so they fade across seams too; the apply upsamples the
+  half-size targets depth-aware (no halo on a character in front of a shiny floor). Glints: eight nearest lamps
+  (four cut off the wall lights of kos1), scaled by the light the face receives (lightmap luminance x 1.6) instead
+  of an on/off gate, capped lower: soft sheens instead of spotlight blobs on tiles. Cost on kos1: about 3.0 ms in all
+  (glints 0.5).

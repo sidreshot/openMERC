@@ -54,7 +54,7 @@ static qboolean SSRWanted(void);
 static void SSRShutdown(void);
 static void SSRKeepColour(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
-static cvar_t *r_om_ssr_glint, *r_om_ssr_damp;
+static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth;
 
 static struct
 {
@@ -896,7 +896,7 @@ CreateTargets(int w, int h)
 
 	if (P.mat)
 	{
-		P.texmat = NewTexture(GL_RG8, GL_RG, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
+		P.texmat = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
 	}
 
 	if (P.hdr)
@@ -923,7 +923,7 @@ CreateTargets(int w, int h)
 
 		if (P.mat)
 		{
-			P.rbmat = NewRenderbuffer(GL_RG8, w, h, P.samples);
+			P.rbmat = NewRenderbuffer(GL_RGBA8, w, h, P.samples);
 			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_RENDERBUFFER, P.rbmat);
 		}
 	}
@@ -4996,13 +4996,14 @@ static struct
 	qboolean failed;
 	int cw, ch, vw, vh;
 	GLuint colortex;   /* scene texture the apply framebuffer was made for */
-	GLuint coltex, colfbo, applyfbo, reftex, reffbo;
+	GLuint coltex, colfbo, applyfbo, reftex, reffbo, smtex[2], smfbo[2];
 	qboolean havecol;  /* coltex holds the last frame (seen through prevpv) */
 	hmm_mat4 prevpv;
 	float frame;
-	GLuint prog, progapply;
+	GLuint prog, progapply, progsmooth;
 	GLint u_depth, u_mat, u_col, u_rect, u_proj, u_proj2, u_params, u_texel, u_frame, u_strength, u_reproj;
-	GLint a_ref, a_mat, a_rect;
+	GLint a_ref, a_sm, a_depth, a_rect, a_proj, a_proj2, a_size, a_texel, a_inv, a_glint;
+	GLint m_depth, m_src, m_rect, m_proj, m_proj2, m_params, m_texel;
 } SR;
 
 static const char *ssr_fs =
@@ -5035,7 +5036,7 @@ static const char *ssr_fs =
 	"vec2 Proj(vec3 p) { return vec2(p.x * proj2.z, p.y * proj2.w) / -p.z * 0.5 + 0.5; }\n"
 	"void main()\n"
 	"{\n"
-	"	vec4 m = texture(mattex, uv);\n"
+	"	vec4 m = texture(mattex, vuv);\n"
 	"	float refl = m.r;\n"
 	"	int dbg = int(params.w + 0.5);\n"
 	"	if (dbg == 2)\n"
@@ -5139,23 +5140,149 @@ static const char *ssr_fs =
 	"		outColor = vec4(c * w, w * smoothstep(0.15, 0.45, refl));\n"
 	"}\n";
 
-/* the half-size reflections over the scene, only on reflective pixels of the full-size material target */
-static const char *ssr_apply_fs =
-	"uniform sampler2D reftex;\n"
-	"uniform sampler2D mattex;\n"
+/* the material smoothed across texture seams, at half size: 9 taps over about r_om_ssr_smooth world units, one axis
+   per pass, only between samples on the plane of the centre pixel (floor with floor, never floor with the wall or
+   a character standing on it). Values stay premultiplied: reflectivity, reflectivity x roughness, wetness, light */
+static const char *ssr_smooth_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform sampler2D srctex;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 proj;\n"     /* projection C, D; depth range min, max */
+	"uniform vec4 proj2;\n"    /* 1/P00, 1/P11, P00, P11 */
+	"uniform vec4 params;\n"   /* 1 = source is the full-size target (through rect), axis x, axis y, radius (units) */
+	"uniform vec2 texel;\n"    /* one full-size pixel in view coordinates */
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
+	"float Dist(vec2 v)\n"
+	"{\n"
+	"	float z = texture(depthtex, rect.xy + v * rect.zw).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	return proj.y / (ndc + proj.x);\n"
+	"}\n"
+	"vec3 Pos(vec2 v)\n"
+	"{\n"
+	"	float d = Dist(v);\n"
+	"	vec2 n = v * 2.0 - 1.0;\n"
+	"	return vec3(n.x * d * proj2.x, n.y * d * proj2.y, -d);\n"
+	"}\n"
+	"vec4 Src(vec2 v) { return params.x > 0.5 ? texture(srctex, rect.xy + v * rect.zw) : texture(srctex, v); }\n"
 	"void main()\n"
 	"{\n"
-	"	if (texture(mattex, uv).r < 0.003)\n"
-	"		discard;\n"
-	"	vec4 r = texture(reftex, vuv);\n"
-	"	if (r.r + r.g + r.b + r.a <= 0.002)\n"
-	"		discard;\n"
-	"	outColor = r;\n"
+	"	vec3 P = Pos(vuv);\n"
+	"	float d = -P.z;\n"
+	"	vec4 c = Src(vuv);\n"
+	"	vec3 Pr = Pos(vuv + vec2(texel.x, 0.0)), Pl = Pos(vuv - vec2(texel.x, 0.0));\n"
+	"	vec3 Pu = Pos(vuv + vec2(0.0, texel.y)), Pd = Pos(vuv - vec2(0.0, texel.y));\n"
+	"	vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
+	"	vec3 dy = abs(Pu.z - P.z) < abs(P.z - Pd.z) ? Pu - P : P - Pd;\n"
+	"	vec3 N = normalize(cross(dx, dy));\n"
+	/* the radius on the screen at this distance, at most 8 % of the view near the eye */
+	"	vec2 rad = params.yz * min(0.5 * vec2(proj2.z, proj2.w) * params.w / max(d, 1.0), vec2(0.08));\n"
+	"	float tol = 1.5 + d * 0.01;\n"
+	"	vec4 sum = c;\n"
+	"	float ws = 1.0;\n"
+	"	for (int i = -4; i <= 4; i++)\n"
+	"	{\n"
+	"		if (i == 0) continue;\n"
+	"		vec2 v = vuv + rad * (float(i) * 0.25);\n"
+	"		if (any(lessThan(v, vec2(0.0))) || any(greaterThan(v, vec2(1.0)))) continue;\n"
+	"		float w = exp(-float(i * i) / 8.0) * (1.0 - smoothstep(tol * 0.5, tol, abs(dot(Pos(v) - P, N))));\n"
+	"		sum += Src(v) * w;\n"
+	"		ws += w;\n"
+	"	}\n"
+	"	outColor = sum / ws;\n"
 	"}\n";
 
+/* over the scene at full size: the half-size reflections and smoothed material, upsampled where the depth agrees
+   (no halo on a character in front of a shiny floor); the wet darkening; the glints of the eight nearest map lamps
+   (lump 20, gl3_bump.c), gated by the light the face receives (no shadows here) */
+static const char *ssr_apply_fs =
+	"uniform sampler2D reftex;\n"
+	"uniform sampler2D smtex;\n"
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 proj;\n"
+	"uniform vec4 proj2;\n"
+	"uniform vec4 size;\n"     /* half size: width, height, 1/width, 1/height */
+	"uniform vec2 texel;\n"    /* one full-size pixel in view coordinates */
+	"uniform mat4 invview;\n"  /* view space -> world */
+	"uniform vec4 glint;\n"    /* glint strength, wet darkening, debug */
+	"uniform vec4 omBL[8];\n"
+	"uniform vec4 omBC[8];\n"
+	"uniform int omBN;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"float Dist(vec2 v)\n"
+	"{\n"
+	"	float z = texture(depthtex, rect.xy + v * rect.zw).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	return proj.y / (ndc + proj.x);\n"
+	"}\n"
+	"vec3 Pos(vec2 v)\n"
+	"{\n"
+	"	float d = Dist(v);\n"
+	"	vec2 n = v * 2.0 - 1.0;\n"
+	"	return vec3(n.x * d * proj2.x, n.y * d * proj2.y, -d);\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	vec3 P = Pos(vuv);\n"
+	"	float d = -P.z;\n"
+	"	vec2 p = vuv * size.xy - 0.5;\n"
+	"	vec2 f = fract(p), b = (floor(p) + 0.5) * size.zw;\n"
+	"	vec2 t0 = b, t1 = b + vec2(size.z, 0.0), t2 = b + vec2(0.0, size.w), t3 = b + size.zw;\n"
+	"	vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);\n"
+	"	float k = 3.0 / (0.03 * d + 1.0);\n"
+	"	w *= vec4(exp(-abs(Dist(t0) - d) * k), exp(-abs(Dist(t1) - d) * k), exp(-abs(Dist(t2) - d) * k), exp(-abs(Dist(t3) - d) * k));\n"
+	"	float wsum = dot(w, vec4(1.0));\n"
+	"	if (wsum < 0.02)\n"
+	"		discard;\n"
+	"	w /= wsum;\n"
+	"	vec4 r = texture(reftex, t0) * w.x + texture(reftex, t1) * w.y + texture(reftex, t2) * w.z + texture(reftex, t3) * w.w;\n"
+	"	if (glint.z > 0.5)\n"
+	"	{\n"
+	"		outColor = vec4(r.rgb, 1.0);\n"
+	"		return;\n"
+	"	}\n"
+	"	vec4 m = texture(smtex, t0) * w.x + texture(smtex, t1) * w.y + texture(smtex, t2) * w.z + texture(smtex, t3) * w.w;\n"
+	"	float refl = m.r, wet = m.b;\n"
+	"	vec3 add = r.rgb;\n"
+	"	if (glint.x > 0.0 && refl > 0.02 && omBN > 0)\n"
+	"	{\n"
+	"		float rough = clamp(m.g / refl, 0.02, 1.0);\n"
+	"		vec3 Pr = Pos(vuv + vec2(texel.x, 0.0)), Pl = Pos(vuv - vec2(texel.x, 0.0));\n"
+	"		vec3 Pu = Pos(vuv + vec2(0.0, texel.y)), Pd = Pos(vuv - vec2(0.0, texel.y));\n"
+	"		vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
+	"		vec3 dy = abs(Pu.z - P.z) < abs(P.z - Pd.z) ? Pu - P : P - Pd;\n"
+	"		vec3 Nv = normalize(cross(dx, dy));\n"
+	"		if (dot(Nv, P) > 0.0) Nv = -Nv;\n"
+	"		vec3 N = normalize(mat3(invview) * Nv);\n"
+	"		vec3 wp = (invview * vec4(P, 1.0)).xyz;\n"
+	"		vec3 V = normalize(invview[3].xyz - wp);\n"
+	"		float ndv = max(dot(N, V), 0.0);\n"
+	"		float n = exp2(mix(11.0, 3.0, sqrt(rough)));\n"
+	"		float fr = refl + (min(1.0, refl * 3.0) - refl) * pow(1.0 - ndv, 5.0);\n"
+	"		vec3 acc = vec3(0.0);\n"
+	"		for (int i = 0; i < omBN; i++)\n"
+	"		{\n"
+	"			vec3 Lp = omBL[i].xyz - wp;\n"
+	"			float dl = length(Lp);\n"
+	"			float att = 1.0 - dl / omBL[i].w;\n"
+	"			if (att <= 0.0) continue;\n"
+	"			vec3 L = Lp / dl;\n"
+	"			float ndl = dot(N, L);\n"
+	"			if (ndl <= 0.0) continue;\n"
+	"			acc += omBC[i].rgb * (att * att * ndl * pow(max(dot(N, normalize(L + V)), 0.0), n) * (n + 8.0) / 64.0);\n"
+	"		}\n"
+	"		add += min(acc, vec3(1.5)) * fr * clamp(m.a * 1.6 - 0.05, 0.0, 1.0) * glint.x;\n"
+	"	}\n"
+	"	float a = 1.0 - (1.0 - r.a) * (1.0 - glint.y * wet);\n"
+	"	if (dot(add, vec3(1.0)) + a <= 0.002)\n"
+	"		discard;\n"
+	"	outColor = vec4(add, a);\n"
+	"}\n";
 static qboolean
 SSRWanted(void)
 {
@@ -5171,6 +5298,7 @@ SSRWanted(void)
 		r_om_ssr_debug = ri.Cvar_Get("r_om_ssr_debug", "0", 0);
 		r_om_ssr_glint = ri.Cvar_Get("r_om_ssr_glint", "1", CVAR_ARCHIVE);
 		r_om_ssr_damp = ri.Cvar_Get("r_om_ssr_damp", "1", CVAR_ARCHIVE);
+		r_om_ssr_smooth = ri.Cvar_Get("r_om_ssr_smooth", "32", CVAR_ARCHIVE);
 	}
 
 	return !SR.failed && (r_om_ssr->value > 0);
@@ -5185,7 +5313,10 @@ SSRDeleteTargets(void)
 	if (SR.applyfbo) glDeleteFramebuffers(1, &SR.applyfbo);
 	if (SR.reffbo) glDeleteFramebuffers(1, &SR.reffbo);
 	if (SR.reftex) glDeleteTextures(1, &SR.reftex);
+	if (SR.smfbo[0]) glDeleteFramebuffers(2, SR.smfbo);
+	if (SR.smtex[0]) glDeleteTextures(2, SR.smtex);
 	SR.colfbo = SR.coltex = SR.applyfbo = SR.reffbo = SR.reftex = 0;
+	SR.smfbo[0] = SR.smfbo[1] = SR.smtex[0] = SR.smtex[1] = 0;
 	SR.havecol = false;
 	SR.cw = SR.ch = SR.vw = SR.vh = 0;
 	SR.colortex = 0;
@@ -5228,6 +5359,24 @@ SSRTargets(void)
 		return false;
 	}
 
+	{
+		int i;
+
+		for (i = 0; i < 2; i++)
+		{
+			SR.smtex[i] = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR);
+			glGenFramebuffers(1, &SR.smfbo[i]);
+			glBindFramebuffer(GL_FRAMEBUFFER, SR.smfbo[i]);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, SR.smtex[i], 0);
+			glDrawBuffers(1, one);
+
+			if (!Complete("ssr material"))
+			{
+				return false;
+			}
+		}
+	}
+
 	/* without MSAA the scene texture is drawn through a framebuffer of its own (the material
 	   texture of the scene framebuffer is read meanwhile) */
 	if (!P.samples)
@@ -5268,16 +5417,31 @@ GL3_Post_SSR(void)
 	{
 		SR.prog = LinkPost(ssr_fs);
 		SR.progapply = LinkPost(ssr_apply_fs);
+		SR.progsmooth = LinkPost(ssr_smooth_fs);
 
-		if (!SR.prog || !SR.progapply)
+		if (!SR.prog || !SR.progapply || !SR.progsmooth)
 		{
 			SR.failed = true;
 			return;
 		}
 
 		SR.a_ref = glGetUniformLocation(SR.progapply, "reftex");
-		SR.a_mat = glGetUniformLocation(SR.progapply, "mattex");
+		SR.a_sm = glGetUniformLocation(SR.progapply, "smtex");
+		SR.a_depth = glGetUniformLocation(SR.progapply, "depthtex");
 		SR.a_rect = glGetUniformLocation(SR.progapply, "rect");
+		SR.a_proj = glGetUniformLocation(SR.progapply, "proj");
+		SR.a_proj2 = glGetUniformLocation(SR.progapply, "proj2");
+		SR.a_size = glGetUniformLocation(SR.progapply, "size");
+		SR.a_texel = glGetUniformLocation(SR.progapply, "texel");
+		SR.a_inv = glGetUniformLocation(SR.progapply, "invview");
+		SR.a_glint = glGetUniformLocation(SR.progapply, "glint");
+		SR.m_depth = glGetUniformLocation(SR.progsmooth, "depthtex");
+		SR.m_src = glGetUniformLocation(SR.progsmooth, "srctex");
+		SR.m_rect = glGetUniformLocation(SR.progsmooth, "rect");
+		SR.m_proj = glGetUniformLocation(SR.progsmooth, "proj");
+		SR.m_proj2 = glGetUniformLocation(SR.progsmooth, "proj2");
+		SR.m_params = glGetUniformLocation(SR.progsmooth, "params");
+		SR.m_texel = glGetUniformLocation(SR.progsmooth, "texel");
 
 		SR.u_depth = glGetUniformLocation(SR.prog, "depthtex");
 		SR.u_mat = glGetUniformLocation(SR.prog, "mattex");
@@ -5337,6 +5501,31 @@ GL3_Post_SSR(void)
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 	}
 
+	/* the material smoothed across texture seams (half size, two passes) */
+	{
+		float rad = Q_max(r_om_ssr_smooth->value, 0.0f);
+		int i;
+
+		GL3_UseProgram(SR.progsmooth);
+		glUniform1i(SR.m_depth, 0);
+		glUniform1i(SR.m_src, 1);
+		glUniform4f(SR.m_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(SR.m_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+		glUniform4f(SR.m_proj2, 1.0f / gl3state.projMat3D.Elements[0][0], 1.0f / gl3state.projMat3D.Elements[1][1],
+			gl3state.projMat3D.Elements[0][0], gl3state.projMat3D.Elements[1][1]);
+		glUniform2f(SR.m_texel, 1.0f / P.vw, 1.0f / P.vh);
+		BindTex(GL_TEXTURE0, P.texdepthcopy);
+		glViewport(0, 0, SR.cw, SR.ch);
+
+		for (i = 0; i < 2; i++)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, SR.smfbo[i]);
+			glUniform4f(SR.m_params, i ? 0.0f : 1.0f, i ? 0.0f : 1.0f, i ? 1.0f : 0.0f, rad);
+			BindTex(GL_TEXTURE1, i ? SR.smtex[0] : P.texmat);
+			DrawQuad();
+		}
+	}
+
 	/* the reflections at half size (premultiplied colour, weight) */
 	{
 		static const float zero[4] = {0, 0, 0, 0};
@@ -5368,7 +5557,7 @@ GL3_Post_SSR(void)
 		glUniformMatrix4fv(SR.u_reproj, 1, GL_FALSE, &reproj.Elements[0][0]);
 	}
 	BindTex(GL_TEXTURE2, SR.coltex);
-	BindTex(GL_TEXTURE1, P.texmat);
+	BindTex(GL_TEXTURE1, SR.smtex[1]);
 	BindTex(GL_TEXTURE0, P.texdepthcopy);
 	DrawQuad();
 
@@ -5386,9 +5575,24 @@ GL3_Post_SSR(void)
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 	GL3_UseProgram(SR.progapply);
 	glUniform1i(SR.a_ref, 0);
-	glUniform1i(SR.a_mat, 1);
+	glUniform1i(SR.a_sm, 1);
+	glUniform1i(SR.a_depth, 2);
 	glUniform4f(SR.a_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
-	BindTex(GL_TEXTURE1, P.texmat);
+	glUniform4f(SR.a_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+	glUniform4f(SR.a_proj2, 1.0f / gl3state.projMat3D.Elements[0][0], 1.0f / gl3state.projMat3D.Elements[1][1],
+		gl3state.projMat3D.Elements[0][0], gl3state.projMat3D.Elements[1][1]);
+	glUniform4f(SR.a_size, (float)SR.cw, (float)SR.ch, 1.0f / SR.cw, 1.0f / SR.ch);
+	glUniform2f(SR.a_texel, 1.0f / P.vw, 1.0f / P.vh);
+	{
+		hmm_mat4 inv = ViewInverse();
+
+		glUniformMatrix4fv(SR.a_inv, 1, GL_FALSE, &inv.Elements[0][0]);
+	}
+	glUniform4f(SR.a_glint, Q_max(0.0f, r_om_ssr_glint->value), 0.3f,
+		(float)dbg, 0);
+	GL3_Bump_ViewLights(SR.progapply, r_newrefdef.vieworg);
+	BindTex(GL_TEXTURE2, P.texdepthcopy);
+	BindTex(GL_TEXTURE1, SR.smtex[1]);
 	BindTex(GL_TEXTURE0, SR.reftex);
 
 	if (!dbg)
@@ -5438,13 +5642,15 @@ SSRShutdown(void)
 {
 	SSRDeleteTargets();
 
-	if ((gl3state.currentShaderProgram == SR.prog) || (gl3state.currentShaderProgram == SR.progapply))
+	if ((gl3state.currentShaderProgram == SR.prog) || (gl3state.currentShaderProgram == SR.progapply) ||
+		(gl3state.currentShaderProgram == SR.progsmooth))
 	{
 		gl3state.currentShaderProgram = 0;
 	}
 
 	if (SR.prog) glDeleteProgram(SR.prog);
 	if (SR.progapply) glDeleteProgram(SR.progapply);
+	if (SR.progsmooth) glDeleteProgram(SR.progsmooth);
 
 	memset(&SR, 0, sizeof(SR));
 }

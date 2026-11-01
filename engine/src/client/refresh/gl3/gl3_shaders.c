@@ -703,12 +703,12 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 				discard;
 
 			lmTex.rgb *= overbrightbits;
-			// OpenMerc GFX-modern r_om_ssr: reflectivity of opaque faces (translucent ones keep the default and
-			// fade what is behind them), wet ground is darker, glossy faces get the glints of the lamps
+			// OpenMerc GFX-modern r_om_ssr: material of opaque faces (translucent ones keep the default and fade
+			// what is behind them); the reflection pass smooths it across texture seams and adds the wet darkening
+			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
 			outColor = lmTex*texel;
-			outColor.rgb = outColor.rgb * (1.0 - 0.3 * omWetK) + omGlint(passWorldCoord, passNormal, omMat, lmTex.rgb);
 			float omFogK = 1.0;
 			// OpenMerc (I4c): gl_fogmode 1, linear fog of the face's fog region (SPEC-410)
 			if(omFogParams.z != 0.0)
@@ -726,7 +726,7 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
 			if(omTranslucent == 0)
-				outMaterial = vec4(omMat.rg * omFogK, 0.0, 1.0); // OpenMerc GFX-modern r_om_ssr
+				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
 		}
 );
 
@@ -908,37 +908,6 @@ static const char* fragmentSrcOmBump =
 	"		wet *= 0.6 + 0.4 * pud;\n"
 	"	}\n"
 	"	return vec4(r, r * rough, 0.0, 1.0);\n"
-	"}\n"
-	/* glints of the map's lamps (lump 20, the nearest eight: omBL/omBC from gl3_bump.c) on glossy faces: a
-	   normalised Blinn-Phong highlight, sharper on smoother faces, Fresnel by the reflectivity. No shadows: the
-	   lightmap gates it, so lamps behind walls leave dark places dark */
-	"vec3 omGlint(vec3 wp, vec3 nrm, vec4 m, vec3 lm)\n"
-	"{\n"
-	"	float r = m.r;\n"
-	"	if (omSsr.z <= 0.0 || r < 0.02 || omBN == 0)\n"
-	"		return vec3(0.0);\n"
-	"	float rough = clamp(m.g / r, 0.02, 1.0);\n"
-	"	vec3 N = normalize(nrm);\n"
-	"	vec3 V = normalize(omBumpView.xyz - wp);\n"
-	"	float ndv = max(dot(N, V), 0.0);\n"
-	"	float n = exp2(mix(11.0, 3.0, sqrt(rough)));\n"
-	"	float fr = r + (min(1.0, r * 3.0) - r) * pow(1.0 - ndv, 5.0);\n"
-	"	float lit = smoothstep(0.03, 0.35, dot(lm, vec3(0.3, 0.5, 0.2)));\n"
-	"	vec3 acc = vec3(0.0);\n"
-	"	for (int i = 0; i < min(omBN, 4); i++)\n"   /* the four lamps nearest in influence (sorted in gl3_bump.c) */
-	"	{\n"
-	"		vec3 Lp = omBL[i].xyz - wp;\n"
-	"		float d = length(Lp);\n"
-	"		float att = 1.0 - d / omBL[i].w;\n"
-	"		if (att <= 0.0)\n"
-	"			continue;\n"
-	"		vec3 L = Lp / d;\n"
-	"		float ndl = dot(N, L);\n"
-	"		if (ndl <= 0.0)\n"
-	"			continue;\n"
-	"		acc += omBC[i].rgb * (att * att * ndl * pow(max(dot(N, normalize(L + V)), 0.0), n) * (n + 8.0) / 64.0);\n"
-	"	}\n"
-	"	return min(acc, vec3(4.0)) * fr * lit * omSsr.z;\n"
 	"}\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
@@ -1182,12 +1151,12 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 				discard;
 
 			lmTex.rgb *= overbrightbits;
-			// OpenMerc GFX-modern r_om_ssr: reflectivity of opaque faces (translucent ones keep the default and
-			// fade what is behind them), wet ground is darker, glossy faces get the glints of the lamps
+			// OpenMerc GFX-modern r_om_ssr: material of opaque faces (translucent ones keep the default and fade
+			// what is behind them); the reflection pass smooths it across texture seams and adds the wet darkening
+			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
 			outColor = lmTex*texel;
-			outColor.rgb = outColor.rgb * (1.0 - 0.3 * omWetK) + omGlint(passWorldCoord, passNormal, omMat, lmTex.rgb);
 			float omFogK = 1.0;
 			// OpenMerc (I4c): gl_fogmode 1, linear fog of the face's fog region (SPEC-410)
 			if(omFogParams.z != 0.0)
@@ -1205,7 +1174,7 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
 			if(omTranslucent == 0)
-				outMaterial = vec4(omMat.rg * omFogK, 0.0, 1.0); // OpenMerc GFX-modern r_om_ssr
+				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
 		}
 );
 
