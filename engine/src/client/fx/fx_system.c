@@ -220,6 +220,26 @@ FX_LoadDef(fx_def_t *d, const char *name)
 	memset(d, 0, sizeof(*d));
 	Q_strlcpy(d->name, name, sizeof(d->name));
 
+	/* openMERC GFX-modern: the renderer's rain (r_om_rain) replaces the maps' own rain effects (arm1 environ/gb_rain:
+	   a column of streaks by one wall) */
+	{
+		static cvar_t *rain;
+		char low[MAX_QPATH];
+
+		if (!rain)
+		{
+			rain = Cvar_Get("r_om_rain", "1", CVAR_ARCHIVE);
+		}
+
+		Q_strlcpy(low, name, sizeof(low));
+		Q_strlwr(low);
+
+		if (rain->value >= 1 && strstr(low, "rain"))
+		{
+			return false;
+		}
+	}
+
 	Com_sprintf(path, sizeof(path), "effects/%s.eft", name);
 	len = FS_LoadFile(path, (void **)&buf);
 

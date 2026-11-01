@@ -513,6 +513,187 @@ V_Render3dCrosshair(void)
 	}
 }
 
+/*
+ * openMERC GFX-modern: thunder for the renderer's lightning (r_om_rain). The game has no thunder sound, so three
+ * are synthesised once into <gamedir>/sound/om/: brown-noise rumble with a few random rolls under a slow decay,
+ * the third with a sharp crack in front (close strikes). The renderer reports each strike in the cvar
+ * r_om_lightning_strike ("number distance"); the thunder follows after distance / 1200 s, quieter when far.
+ */
+#define THUNDER_RATE 22050
+#define THUNDER_SECONDS 5
+
+static float
+Thunder_Rand(unsigned *s)
+{
+	*s = *s * 1664525u + 1013904223u;
+	return (float)((*s >> 8) & 0xffff) / 32768.0f - 1.0f;
+}
+
+static void
+Thunder_Write(const char *path, int variant)
+{
+	int n = THUNDER_RATE * THUNDER_SECONDS, i, k;
+	float *f = malloc(n * sizeof(float)), b1 = 0, b2 = 0, peak = 1e-6f, rolls[6][3];
+	short *pcm = malloc(n * sizeof(short));
+	unsigned seed = 12345u + 7919u * (unsigned)variant;
+	FILE *out;
+
+	if (!f || !pcm)
+	{
+		free(f);
+		free(pcm);
+		return;
+	}
+
+	for (k = 0; k < 6; k++)
+	{
+		rolls[k][0] = 0.1f + (Thunder_Rand(&seed) * 0.5f + 0.5f) * 2.8f; /* time */
+		rolls[k][1] = 0.15f + (Thunder_Rand(&seed) * 0.5f + 0.5f) * 0.6f; /* width */
+		rolls[k][2] = 0.4f + (Thunder_Rand(&seed) * 0.5f + 0.5f) * 0.6f;  /* strength */
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		float t = (float)i / THUNDER_RATE, w = Thunder_Rand(&seed), env, roll = 0.25f, v;
+
+		/* brown noise, low-passed twice: the rumble */
+		b1 = b1 * 0.995f + w * 0.06f;
+		b2 = b2 * 0.97f + b1 * 0.03f;
+
+		for (k = 0; k < 6; k++)
+		{
+			float d = (t - rolls[k][0]) / rolls[k][1];
+			roll += rolls[k][2] * expf(-d * d);
+		}
+
+		env = (1.0f - expf(-t * 12.0f)) * expf(-t / 1.6f);
+		v = b2 * roll * env * 12.0f + b1 * env * 0.6f;
+
+		if (variant == 2)
+		{
+			/* the crack: bright noise with a fast decay */
+			v += w * 0.9f * expf(-t / 0.07f) + b1 * 2.5f * expf(-t / 0.35f);
+		}
+
+		f[i] = v;
+		peak = Q_max(peak, fabsf(v));
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		float s = f[i] / peak * 0.9f;
+
+		/* fade the tail to silence */
+		if (i > n - THUNDER_RATE / 2)
+		{
+			s *= (float)(n - i) / (THUNDER_RATE / 2);
+		}
+
+		pcm[i] = (short)(s * 32767.0f);
+	}
+
+	out = Q_fopen(path, "wb");
+
+	if (out)
+	{
+		int datalen = n * 2, riff = 36 + datalen, fmtlen = 16, rate = THUNDER_RATE, brate = THUNDER_RATE * 2;
+		short fmt = 1, ch = 1, align = 2, bits = 16;
+
+		fwrite("RIFF", 1, 4, out);
+		fwrite(&riff, 4, 1, out);
+		fwrite("WAVEfmt ", 1, 8, out);
+		fwrite(&fmtlen, 4, 1, out);
+		fwrite(&fmt, 2, 1, out);
+		fwrite(&ch, 2, 1, out);
+		fwrite(&rate, 4, 1, out);
+		fwrite(&brate, 4, 1, out);
+		fwrite(&align, 2, 1, out);
+		fwrite(&bits, 2, 1, out);
+		fwrite("data", 1, 4, out);
+		fwrite(&datalen, 4, 1, out);
+		fwrite(pcm, 2, n, out);
+		fclose(out);
+	}
+
+	free(f);
+	free(pcm);
+}
+
+static void
+CL_Thunder_Frame(void)
+{
+	static cvar_t *strike;
+	static int lastseq = -1, pending;
+	static float due, dist;
+	static qboolean made;
+	int seq = 0;
+	float d = 0;
+
+	if (!strike)
+	{
+		strike = Cvar_Get("r_om_lightning_strike", "0 0", 0);
+	}
+
+	if (sscanf(strike->string, "%d %f", &seq, &d) == 2 && seq != lastseq)
+	{
+		if (lastseq >= 0 && seq > 0)
+		{
+			pending = 1;
+			dist = d;
+			due = cls.realtime * 0.001f + d / 1200.0f;
+		}
+
+		lastseq = seq;
+	}
+
+	if (!pending || cls.realtime * 0.001f < due)
+	{
+		return;
+	}
+
+	pending = 0;
+
+	if (!made)
+	{
+		char path[MAX_OSPATH];
+		int i;
+
+		for (i = 0; i < 3; i++)
+		{
+			FILE *t;
+
+			Com_sprintf(path, sizeof(path), "%s/sound/om/thunder%d.wav", FS_Gamedir(), i);
+			t = Q_fopen(path, "rb");
+
+			if (t)
+			{
+				fclose(t);
+				continue;
+			}
+
+			FS_CreatePath(path);
+			Thunder_Write(path, i);
+		}
+
+		made = true;
+	}
+
+	{
+		char name[64];
+		struct sfx_s *sfx;
+		int v = (dist < 1900) ? 2 : (rand() & 1);
+		float vol = Q_clamp(1.4f - dist / 3500.0f, 0.4f, 1.0f);
+
+		Com_sprintf(name, sizeof(name), "om/thunder%d.wav", v);
+		sfx = S_RegisterSound(name);
+
+		if (sfx)
+		{
+			S_StartSound(NULL, cl.playernum + 1, 0, sfx, vol, 0, 0);
+		}
+	}
+}
+
 void
 V_RenderView(float stereo_separation)
 {
@@ -527,6 +708,8 @@ V_RenderView(float stereo_separation)
 		R_EndWorldRenderpass();
 		return;			// still loading
 	}
+
+	CL_Thunder_Frame();
 
 	if (cl_timedemo->value)
 	{

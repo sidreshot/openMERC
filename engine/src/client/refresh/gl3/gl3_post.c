@@ -4218,6 +4218,15 @@ LightningThink(void)
 		bottom[2] = r_newrefdef.vieworg[2] - 300;
 		WX.nbolt = 0;
 		BoltSegment(top, bottom, 260, 7, 2);
+
+		/* the client plays the thunder (cl_view.c): strike number and distance */
+		{
+			static int seq;
+			char buf[64];
+
+			Com_sprintf(buf, sizeof(buf), "%d %.0f", ++seq, dist);
+			ri.Cvar_Set("r_om_lightning_strike", buf);
+		}
 	}
 }
 
@@ -4357,10 +4366,17 @@ static const char *wx_flash_fs =
 	"	float d = proj.y / (ndc + proj.x);\n"
 	"	vec2 v = vuv * 2.0 - 1.0;\n"
 	"	vec4 w = inv * vec4(v.x * d * rect2.x, v.y * d * rect2.y, -d, 1.0);\n"
-	"	vec4 oc = occvp * vec4(w.xyz, 1.0);\n"
+	/* the surface normal (facing the eye); the point is moved 12 units off the surface along it and is open
+	   when nothing of the world lies above the moved point: an open floor or an outside wall is lit, the
+	   underside of a roof or anything indoors is not */
+	"	vec3 wp = w.xyz;\n"
+	"	vec3 n = normalize(cross(dFdx(wp), dFdy(wp)));\n"
+	"	vec3 eye = (inv * vec4(0.0, 0.0, 0.0, 1.0)).xyz;\n"
+	"	if (dot(n, eye - wp) < 0.0) n = -n;\n"
+	"	vec4 oc = occvp * vec4(wp + n * 12.0, 1.0);\n"
 	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
 	"	float od = texture(occ, ou).r;\n"
-	"	float open = (all(greaterThan(ou, vec2(0.0))) && all(lessThan(ou, vec2(1.0)))) ? smoothstep(-0.004, 0.0, od - (oc.z * 0.5 + 0.5) + 0.002) : 0.0;\n"
+	"	float open = (all(greaterThan(ou, vec2(0.0))) && all(lessThan(ou, vec2(1.0)))) ? 1.0 - smoothstep(0.0, 0.0012, (oc.z * 0.5 + 0.5) - od) : 0.0;\n"
 	"	if (d > 60000.0) open = 0.0;\n"
 	"	outColor = vec4(flash.rgb * open, 1.0);\n"
 	"}\n";
