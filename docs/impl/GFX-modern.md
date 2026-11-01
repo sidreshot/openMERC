@@ -813,3 +813,11 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   (four cut off the wall lights of kos1), scaled by the light the face receives (lightmap luminance x 1.6) instead
   of an on/off gate, capped lower: soft sheens instead of spotlight blobs on tiles. Cost on kos1: about 3.0 ms in all
   (glints 0.5).
+* Follow-up 3 (owner: "stripes in the reflection on the floor", kos1 channel): the march refines every crossing
+  behind the depth before judging the thickness (coarse far steps that jumped deep behind a wall were misses: rows of
+  hit and missed bands); mirrors fade a hit into the colour a miss takes instead of to nothing; the reflections are
+  accumulated over frames (r_om_ssr_temporal 0.85: last frame's result at the surface point, reprojected, clamped to
+  this frame's 3x3 range); smooth level faces ripple a little (r_om_ssr_ripple 1, animated by world position), and
+  liquids/puddles are a bit rougher, so the arch ribs over the water reflect softly instead of as sharp lines.
+  NaN guards: normals from a degenerate depth neighbourhood, NaN/Inf dropped in every r_om_ssr pass and in the HDR
+  luminance (a NaN fed back through the last frame's colour and spread as black blotches).

@@ -54,7 +54,7 @@ static qboolean SSRWanted(void);
 static void SSRShutdown(void);
 static void SSRKeepColour(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
-static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth;
+static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth, *r_om_ssr_temporal, *r_om_ssr_ripple;
 
 static struct
 {
@@ -4997,12 +4997,16 @@ static struct
 	qboolean failed;
 	int cw, ch, vw, vh;
 	GLuint colortex;   /* scene texture the apply framebuffer was made for */
-	GLuint coltex, colfbo, applyfbo, reftex, reffbo, smtex[2], smfbo[2];
+	GLuint coltex, colfbo, applyfbo, reftex, reffbo, smtex[2], smfbo[2], histtex[2], histfbo[2];
+	int histcur;
+	qboolean havehist;
 	qboolean havecol;  /* coltex holds the last frame (seen through prevpv) */
 	hmm_mat4 prevpv;
 	float frame;
-	GLuint prog, progapply, progsmooth;
+	GLuint prog, progapply, progsmooth, progtemp;
+	GLint t_cur, t_hist, t_depth, t_rect, t_proj, t_proj2, t_size, t_reproj, t_keep;
 	GLint u_depth, u_mat, u_col, u_rect, u_proj, u_proj2, u_params, u_texel, u_frame, u_strength, u_reproj;
+	GLint u_inv, u_ripple;
 	GLint a_ref, a_sm, a_depth, a_rect, a_proj, a_proj2, a_size, a_texel, a_inv, a_glint;
 	GLint m_depth, m_src, m_rect, m_proj, m_proj2, m_params, m_texel;
 } SR;
@@ -5012,6 +5016,8 @@ static const char *ssr_fs =
 	"uniform sampler2D mattex;\n"
 	"uniform sampler2D coltex;\n"   /* the last frame's view, half size, with mipmaps (0..1 = the view) */
 	"uniform mat4 reproj;\n"        /* this view space -> the last frame's clip space */
+	"uniform mat4 invview;\n"       /* this view space -> world */
+	"uniform vec2 ripple;\n"        /* time, strength */
 	"uniform vec4 rect;\n"
 	"uniform vec4 proj;\n"          /* projection C, D; depth range min, max */
 	"uniform vec4 proj2;\n"         /* 1/P00, 1/P11, P00, P11 */
@@ -5062,6 +5068,21 @@ static const char *ssr_fs =
 	"	vec3 N = SafeN(cross(dx, dy));\n"
 	"	vec3 V = normalize(-P);\n"
 	"	if (dot(N, V) < 0.0) N = -N;\n"
+	/* smooth level faces (water, puddles, polished floors) ripple a little: the reflection wobbles softly instead
+	   of showing the exact pattern of what it hits (arch ribs over the kos1 channel gave stripes) */
+	"	if (rough < 0.12 && ripple.y > 0.0)\n"
+	"	{\n"
+	"		vec3 Nw = mat3(invview) * N;\n"
+	"		if (Nw.z > 0.7)\n"
+	"		{\n"
+	"			vec3 wp = (invview * vec4(P, 1.0)).xyz;\n"
+	"			float tt = ripple.x;\n"
+	"			vec2 q = vec2(sin(wp.x * 0.09 + tt * 1.7) + sin(wp.y * 0.13 - tt * 1.3) + sin((wp.x + wp.y) * 0.21 + tt * 2.3),\n"
+	"				cos(wp.y * 0.08 - tt * 1.1) + cos(wp.x * 0.15 + tt * 1.9) + cos((wp.x - wp.y) * 0.19 - tt * 2.6));\n"
+	"			Nw = normalize(Nw + vec3(q * 0.012 * ripple.y * (1.0 - rough / 0.12), 0.0));\n"
+	"			N = normalize(transpose(mat3(invview)) * Nw);\n"
+	"		}\n"
+	"	}\n"
 	"	vec3 R = normalize(reflect(-V, N));\n"
 	"	float ndv = clamp(dot(N, V), 0.0, 1.0);\n"
 	/* Schlick towards grazing angles, at most three times the head-on value, less on rough faces */
@@ -5091,11 +5112,23 @@ static const char *ssr_fs =
 	"		float t = max(tmax * f * f, tmin);\n"
 	"		float rd = -1.0 / mix(iz0, iz1, t);\n"
 	"		float sd = Dist(s0 + ds * t);\n"
-	"		float diff = rd - sd;\n"
-	"		if (diff > 0.0 && diff < max(4.0, sd * 0.015) + abs(rd - rdp))\n"
+	/* behind the depth: the crossing is refined first, then judged by the thickness there (a coarse far step that
+	   jumped from in front of a wall to deep behind it was taken for a miss: bands of hit and missed rows) */
+	"		if (rd > sd)\n"
 	"		{\n"
-	"			hit = t;\n"
-	"			break;\n"
+	"			float ra = tp, rb = t;\n"
+	"			for (int r = 0; r < 6; r++)\n"
+	"			{\n"
+	"				float mid = (ra + rb) * 0.5;\n"
+	"				if (-1.0 / mix(iz0, iz1, mid) > Dist(s0 + ds * mid)) rb = mid; else ra = mid;\n"
+	"			}\n"
+	"			float zb = -1.0 / mix(iz0, iz1, rb), sb = Dist(s0 + ds * rb);\n"
+	"			if (zb - sb < max(4.0, sb * 0.02) + abs(zb + 1.0 / mix(iz0, iz1, ra)))\n"
+	"			{\n"
+	"				hit = rb;\n"
+	"				tp = ra;\n"
+	"				break;\n"
+	"			}\n"
 	"		}\n"
 	"		tp = t;\n"
 	"		rdp = rd;\n"
@@ -5133,6 +5166,15 @@ static const char *ssr_fs =
 	"	float blur = rough * dist * proj2.w * texel.z / max(d, 1.0);\n"
 	"	vec3 c = textureLod(coltex, su, clamp(log2(1.0 + blur), rough * 3.0, 6.0)).rgb;\n"
 	"	float w = clamp(k * conf * strength, 0.0, 0.85);\n"
+	/* mirrors: towards the edges the hit fades into the colour a miss would take, not to nothing (a hard border
+	   between hit and miss rows showed as stripes on the water) */
+	"	if (refl >= 0.2)\n"
+	"	{\n"
+	"		vec3 fc = textureLod(coltex, clamp(s0 + ds * tmax, 0.0, 1.0), 4.0).rgb;\n"
+	"		float fw = 0.7 * (1.0 - smoothstep(0.35, 0.9, R.z));\n"
+	"		c = mix(fc, c, conf / max(mix(fw, 1.0, conf), 1e-3));\n"
+	"		w = clamp(k * strength * mix(fw, 1.0, conf) * (1.0 - smoothstep(0.35, 0.9, R.z)), 0.0, 0.85);\n"
+	"	}\n"
 	"	if (dbg == 1)\n"
 	"		outColor = vec4(vec3(w), 1.0);\n"
 	/* premultiplied (filtered up without dark fringes). Mirrors (puddles, glass) replace the scene by the reflection;
@@ -5199,6 +5241,50 @@ static const char *ssr_smooth_fs =
 	"		ws += w;\n"
 	"	}\n"
 	"	outColor = sum / ws;\n"
+	"	if (any(isnan(outColor)) || any(isinf(outColor))) outColor = vec4(0.0);\n"
+	"}\n";
+
+/* the reflections accumulated over frames (half size): last frame's result at this surface point (reprojected),
+   clamped to the range of this frame's 3x3 neighbourhood (no ghosts of what moved), mixed with this frame's
+   jittered trace: the noise and the stepped edges between hit and missed rows average out */
+static const char *ssr_temporal_fs =
+	"uniform sampler2D cur;\n"
+	"uniform sampler2D hist;\n"
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 proj;\n"
+	"uniform vec4 proj2;\n"
+	"uniform vec4 size;\n"     /* half size: width, height, 1/width, 1/height */
+	"uniform mat4 reproj;\n"   /* this view space -> last frame's clip space */
+	"uniform float keep;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec4 c = texture(cur, vuv);\n"
+	"	vec4 mn = c, mx = c;\n"
+	"	for (int y = -1; y <= 1; y++)\n"
+	"		for (int x = -1; x <= 1; x++)\n"
+	"		{\n"
+	"			vec4 s = texture(cur, vuv + vec2(float(x), float(y)) * size.zw);\n"
+	"			mn = min(mn, s);\n"
+	"			mx = max(mx, s);\n"
+	"		}\n"
+	"	float z = texture(depthtex, rect.xy + vuv * rect.zw).r;\n"
+	"	float d = proj.y / ((z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0 + proj.x);\n"
+	"	vec2 n = vuv * 2.0 - 1.0;\n"
+	"	vec4 pc = reproj * vec4(n.x * d * proj2.x, n.y * d * proj2.y, -d, 1.0);\n"
+	"	outColor = c;\n"
+	"	if (keep > 0.0 && pc.w > 0.0)\n"
+	"	{\n"
+	"		vec2 pu = pc.xy / pc.w * 0.5 + 0.5;\n"
+	"		if (all(greaterThan(pu, vec2(0.0))) && all(lessThan(pu, vec2(1.0))))\n"
+	"		{\n"
+	"			vec4 h = clamp(texture(hist, pu), mn, mx);\n"
+	"			outColor = mix(c, h, keep);\n"
+	"		}\n"
+	"	}\n"
 	"	if (any(isnan(outColor)) || any(isinf(outColor))) outColor = vec4(0.0);\n"
 	"}\n";
 
@@ -5308,6 +5394,8 @@ SSRWanted(void)
 		r_om_ssr_glint = ri.Cvar_Get("r_om_ssr_glint", "1", CVAR_ARCHIVE);
 		r_om_ssr_damp = ri.Cvar_Get("r_om_ssr_damp", "1", CVAR_ARCHIVE);
 		r_om_ssr_smooth = ri.Cvar_Get("r_om_ssr_smooth", "32", CVAR_ARCHIVE);
+		r_om_ssr_temporal = ri.Cvar_Get("r_om_ssr_temporal", "0.85", CVAR_ARCHIVE);
+		r_om_ssr_ripple = ri.Cvar_Get("r_om_ssr_ripple", "1", CVAR_ARCHIVE);
 	}
 
 	return !SR.failed && (r_om_ssr->value > 0);
@@ -5324,6 +5412,10 @@ SSRDeleteTargets(void)
 	if (SR.reftex) glDeleteTextures(1, &SR.reftex);
 	if (SR.smfbo[0]) glDeleteFramebuffers(2, SR.smfbo);
 	if (SR.smtex[0]) glDeleteTextures(2, SR.smtex);
+	if (SR.histfbo[0]) glDeleteFramebuffers(2, SR.histfbo);
+	if (SR.histtex[0]) glDeleteTextures(2, SR.histtex);
+	SR.histfbo[0] = SR.histfbo[1] = SR.histtex[0] = SR.histtex[1] = 0;
+	SR.havehist = false;
 	SR.colfbo = SR.coltex = SR.applyfbo = SR.reffbo = SR.reftex = 0;
 	SR.smfbo[0] = SR.smfbo[1] = SR.smtex[0] = SR.smtex[1] = 0;
 	SR.havecol = false;
@@ -5383,6 +5475,17 @@ SSRTargets(void)
 			{
 				return false;
 			}
+
+			SR.histtex[i] = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR);
+			glGenFramebuffers(1, &SR.histfbo[i]);
+			glBindFramebuffer(GL_FRAMEBUFFER, SR.histfbo[i]);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, SR.histtex[i], 0);
+			glDrawBuffers(1, one);
+
+			if (!Complete("ssr history"))
+			{
+				return false;
+			}
 		}
 	}
 
@@ -5427,12 +5530,23 @@ GL3_Post_SSR(void)
 		SR.prog = LinkPost(ssr_fs);
 		SR.progapply = LinkPost(ssr_apply_fs);
 		SR.progsmooth = LinkPost(ssr_smooth_fs);
+		SR.progtemp = LinkPost(ssr_temporal_fs);
 
-		if (!SR.prog || !SR.progapply || !SR.progsmooth)
+		if (!SR.prog || !SR.progapply || !SR.progsmooth || !SR.progtemp)
 		{
 			SR.failed = true;
 			return;
 		}
+
+		SR.t_cur = glGetUniformLocation(SR.progtemp, "cur");
+		SR.t_hist = glGetUniformLocation(SR.progtemp, "hist");
+		SR.t_depth = glGetUniformLocation(SR.progtemp, "depthtex");
+		SR.t_rect = glGetUniformLocation(SR.progtemp, "rect");
+		SR.t_proj = glGetUniformLocation(SR.progtemp, "proj");
+		SR.t_proj2 = glGetUniformLocation(SR.progtemp, "proj2");
+		SR.t_size = glGetUniformLocation(SR.progtemp, "size");
+		SR.t_reproj = glGetUniformLocation(SR.progtemp, "reproj");
+		SR.t_keep = glGetUniformLocation(SR.progtemp, "keep");
 
 		SR.a_ref = glGetUniformLocation(SR.progapply, "reftex");
 		SR.a_sm = glGetUniformLocation(SR.progapply, "smtex");
@@ -5463,6 +5577,8 @@ GL3_Post_SSR(void)
 		SR.u_frame = glGetUniformLocation(SR.prog, "frame");
 		SR.u_strength = glGetUniformLocation(SR.prog, "strength");
 		SR.u_reproj = glGetUniformLocation(SR.prog, "reproj");
+		SR.u_inv = glGetUniformLocation(SR.prog, "invview");
+		SR.u_ripple = glGetUniformLocation(SR.prog, "ripple");
 	}
 
 	if (!SSRTargets())
@@ -5561,14 +5677,43 @@ GL3_Post_SSR(void)
 	glUniform1f(SR.u_frame, SR.frame);
 	glUniform1f(SR.u_strength, Q_min(r_om_ssr->value, 4.0f));
 	{
-		hmm_mat4 reproj = HMM_MultiplyMat4(SR.prevpv, ViewInverse());
+		hmm_mat4 inv = ViewInverse();
+		hmm_mat4 reproj = HMM_MultiplyMat4(SR.prevpv, inv);
 
 		glUniformMatrix4fv(SR.u_reproj, 1, GL_FALSE, &reproj.Elements[0][0]);
+		glUniformMatrix4fv(SR.u_inv, 1, GL_FALSE, &inv.Elements[0][0]);
+		glUniform2f(SR.u_ripple, fmodf(r_newrefdef.time, 1000.0f), Q_max(0.0f, r_om_ssr_ripple->value));
 	}
 	BindTex(GL_TEXTURE2, SR.coltex);
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
 	BindTex(GL_TEXTURE0, P.texdepthcopy);
 	DrawQuad();
+
+	/* accumulated over frames into the next history texture (its reprojection uses last frame's projection x view,
+	   the same one the colour of the last frame was made with) */
+	{
+		hmm_mat4 reproj = HMM_MultiplyMat4(SR.prevpv, ViewInverse());
+		int next = SR.histcur ^ 1;
+
+		glBindFramebuffer(GL_FRAMEBUFFER, SR.histfbo[next]);
+		GL3_UseProgram(SR.progtemp);
+		glUniform1i(SR.t_cur, 0);
+		glUniform1i(SR.t_hist, 1);
+		glUniform1i(SR.t_depth, 2);
+		glUniform4f(SR.t_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(SR.t_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+		glUniform4f(SR.t_proj2, 1.0f / gl3state.projMat3D.Elements[0][0], 1.0f / gl3state.projMat3D.Elements[1][1],
+			gl3state.projMat3D.Elements[0][0], gl3state.projMat3D.Elements[1][1]);
+		glUniform4f(SR.t_size, (float)SR.cw, (float)SR.ch, 1.0f / SR.cw, 1.0f / SR.ch);
+		glUniformMatrix4fv(SR.t_reproj, 1, GL_FALSE, &reproj.Elements[0][0]);
+		glUniform1f(SR.t_keep, (SR.havehist && !dbg) ? Q_max(0.0f, Q_min(r_om_ssr_temporal->value, 0.95f)) : 0.0f);
+		BindTex(GL_TEXTURE2, P.texdepthcopy);
+		BindTex(GL_TEXTURE1, SR.histtex[SR.histcur]);
+		BindTex(GL_TEXTURE0, SR.reftex);
+		DrawQuad();
+		SR.histcur = next;
+		SR.havehist = true;
+	}
 
 	/* over the scene */
 	if (P.samples)
@@ -5602,7 +5747,7 @@ GL3_Post_SSR(void)
 	GL3_Bump_ViewLights(SR.progapply, r_newrefdef.vieworg);
 	BindTex(GL_TEXTURE2, P.texdepthcopy);
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
-	BindTex(GL_TEXTURE0, SR.reftex);
+	BindTex(GL_TEXTURE0, SR.histtex[SR.histcur]);
 
 	if (!dbg)
 	{
@@ -5652,7 +5797,7 @@ SSRShutdown(void)
 	SSRDeleteTargets();
 
 	if ((gl3state.currentShaderProgram == SR.prog) || (gl3state.currentShaderProgram == SR.progapply) ||
-		(gl3state.currentShaderProgram == SR.progsmooth))
+		(gl3state.currentShaderProgram == SR.progsmooth) || (gl3state.currentShaderProgram == SR.progtemp))
 	{
 		gl3state.currentShaderProgram = 0;
 	}
@@ -5660,6 +5805,7 @@ SSRShutdown(void)
 	if (SR.prog) glDeleteProgram(SR.prog);
 	if (SR.progapply) glDeleteProgram(SR.progapply);
 	if (SR.progsmooth) glDeleteProgram(SR.progsmooth);
+	if (SR.progtemp) glDeleteProgram(SR.progtemp);
 
 	memset(&SR, 0, sizeof(SR));
 }

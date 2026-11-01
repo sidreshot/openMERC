@@ -890,7 +890,7 @@ static const char* fragmentSrcOmBump =
 	   8 polished stone, 9 polished metal, 10 rusty metal, 11 mirror, 12 damp stone */
 	"	if (mc == 11) { r = 0.9; rough = 0.0; }\n"
 	"	else if (mc == 4) { r = 0.45; rough = 0.03; }\n"
-	"	else if (mc == 7) { r = mix(0.2, 0.45, fl); rough = 0.05; }\n"
+	"	else if (mc == 7) { r = mix(0.2, 0.45, fl); rough = 0.09; }\n"
 	"	else if (mc == 8) { r = mix(0.12, 0.28, fl) * mix(0.6, 1.0, sm); rough = mix(0.2, 0.06, sm); }\n"
 	"	else if (mc == 9) { r = mix(0.2, 0.3, fl); rough = mix(0.35, 0.12, sm); }\n"
 	"	else if (mc == 3) { r = 0.16; rough = mix(0.5, 0.3, sm); }\n"
@@ -904,7 +904,7 @@ static const char* fragmentSrcOmBump =
 	"	{\n"
 	"		float pud = smoothstep(0.56, 0.6, omVN(wp.xy / 96.0) * 0.7 + omVN(wp.xy / 23.0) * 0.3) * fl;\n"
 	"		r = mix(r, max(r, mix(0.16, 0.5, pud) * fl + 0.12 * damp * (1.0 - fl)), wet);\n"
-	"		rough = mix(rough, mix(0.3, 0.03, pud) - 0.1 * damp * (1.0 - fl), wet);\n"
+	"		rough = mix(rough, mix(0.3, 0.06, pud) - 0.1 * damp * (1.0 - fl), wet);\n"
 	"		wet *= 0.6 + 0.4 * pud;\n"
 	"	}\n"
 	"	return vec4(r, r * rough, 0.0, 1.0);\n"
