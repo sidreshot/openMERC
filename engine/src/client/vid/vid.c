@@ -286,6 +286,34 @@ VID_Stage_f(void)
 	{
 		Cvar_Set("menu_mode", va("%dx%d", viddef.width, viddef.height));
 	}
+
+	/* the frame rate limit: "by the display" (vid_maxfps 0) or a manual value; while it follows the display the
+	   manual row shows the display's own rate (the nearest value of the page's list) */
+	{
+		static const int rates[] = {30, 60, 75, 90, 100, 120, 144, 165, 200, 240, 300, 999};
+		int fps = (int)Cvar_VariableValue("vid_maxfps");
+
+		Cvar_Set("menu_maxfps_auto", (fps < 1) ? "1" : "0");
+
+		if (fps < 1)
+		{
+			fps = (int)(GLimp_GetRefreshRate() + 0.5f);
+		}
+
+		{
+			int i, best = rates[0];
+
+			for (i = 0; i < (int)(sizeof(rates) / sizeof(rates[0])); i++)
+			{
+				if (abs(rates[i] - fps) < abs(best - fps))
+				{
+					best = rates[i];
+				}
+			}
+
+			Cvar_Set("menu_maxfps", va("%d", best));
+		}
+	}
 }
 
 /*
@@ -312,6 +340,12 @@ VID_Apply_f(void)
 	else if (m[0])
 	{
 		Cvar_Set("r_mode", m);
+	}
+
+	/* the frame rate limit by the display unless the page set it to a manual value */
+	if (Cvar_VariableValue("menu_maxfps_auto") != 0)
+	{
+		Cvar_Set("vid_maxfps", "0");
 	}
 }
 

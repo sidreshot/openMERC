@@ -13,7 +13,8 @@ section | DISPLAY | ЭКРАН | tip=Display settings are applied with the Apply
 rmf | <list "^MENU_OMVIDEO_DESKTOP^" match "desktop" vidmodes atext "^MENU_OMVIDEO_MODES_LABEL^" split 230 cvar menu_mode key mouse1 "set menu_settings_changed 1"><hbr>
 list | menu_fullscreen | 0,1,2 | Windowed,Fullscreen,Borderless | В окне,Полный экран,Без рамки | Display Mode | Режим экрана | stage
 list | menu_vsync | 0,1 | Off,On | Выкл,Вкл | Vertical Sync | Вертикальная синхронизация | stage
-list | menu_maxfps | 0,60,120,144,165,240,999 | Display Refresh,60,120,144,165,240,Unlimited | Частота экрана,60,120,144,165,240,Без ограничения | Frame Rate Limit | Ограничение кадров | stage
+list | menu_maxfps_auto | 1,0 | By Display,Manual | По частоте монитора,Вручную | Frame Rate Limit | Ограничение кадров | stage | tip=By Display: as many frames as the monitor shows; Manual: the value below/По частоте монитора: столько кадров, сколько показывает монитор; Вручную: значение ниже
+list | menu_maxfps | 30,60,75,90,100,120,144,165,200,240,300,999 | 30,60,75,90,100,120,144,165,200,240,300,Unlimited | 30,60,75,90,100,120,144,165,200,240,300,Без ограничения | Manual Limit | Лимит вручную | stage | tip=Used when the limit is Manual/Действует, когда ограничение задано вручную
 
 section | SCALING | МАСШТАБ
 list | menu_uiscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | Menu and Text Size | Размер меню и текста | stage
