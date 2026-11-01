@@ -836,3 +836,10 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   emissive target (bloom), the world in front hides them by depth.
 * r_om_storm_maps ("trn1"): lightning without rain - bolts 6500..8000 units away, low over the horizon, the sky not
   darkened, the world lit at a third of the rain strength; thunder as with the rain.
+* r_om_mirror 1 (gl3_post.c section "r_om_mirror"): planar mirrors. World faces of gloss class 11 note their plane
+  while drawn (gl3_surf.c GL3_DrawGLPoly); the nearest one facing the eye is used in the next frame: before the world
+  of the view, the world is drawn again from the eye mirrored in that plane (view x reflection matrix, culling
+  flipped, Lengyel oblique near plane 0.5 units in front of the glass, the real eye's PVS, the walk's queues for the
+  sorted and fog passes dropped afterwards) into a window-sized RGBA16F texture (unit 13). The lightmapped shaders
+  replace faces on that plane by the texture at gl_FragCoord (92 %) and write no SSR material there. World only - no
+  models or effects in the mirror yet; mirrors on other planes keep SSR. Cost (tsr1 restroom, 1080p): +0.7 ms.

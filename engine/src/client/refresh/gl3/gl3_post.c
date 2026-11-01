@@ -6028,3 +6028,295 @@ SSRShutdown(void)
 
 	memset(&SR, 0, sizeof(SR));
 }
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_mirror: planar mirrors. The world faces of class 11
+ * (texture name "mirror" with the glass material, gl3_bump.c) note
+ * themselves while drawn; of those facing the eye the nearest gives the
+ * plane of the next frame. Before the world of a view is drawn, it is
+ * drawn once more from the eye mirrored in that plane (view matrix x
+ * reflection, face culling flipped, an oblique near plane on the mirror
+ * so nothing behind it shows; the PVS of the real eye) into a window-
+ * sized texture. The world shaders replace the colour of the faces on
+ * that plane by the texture at their screen position. World only: no
+ * models or effects in the mirror. Mirrors on other planes keep the
+ * screen-space reflection. r_om_mirror 0 turns it off.
+ * ------------------------------------------------------------------ */
+
+static cvar_t *r_om_mirror;
+
+static struct
+{
+	qboolean failed, inpass;
+	int w, h;
+	GLuint tex, rbdepth, fbo;
+	/* noted this frame / used this frame: plane normal (towards the eye), dist; score (distance) */
+	qboolean candvalid, valid;
+	float cand[4], candscore, plane[4];
+	int candframe;
+} MR;
+
+extern vec3_t gl3_origin;
+
+/* a world face of a mirror is drawn (gl3_surf.c) */
+void
+GL3_Mirror_Note(const msurface_t *surf)
+{
+	vec3_t n, c = {0, 0, 0};
+	float d, side, dist;
+	const glpoly_t *p = surf->polys;
+	int i;
+
+	if (MR.inpass || !p || !surf->plane || !r_om_mirror || !r_om_mirror->value)
+	{
+		return;
+	}
+
+	VectorCopy(surf->plane->normal, n);
+	d = surf->plane->dist;
+
+	if (surf->flags & SURF_PLANEBACK)
+	{
+		VectorNegate(n, n);
+		d = -d;
+	}
+
+	side = DotProduct(n, r_newrefdef.vieworg) - d;
+
+	if (side < 2)
+	{
+		return;
+	}
+
+	for (i = 0; i < p->numverts; i++)
+	{
+		VectorAdd(c, p->vertices[i].pos, c);
+	}
+
+	VectorScale(c, 1.0f / p->numverts, c);
+	VectorSubtract(c, r_newrefdef.vieworg, c);
+	dist = VectorLength(c);
+
+	if (!MR.candvalid || (dist < MR.candscore))
+	{
+		MR.candvalid = true;
+		MR.candscore = dist;
+		VectorCopy(n, MR.cand);
+		MR.cand[3] = d;
+	}
+}
+
+static qboolean
+MirrorTargets(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+
+	if (MR.fbo && (MR.w == vid.width) && (MR.h == vid.height))
+	{
+		return true;
+	}
+
+	if (MR.fbo) glDeleteFramebuffers(1, &MR.fbo);
+	if (MR.tex) glDeleteTextures(1, &MR.tex);
+	if (MR.rbdepth) glDeleteRenderbuffers(1, &MR.rbdepth);
+
+	MR.w = vid.width;
+	MR.h = vid.height;
+	MR.tex = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, MR.w, MR.h, GL_LINEAR);
+	MR.rbdepth = NewRenderbuffer(GL_DEPTH24_STENCIL8, MR.w, MR.h, 0);
+	glGenFramebuffers(1, &MR.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, MR.fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, MR.tex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, MR.rbdepth);
+	glDrawBuffers(1, one);
+	return Complete("mirror");
+}
+
+/* the inverse of a rigid (possibly mirrored) view matrix: transposed 3x3, -R^T t */
+static hmm_mat4
+RigidInverse(const hmm_mat4 *v)
+{
+	hmm_mat4 inv;
+	int r, c;
+
+	memset(&inv, 0, sizeof(inv));
+	for (c = 0; c < 3; c++)
+	{
+		for (r = 0; r < 3; r++)
+		{
+			inv.Elements[c][r] = v->Elements[r][c];
+		}
+	}
+	for (r = 0; r < 3; r++)
+	{
+		inv.Elements[3][r] = -(inv.Elements[0][r] * v->Elements[3][0] + inv.Elements[1][r] * v->Elements[3][1] +
+			inv.Elements[2][r] * v->Elements[3][2]);
+	}
+	inv.Elements[3][3] = 1.0f;
+	return inv;
+}
+
+/* before the world of the view (gl3_main.c): the mirror image of the world in the plane chosen last frame */
+void
+GL3_Mirror_Render(void)
+{
+	float on[4] = {0, 0, 0, 0}, plane[4] = {0, 0, 0, 0}, rect[4] = {0, 0, 0, 0};
+
+	if (!r_om_mirror)
+	{
+		r_om_mirror = ri.Cvar_Get("r_om_mirror", "1", CVAR_ARCHIVE);
+	}
+
+	/* the plane noted in the last frame of this world */
+	MR.valid = MR.candvalid && (MR.candframe == 1);
+	if (MR.valid)
+	{
+		memcpy(MR.plane, MR.cand, sizeof(MR.plane));
+	}
+	MR.candvalid = false;
+	MR.candframe = 1;
+
+	if (MR.failed || !MR.valid || !r_om_mirror->value || !P.bound || (r_newrefdef.rdflags & RDF_NOWORLDMODEL) ||
+		(DotProduct(MR.plane, r_newrefdef.vieworg) - MR.plane[3] < 2))
+	{
+		GL3_SoF_MirrorUniforms(on, plane, rect, 0);
+		return;
+	}
+
+	if (!MirrorTargets())
+	{
+		MR.failed = true;
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		GL3_SoF_MirrorUniforms(on, plane, rect, 0);
+		return;
+	}
+
+	GL3_Draw3DBatchesNow();
+
+	{
+		const float *n = MR.plane;
+		float d = MR.plane[3];
+		hmm_mat4 refl, saveview = gl3state.viewMat3D, saveproj = gl3state.projMat3D;
+		hmm_mat4 savepv = gl3state.uni3DData.transProjViewMat4, view, inv, proj;
+		cplane_t savefrustum[4];
+		vec3_t saveorg, saveglorg, savevpn, savevright, savevup, e;
+		float cw[4], cv[4], q[4], k, dot;
+		float zfar = (gl3depthmin > gl3depthmax) ? 0.0f : 1.0f;
+		int i, j;
+		extern vec3_t vup, vpn, vright;
+
+		/* reflection in the plane n.x = d */
+		memset(&refl, 0, sizeof(refl));
+		for (i = 0; i < 3; i++)
+		{
+			for (j = 0; j < 3; j++)
+			{
+				refl.Elements[j][i] = (i == j ? 1.0f : 0.0f) - 2 * n[i] * n[j];
+			}
+			refl.Elements[3][i] = 2 * d * n[i];
+		}
+		refl.Elements[3][3] = 1;
+		view = HMM_MultiplyMat4(gl3state.viewMat3D, refl);
+
+		/* oblique near plane on the mirror (Lengyel): keep what is on the eye's side */
+		cw[0] = n[0]; cw[1] = n[1]; cw[2] = n[2]; cw[3] = -d;
+		inv = RigidInverse(&view);
+		for (i = 0; i < 4; i++)
+		{
+			cv[i] = inv.Elements[i][0] * cw[0] + inv.Elements[i][1] * cw[1] + inv.Elements[i][2] * cw[2] +
+				inv.Elements[i][3] * cw[3];
+		}
+		cv[3] -= 0.5f; /* a little in front of the glass: the mirror face itself is not drawn into its image */
+		proj = gl3state.projMat3D;
+		q[0] = ((cv[0] > 0 ? 1.0f : cv[0] < 0 ? -1.0f : 0.0f) + proj.Elements[2][0]) / proj.Elements[0][0];
+		q[1] = ((cv[1] > 0 ? 1.0f : cv[1] < 0 ? -1.0f : 0.0f) + proj.Elements[2][1]) / proj.Elements[1][1];
+		q[2] = -1.0f;
+		q[3] = (1.0f + proj.Elements[2][2]) / proj.Elements[3][2];
+		dot = cv[0] * q[0] + cv[1] * q[1] + cv[2] * q[2] + cv[3] * q[3];
+		if (fabsf(dot) < 1e-8f)
+		{
+			GL3_SoF_MirrorUniforms(on, plane, rect, 0);
+			return;
+		}
+		k = 2.0f / dot;
+		proj.Elements[0][2] = cv[0] * k;
+		proj.Elements[1][2] = cv[1] * k;
+		proj.Elements[2][2] = cv[2] * k + 1.0f;
+		proj.Elements[3][2] = cv[3] * k;
+
+		/* the mirrored eye for the world walk (face sides, culling) */
+		VectorCopy(r_newrefdef.vieworg, saveorg);
+		VectorCopy(gl3_origin, saveglorg);
+		VectorCopy(vpn, savevpn);
+		VectorCopy(vright, savevright);
+		VectorCopy(vup, savevup);
+		memcpy(savefrustum, frustum, sizeof(savefrustum));
+
+		VectorMA(r_newrefdef.vieworg, -2 * (DotProduct(n, r_newrefdef.vieworg) - d), n, e);
+		VectorCopy(e, r_newrefdef.vieworg);
+		VectorCopy(e, gl3_origin);
+		VectorMA(vpn, -2 * DotProduct(n, vpn), n, vpn);
+		VectorMA(vright, -2 * DotProduct(n, vright), n, vright);
+		VectorMA(vup, -2 * DotProduct(n, vup), n, vup);
+		R_SetFrustum(vup, vpn, vright, gl3_origin, r_newrefdef.fov_x, r_newrefdef.fov_y, frustum);
+
+		gl3state.viewMat3D = view;
+		gl3state.projMat3D = proj;
+		gl3state.uni3DData.transProjViewMat4 = HMM_MultiplyMat4(proj, view);
+		GL3_UpdateUBO3D();
+
+		glBindFramebuffer(GL_FRAMEBUFFER, MR.fbo);
+		glViewport(P.vx, P.vy, P.vw, P.vh);
+		{
+			float black[4] = {0, 0, 0, 1};
+
+			glClearBufferfv(GL_COLOR, 0, black);
+			glDepthMask(GL_TRUE);
+			glClearBufferfi(GL_DEPTH_STENCIL, 0, zfar, 0);
+		}
+		glCullFace(GL_BACK);
+		GL3_SoF_MirrorUniforms(on, plane, rect, 0);
+
+		MR.inpass = true;
+		GL3_FX_BeginFrame3D();
+		GL3_Fog_BeginFrame();
+		GL3_DrawWorld();
+		GL3_Draw3DBatchesNow();
+		MR.inpass = false;
+
+		/* back to the real eye; what the walk queued for the sorted and fog passes is dropped */
+		glCullFace(GL_FRONT);
+		VectorCopy(saveorg, r_newrefdef.vieworg);
+		VectorCopy(saveglorg, gl3_origin);
+		VectorCopy(savevpn, vpn);
+		VectorCopy(savevright, vright);
+		VectorCopy(savevup, vup);
+		memcpy(frustum, savefrustum, sizeof(savefrustum));
+		gl3state.viewMat3D = saveview;
+		gl3state.projMat3D = saveproj;
+		gl3state.uni3DData.transProjViewMat4 = savepv;
+		GL3_UpdateUBO3D();
+		GL3_FX_BeginFrame3D();
+		GL3_Fog_BeginFrame();
+
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		SceneBuffers();
+		glViewport(P.vx, P.vy, P.vw, P.vh);
+		gl3state.currentlightmap = -1;
+		gl3state.currenttexture = -1;
+	}
+
+	on[0] = 1;
+	memcpy(plane, MR.plane, sizeof(plane));
+	rect[0] = 1.0f / MR.w;
+	rect[1] = 1.0f / MR.h;
+	rect[2] = Q_max(0.0f, Q_min(r_om_mirror->value, 1.0f));
+	GL3_SoF_MirrorUniforms(on, plane, rect, MR.tex);
+}
+
+/* a new map: no plane from the old one */
+void
+GL3_Mirror_MapLoad(void)
+{
+	MR.candvalid = MR.valid = false;
+	MR.candframe = 0;
+}

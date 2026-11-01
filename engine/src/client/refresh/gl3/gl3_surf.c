@@ -208,6 +208,10 @@ GL3_DrawGLPoly(msurface_t *fa, gl3drawCmd_t drawCmd)
 	{
 		drawCmd.emissive = GL3_Bump_SurfClass(fa); /* GFX-modern r_om_bump: gloss class as a negative value */
 	}
+	if (drawCmd.emissive == -11.0f)
+	{
+		GL3_Mirror_Note(fa); /* GFX-modern r_om_mirror: a candidate plane for the next frame */
+	}
 	if (GL3_DynLight_PerPixel() && fa->texinfo && fa->texinfo->image)
 	{
 		/* GFX-modern r_om_pdlight: texture units of the face for the SoF dlight rule */

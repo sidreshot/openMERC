@@ -1927,6 +1927,9 @@ GL3_RenderView(refdef_t *fd)
 	/* GFX-modern r_om_rain: lightning timeline and the sky tint */
 	GL3_Post_WeatherFrame();
 
+	/* GFX-modern: the world seen in the nearest mirror (r_om_mirror) */
+	GL3_Mirror_Render();
+
 	GL3_DrawWorld();
 
 	/* GFX-modern: depth of the world for soft particles */

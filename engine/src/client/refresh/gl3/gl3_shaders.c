@@ -727,6 +727,16 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
 			if(omTranslucent == 0)
 				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
+			// OpenMerc GFX-modern r_om_mirror: a face on the mirrored plane shows the mirror image (no screen-space reflection)
+			if(omEmissive < -10.5 && omMirror.x > 0.5)
+			{
+				vec3 omMc = omMirrorColor(outColor.rgb, passWorldCoord);
+				if(omMc != outColor.rgb)
+				{
+					outColor.rgb = omMc;
+					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
+				}
+			}
 		}
 );
 
@@ -852,6 +862,18 @@ static const char* fragmentSrcOmBump =
 	   SoF material class and how smooth the texture is (little fine detail = polished), floors more than walls;
 	   under the rain (the same top-down map as the lightning) open ground is wet, with puddles from a noise */
 	"uniform vec4 omSsr;\n"   /* x reflections on (0 = off), y rain wetness (0 = dry) */
+	/* GFX-modern r_om_mirror: the world seen in the mirror plane (gl3_post.c), replaces the faces on that plane */
+	"uniform vec4 omMirror;\n"       /* x on, - */
+	"uniform vec4 omMirrorPlane;\n"  /* normal, dist */
+	"uniform vec4 omMirrorRect;\n"   /* 1/width, 1/height of the texture, strength */
+	"uniform sampler2D omMirrorTex;\n"
+	"vec3 omMirrorColor(vec3 c, vec3 wp)\n"
+	"{\n"
+	"	if (omMirror.x < 0.5 || abs(dot(omMirrorPlane.xyz, wp) - omMirrorPlane.w) > 1.5)\n"
+	"		return c;\n"
+	"	vec3 m = texture(omMirrorTex, gl_FragCoord.xy * omMirrorRect.xy).rgb;\n"
+	"	return mix(c, m, omMirrorRect.z * 0.92);\n"
+	"}\n"
 	"float omH2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n"
 	"float omVN(vec2 p)\n"
 	"{\n"
@@ -1179,6 +1201,16 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
 			if(omTranslucent == 0)
 				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
+			// OpenMerc GFX-modern r_om_mirror: a face on the mirrored plane shows the mirror image (no screen-space reflection)
+			if(omEmissive < -10.5 && omMirror.x > 0.5)
+			{
+				vec3 omMc = omMirrorColor(outColor.rgb, passWorldCoord);
+				if(omMc != outColor.rgb)
+				{
+					outColor.rgb = omMc;
+					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
+				}
+			}
 		}
 );
 
@@ -2217,6 +2249,36 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 	{
 		GL3_SelectTMU(GL_TEXTURE12);
 		glBindTexture(GL_TEXTURE_2D, occtex);
+		GL3_SelectTMU(GL_TEXTURE0);
+	}
+}
+
+/* GFX-modern r_om_mirror: the mirror image and its plane (texture unit 13) */
+void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *rect, GLuint tex)
+{
+	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		GLint loc;
+
+		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omMirror")) == -1)
+		{
+			continue;
+		}
+
+		GL3_UseProgram(si[i]->shaderProgram);
+		glUniform4fv(loc, 1, on);
+		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omMirrorPlane"), 1, plane);
+		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omMirrorRect"), 1, rect);
+		glUniform1i(glGetUniformLocation(si[i]->shaderProgram, "omMirrorTex"), 13);
+	}
+
+	if (tex)
+	{
+		GL3_SelectTMU(GL_TEXTURE13);
+		glBindTexture(GL_TEXTURE_2D, tex);
 		GL3_SelectTMU(GL_TEXTURE0);
 	}
 }
