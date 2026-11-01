@@ -54,6 +54,7 @@ static qboolean SSRWanted(void);
 static void SSRShutdown(void);
 static void SSRKeepColour(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
+static cvar_t *r_om_ssr_glint, *r_om_ssr_damp;
 
 static struct
 {
@@ -4167,7 +4168,8 @@ GL3_Weather_MapLoad(const char *ents, int len)
 		return;
 	}
 
-	/* "rain" in a value (environ/gb_rain, CityTrafficRainy ...), case-insensitive */
+	/* "rain" starting a word in a value (environ/gb_rain, CityTrafficRainy ...): after a non-letter or as a
+	   capitalised part; "train", "drain", "terrain" are no rain (tsr1, kos1 and others got rain from them) */
 	for (i = 0; i + 4 <= len && ents[i]; i++)
 	{
 		int k;
@@ -4177,7 +4179,7 @@ GL3_Weather_MapLoad(const char *ents, int len)
 			buf[k] = (char)tolower((unsigned char)ents[i + k]);
 		}
 
-		if (!memcmp(buf, "rain", 4))
+		if (!memcmp(buf, "rain", 4) && ((i == 0) || !isalpha((unsigned char)ents[i - 1]) || (ents[i] == 'R')))
 		{
 			WX.maprain = true;
 			return;
@@ -4375,6 +4377,8 @@ GL3_Post_WeatherFrame(void)
 		{
 			ssr[0] = 1;
 			ssr[1] = (WX.active && WX.occvalid) ? Q_max(0.0f, Q_min(r_om_ssr_wet->value, 1.0f)) : 0;
+			ssr[2] = Q_max(0.0f, r_om_ssr_glint->value);
+			ssr[3] = Q_max(0.0f, Q_min(r_om_ssr_damp->value, 1.0f));
 		}
 
 		GL3_SoF_SSRUniforms(ssr);
@@ -4406,7 +4410,7 @@ static const char *wx_rain_vs =
 	"	vec4 oc = occvp * vec4(p, 1.0);\n"
 	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
 	"	float od = texture(occ, ou).r;\n"
-	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0005);\n"
+	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0002);\n"
 	"	float dist = length(p - eye);\n"
 	"	vA = open ? clamp(1.0 - dist / (B * 0.5), 0.0, 1.0) * smoothstep(60.0, 260.0, dist) : 0.0;\n"
 	"	vec3 a = (c == 0 || c == 1 || c == 4) ? q : p;\n"
@@ -4449,14 +4453,21 @@ static const char *wx_splash_vs =
 	"	vec2 xy = eye.xy + (vec2(H(f * 1.3 + cyc * 17.0), H(f * 2.9 + cyc * 31.0)) - 0.5) * B;\n"
 	"	vec4 oc = occvp * vec4(xy, eye.z, 1.0);\n"
 	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
-	"	float od = texture(occ, ou).r;\n"
+	/* the highest surface under the whole ring, and only on even ground: a ring at the height of one texel lay
+	   below a recessed ceiling panel next to it and showed inside a room (arm1) */
+	"	float t = 2.0 / 1024.0;\n"
+	"	float d0 = texture(occ, ou).r;\n"
+	"	float d1 = texture(occ, ou + vec2(t, 0.0)).r, d2 = texture(occ, ou - vec2(t, 0.0)).r;\n"
+	"	float d3 = texture(occ, ou + vec2(0.0, t)).r, d4 = texture(occ, ou - vec2(0.0, t)).r;\n"
+	"	float od = min(d0, min(min(d1, d2), min(d3, d4)));\n"
+	"	float spread = max(d0, max(max(d1, d2), max(d3, d4))) - od;\n"
 	"	vec4 w = occinv * vec4(oc.xy, od * 2.0 - 1.0, 1.0);\n"
 	"	float z = w.z / w.w + 0.6;\n"
 	"	vec2 cr = vec2((c == 1 || c == 2 || c == 5) ? 1.0 : -1.0, (c == 2 || c == 4 || c == 5) ? 1.0 : -1.0);\n"
 	"	float s = params.z * (0.4 + ph);\n"
 	"	vUV = cr;\n"
 	"	vPh = ph;\n"
-	"	bool ok = od < 0.999 && abs(z - eye.z) < 400.0;\n"
+	"	bool ok = od < 0.999 && abs(z - eye.z) < 400.0 && spread < 0.0003;\n"
 	"	gl_Position = ok ? vp * vec4(xy + cr * s, z, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);\n"
 	"}\n";
 
@@ -5158,6 +5169,8 @@ SSRWanted(void)
 		r_om_ssr_dist = ri.Cvar_Get("r_om_ssr_dist", "1500", CVAR_ARCHIVE);
 		r_om_ssr_quality = ri.Cvar_Get("r_om_ssr_quality", "2", CVAR_ARCHIVE);
 		r_om_ssr_debug = ri.Cvar_Get("r_om_ssr_debug", "0", 0);
+		r_om_ssr_glint = ri.Cvar_Get("r_om_ssr_glint", "1", CVAR_ARCHIVE);
+		r_om_ssr_damp = ri.Cvar_Get("r_om_ssr_damp", "1", CVAR_ARCHIVE);
 	}
 
 	return !SR.failed && (r_om_ssr->value > 0);

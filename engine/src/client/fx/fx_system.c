@@ -225,6 +225,7 @@ FX_LoadDef(fx_def_t *d, const char *name)
 	{
 		static cvar_t *rain;
 		char low[MAX_QPATH];
+		const char *r;
 
 		if (!rain)
 		{
@@ -233,8 +234,10 @@ FX_LoadDef(fx_def_t *d, const char *name)
 
 		Q_strlcpy(low, name, sizeof(low));
 		Q_strlwr(low);
+		r = strstr(low, "rain");
 
-		if (rain->value >= 1 && strstr(low, "rain"))
+		/* "rain" starting a word ("gb_rain"), not "bloodrain" (a gore effect) or "train" */
+		if (rain->value >= 1 && r && ((r == low) || !isalpha((unsigned char)r[-1])))
 		{
 			return false;
 		}

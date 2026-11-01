@@ -427,6 +427,7 @@ typedef struct image_s
 	float detail_scale[2];
 	float detail_shift[2];
 	float detail_scroll[2];
+	int omgloss;                        /* GFX-modern r_om_ssr: gloss class by name + 1 (0 = not worked out yet) */
 } gl3image_t;
 
 enum {MAX_GL3TEXTURES = 1024};

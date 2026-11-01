@@ -703,7 +703,12 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 				discard;
 
 			lmTex.rgb *= overbrightbits;
+			// OpenMerc GFX-modern r_om_ssr: reflectivity of opaque faces (translucent ones keep the default and
+			// fade what is behind them), wet ground is darker, glossy faces get the glints of the lamps
+			float omWetK = 0.0;
+			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
 			outColor = lmTex*texel;
+			outColor.rgb = outColor.rgb * (1.0 - 0.3 * omWetK) + omGlint(passWorldCoord, passNormal, omMat, lmTex.rgb);
 			float omFogK = 1.0;
 			// OpenMerc (I4c): gl_fogmode 1, linear fog of the face's fog region (SPEC-410)
 			if(omFogParams.z != 0.0)
@@ -720,15 +725,8 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
-			// OpenMerc GFX-modern r_om_ssr: reflectivity for the reflection pass (opaque faces: translucent ones
-			// keep the default and fade what is behind them); wet ground under the rain is darker
 			if(omTranslucent == 0)
-			{
-				float omWetK;
-				outMaterial = omMaterial(passWorldCoord, passNormal, omWetK);
-				outMaterial.rg *= omFogK;
-				outColor.rgb *= 1.0 - 0.25 * omWetK;
-			}
+				outMaterial = vec4(omMat.rg * omFogK, 0.0, 1.0); // OpenMerc GFX-modern r_om_ssr
 		}
 );
 
@@ -822,15 +820,23 @@ static const char* fragmentSrcOmBump =
 	   further along the light soften the edge of what is lit */
 	/* lit only when every sample is open: straight above the point (moved off the surface) and two further along
 	   the light; each sample is a 4-tap average */
+	/* the walk goes on along the light (up to ~520 units) through the top-down map as a height field: a building
+	   between the face and the bolt is higher than the ray there (a wall in a narrow street was lit through the
+	   opposite house); past the map's edge the rest counts as open */
 	"	float open = 1.0;\n"
-	"	for (int k = 0; k < 3; k++)\n"
+	"	for (int k = 0; k < 6; k++)\n"
 	"	{\n"
-	"		vec3 p = wp + N * 10.0 + L * (20.0 * float(k));\n"
+	"		float dk = k == 0 ? 0.0 : k == 1 ? 20.0 : k == 2 ? 40.0 : k == 3 ? 110.0 : k == 4 ? 260.0 : 520.0;\n"
+	"		vec3 p = wp + N * 10.0 + L * dk;\n"
 	"		float s = 0.0;\n"
 	"		vec4 oc = omLtOccVP * vec4(p, 1.0);\n"
 	"		vec2 ou = oc.xy * 0.5 + 0.5;\n"
 	"		if (any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))))\n"
-	"			return vec3(0.0);\n"
+	"		{\n"
+	"			if (k == 0)\n"
+	"				return vec3(0.0);\n"
+	"			break;\n"
+	"		}\n"
 	/* four taps 1.5 texels apart: a soft edge instead of the map's texel steps */
 	"		float z = oc.z * 0.5 + 0.5, t = 1.5 / 1024.0;\n"
 	"		for (int j = 0; j < 4; j++)\n"
@@ -879,22 +885,60 @@ static const char* fragmentSrcOmBump =
 	"	float fl = smoothstep(0.6, 0.85, N.z);\n"
 	"	float det = abs(dot(texture(tex, passTexCoord).rgb - texture(tex, passTexCoord, 3.0).rgb, vec3(0.333)));\n"
 	"	float sm = 1.0 - smoothstep(0.04, 0.25, det);\n"
-	"	float r = 0.0, rough = 0.5;\n"
-	/* gl3_bump.c GL3_Bump_SurfClass: 1 stone, 2 wood, 3 metal, 4 glass, 5 pictures, 6 loose ground, 7 liquids */
-	"	if (mc == 3) { r = 0.16; rough = mix(0.5, 0.3, sm); }\n"
+	"	float r = 0.0, rough = 0.5, damp = 0.0;\n"
+	/* gl3_bump.c GL3_Bump_SurfClass: 1 stone, 2 wood, 3 metal, 4 glass, 5 pictures, 6 loose ground, 7 liquids,
+	   8 polished stone, 9 polished metal, 10 rusty metal, 11 mirror, 12 damp stone */
+	"	if (mc == 11) { r = 0.9; rough = 0.0; }\n"
 	"	else if (mc == 4) { r = 0.45; rough = 0.03; }\n"
-	"	else if (mc == 7) { r = 0.4 * fl; rough = 0.06; }\n"
+	"	else if (mc == 7) { r = mix(0.2, 0.45, fl); rough = 0.05; }\n"
+	"	else if (mc == 8) { r = mix(0.12, 0.28, fl) * mix(0.6, 1.0, sm); rough = mix(0.2, 0.06, sm); }\n"
+	"	else if (mc == 9) { r = mix(0.2, 0.3, fl); rough = mix(0.35, 0.12, sm); }\n"
+	"	else if (mc == 3) { r = 0.16; rough = mix(0.5, 0.3, sm); }\n"
+	"	else if (mc == 10) { r = 0.06; rough = 0.6; }\n"
+	"	else if (mc == 12) { r = fl * 0.13; rough = 0.3; damp = 1.0; }\n"
 	"	else if (mc == 2) { r = fl * 0.1 * mix(0.3, 1.0, sm); rough = mix(0.5, 0.25, sm); }\n"
 	"	else if (mc == 1 || mc == 0) { r = fl * 0.13 * mix(0.3, 1.0, sm); rough = mix(0.45, 0.15, sm); }\n"
-	"	wet = omWet(wp, N);\n"
+	/* wet: open to the rain, or damp by nature (sewers, catacombs): floors with puddles, damp walls glisten */
+	"	wet = max(omWet(wp, N), damp * omSsr.w);\n"
 	"	if (wet > 0.0)\n"
 	"	{\n"
 	"		float pud = smoothstep(0.56, 0.6, omVN(wp.xy / 96.0) * 0.7 + omVN(wp.xy / 23.0) * 0.3) * fl;\n"
-	"		r = mix(r, max(r, mix(0.16, 0.5, pud) * fl), wet);\n"
-	"		rough = mix(rough, mix(0.3, 0.03, pud), wet);\n"
+	"		r = mix(r, max(r, mix(0.16, 0.5, pud) * fl + 0.12 * damp * (1.0 - fl)), wet);\n"
+	"		rough = mix(rough, mix(0.3, 0.03, pud) - 0.1 * damp * (1.0 - fl), wet);\n"
 	"		wet *= 0.6 + 0.4 * pud;\n"
 	"	}\n"
 	"	return vec4(r, r * rough, 0.0, 1.0);\n"
+	"}\n"
+	/* glints of the map's lamps (lump 20, the nearest eight: omBL/omBC from gl3_bump.c) on glossy faces: a
+	   normalised Blinn-Phong highlight, sharper on smoother faces, Fresnel by the reflectivity. No shadows: the
+	   lightmap gates it, so lamps behind walls leave dark places dark */
+	"vec3 omGlint(vec3 wp, vec3 nrm, vec4 m, vec3 lm)\n"
+	"{\n"
+	"	float r = m.r;\n"
+	"	if (omSsr.z <= 0.0 || r < 0.02 || omBN == 0)\n"
+	"		return vec3(0.0);\n"
+	"	float rough = clamp(m.g / r, 0.02, 1.0);\n"
+	"	vec3 N = normalize(nrm);\n"
+	"	vec3 V = normalize(omBumpView.xyz - wp);\n"
+	"	float ndv = max(dot(N, V), 0.0);\n"
+	"	float n = exp2(mix(11.0, 3.0, sqrt(rough)));\n"
+	"	float fr = r + (min(1.0, r * 3.0) - r) * pow(1.0 - ndv, 5.0);\n"
+	"	float lit = smoothstep(0.03, 0.35, dot(lm, vec3(0.3, 0.5, 0.2)));\n"
+	"	vec3 acc = vec3(0.0);\n"
+	"	for (int i = 0; i < min(omBN, 4); i++)\n"   /* the four lamps nearest in influence (sorted in gl3_bump.c) */
+	"	{\n"
+	"		vec3 Lp = omBL[i].xyz - wp;\n"
+	"		float d = length(Lp);\n"
+	"		float att = 1.0 - d / omBL[i].w;\n"
+	"		if (att <= 0.0)\n"
+	"			continue;\n"
+	"		vec3 L = Lp / d;\n"
+	"		float ndl = dot(N, L);\n"
+	"		if (ndl <= 0.0)\n"
+	"			continue;\n"
+	"		acc += omBC[i].rgb * (att * att * ndl * pow(max(dot(N, normalize(L + V)), 0.0), n) * (n + 8.0) / 64.0);\n"
+	"	}\n"
+	"	return min(acc, vec3(4.0)) * fr * lit * omSsr.z;\n"
 	"}\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
@@ -1138,7 +1182,12 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 				discard;
 
 			lmTex.rgb *= overbrightbits;
+			// OpenMerc GFX-modern r_om_ssr: reflectivity of opaque faces (translucent ones keep the default and
+			// fade what is behind them), wet ground is darker, glossy faces get the glints of the lamps
+			float omWetK = 0.0;
+			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
 			outColor = lmTex*texel;
+			outColor.rgb = outColor.rgb * (1.0 - 0.3 * omWetK) + omGlint(passWorldCoord, passNormal, omMat, lmTex.rgb);
 			float omFogK = 1.0;
 			// OpenMerc (I4c): gl_fogmode 1, linear fog of the face's fog region (SPEC-410)
 			if(omFogParams.z != 0.0)
@@ -1155,15 +1204,8 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
-			// OpenMerc GFX-modern r_om_ssr: reflectivity for the reflection pass (opaque faces: translucent ones
-			// keep the default and fade what is behind them); wet ground under the rain is darker
 			if(omTranslucent == 0)
-			{
-				float omWetK;
-				outMaterial = omMaterial(passWorldCoord, passNormal, omWetK);
-				outMaterial.rg *= omFogK;
-				outColor.rgb *= 1.0 - 0.25 * omWetK;
-			}
+				outMaterial = vec4(omMat.rg * omFogK, 0.0, 1.0); // OpenMerc GFX-modern r_om_ssr
 		}
 );
 

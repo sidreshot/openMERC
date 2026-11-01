@@ -788,3 +788,18 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
 * Cost (arm1 street in the rain, 1080p, MSAA 2x, GTX 1050 Ti, r_om_gputime): about +1.8 ms (5.5 -> 7.3 ms):
   0.6 the world shaders and the extra target, 0.6 tracing, the rest resolves, apply and the colour of the frame.
 * Screen-space limits: what is not on screen is not reflected; Ghoul models (cars) write no reflectivity.
+* Follow-up (owner: "floors differ: wet catacombs in kos1, metal, mirrors"; "sort the textures that can shine on the
+  fly"): GL3_Bump_SurfClass first looks at the texture's file name once per image (gl3image_t.omgloss) - SoF names
+  are telling - and adds classes 8 polished stone (marbl, bathroom, pooltile, lobby_floor, _tile ...), 9 polished metal
+  (brushed, chrome, metal_clean, metal_smooth, _sink), 10 rusty/dirty metal, 11 mirror (with material 37), 12 damp
+  stone (sewer, mildew, gutter, wet, drain); "water" overrides the material (kos1 water4b is "mud"). Damp faces are
+  wet without rain (r_om_ssr_damp 1): floors with puddles, walls glisten.
+* Lamp glints (r_om_ssr_glint 1): the four nearest map lights (lump 20, gl3_bump.c) give a normalised Blinn-Phong
+  highlight on reflective faces, sharpness from the roughness, Fresnel from the reflectivity, gated by the lightmap
+  (no shadows). Cost on kos1 (almost everything damp): +0.36 ms; r_om_ssr total there about 2.1 ms.
+* Rain detection fix: "rain" must start a word ("gb_rain", "CityTrafficRainy"); "train"/"drain" had switched the rain
+  on in tsr1, tsr2, trn1, kos1, nyc2, sud1, ger1 (drops on ceilings). Same rule in fx_system.c (it also dropped the
+  gore effect environ/bloodrain). Splash rings take the highest occlusion height under the ring and skip uneven
+  ground (a ring under a recessed ceiling panel showed in an arm1 room); drops are open only within 1 unit.
+  Lightning: the openness walk goes on to ~520 units along the light through the top-down map as a height field.
+* Mirrors are not real yet: screen space cannot show what is behind the eye; they need a planar reflection pass.

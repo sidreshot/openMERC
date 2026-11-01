@@ -572,14 +572,57 @@ GL3_Bump_ViewLights(GLuint prog, const float *eye)
 	}
 }
 
-/* the gloss class of a face from its SoF surface material (high byte of the texinfo flags, SPEC-401 table),
- * passed to the world shader as -class in the emissive slot of non-light faces:
+/* gloss classes from the texture name (the SoF artists named them well: "marblefloor", "bathroom_tile",
+ * "brushed_metal", "metal_rust", "sewerbrick", "mirror"); the first word found wins, 0 = none (material decides) */
+static int
+GlossByName(const char *path)
+{
+	static const struct
+	{
+		const char *word;
+		int cls;
+	} rules[] = {
+		{"mirror", 11},
+		{"carpet", 6}, {"rubber", 6}, {"snow", 6}, {"grass", 6}, {"sand", 6}, {"hay", 6},
+		{"water", 7}, {"slime", 7},
+		{"wet", 12}, {"sewer", 12}, {"sewcon", 12}, {"bsewfloor", 12}, {"mildew", 12}, {"gutter", 12}, {"drain", 12},
+		{"rust", 10}, {"dirty", 10}, {"burn", 10}, {"grate", 10}, {"rivet", 10}, {"metalrib", 10}, {"damage", 10},
+		{"marbl", 8}, {"polish", 8}, {"bathroom", 8}, {"bath_", 8}, {"pooltile", 8}, {"lobby_floor", 8},
+		{"checkfloor", 8}, {"clean_floor", 8}, {"btile_clean", 8}, {"kitchfloor", 8}, {"hallfloor", 8},
+		{"floordesign", 8}, {"decfloor", 8}, {"tilefloor", 8},
+		{"brushed", 9}, {"chrome", 9}, {"metal_clean", 9}, {"metal_smooth", 9}, {"steel_brushed", 9}, {"_sink", 9},
+		{"_tile", 8},
+		{"dirt", 6}, {"mud", 6},
+	};
+	char name[MAX_QPATH];
+	const char *base = strrchr(path, '/');
+	int i;
+
+	/* the file name without the folder ("textures/bosnia/") */
+	Q_strlcpy(name, base ? base + 1 : path, sizeof(name));
+	Q_strlwr(name);
+
+	for (i = 0; i < (int)(sizeof(rules) / sizeof(rules[0])); i++)
+	{
+		if (strstr(name, rules[i].word))
+		{
+			return rules[i].cls;
+		}
+	}
+
+	return 0;
+}
+
+/* the gloss class of a face from its texture name and SoF surface material (high byte of the texinfo flags,
+ * SPEC-401 table), passed to the world shader as -class in the emissive slot of non-light faces:
  * 1 stone/brick/concrete, 2 wood, 3 metal, 4 glass, 5 pictures and screens (flat), 6 loose ground (sand, dirt,
- * gravel, snow, grass, hay, mud), 7 liquids (water, slime, blood, tar), 0 unknown */
+ * gravel, snow, grass, hay, mud, carpet), 7 liquids (water, slime, blood, tar), 8 polished stone (marble, glazed
+ * tiles), 9 polished metal, 10 rusty or dirty metal, 11 mirror, 12 damp stone (sewers, mildew), 0 unknown */
 float
 GL3_Bump_SurfClass(const msurface_t *surf)
 {
-	int m;
+	gl3image_t *img;
+	int m, byname = 0;
 
 	if (!surf->texinfo || (surf->texinfo->flags & SURF_LIGHT))
 	{
@@ -587,11 +630,32 @@ GL3_Bump_SurfClass(const msurface_t *surf)
 	}
 
 	m = (surf->texinfo->flags >> 24) & 0xff;
+	img = surf->texinfo->image;
+
+	if (img)
+	{
+		if (!img->omgloss)
+		{
+			img->omgloss = GlossByName(img->name) + 1;
+		}
+
+		byname = img->omgloss - 1;
+	}
+
+	if (byname == 11 && m == 37)
+	{
+		return -11.0f;
+	}
 
 	/* computers and screens, lit glass panels, vending machines, paintings: no relief at all */
 	if (m == 32 || m == 38 || m == 39 || m == 40)
 	{
 		return -5.0f;
+	}
+
+	if (byname > 0 && byname != 11 && m != 37)
+	{
+		return -(float)byname;
 	}
 
 	if ((m >= 2 && m <= 9) || m == 13 || m == 25 || m == 26)
