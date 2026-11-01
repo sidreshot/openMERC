@@ -35,6 +35,7 @@
 #include "header/sofclient.h"
 #include "input/header/input.h"
 #include "fx/cl_fx.h" /* OpenMerc (I5) */
+#include "../common/header/sof/refapi.h"
 
 /* development tools for weapons */
 int gun_frame;
@@ -355,6 +356,22 @@ CL_PrepRefresh(void)
 	rotate = (float)strtod(cl.configstrings[CS_SKYROTATE], (char **)NULL);
 	sscanf(cl.configstrings[CS_SKYAXIS], "%f %f %f", &axis[0], &axis[1], &axis[2]);
 	R_SetSky(cl.configstrings[CS_SKY], rotate, axis);
+
+	/* SPEC-002 registration step 6: the terrain set (configstring 14, worldspawn "terrainset"); without it the
+	   trn1 landscape outside the train was never built */
+	if (CL_SoF_Active())
+	{
+		extern const sofrefexport_t *HUD_Ref(void);
+		const sofrefexport_t *r = HUD_Ref();
+
+		if (r && r->SetTerrain)
+		{
+			char name[64];
+
+			Q_strlcpy(name, CL_SoF_ConfigString(14), sizeof(name));
+			r->SetTerrain(name);
+		}
+	}
 
 	Com_Printf("                                     \r");
 

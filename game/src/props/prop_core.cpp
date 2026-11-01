@@ -876,16 +876,20 @@ void FallOverStart(edict_t *self, edict_t *player)
 
 void Riders(edict_t *self)
 {
-	for (int i = 1; i <= game.maxclients; i++) {
+	/* openMERC: characters standing on the prop ride too (the spec names players only); otherwise the people on
+	   the tsr1 subway trains stayed in the air and fell when the train drove off in the cinematic */
+	for (int i = 1; i < globals.num_edicts; i++) {
 		edict_t *p = g_edicts + i;
-		if (!p->inuse || !p->client || p->groundentity != self)
+		if (!p->inuse || p->groundentity != self || p == self)
+			continue;
+		if (!p->client && !p->ai)
 			continue;
 		if (p->movetype == MOVETYPE_NONE || p->movetype == MOVETYPE_NOCLIP || p->movetype == MOVETYPE_PUSH ||
 		    p->movetype == MOVETYPE_STOP)
 			continue;
 		vec3_t np;
 		VectorMA(p->s.origin, FRAMETIME, self->velocity, np);
-		trace_t tr = gi.trace(np, p->mins, p->maxs, np, p, 0x02010003);
+		trace_t tr = gi.trace(np, p->mins, p->maxs, np, p, p->client ? 0x02010003 : MASK_MONSTERSOLID);
 		if (tr.startsolid || tr.allsolid)
 			continue;
 		VectorCopy(np, p->s.origin);
