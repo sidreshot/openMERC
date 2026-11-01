@@ -787,6 +787,7 @@ static const char* fragmentSrcOmPdl =
  */
 static const char* fragmentSrcOmBump =
 	"uniform vec4 omBump;\n"
+	"uniform float omBumpWalls; // 1: walls only (|normal z| < 0.7), floors and ceilings stay flat\n"
 	"uniform sampler2D omDeluxe;\n"
 	"float omBumpLum(vec2 uv, float lod)\n"
 	"{\n"
@@ -801,6 +802,8 @@ static const char* fragmentSrcOmBump =
 	"	if(omBump.x <= 0.0 || omEmissive > 0.0)\n"
 	"		return lm;\n"
 	"	vec3 N = normalize(passNormal);\n"
+	"	if(omBumpWalls > 0.5 && abs(N.z) >= 0.7)\n"
+	"		return lm;\n"
 	"	vec3 dp1 = dFdx(passWorldCoord);\n"
 	"	vec3 dp2 = dFdy(passWorldCoord);\n"
 	"	vec2 duv1 = dFdx(passTexCoord);\n"
@@ -2042,7 +2045,7 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 
 		if (loc != -1)
 		{
-			static cvar_t *bump, *bumplight, *bumpcontrast, *bumplod;
+			static cvar_t *bump, *bumplight, *bumpcontrast, *bumplod, *bumpwalls;
 
 			if (!bump)
 			{
@@ -2050,11 +2053,17 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 				bumplight = ri.Cvar_Get("r_om_bump_light", "1.5", CVAR_ARCHIVE);
 				bumpcontrast = ri.Cvar_Get("r_om_bump_contrast", "2.5", CVAR_ARCHIVE);
 				bumplod = ri.Cvar_Get("r_om_bump_lod", "0.7", CVAR_ARCHIVE);
+				bumpwalls = ri.Cvar_Get("r_om_bump_walls", "1", CVAR_ARCHIVE);
 			}
 
 			GL3_UseProgram(si[i]->shaderProgram);
 			glUniform4f(loc, fullbright ? 0.0f : 8.0f * bump->value, bumplight->value, bumpcontrast->value,
 					bumplod->value);
+			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpWalls");
+			if (loc != -1)
+			{
+				glUniform1f(loc, bumpwalls->value);
+			}
 		}
 	}
 }
