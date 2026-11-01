@@ -620,6 +620,7 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
 			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
+			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
 			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
 			if(passLightFlags != 0u && omPdl.x > 0.5)
@@ -794,6 +795,34 @@ static const char* fragmentSrcOmBump =
 	"uniform vec4 omBL[8]; // lamps: xyz origin, w radius\n"
 	"uniform vec4 omBC[8]; // lamps: rgb colour\n"
 	"uniform int omBN;\n"
+	/* GFX-modern r_om_rain: the lightning lights what is open to the sky towards the bolt (gl3_post.c) */
+	"uniform vec4 omLt;\n"        /* bolt position, strength (0 = none) */
+	"uniform vec4 omLtCol;\n"
+	"uniform mat4 omLtOccVP;\n"   /* top-down depth map of the static world */
+	"uniform sampler2D omLtOcc;\n"
+	"vec3 omLightningLight(vec3 wp, vec3 nrm)\n"
+	"{\n"
+	"	if (omLt.w <= 0.0)\n"
+	"		return vec3(0.0);\n"
+	"	vec3 N = normalize(nrm);\n"
+	"	vec3 L = normalize(omLt.xyz - wp);\n"
+	"	float ndl = dot(N, L);\n"
+	"	if (ndl <= 0.0)\n"
+	"		return vec3(0.0);\n"
+	/* open: nothing of the world above the point moved off the surface and towards the bolt; two more samples
+	   further along the light soften the edge of what is lit */
+	"	float open = 0.0;\n"
+	"	for (int k = 0; k < 3; k++)\n"
+	"	{\n"
+	"		vec3 p = wp + N * 10.0 + L * (16.0 + 24.0 * float(k));\n"
+	"		vec4 oc = omLtOccVP * vec4(p, 1.0);\n"
+	"		vec2 ou = oc.xy * 0.5 + 0.5;\n"
+	"		if (any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))))\n"
+	"			continue;\n"
+	"		open += 1.0 - smoothstep(0.0, 0.0015, (oc.z * 0.5 + 0.5) - texture(omLtOcc, ou).r);\n"
+	"	}\n"
+	"	return omLtCol.rgb * omLt.w * (0.3 + 0.7 * ndl) * (open / 3.0);\n"
+	"}\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
 	"	if(omBump.x <= 0.0 || omEmissive > 0.0)\n"
@@ -950,6 +979,7 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
 			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
+			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
 			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
 			if(passLightFlags != 0u && omPdl.x > 0.5)
@@ -2055,6 +2085,42 @@ void GL3_UpdateUBOLights(void)
  * world shaders; r_fullbright and night vision use the colour-table path (no lightmaps). Called once per
  * 3D view (set every time: recreated programs start at 0).
  */
+/* GFX-modern r_om_rain (gl3_post.c): the lightning as a light of the world shaders - bolt position and
+   strength (w 0 = none), colour, the top-down depth map (texture unit 12) and its view-projection */
+void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const float *occvp, GLuint occtex)
+{
+	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		GLint loc;
+
+		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omLt")) == -1)
+		{
+			continue;
+		}
+
+		GL3_UseProgram(si[i]->shaderProgram);
+		glUniform4fv(loc, 1, bolt);
+		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omLtCol"), 1, color);
+
+		if (occvp)
+		{
+			glUniformMatrix4fv(glGetUniformLocation(si[i]->shaderProgram, "omLtOccVP"), 1, GL_FALSE, occvp);
+		}
+
+		glUniform1i(glGetUniformLocation(si[i]->shaderProgram, "omLtOcc"), 12);
+	}
+
+	if (occtex)
+	{
+		GL3_SelectTMU(GL_TEXTURE12);
+		glBindTexture(GL_TEXTURE_2D, occtex);
+		GL3_SelectTMU(GL_TEXTURE0);
+	}
+}
+
 void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 {
 	extern int gl3_monolightmap_mode;

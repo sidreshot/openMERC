@@ -91,6 +91,10 @@ Variable *ScriptSystem::find_global(const char *name)
 
 Variable *ScriptSystem::add_global(std::unique_ptr<Variable> v)
 {
+	/* openMERC: the mission terminals of arm1..3 (scripts arm/runcomputer, runcomputer1, runcomputer2) work at once,
+	   not only after the briefing talk sets their global to 1 */
+	if (v->type == VT_INT && !strncmp(v->name, "runcomputer", 11))
+		v->d.i = 1;
 	globals_.push_back(std::move(v));
 	return globals_.back().get();
 }

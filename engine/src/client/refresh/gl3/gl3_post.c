@@ -4057,6 +4057,8 @@ static struct
 	int nflicker;
 	float bolt[BOLT_MAXPTS * 3];
 	int nbolt;  /* segment end points, pairs */
+	vec3_t boltpos;  /* where the light of the world shaders comes from */
+	qboolean occvalid;
 } WX;
 
 /* map load (gl3_model.c): does the map ask for rain? */
@@ -4068,6 +4070,7 @@ GL3_Weather_MapLoad(const char *ents, int len)
 
 	WX.maprain = false;
 	WX.occmodel = NULL;
+	WX.occvalid = false;
 	WX.next = 0;
 
 	if (!ents || len <= 0)
@@ -4196,7 +4199,10 @@ LightningThink(void)
 
 	if (now >= WX.next)
 	{
-		float az = frand() * 2.0f * (float)M_PI, dist = 1500 + frand() * 1500;
+		/* far out in the sky, high above the horizon, roughly where the player looks (seen through the gaps
+		   between the buildings; the world in front hides it by depth) */
+		float az = (r_newrefdef.viewangles[YAW] + (frand() * 2 - 1) * 55.0f) * (float)M_PI / 180.0f;
+		float dist = 5500 + frand() * 1500;
 		vec3_t top, bottom;
 		int i;
 
@@ -4211,13 +4217,18 @@ LightningThink(void)
 
 		top[0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
 		top[1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
-		top[2] = r_newrefdef.vieworg[2] + 1800;
+		top[2] = r_newrefdef.vieworg[2] + 4200 + frand() * 1500;
 		VectorCopy(top, bottom);
-		bottom[0] += (frand() * 2 - 1) * 300;
-		bottom[1] += (frand() * 2 - 1) * 300;
-		bottom[2] = r_newrefdef.vieworg[2] - 300;
+		bottom[0] += (frand() * 2 - 1) * 900;
+		bottom[1] += (frand() * 2 - 1) * 900;
+		bottom[2] = r_newrefdef.vieworg[2] + 300 + frand() * 400;
 		WX.nbolt = 0;
-		BoltSegment(top, bottom, 260, 7, 2);
+		BoltSegment(top, bottom, 700, 8, 3);
+		/* the light of the world shaders comes from the upper part of the bolt */
+		for (i = 0; i < 3; i++)
+		{
+			WX.boltpos[i] = top[i] * 0.6f + bottom[i] * 0.4f;
+		}
 
 		/* the client plays the thunder (cl_view.c): strike number and distance */
 		{
@@ -4242,9 +4253,22 @@ GL3_Post_WeatherFrame(void)
 
 	if (WX.active)
 	{
+		float bolt[4], col[4] = {0.72f, 0.8f, 1.0f, 0};
+
 		LightningThink();
 		tint = Q_max(0.05f, Q_min(r_om_rain_sky->value, 1.0f));
-		add = LightningFlash() * 0.6f;
+		add = LightningFlash() * 1.2f;
+
+		/* the lightning lights the open world through the world shaders */
+		VectorCopy(WX.boltpos, bolt);
+		bolt[3] = WX.occvalid ? LightningFlash() * 1.4f : 0;
+		GL3_SoF_LightningUniforms(bolt, col, WX.occvalid ? WX.occvp : NULL, WX.occvalid ? WX.occtex : 0);
+	}
+	else
+	{
+		static const float none[4] = {0, 0, 0, 0};
+
+		GL3_SoF_LightningUniforms(none, none, NULL, 0);
 	}
 
 	if (p && (loc = glGetUniformLocation(p, "omSkyTint")) != -1)
@@ -4281,7 +4305,7 @@ static const char *wx_rain_vs =
 	"	float od = texture(occ, ou).r;\n"
 	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0005);\n"
 	"	float dist = length(p - eye);\n"
-	"	vA = open ? clamp(1.0 - dist / (B * 0.5), 0.0, 1.0) * smoothstep(30.0, 140.0, dist) : 0.0;\n"
+	"	vA = open ? clamp(1.0 - dist / (B * 0.5), 0.0, 1.0) * smoothstep(60.0, 260.0, dist) : 0.0;\n"
 	"	vec3 a = (c == 0 || c == 1 || c == 4) ? q : p;\n"
 	"	vec3 side = normalize(cross(p - q, a - eye)) * (0.22 + dist * 0.0009);\n"
 	"	a += (c == 1 || c == 2 || c == 5) ? side : -side;\n"
@@ -4565,6 +4589,7 @@ WXOcclusion(void)
 		glClearBufferfv(GL_DEPTH, 0, &one);
 	}
 	GL3_CSM_DrawDepth(m, NULL, 0, true);
+	WX.occvalid = true;
 	glDepthFunc(oldfunc);
 	glDepthRange(oldrange[0], oldrange[1]);
 }
@@ -4668,64 +4693,32 @@ GL3_Post_Weather(void)
 		glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(1500 * dens));
 	}
 
-	/* lightning: the open surfaces brighten (additive), the bolt into the scene and the emissive target */
-	if (flash > 0.01f)
+	/* lightning: the bolt far in the sky (a soft glow and a bright core), into the scene and the emissive target;
+	   its light on the world comes from the world shaders (omLightningLight, GL3_SoF_LightningUniforms) */
+	if (flash > 0.01f && WX.nbolt >= 2)
 	{
-		hmm_mat4 inv;
-		const hmm_mat4 *v = &gl3state.viewMat3D;
-		int r, c;
+		static float quads[BOLT_MAXPTS * 3 * 5 * 2];
+		int pass;
 
-		memset(&inv, 0, sizeof(inv));
-		for (c = 0; c < 3; c++)
-		{
-			for (r = 0; r < 3; r++)
-			{
-				inv.Elements[c][r] = v->Elements[r][c];
-			}
-		}
-		for (r = 0; r < 3; r++)
-		{
-			inv.Elements[3][r] = -(inv.Elements[0][r] * v->Elements[3][0] + inv.Elements[1][r] * v->Elements[3][1] +
-				inv.Elements[2][r] * v->Elements[3][2]);
-		}
-		inv.Elements[3][3] = 1.0f;
-
-		/* the depth as a texture */
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
-		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
-			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
-		glDrawBuffers(1, one);
-
-		glDisable(GL_DEPTH_TEST);
+		glDrawBuffers(2, bufs);
+		glEnable(GL_DEPTH_TEST);
 		glBlendFunc(GL_ONE, GL_ONE);
-		GL3_UseProgram(WX.progflash);
-		glUniform1i(WX.f_depth, 1);
-		glUniform1i(WX.f_occ, 0);
-		glUniformMatrix4fv(WX.f_occvp, 1, GL_FALSE, WX.occvp);
-		glUniform4f(WX.f_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin,
-			gl3depthmax);
-		glUniformMatrix4fv(WX.f_inv, 1, GL_FALSE, &inv.Elements[0][0]);
-		glUniform4f(WX.f_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
-		glUniform4f(glGetUniformLocation(WX.progflash, "rect2"), 1.0f / gl3state.projMat3D.Elements[0][0],
-			1.0f / gl3state.projMat3D.Elements[1][1], 0, 0);
-		glUniform4f(WX.f_flash, 0.28f * flash, 0.31f * flash, 0.4f * flash, 0);
-		BindTex(GL_TEXTURE1, P.texdepthcopy);
-		BindTex(GL_TEXTURE0, WX.occtex);
-		DrawQuad();
+		GL3_UseProgram(WX.progbolt);
+		glUniformMatrix4fv(WX.b_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+		GL3_BindVAO(WX.vao);
+		GL3_BindVBO(WX.bolt_vbo);
+		glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+		glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
 
-		/* the bolt: camera-facing quads along its segments */
-		if (WX.nbolt >= 2)
+		for (pass = 0; pass < 2; pass++)
 		{
-			static float quads[BOLT_MAXPTS * 3 * 5];
+			float w = pass ? 28.0f : 150.0f;
 			int i, n = 0;
 
 			for (i = 0; i + 1 < WX.nbolt; i += 2)
 			{
 				const float *a = &WX.bolt[i * 3], *b = &WX.bolt[(i + 1) * 3];
 				vec3_t dir, to, s;
-				float w = 10.0f;
 				int k, j;
 				float pts[6][5];
 
@@ -4760,23 +4753,15 @@ GL3_Post_Weather(void)
 				n += 30;
 			}
 
-			glDrawBuffers(2, bufs);
-			glEnable(GL_DEPTH_TEST);
-			glBlendFunc(GL_ONE, GL_ONE);
-			GL3_UseProgram(WX.progbolt);
-			glUniformMatrix4fv(WX.b_vp, 1, GL_FALSE, &pv.Elements[0][0]);
-			glUniform4f(WX.b_color, 0.8f, 0.85f, 1.0f, Q_min(1.0f, flash * 1.6f));
-			GL3_BindVAO(WX.vao);
-			GL3_BindVBO(WX.bolt_vbo);
+			glUniform4f(WX.b_color, 0.75f, 0.82f, 1.0f, pass ? Q_min(1.0f, flash * 1.8f) : flash * 0.22f);
 			glBufferData(GL_ARRAY_BUFFER, n * sizeof(float), quads, GL_STREAM_DRAW);
-			glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
 			qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), 0);
-			glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
 			qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (GLintptr)(3 * sizeof(float)));
 			glDrawArrays(GL_TRIANGLES, 0, n / 5);
-			glDisableVertexAttribArray(GL3_ATTRIB_POSITION);
-			glDisableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
 		}
+
+		glDisableVertexAttribArray(GL3_ATTRIB_POSITION);
+		glDisableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
 	}
 
 	GL3_BindVAO(0);
