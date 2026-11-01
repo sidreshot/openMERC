@@ -544,6 +544,8 @@ extern void GL3_Deluxe_BindPage(int page);
 extern void GL3_Bump_Make(GLuint texnum, const byte *rgba, int w, int h);
 extern void GL3_Bump_Free(GLuint texnum);
 extern void GL3_Bump_Bind(GLuint texnum);
+extern void GL3_Bump_SetLights(const byte *lights, int len);
+extern void GL3_Bump_ViewLights(GLuint prog, const float *eye);
 
 // gl3_draw.c
 extern void GL3_Draw_InitLocal(void);

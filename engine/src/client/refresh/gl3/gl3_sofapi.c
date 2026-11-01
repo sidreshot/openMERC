@@ -162,6 +162,8 @@ GL3_SoF_WorldLights(const byte *lights, int len)
 {
 	int i, n = len / 36;
 
+	GL3_Bump_SetLights(lights, len);
+
 	if (!gl3_ghoul)
 	{
 		return;

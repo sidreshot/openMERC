@@ -372,3 +372,148 @@ GL3_Bump_Bind(GLuint texnum)
 	glBindTexture(GL_TEXTURE_2D, (((int)texnum < nmapcount) && nmaps[texnum]) ? nmaps[texnum] : nflat);
 	GL3_SelectTMU(GL_TEXTURE0);
 }
+
+/* ---------------------------------------------------------------------
+ * the map's lamps for per-pixel relief and highlights (lump 20)
+ * --------------------------------------------------------------------- */
+
+#define BUMP_MAX_VIEW_LIGHTS 16
+
+typedef struct
+{
+	vec3_t origin;
+	vec3_t color;
+	float radius;
+} bumplight_t;
+
+static bumplight_t *blights;
+static int numblights;
+
+/* the static lights of the new world: origin, colour, intensity, type (0 surface patch, 1 point, 2 spot, 3 sky) */
+void
+GL3_Bump_SetLights(const byte *lights, int len)
+{
+	int i, n = len / 36;
+
+	free(blights);
+	blights = NULL;
+	numblights = 0;
+
+	if (n <= 0)
+	{
+		return;
+	}
+
+	blights = malloc(sizeof(bumplight_t) * n);
+
+	if (!blights)
+	{
+		return;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		const byte *r = lights + 36 * i;
+		float intensity = LittleFloat(*(const float *)(r + 24));
+		int type = LittleLong(*(const int *)(r + 28));
+		bumplight_t *l = &blights[numblights];
+		float m;
+
+		if ((intensity <= 0) || (type == 3))
+		{
+			continue;
+		}
+
+		l->origin[0] = LittleFloat(*(const float *)(r + 0));
+		l->origin[1] = LittleFloat(*(const float *)(r + 4));
+		l->origin[2] = LittleFloat(*(const float *)(r + 8));
+		l->color[0] = LittleFloat(*(const float *)(r + 12));
+		l->color[1] = LittleFloat(*(const float *)(r + 16));
+		l->color[2] = LittleFloat(*(const float *)(r + 20));
+		m = fmaxf(l->color[0], fmaxf(l->color[1], l->color[2]));
+
+		if (m > 0)
+		{
+			VectorScale(l->color, 1.0f / m, l->color);
+		}
+
+		/* reach: points their intensity, surface patches more (their light falls off as 1/d) */
+		l->radius = (type == 0) ? fminf(sqrtf(intensity) * 8.0f, 600.0f) : fminf(intensity, 800.0f);
+		numblights++;
+	}
+}
+
+/* the lamps nearest in influence to the eye go to the shader: omBL[i] = origin, radius; omBC[i] = colour */
+void
+GL3_Bump_ViewLights(GLuint prog, const float *eye)
+{
+	float pos[BUMP_MAX_VIEW_LIGHTS * 4], col[BUMP_MAX_VIEW_LIGHTS * 4], score[BUMP_MAX_VIEW_LIGHTS];
+	int i, j, n = 0;
+	GLint loc;
+
+	for (i = 0; i < numblights; i++)
+	{
+		const bumplight_t *l = &blights[i];
+		vec3_t d;
+		float dist, s;
+
+		VectorSubtract(l->origin, eye, d);
+		dist = VectorLength(d);
+
+		if (dist > l->radius + 1200.0f)
+		{
+			continue;
+		}
+
+		s = l->radius / (dist + 64.0f);
+
+		/* insertion into the best BUMP_MAX_VIEW_LIGHTS by score */
+		for (j = n; j > 0 && score[j - 1] < s; j--)
+		{
+			if (j < BUMP_MAX_VIEW_LIGHTS)
+			{
+				score[j] = score[j - 1];
+				memcpy(pos + j * 4, pos + (j - 1) * 4, sizeof(float) * 4);
+				memcpy(col + j * 4, col + (j - 1) * 4, sizeof(float) * 4);
+			}
+		}
+
+		if (j >= BUMP_MAX_VIEW_LIGHTS)
+		{
+			continue;
+		}
+
+		score[j] = s;
+		pos[j * 4 + 0] = l->origin[0];
+		pos[j * 4 + 1] = l->origin[1];
+		pos[j * 4 + 2] = l->origin[2];
+		pos[j * 4 + 3] = l->radius;
+		col[j * 4 + 0] = l->color[0];
+		col[j * 4 + 1] = l->color[1];
+		col[j * 4 + 2] = l->color[2];
+		col[j * 4 + 3] = 1.0f;
+
+		if (n < BUMP_MAX_VIEW_LIGHTS)
+		{
+			n++;
+		}
+	}
+
+	loc = glGetUniformLocation(prog, "omBL");
+	if (loc != -1 && n > 0)
+	{
+		glUniform4fv(loc, n, pos);
+	}
+
+	loc = glGetUniformLocation(prog, "omBC");
+	if (loc != -1 && n > 0)
+	{
+		glUniform4fv(loc, n, col);
+	}
+
+	loc = glGetUniformLocation(prog, "omBN");
+	if (loc != -1)
+	{
+		glUniform1i(loc, n);
+	}
+}

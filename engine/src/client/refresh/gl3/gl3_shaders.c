@@ -790,6 +790,10 @@ static const char* fragmentSrcOmBump =
 	"uniform sampler2D omDeluxe;\n"
 	"uniform sampler2D omNormalMap;\n"
 	"uniform vec4 omBumpView; // xyz eye position, w specular strength (0 = no highlights)\n"
+	"uniform vec4 omBumpLights; // x lamp relief strength, y lamp glint strength (x 0 = lamps off)\n"
+	"uniform vec4 omBL[16]; // lamps: xyz origin, w radius\n"
+	"uniform vec4 omBC[16]; // lamps: rgb colour\n"
+	"uniform int omBN;\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
 	"	if(omBump.x <= 0.0 || omEmissive > 0.0)\n"
@@ -842,7 +846,33 @@ static const char* fragmentSrcOmBump =
 	"		float sp = pow(max(dot(Nb, Hh), 0.0), 40.0) * omBumpView.w * gloss * (0.4 + 0.6 * k);\n"
 	"		res += lm * sp;\n"
 	"	}\n"
-	"	return res;\n"
+	"	// the map's lamps near the eye (lump 20, gl3_bump.c): each one shades the relief from its real position and\n"
+	"	// leaves a soft glint on it. Only the bumped-minus-flat part of the diffuse is added, so the baked brightness\n"
+	"	// stays; both scale with the lightmap, so lamps behind walls (no shadows here) don't light dark places.\n"
+	"	if(omBumpLights.x > 0.0)\n"
+	"	{\n"
+	"		vec3 V = normalize(omBumpView.xyz - passWorldCoord);\n"
+	"		float gloss = smoothstep(-0.6, 0.2, nm.a * 2.0 - 1.0);\n"
+	"		vec3 acc = vec3(0.0);\n"
+	"		for(int i = 0; i < omBN; i++)\n"
+	"		{\n"
+	"			vec3 Lp = omBL[i].xyz - passWorldCoord;\n"
+	"			float d = length(Lp);\n"
+	"			float att = 1.0 - d / omBL[i].w;\n"
+	"			if(att <= 0.0)\n"
+	"				continue;\n"
+	"			vec3 L = Lp / d;\n"
+	"			float nf = dot(N, L);\n"
+	"			if(nf <= 0.0)\n"
+	"				continue;\n"
+	"			att *= att * smoothstep(0.0, 0.2, nf);\n"
+	"			float dif = max(dot(Nb, L), 0.0) - nf;\n"
+	"			float sp = pow(max(dot(Nb, normalize(L + V)), 0.0), 32.0) * gloss;\n"
+	"			acc += omBC[i].rgb * att * (dif * omBumpLights.x + sp * omBumpLights.y);\n"
+	"		}\n"
+	"		res += lm * acc;\n"
+	"	}\n"
+	"	return max(res, vec3(0.0));\n"
 	"}\n"
 	;
 static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
@@ -2043,7 +2073,7 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 
 		if (loc != -1)
 		{
-			static cvar_t *bump, *bumpcavity, *bumpcontrast, *bumpshare, *bumpwalls, *bumpspec;
+			static cvar_t *bump, *bumpcavity, *bumpcontrast, *bumpshare, *bumpwalls, *bumpspec, *bumplights, *bumpglint;
 
 			if (!bump)
 			{
@@ -2053,6 +2083,8 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 				bumpshare = ri.Cvar_Get("r_om_bump_share", "0.6", CVAR_ARCHIVE);
 				bumpwalls = ri.Cvar_Get("r_om_bump_walls", "1", CVAR_ARCHIVE);
 				bumpspec = ri.Cvar_Get("r_om_bump_spec", "0.3", CVAR_ARCHIVE);
+				bumplights = ri.Cvar_Get("r_om_bump_lights", "1", CVAR_ARCHIVE);
+				bumpglint = ri.Cvar_Get("r_om_bump_glint", "0.8", CVAR_ARCHIVE);
 			}
 
 			GL3_UseProgram(si[i]->shaderProgram);
@@ -2067,6 +2099,12 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 			if (loc != -1)
 			{
 				glUniform1f(loc, bumpwalls->value);
+			}
+			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpLights");
+			if (loc != -1)
+			{
+				glUniform4f(loc, fullbright ? 0.0f : bumplights->value, bumpglint->value, 0.0f, 0.0f);
+				GL3_Bump_ViewLights(si[i]->shaderProgram, r_newrefdef.vieworg);
 			}
 		}
 	}
