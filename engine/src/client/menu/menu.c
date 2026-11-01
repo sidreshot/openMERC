@@ -795,6 +795,14 @@ M_OpenMenu(const char *rawname, const char *rawframe, qboolean forced)
 		Q_strlcpy(name, "main", sizeof(name));
 	}
 
+	/* the mission terminal (arm1..3 scripts: "intermission login") opened the
+	   retired, empty login page; the mission briefing (mail, which leads on to
+	   the outfit screen) is opened at once instead */
+	if (!strcmp(name, "login") || !strcmp(name, "f_login"))
+	{
+		Q_strlcpy(name, "mail", sizeof(name));
+	}
+
 	/* owner t102u: no parental locks - the stock lock and password pages
 	   (lock, change) are not opened */
 	if (!strcmp(name, "lock") || !strcmp(name, "change"))
