@@ -787,5 +787,4 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   roughness). Not in GLES3 builds (the shaders still declare the output).
 * Cost (arm1 street in the rain, 1080p, MSAA 2x, GTX 1050 Ti, r_om_gputime): about +1.8 ms (5.5 -> 7.3 ms):
   0.6 the world shaders and the extra target, 0.6 tracing, the rest resolves, apply and the colour of the frame.
-* Screen-space limits: what is not on screen is not reflected; Ghoul models (cars) and brush faces drawn with the
-  FX shader write no reflectivity.
+* Screen-space limits: what is not on screen is not reflected; Ghoul models (cars) write no reflectivity.
