@@ -2086,7 +2086,7 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 
 			if (!bump)
 			{
-				bump = ri.Cvar_Get("r_om_bump", "1.5", CVAR_ARCHIVE);
+				bump = ri.Cvar_Get("r_om_bump", "0", CVAR_ARCHIVE);
 				bumpcavity = ri.Cvar_Get("r_om_bump_cavity", "0.25", CVAR_ARCHIVE);
 				bumpcontrast = ri.Cvar_Get("r_om_bump_contrast", "2", CVAR_ARCHIVE);
 				bumpshare = ri.Cvar_Get("r_om_bump_share", "0.6", CVAR_ARCHIVE);
