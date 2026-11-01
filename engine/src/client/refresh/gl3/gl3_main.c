@@ -1924,6 +1924,8 @@ GL3_RenderView(refdef_t *fd)
 	GL3_SoF_BindLightTable((r_fullbright->value != 0) || (r_newrefdef.rdflags & RDF_IRGOGGLES));
 	/* I4c: gl_monolightmap texel modes (SPEC-410 Lightmaps) */
 	GL3_SoF_ApplyMonoLightmap((r_fullbright->value != 0) || (r_newrefdef.rdflags & RDF_IRGOGGLES));
+	/* GFX-modern r_om_rain: lightning timeline and the sky tint */
+	GL3_Post_WeatherFrame();
 
 	GL3_DrawWorld();
 
@@ -1956,6 +1958,9 @@ GL3_RenderView(refdef_t *fd)
 
 	/* GFX-modern: ambient occlusion of the finished opaque view (r_om_ssao) */
 	GL3_Post_SSAO();
+
+	/* GFX-modern: rain, splashes and lightning (r_om_rain) */
+	GL3_Post_Weather();
 
 	/* GFX-modern: volumetric light beams in place of the painted Ghoul light cones */
 	GL3_Post_Beams();

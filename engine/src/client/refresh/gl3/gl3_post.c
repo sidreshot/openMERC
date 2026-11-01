@@ -4010,3 +4010,769 @@ SSAOShutdown(void)
 
 	memset(&S, 0, sizeof(S));
 }
+
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_rain: rain, splashes, a darker sky and lightning.
+ * On by itself (r_om_rain 1) on maps whose entities speak of rain (a rain
+ * effect or a rainy ambient set: arm1), always with 2, never with 0.
+ * A depth map of the static world seen from straight above the camera
+ * (1024^2 over 3072 units, re-made when the camera moves 256 units) tells
+ * where the sky is open: drops and splashes exist only above the first
+ * surface met from the top. Drops are camera-facing streaks made in the
+ * vertex shader from gl_VertexID (world-fixed cells wrapped around the eye,
+ * falling 700 u/s with a little wind); splashes are short rings on the top
+ * surfaces. The sky is multiplied by r_om_rain_sky. Lightning
+ * (r_om_lightning): every 8..20 s (r_om_lightning_rate scales) two or three
+ * flickers within 0.5 s light the open surfaces (full-view pass over the
+ * depth, tested against the top-down map), brighten the sky and draw a
+ * branched midpoint-displaced bolt 1500..3000 units away into the scene and
+ * the emissive target (bloom). No thunder: the renderer has no sound.
+ * ------------------------------------------------------------------ */
+
+#define RAIN_OCC 1024
+#define RAIN_HALF 1536.0f
+#define BOLT_MAXPTS 512
+
+static cvar_t *r_om_rain, *r_om_rain_density, *r_om_rain_sky, *r_om_lightning, *r_om_lightning_rate;
+
+static float
+frand(void)
+{
+	return (float)(rand() & 0x7fff) / 32768.0f;
+}
+
+static struct
+{
+	qboolean maprain, failed, active;
+	GLuint occtex, occfbo;
+	float occvp[16], occc[3];
+	const void *occmodel;
+	GLuint prograin, progsplash, progflash, progbolt, vao, bolt_vbo;
+	GLint r_vp, r_eye, r_time, r_params, r_occ, r_occvp, r_color;
+	GLint s_vp, s_eye, s_time, s_params, s_occ, s_occvp, s_color;
+	GLint f_depth, f_occ, f_occvp, f_proj, f_inv, f_rect, f_flash;
+	GLint b_vp, b_color;
+	/* lightning */
+	float next, start, flashk[3];
+	int nflicker;
+	float bolt[BOLT_MAXPTS * 3];
+	int nbolt;  /* segment end points, pairs */
+} WX;
+
+/* map load (gl3_model.c): does the map ask for rain? */
+void
+GL3_Weather_MapLoad(const char *ents, int len)
+{
+	char buf[64];
+	int i;
+
+	WX.maprain = false;
+	WX.occmodel = NULL;
+	WX.next = 0;
+
+	if (!ents || len <= 0)
+	{
+		return;
+	}
+
+	/* "rain" in a value (environ/gb_rain, CityTrafficRainy ...), case-insensitive */
+	for (i = 0; i + 4 <= len && ents[i]; i++)
+	{
+		int k;
+
+		for (k = 0; k < 4; k++)
+		{
+			buf[k] = (char)tolower((unsigned char)ents[i + k]);
+		}
+
+		if (!memcmp(buf, "rain", 4))
+		{
+			WX.maprain = true;
+			return;
+		}
+	}
+}
+
+static qboolean
+WeatherWanted(void)
+{
+	if (!r_om_rain)
+	{
+		r_om_rain = ri.Cvar_Get("r_om_rain", "1", CVAR_ARCHIVE);
+		r_om_rain_density = ri.Cvar_Get("r_om_rain_density", "1", CVAR_ARCHIVE);
+		r_om_rain_sky = ri.Cvar_Get("r_om_rain_sky", "0.45", CVAR_ARCHIVE);
+		r_om_lightning = ri.Cvar_Get("r_om_lightning", "1", CVAR_ARCHIVE);
+		r_om_lightning_rate = ri.Cvar_Get("r_om_lightning_rate", "1", CVAR_ARCHIVE);
+	}
+
+#ifdef YQ2_GL3_GLES3
+	return false;
+#else
+	if (WX.failed || !gl3_worldmodel || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
+	{
+		return false;
+	}
+
+	return (r_om_rain->value >= 2) || ((r_om_rain->value >= 1) && WX.maprain);
+#endif
+}
+
+/* 0..1 brightness of the lightning now */
+static float
+LightningFlash(void)
+{
+	float t = r_newrefdef.time - WX.start, f = 0;
+	int i;
+
+	if (WX.start <= 0 || t < 0 || t > 1.5f)
+	{
+		return 0;
+	}
+
+	for (i = 0; i < WX.nflicker; i++)
+	{
+		float d = t - WX.flashk[i];
+
+		if (d >= 0)
+		{
+			f = Q_max(f, expf(-d * 9.0f) * (i == 0 ? 1.0f : 0.8f));
+		}
+	}
+
+	return f;
+}
+
+static void
+BoltSegment(const vec3_t a, const vec3_t b, float disp, int depth, int branch)
+{
+	vec3_t m, d;
+
+	if (depth == 0 || WX.nbolt + 2 > BOLT_MAXPTS)
+	{
+		if (WX.nbolt + 2 <= BOLT_MAXPTS)
+		{
+			{ float *o = WX.bolt + WX.nbolt * 3; VectorCopy(a, o); }
+			{ float *o = WX.bolt + (WX.nbolt + 1) * 3; VectorCopy(b, o); }
+			WX.nbolt += 2;
+		}
+
+		return;
+	}
+
+	VectorAdd(a, b, m);
+	VectorScale(m, 0.5f, m);
+	m[0] += (frand() * 2 - 1) * disp;
+	m[1] += (frand() * 2 - 1) * disp;
+	m[2] += (frand() * 2 - 1) * disp * 0.3f;
+	BoltSegment(a, m, disp * 0.55f, depth - 1, branch);
+	BoltSegment(m, b, disp * 0.55f, depth - 1, branch);
+
+	/* a side branch now and then, thinner (shorter recursion) */
+	if (branch > 0 && depth >= 4 && frand() < 0.3f)
+	{
+		VectorSubtract(b, a, d);
+		VectorMA(m, 0.6f, d, d);
+		d[0] += (frand() * 2 - 1) * disp * 1.5f;
+		d[1] += (frand() * 2 - 1) * disp * 1.5f;
+		BoltSegment(m, d, disp * 0.5f, depth - 2, branch - 1);
+	}
+}
+
+static void
+LightningThink(void)
+{
+	float now = r_newrefdef.time, rate = Q_max(r_om_lightning_rate->value, 0.05f);
+
+	if (!r_om_lightning->value)
+	{
+		WX.start = 0;
+		return;
+	}
+
+	if (WX.next <= 0 || WX.next - now > 60)
+	{
+		WX.next = now + (4.0f + frand() * 8.0f) / rate;
+	}
+
+	if (now >= WX.next)
+	{
+		float az = frand() * 2.0f * (float)M_PI, dist = 1500 + frand() * 1500;
+		vec3_t top, bottom;
+		int i;
+
+		WX.start = now;
+		WX.nflicker = 2 + (frand() < 0.5f ? 1 : 0);
+		WX.flashk[0] = 0;
+		for (i = 1; i < WX.nflicker; i++)
+		{
+			WX.flashk[i] = WX.flashk[i - 1] + 0.08f + frand() * 0.15f;
+		}
+		WX.next = now + (8.0f + frand() * 12.0f) / rate;
+
+		top[0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
+		top[1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
+		top[2] = r_newrefdef.vieworg[2] + 1800;
+		VectorCopy(top, bottom);
+		bottom[0] += (frand() * 2 - 1) * 300;
+		bottom[1] += (frand() * 2 - 1) * 300;
+		bottom[2] = r_newrefdef.vieworg[2] - 300;
+		WX.nbolt = 0;
+		BoltSegment(top, bottom, 260, 7, 2);
+	}
+}
+
+/* every frame before the world: lightning timeline, the sky tint */
+void
+GL3_Post_WeatherFrame(void)
+{
+	GLuint p = gl3state.si3Dsky.shaderProgram;
+	GLint loc;
+	float tint = 1, add = 0;
+
+	WX.active = WeatherWanted();
+
+	if (WX.active)
+	{
+		LightningThink();
+		tint = Q_max(0.05f, Q_min(r_om_rain_sky->value, 1.0f));
+		add = LightningFlash() * 0.6f;
+	}
+
+	if (p && (loc = glGetUniformLocation(p, "omSkyTint")) != -1)
+	{
+		GL3_UseProgram(p);
+		glUniform4f(loc, tint * (0.95f + add), tint * (0.97f + add), tint + add, 0);
+	}
+}
+
+static const char *wx_rain_vs =
+	"uniform mat4 vp;\n"
+	"uniform vec3 eye;\n"
+	"uniform float time;\n"
+	"uniform vec4 params;\n"   /* box size, box height, fall speed, streak length (s) */
+	"uniform sampler2D occ;\n"
+	"uniform mat4 occvp;\n"
+	"out float vA;\n"
+	"out float vT;\n"
+	"float H(float n) { return fract(sin(n) * 43758.5453); }\n"
+	"void main()\n"
+	"{\n"
+	"	int id = gl_VertexID / 6, c = gl_VertexID - id * 6;\n"
+	"	float f = float(id);\n"
+	"	float B = params.x, Hh = params.y, v = params.z * (0.85 + 0.3 * H(f * 3.7));\n"
+	"	vec3 p;\n"
+	"	p.x = eye.x + (fract((H(f * 1.13) * B - eye.x) / B) - 0.5) * B;\n"
+	"	p.y = eye.y + (fract((H(f * 2.71) * B - eye.y) / B) - 0.5) * B;\n"
+	"	p.z = eye.z - Hh * 0.45 + fract((H(f * 5.3) * Hh - time * v - eye.z) / Hh) * Hh;\n"
+	"	vec3 vel = vec3(25.0, 12.0, -v);\n"
+	"	vec3 q = p - vel * params.w;\n"   /* tail above the head */
+	/* open sky above the drop? (above the first surface seen from the top) */
+	"	vec4 oc = occvp * vec4(p, 1.0);\n"
+	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
+	"	float od = texture(occ, ou).r;\n"
+	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0005);\n"
+	"	float dist = length(p - eye);\n"
+	"	vA = open ? clamp(1.0 - dist / (B * 0.5), 0.0, 1.0) * smoothstep(30.0, 140.0, dist) : 0.0;\n"
+	"	vec3 a = (c == 0 || c == 1 || c == 4) ? q : p;\n"
+	"	vec3 side = normalize(cross(p - q, a - eye)) * (0.22 + dist * 0.0009);\n"
+	"	a += (c == 1 || c == 2 || c == 5) ? side : -side;\n"
+	"	vT = (c == 0 || c == 1 || c == 4) ? 0.0 : 1.0;\n"
+	"	gl_Position = vA > 0.0 ? vp * vec4(a, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"}\n";
+
+static const char *wx_rain_fs =
+	"uniform vec4 color;\n"
+	"in float vA;\n"
+	"in float vT;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	float a = vA * color.a * smoothstep(0.0, 0.6, vT);\n"
+	"	if (a <= 0.003) discard;\n"
+	"	outColor = vec4(color.rgb, a);\n"
+	"}\n";
+
+static const char *wx_splash_vs =
+	"uniform mat4 vp;\n"
+	"uniform vec3 eye;\n"
+	"uniform float time;\n"
+	"uniform vec4 params;\n"   /* area size, life (s), size, - */
+	"uniform sampler2D occ;\n"
+	"uniform mat4 occvp;\n"
+	"uniform mat4 occinv;\n"
+	"out vec2 vUV;\n"
+	"out float vPh;\n"
+	"float H(float n) { return fract(sin(n) * 43758.5453); }\n"
+	"void main()\n"
+	"{\n"
+	"	int id = gl_VertexID / 6, c = gl_VertexID - id * 6;\n"
+	"	float f = float(id);\n"
+	"	float ph = fract(H(f * 7.1) + time / params.y);\n"
+	"	float cyc = floor(H(f * 7.1) + time / params.y);\n"
+	"	float B = params.x;\n"
+	"	vec2 xy = eye.xy + (vec2(H(f * 1.3 + cyc * 17.0), H(f * 2.9 + cyc * 31.0)) - 0.5) * B;\n"
+	"	vec4 oc = occvp * vec4(xy, eye.z, 1.0);\n"
+	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
+	"	float od = texture(occ, ou).r;\n"
+	"	vec4 w = occinv * vec4(oc.xy, od * 2.0 - 1.0, 1.0);\n"
+	"	float z = w.z / w.w + 0.6;\n"
+	"	vec2 cr = vec2((c == 1 || c == 2 || c == 5) ? 1.0 : -1.0, (c == 2 || c == 4 || c == 5) ? 1.0 : -1.0);\n"
+	"	float s = params.z * (0.4 + ph);\n"
+	"	vUV = cr;\n"
+	"	vPh = ph;\n"
+	"	bool ok = od < 0.999 && abs(z - eye.z) < 400.0;\n"
+	"	gl_Position = ok ? vp * vec4(xy + cr * s, z, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"}\n";
+
+static const char *wx_splash_fs =
+	"uniform vec4 color;\n"
+	"in vec2 vUV;\n"
+	"in float vPh;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	float r = length(vUV);\n"
+	"	float ring = smoothstep(0.7, 0.88, r) * (1.0 - smoothstep(0.88, 1.0, r));\n"
+	"	float a = ring * (1.0 - vPh) * color.a;\n"
+	"	if (a <= 0.003) discard;\n"
+	"	outColor = vec4(color.rgb, a);\n"
+	"}\n";
+
+/* lightning on the open surfaces: depth -> world, open if it is the top surface */
+static const char *wx_flash_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform sampler2D occ;\n"
+	"uniform mat4 occvp;\n"
+	"uniform vec4 proj;\n"     /* C, D, depth min, max */
+	"uniform mat4 inv;\n"      /* view space -> world */
+	"uniform vec4 flash;\n"    /* rgb, 1/P00, ... in two parts */
+	"uniform vec4 rect2;\n"    /* 1/P00, 1/P11, -, - */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	float z = texture(depthtex, uv).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	float d = proj.y / (ndc + proj.x);\n"
+	"	vec2 v = vuv * 2.0 - 1.0;\n"
+	"	vec4 w = inv * vec4(v.x * d * rect2.x, v.y * d * rect2.y, -d, 1.0);\n"
+	"	vec4 oc = occvp * vec4(w.xyz, 1.0);\n"
+	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
+	"	float od = texture(occ, ou).r;\n"
+	"	float open = (all(greaterThan(ou, vec2(0.0))) && all(lessThan(ou, vec2(1.0)))) ? smoothstep(-0.004, 0.0, od - (oc.z * 0.5 + 0.5) + 0.002) : 0.0;\n"
+	"	if (d > 60000.0) open = 0.0;\n"
+	"	outColor = vec4(flash.rgb * open, 1.0);\n"
+	"}\n";
+
+static const char *wx_bolt_vs =
+	"uniform mat4 vp;\n"
+	"in vec3 position;\n"
+	"in vec2 texCoord;\n"
+	"out float vE;\n"
+	"void main()\n"
+	"{\n"
+	"	vE = texCoord.x;\n"
+	"	gl_Position = vp * vec4(position, 1.0);\n"
+	"}\n";
+
+static const char *wx_bolt_fs =
+	"uniform vec4 color;\n"
+	"in float vE;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmis;\n"
+	"void main()\n"
+	"{\n"
+	"	float core = 1.0 - abs(vE);\n"
+	"	float a = pow(core, 2.0) * color.a;\n"
+	"	outColor = vec4(color.rgb * a, 1.0);\n"
+	"	outEmis = vec4(color.rgb * a, 1.0);\n"
+	"}\n";
+
+static GLuint
+WXLink(const char *vs, const char *fs, qboolean twoout)
+{
+	GLuint v = vs ? CompilePost(GL_VERTEX_SHADER, vs) : CompilePost(GL_VERTEX_SHADER, post_vs);
+	GLuint f = CompilePost(GL_FRAGMENT_SHADER, fs), p;
+	GLint ok = 0;
+
+	if (!v || !f)
+	{
+		return 0;
+	}
+
+	p = glCreateProgram();
+	glAttachShader(p, v);
+	glAttachShader(p, f);
+#ifndef YQ2_GL3_GLES3
+	glBindFragDataLocation(p, 0, "outColor");
+	if (twoout)
+	{
+		glBindFragDataLocation(p, 1, "outEmis");
+	}
+#endif
+	glBindAttribLocation(p, GL3_ATTRIB_POSITION, "position");
+	glBindAttribLocation(p, GL3_ATTRIB_TEXCOORD, "texCoord");
+	glLinkProgram(p);
+	glDeleteShader(v);
+	glDeleteShader(f);
+	glGetProgramiv(p, GL_LINK_STATUS, &ok);
+
+	if (!ok)
+	{
+		char log[2048];
+
+		glGetProgramInfoLog(p, sizeof(log), NULL, log);
+		R_Printf(PRINT_ALL, "GL3 rain: link failed: %s\n", log);
+		glDeleteProgram(p);
+		return 0;
+	}
+
+	return p;
+}
+
+static qboolean
+WXCreate(void)
+{
+	static const GLenum none[1] = {GL_NONE};
+
+	if (WX.prograin)
+	{
+		return true;
+	}
+
+	WX.prograin = WXLink(wx_rain_vs, wx_rain_fs, false);
+	WX.progsplash = WXLink(wx_splash_vs, wx_splash_fs, false);
+	WX.progflash = WXLink(NULL, wx_flash_fs, false);
+	WX.progbolt = WXLink(wx_bolt_vs, wx_bolt_fs, true);
+
+	if (!WX.prograin || !WX.progsplash || !WX.progflash || !WX.progbolt)
+	{
+		return false;
+	}
+
+	WX.r_vp = glGetUniformLocation(WX.prograin, "vp");
+	WX.r_eye = glGetUniformLocation(WX.prograin, "eye");
+	WX.r_time = glGetUniformLocation(WX.prograin, "time");
+	WX.r_params = glGetUniformLocation(WX.prograin, "params");
+	WX.r_occ = glGetUniformLocation(WX.prograin, "occ");
+	WX.r_occvp = glGetUniformLocation(WX.prograin, "occvp");
+	WX.r_color = glGetUniformLocation(WX.prograin, "color");
+	WX.s_vp = glGetUniformLocation(WX.progsplash, "vp");
+	WX.s_eye = glGetUniformLocation(WX.progsplash, "eye");
+	WX.s_time = glGetUniformLocation(WX.progsplash, "time");
+	WX.s_params = glGetUniformLocation(WX.progsplash, "params");
+	WX.s_occ = glGetUniformLocation(WX.progsplash, "occ");
+	WX.s_occvp = glGetUniformLocation(WX.progsplash, "occvp");
+	WX.s_color = glGetUniformLocation(WX.progsplash, "color");
+	WX.f_depth = glGetUniformLocation(WX.progflash, "depthtex");
+	WX.f_occ = glGetUniformLocation(WX.progflash, "occ");
+	WX.f_occvp = glGetUniformLocation(WX.progflash, "occvp");
+	WX.f_proj = glGetUniformLocation(WX.progflash, "proj");
+	WX.f_inv = glGetUniformLocation(WX.progflash, "inv");
+	WX.f_rect = glGetUniformLocation(WX.progflash, "rect");
+	WX.f_flash = glGetUniformLocation(WX.progflash, "flash");
+	WX.b_vp = glGetUniformLocation(WX.progbolt, "vp");
+	WX.b_color = glGetUniformLocation(WX.progbolt, "color");
+
+	glGenVertexArrays(1, &WX.vao);
+	glGenBuffers(1, &WX.bolt_vbo);
+
+	glGenTextures(1, &WX.occtex);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, WX.occtex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, RAIN_OCC, RAIN_OCC, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	gl3state.currenttexture = WX.occtex;
+	glGenFramebuffers(1, &WX.occfbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, WX.occfbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, WX.occtex, 0);
+	glDrawBuffers(1, none);
+	glReadBuffer(GL_NONE);
+
+	if (!Complete("rain occlusion"))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+/* the top-down depth of the static world around the eye (orthographic, looking down) */
+static void
+WXOcclusion(void)
+{
+	float zt, zb, cx, cy, half = RAIN_HALF, oldrange[2];
+	float *m = WX.occvp;
+	vec3_t d;
+	GLint oldfunc;
+
+	VectorSubtract(r_newrefdef.vieworg, WX.occc, d);
+
+	if (WX.occmodel == gl3_worldmodel && fabsf(d[0]) < 256 && fabsf(d[1]) < 256 && fabsf(d[2]) < 256)
+	{
+		return;
+	}
+
+	cx = floorf(r_newrefdef.vieworg[0] / 64) * 64;
+	cy = floorf(r_newrefdef.vieworg[1] / 64) * 64;
+	zt = r_newrefdef.vieworg[2] + 3000;
+	zb = r_newrefdef.vieworg[2] - 2000;
+	VectorCopy(r_newrefdef.vieworg, WX.occc);
+	WX.occmodel = gl3_worldmodel;
+
+	memset(m, 0, 16 * sizeof(float));
+	m[0] = 1.0f / half;
+	m[5] = 1.0f / half;
+	m[10] = -2.0f / (zt - zb);
+	m[12] = -cx / half;
+	m[13] = -cy / half;
+	m[14] = (zt + zb) / (zt - zb);
+	m[15] = 1;
+
+	glGetIntegerv(GL_DEPTH_FUNC, &oldfunc);
+	glGetFloatv(GL_DEPTH_RANGE, oldrange);
+	glBindFramebuffer(GL_FRAMEBUFFER, WX.occfbo);
+	glViewport(0, 0, RAIN_OCC, RAIN_OCC);
+	glDepthRange(0, 1);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	{
+		float one = 1.0f;
+
+		glClearBufferfv(GL_DEPTH, 0, &one);
+	}
+	GL3_CSM_DrawDepth(m, NULL, 0, true);
+	glDepthFunc(oldfunc);
+	glDepthRange(oldrange[0], oldrange[1]);
+}
+
+static void
+WXInverse4(const float *m, float *o)
+{
+	/* general 4x4 inverse (column-major) */
+	float inv[16], det;
+	int i;
+
+	inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+	inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+	inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+	inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+	inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+	inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+	inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+	inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+	inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+	inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+	inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+	inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+	inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+	inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+	inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+	inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+	det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+	det = (fabsf(det) > 1e-12f) ? 1.0f / det : 0.0f;
+
+	for (i = 0; i < 16; i++)
+	{
+		o[i] = inv[i] * det;
+	}
+}
+
+/* after the opaque view (and its occlusion): rain, splashes, lightning */
+void
+GL3_Post_Weather(void)
+{
+	static const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	hmm_mat4 pv;
+	float flash, dens, fw = (float)P.w, fh = (float)P.h;
+	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
+
+	if (!P.bound || !WX.active || nv)
+	{
+		return;
+	}
+
+	if (!WXCreate())
+	{
+		WX.failed = true;
+		return;
+	}
+
+	GL3_Draw3DBatchesNow();
+	GL3_FX_Flush();
+	WXOcclusion();
+	flash = LightningFlash();
+	dens = Q_max(0.0f, Q_min(r_om_rain_density->value, 4.0f));
+	pv = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	glDrawBuffers(1, one);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	GL3_BindVAO(WX.vao);
+
+	/* drops */
+	GL3_UseProgram(WX.prograin);
+	glUniformMatrix4fv(WX.r_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+	glUniform3fv(WX.r_eye, 1, r_newrefdef.vieworg);
+	glUniform1f(WX.r_time, r_newrefdef.time);
+	glUniform4f(WX.r_params, 1400.0f, 1000.0f, 700.0f, 0.028f);
+	glUniform1i(WX.r_occ, 0);
+	glUniformMatrix4fv(WX.r_occvp, 1, GL_FALSE, WX.occvp);
+	glUniform4f(WX.r_color, 0.58f + flash * 0.5f, 0.62f + flash * 0.5f, 0.70f + flash * 0.5f, 0.15f + flash * 0.1f);
+	BindTex(GL_TEXTURE0, WX.occtex);
+	glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(9000 * dens));
+
+	/* splashes */
+	{
+		float inv[16];
+
+		WXInverse4(WX.occvp, inv);
+		GL3_UseProgram(WX.progsplash);
+		glUniformMatrix4fv(WX.s_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+		glUniform3fv(WX.s_eye, 1, r_newrefdef.vieworg);
+		glUniform1f(WX.s_time, r_newrefdef.time);
+		glUniform4f(WX.s_params, 900.0f, 0.3f, 3.5f, 0);
+		glUniform1i(WX.s_occ, 0);
+		glUniformMatrix4fv(WX.s_occvp, 1, GL_FALSE, WX.occvp);
+		glUniformMatrix4fv(glGetUniformLocation(WX.progsplash, "occinv"), 1, GL_FALSE, inv);
+		glUniform4f(WX.s_color, 0.7f + flash * 0.5f, 0.72f + flash * 0.5f, 0.78f + flash * 0.5f, 0.16f);
+		glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(1500 * dens));
+	}
+
+	/* lightning: the open surfaces brighten (additive), the bolt into the scene and the emissive target */
+	if (flash > 0.01f)
+	{
+		hmm_mat4 inv;
+		const hmm_mat4 *v = &gl3state.viewMat3D;
+		int r, c;
+
+		memset(&inv, 0, sizeof(inv));
+		for (c = 0; c < 3; c++)
+		{
+			for (r = 0; r < 3; r++)
+			{
+				inv.Elements[c][r] = v->Elements[r][c];
+			}
+		}
+		for (r = 0; r < 3; r++)
+		{
+			inv.Elements[3][r] = -(inv.Elements[0][r] * v->Elements[3][0] + inv.Elements[1][r] * v->Elements[3][1] +
+				inv.Elements[2][r] * v->Elements[3][2]);
+		}
+		inv.Elements[3][3] = 1.0f;
+
+		/* the depth as a texture */
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		glDrawBuffers(1, one);
+
+		glDisable(GL_DEPTH_TEST);
+		glBlendFunc(GL_ONE, GL_ONE);
+		GL3_UseProgram(WX.progflash);
+		glUniform1i(WX.f_depth, 1);
+		glUniform1i(WX.f_occ, 0);
+		glUniformMatrix4fv(WX.f_occvp, 1, GL_FALSE, WX.occvp);
+		glUniform4f(WX.f_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin,
+			gl3depthmax);
+		glUniformMatrix4fv(WX.f_inv, 1, GL_FALSE, &inv.Elements[0][0]);
+		glUniform4f(WX.f_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(glGetUniformLocation(WX.progflash, "rect2"), 1.0f / gl3state.projMat3D.Elements[0][0],
+			1.0f / gl3state.projMat3D.Elements[1][1], 0, 0);
+		glUniform4f(WX.f_flash, 0.28f * flash, 0.31f * flash, 0.4f * flash, 0);
+		BindTex(GL_TEXTURE1, P.texdepthcopy);
+		BindTex(GL_TEXTURE0, WX.occtex);
+		DrawQuad();
+
+		/* the bolt: camera-facing quads along its segments */
+		if (WX.nbolt >= 2)
+		{
+			static float quads[BOLT_MAXPTS * 3 * 5];
+			int i, n = 0;
+
+			for (i = 0; i + 1 < WX.nbolt; i += 2)
+			{
+				const float *a = &WX.bolt[i * 3], *b = &WX.bolt[(i + 1) * 3];
+				vec3_t dir, to, s;
+				float w = 10.0f;
+				int k, j;
+				float pts[6][5];
+
+				VectorSubtract(b, a, dir);
+				VectorSubtract(a, r_newrefdef.vieworg, to);
+				CrossProduct(dir, to, s);
+				if (VectorNormalize(s) == 0)
+				{
+					continue;
+				}
+				VectorScale(s, w, s);
+
+				for (k = 0; k < 6; k++)
+				{
+					const float *e = (k == 0 || k == 1 || k == 4) ? a : b;
+					float side = (k == 1 || k == 2 || k == 5) ? 1.0f : -1.0f;
+
+					for (j = 0; j < 3; j++)
+					{
+						pts[k][j] = e[j] + s[j] * side;
+					}
+					pts[k][3] = side;
+					pts[k][4] = 0;
+				}
+
+				if (n + 30 > (int)(sizeof(quads) / sizeof(quads[0])))
+				{
+					break;
+				}
+
+				memcpy(quads + n, pts, sizeof(pts));
+				n += 30;
+			}
+
+			glDrawBuffers(2, bufs);
+			glEnable(GL_DEPTH_TEST);
+			glBlendFunc(GL_ONE, GL_ONE);
+			GL3_UseProgram(WX.progbolt);
+			glUniformMatrix4fv(WX.b_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+			glUniform4f(WX.b_color, 0.8f, 0.85f, 1.0f, Q_min(1.0f, flash * 1.6f));
+			GL3_BindVAO(WX.vao);
+			GL3_BindVBO(WX.bolt_vbo);
+			glBufferData(GL_ARRAY_BUFFER, n * sizeof(float), quads, GL_STREAM_DRAW);
+			glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+			qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), 0);
+			glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
+			qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (GLintptr)(3 * sizeof(float)));
+			glDrawArrays(GL_TRIANGLES, 0, n / 5);
+			glDisableVertexAttribArray(GL3_ATTRIB_POSITION);
+			glDisableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
+		}
+	}
+
+	GL3_BindVAO(0);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+	glDrawBuffers(2, bufs);
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	gl3state.currentlightmap = -1;
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+}

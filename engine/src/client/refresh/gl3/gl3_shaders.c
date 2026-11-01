@@ -1075,6 +1075,7 @@ static const char* fragmentSrc3Dsky = MULTILINE_STRING(
 		// it gets attributes and uniforms from fragmentCommon3D
 
 		uniform sampler2D tex;
+		uniform vec4 omSkyTint; // OpenMerc GFX-modern r_om_rain: overcast sky, lightning flash (gl3_post.c)
 
 		void main()
 		{
@@ -1084,7 +1085,8 @@ static const char* fragmentSrc3Dsky = MULTILINE_STRING(
 
 			// apply gamma correction
 			// texel.rgb *= intensity; // TODO: really no intensity for sky?
-			outColor.rgb = pow(texel.rgb, vec3(gamma));
+			vec3 omTint = (omSkyTint.r + omSkyTint.g + omSkyTint.b > 0.0) ? omSkyTint.rgb : vec3(1.0);
+			outColor.rgb = pow(texel.rgb * omTint, vec3(gamma));
 			outColor.a = texel.a*alpha; // I think alpha shouldn't be modified by gamma and intensity
 		}
 );
