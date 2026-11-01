@@ -3185,9 +3185,10 @@ static const char *ssao_ao_fs =
 	"			vec3 a = Pos(clamp(ta, lo, hi)) - P;\n"
 	"			vec3 b = Pos(clamp(tb, lo, hi)) - P;\n"
 	"			float la = length(a), lb = length(b);\n"
-	/* samples beyond the view edge know nothing: no occlusion from them */
-	"			float wa = clamp((ffrom - la) / frange + 1.0, 0.0, 1.0) * float(ta == clamp(ta, lo, hi));\n"
-	"			float wb = clamp((ffrom - lb) / frange + 1.0, 0.0, 1.0) * float(tb == clamp(tb, lo, hi));\n"
+	/* samples beyond the view edge take the edge pixel: an occluder keeps its shade until it has left the view
+	   (ignoring them made the occlusion fade out towards the edges while turning) */
+	"			float wa = clamp((ffrom - la) / frange + 1.0, 0.0, 1.0);\n"
+	"			float wb = clamp((ffrom - lb) / frange + 1.0, 0.0, 1.0);\n"
 	"			hc0 = max(hc0, mix(low0, dot(a, V) / max(la, 1e-4), wa));\n"
 	"			hc1 = max(hc1, mix(low1, dot(b, V) / max(lb, 1e-4), wb));\n"
 	"		}\n"
@@ -3198,7 +3199,6 @@ static const char *ssao_ao_fs =
 	"		vis += pl * ((cn + 2.0 * h0 * sn - cos(2.0 * h0 - n)) + (cn + 2.0 * h1 * sn - cos(2.0 * h1 - n))) * 0.25;\n"
 	"	}\n"
 	"	vis = clamp(vis / float(DIRS), 0.0, 1.0);\n"
-	"	vis = mix(vis, 1.0, clamp((d - params.z * 0.6) / (params.z * 0.4), 0.0, 1.0));\n"
 	"	outColor = vec4(vis, d, 0.0, 1.0);\n"
 	"}\n";
 
@@ -3505,7 +3505,7 @@ GL3_Post_SSAO(void)
 	glUniform4f(S.ao_proj2, 1.0f / gl3state.projMat3D.Elements[0][0], 1.0f / gl3state.projMat3D.Elements[1][1],
 		1.0f / S.w, 1.0f / S.h);
 	glUniform4f(S.ao_params, Q_max(r_om_ssao_radius->value, 4.0f),
-		0.5f * S.w * gl3state.projMat3D.Elements[0][0], 2500.0f, 0.1f * S.h);
+		0.5f * S.w * gl3state.projMat3D.Elements[0][0], r_farclipdist->value * 0.98f, 0.1f * S.h);
 	{
 		/* 1: 2 directions x 4 steps, 2: 3 x 5, 3: 4 x 6 */
 		int q = Q_max(1, Q_min((int)r_om_ssao_quality->value, 3));
