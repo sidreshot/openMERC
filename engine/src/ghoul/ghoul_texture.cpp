@@ -345,8 +345,19 @@ static void Upload(Texture *t)
 	}
 	// openMERC GFX-modern (r_om_beams): a painted light cone (".../BEAM") is announced to the renderer,
 	// which may draw a volumetric beam in its place; renderers that do not know the hint ignore it
-	if (t->name.size() >= 5 && t->name.compare(t->name.size() - 5, 5, "/BEAM") == 0)
-		g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 1);
+	{
+		// also the rotating emergency lights' cones (".../EMERGENCY.../4X16") and the police car siren cones
+		std::string u = t->name;
+		for (char &c : u)
+			c = (char)toupper((unsigned char)c);
+		auto ends = [&u](const char *s) {
+			size_t n = strlen(s);
+			return u.size() >= n && u.compare(u.size() - n, n, s) == 0;
+		};
+		if (ends("/BEAM") || ends("/REDCONE") || ends("/BLUECONE") ||
+		    (ends("/4X16") && u.find("EMERGENCY") != std::string::npos))
+			g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 1);
+	}
 	t->uploaded = true;
 }
 

@@ -2715,6 +2715,9 @@ static int
 FilterCasters(const beam_t *b)
 {
 	float keep = b->r0 * 1.5f + 12.0f;
+	/* the face the lamp is set into (a subway train's front lies 5-20 units ahead of the cone's apex) shadowed the
+	   whole beam; it showed only when the model was partly off screen and not captured as a caster */
+	float front = Q_min(24.0f, Q_max(4.0f, b->len * 0.15f));
 	int i, n = 0;
 
 	if (B.maxflt < B.numdyn)
@@ -2742,7 +2745,7 @@ FilterCasters(const beam_t *b)
 
 			VectorSubtract(p, b->apex, d);
 			h = DotProduct(d, b->axis);
-			behind += (h < 4.0f);
+			behind += (h < front);
 			close += (VectorLength(d) < keep);
 		}
 
