@@ -4542,6 +4542,78 @@ WXCreate(void)
 }
 
 /* the top-down depth of the static world around the eye (orthographic, looking down) */
+/* what the static caster set leaves out but still keeps rain and lightning off: glass and other translucent world
+   faces, and the brush entities (awnings, func_walls, doors as placed) - once per map, world-space triangles */
+static float *wxextra;
+static int wxnextra, wxcapextra;
+static const void *wxextramodel;
+
+static void
+WXExtraGeometry(void)
+{
+	const gl3model_t *w = gl3_worldmodel;
+	const gl3model_t *sub = (w->numsubmodels > 0) ? &w->submodels[0] : w;
+	int first = sub->firstmodelsurface, count = sub->nummodelsurfaces, i;
+
+	if (wxextramodel == w)
+	{
+		return;
+	}
+
+	wxextramodel = w;
+	wxnextra = 0;
+
+	for (i = 0; i < w->numsurfaces; i++)
+	{
+		const msurface_t *s = &w->surfaces[i];
+		const glpoly_t *p;
+		int tf = s->texinfo ? s->texinfo->flags : 0;
+		qboolean inworld = (i >= first) && (i < first + count);
+
+		if ((tf & (SURF_SKY | SURF_WARP | SURF_NODRAW)) || (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)))
+		{
+			continue;
+		}
+
+		/* world faces the static set already has */
+		if (inworld && !(tf & (SURF_TRANS33 | SURF_TRANS66 | SOFSURF_ALPHA)))
+		{
+			continue;
+		}
+
+		for (p = s->polys; p; p = p->next)
+		{
+			int k;
+
+			for (k = 2; k < p->numverts; k++)
+			{
+				const float *v[3] = {p->vertices[0].pos, p->vertices[k - 1].pos, p->vertices[k].pos};
+				int j;
+
+				if (wxnextra + 9 > wxcapextra)
+				{
+					int c = wxcapextra ? wxcapextra * 2 : 65536;
+					float *n = realloc(wxextra, c * sizeof(float));
+
+					if (!n)
+					{
+						return;
+					}
+
+					wxextra = n;
+					wxcapextra = c;
+				}
+
+				for (j = 0; j < 3; j++)
+				{
+					{ float *o = wxextra + wxnextra; VectorCopy(v[j], o); }
+					wxnextra += 3;
+				}
+			}
+		}
+	}
+}
+
 static void
 WXOcclusion(void)
 {
@@ -4588,7 +4660,8 @@ WXOcclusion(void)
 
 		glClearBufferfv(GL_DEPTH, 0, &one);
 	}
-	GL3_CSM_DrawDepth(m, NULL, 0, true);
+	WXExtraGeometry();
+	GL3_CSM_DrawDepth(m, wxextra, wxnextra, true);
 	WX.occvalid = true;
 	glDepthFunc(oldfunc);
 	glDepthRange(oldrange[0], oldrange[1]);

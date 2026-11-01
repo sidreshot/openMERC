@@ -811,17 +811,27 @@ static const char* fragmentSrcOmBump =
 	"		return vec3(0.0);\n"
 	/* open: nothing of the world above the point moved off the surface and towards the bolt; two more samples
 	   further along the light soften the edge of what is lit */
-	"	float open = 0.0;\n"
+	/* lit only when every sample is open: straight above the point (moved off the surface) and two further along
+	   the light; each sample is a 4-tap average */
+	"	float open = 1.0;\n"
 	"	for (int k = 0; k < 3; k++)\n"
 	"	{\n"
-	"		vec3 p = wp + N * 10.0 + L * (16.0 + 24.0 * float(k));\n"
+	"		vec3 p = wp + N * 10.0 + L * (20.0 * float(k));\n"
+	"		float s = 0.0;\n"
 	"		vec4 oc = omLtOccVP * vec4(p, 1.0);\n"
 	"		vec2 ou = oc.xy * 0.5 + 0.5;\n"
 	"		if (any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))))\n"
-	"			continue;\n"
-	"		open += 1.0 - smoothstep(0.0, 0.0015, (oc.z * 0.5 + 0.5) - texture(omLtOcc, ou).r);\n"
+	"			return vec3(0.0);\n"
+	/* four taps 1.5 texels apart: a soft edge instead of the map's texel steps */
+	"		float z = oc.z * 0.5 + 0.5, t = 1.5 / 1024.0;\n"
+	"		for (int j = 0; j < 4; j++)\n"
+	"		{\n"
+	"			vec2 o = vec2((j & 1) == 0 ? -t : t, (j & 2) == 0 ? -t : t);\n"
+	"			s += 1.0 - smoothstep(0.0, 0.0015, z - texture(omLtOcc, ou + o).r);\n"
+	"		}\n"
+	"		open = min(open, s * 0.25);\n"
 	"	}\n"
-	"	return omLtCol.rgb * omLt.w * (0.3 + 0.7 * ndl) * (open / 3.0);\n"
+	"	return omLtCol.rgb * omLt.w * (0.3 + 0.7 * ndl) * open;\n"
 	"}\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
