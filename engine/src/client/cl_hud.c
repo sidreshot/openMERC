@@ -82,6 +82,16 @@ HUD_Ref(void)
 	return sre;
 }
 
+/* SPEC-002 slot 0xa8: a world texinfo switches to its damaged image (svc_damagetexture, SPEC-201 s25) */
+void
+HUD_DamageTexture(int surface)
+{
+	if (HUD_Ref() && sre->DamageTexture)
+	{
+		sre->DamageTexture(surface, 0);
+	}
+}
+
 /* SPEC-002 slot 0xb4(0): the engine switches to 2D right after RenderFrame */
 void
 HUD_Set2D(void)

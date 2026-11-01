@@ -471,6 +471,10 @@ bool GroundAction::Step(edict_t *ent, AI *ai, bool attack, bool dying)
 	HandleEvents(ent, ai, ev);
 	if (!ent->inuse || ent->ai != ai)
 		return true;
+	/* dying classes: the `ooze` note of a death animation puts the blood pool under the corpse (A4 flag 0x80,
+	 * SPEC-721 §7; issue #8) */
+	if (dying && (ev & BODYEV_OOZE))
+		b->BloodPool();
 	/* 3. bounding box */
 	if (record)
 		ai->ChangeBBox(ent, record->posture, dying);

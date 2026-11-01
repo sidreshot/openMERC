@@ -182,6 +182,7 @@ G3Body::G3Body(edict_t *e, int fam)
 	VectorClear(rootVel);
 	rootYawRate = 0;
 	readyToRemove = false;
+	pooled = false;
 	gibbed = false;
 	gore = NULL;
 	muted = false;

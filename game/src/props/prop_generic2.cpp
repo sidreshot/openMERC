@@ -794,11 +794,19 @@ static void tvceil_brokenthink(edict_t *self)
 	PropData &d = D(self);
 	gg::IGhoulInst *scr = gg::TrackedPart(self, 1);
 	if (!d.i1 && !d.i2) {
-		vec3_t pos, dir;
-		gg::BoltWorld(self, scr, "face", pos, dir);
-		if (-dir[2] < 0.9f)
-			gg::RotateInst(scr, 2, 0.3f);
-		else
+		// The screen faces along the z axis of its `face` bolt; the bolt's x axis lies on the hinge (the screen's
+		// local z), so testing it never ended the swing and the screen spun for ever (issue #9). The screen turns
+		// face-down about the hinge, at most 8 steps.
+		ghoul::Matrix4 bm;
+		vec3_t lz, face;
+		gg::BoltMatrix(scr, gg::PartId(scr, "face"), bm);
+		VectorSet(lz, bm.m[2][0], bm.m[2][1], bm.m[2][2]);
+		gg::LocalDirToWorld(self, lz, face);
+		VectorNormalize(face);
+		if (-face[2] < 0.9f && d.i3 < 8) {
+			gg::RotateInst(scr, 2, -0.3f);
+			d.i3++;
+		} else
 			d.i1 = 1;
 	}
 	self->nextthink = level.time + FRAMETIME;
@@ -849,6 +857,19 @@ static void tvceil_pain(edict_t *self, edict_t *, float, int, const vec3_t)
 		d.i1 = 0;
 		d.i2 = 1;
 		self->mins[2] += 9;
+		// the box reaches into the ceiling the supports hung from and into the wall behind: with the supports gone the
+		// TV keeps a free box (same bottom, sides and top drawn in), else the all-solid ground check takes the world
+		// as its ground and it never falls (issue #9)
+		int mask = self->clipmask ? self->clipmask : MASK_SOLID;
+		for (int k = 0; k < 12 && gi.trace(self->s.origin, self->mins, self->maxs, self->s.origin, self, mask).startsolid;
+		     k++) {
+			for (int j = 0; j < 2; j++) {
+				self->mins[j] *= 0.8f;
+				self->maxs[j] *= 0.8f;
+			}
+			self->maxs[2] = self->mins[2] + (self->maxs[2] - self->mins[2]) * 0.8f;
+		}
+		self->groundentity = NULL;
 		gi.linkentity(self);
 		self->touch = tvceil_touch;
 	}

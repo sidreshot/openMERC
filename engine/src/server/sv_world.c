@@ -70,11 +70,26 @@ static int sv_nummodels;
 static byte *sv_regions;
 static int sv_numregions;
 
+/* the map's texture table for damageable textures (SV_DamageTexture) */
+#define SV_DMGTEX_MAX 500
+
+typedef struct
+{
+	char name[MAX_QPATH];
+	int damaged; /* record of the damaged texture, 0 = none */
+	int health;
+} sv_dmgtex_t;
+
+static sv_dmgtex_t sv_dmgtex[SV_DMGTEX_MAX];
+static int sv_numdmgtex;
+static int *sv_surfacerec; /* current record per surface */
+
 /* the collision model's surfaces (common/collision.c) */
 extern mapsurface_t map_surfaces[];
 extern int numtexinfo;
 
 static int SV_HullForEntity(const edict_t *ent);
+static void SV_InitDamageTextures(void);
 
 static void
 ClearLink(sof_link_t *l)
@@ -1116,6 +1131,14 @@ SV_FreeMapExtras(void)
 
 	sv.numsurfaces = 0;
 
+	if (sv_surfacerec)
+	{
+		Z_Free(sv_surfacerec);
+		sv_surfacerec = NULL;
+	}
+
+	sv_numdmgtex = 0;
+
 	if (sv_leafregion)
 	{
 		Z_Free(sv_leafregion);
@@ -1200,6 +1223,8 @@ SV_LoadMapExtras(const char *mapfile)
 			memcpy(out->texture, in + 40, 32);
 			out->texture[31] = 0;
 		}
+
+		SV_InitDamageTextures();
 	}
 
 	/* leaf regions (leaf offset 8) and the region records (lump 21) */
@@ -1341,14 +1366,167 @@ SV_MaterialList(byte *buf, int capacity)
 	return n;
 }
 
-/* game import #25 (SPEC-313 s4). The damaged-texture chain comes from the
-   .m32 headers; not loaded yet, so no surface takes damage (I1b.md). */
+/* damageable textures (SPEC-313 s4, SPEC-AMEND-005 G18.23): the texture table of the map, one record per texture
+   name met (record 0 empty), filled from the .m32 headers: damaged-texture name at 0x184, damage value at 0x37c
+   (SPEC-100). Records are registered when the map loads the surfaces; each surface keeps its current record, the
+   damage counter and the stage. */
+
+static int
+SV_RegisterDamageTexture(const char *texture, int depth)
+{
+	char name[MAX_QPATH], path[MAX_QPATH], damaged[128];
+	byte head[0x380];
+	fileHandle_t f;
+	float value;
+	int i, r;
+
+	Q_strlcpy(name, texture, sizeof(name));
+	COM_StripExtension(name, name);
+
+	if (!name[0] || (depth > 8))
+	{
+		return 0;
+	}
+
+	for (i = 1; i < sv_numdmgtex; i++)
+	{
+		if (!Q_stricmp(sv_dmgtex[i].name, name))
+		{
+			return i;
+		}
+	}
+
+	if (sv_numdmgtex >= SV_DMGTEX_MAX)
+	{
+		return 0;
+	}
+
+	if (sv_numdmgtex == 0)
+	{
+		memset(&sv_dmgtex[0], 0, sizeof(sv_dmgtex[0]));
+		sv_numdmgtex = 1;
+	}
+
+	Com_sprintf(path, sizeof(path), "textures/%s.m32", name);
+
+	if ((FS_FOpenFile(path, &f, false) < (int)sizeof(head)) || !f)
+	{
+		if (f)
+		{
+			FS_FCloseFile(f);
+		}
+
+		return 0;
+	}
+
+	i = FS_Read(head, sizeof(head), f);
+	FS_FCloseFile(f);
+
+	if (i != (int)sizeof(head))
+	{
+		return 0;
+	}
+
+	r = sv_numdmgtex++;
+	memset(&sv_dmgtex[r], 0, sizeof(sv_dmgtex[r]));
+	Q_strlcpy(sv_dmgtex[r].name, name, sizeof(sv_dmgtex[r].name));
+	memcpy(damaged, head + 0x184, sizeof(damaged));
+	damaged[sizeof(damaged) - 1] = 0;
+	memcpy(&value, head + 0x37c, sizeof(value));
+	value = LittleFloat(value);
+
+	if (damaged[0])
+	{
+		/* the integer part of the damage value as a signed byte */
+		sv_dmgtex[r].health = (signed char)(int)value;
+		/* a texture naming itself has no damage variant (the renderer refuses it too) */
+		if (Q_stricmp(damaged, name))
+		{
+			int d = SV_RegisterDamageTexture(damaged, depth + 1);
+			sv_dmgtex[r].damaged = d;
+		}
+	}
+
+	return r;
+}
+
+static void
+SV_InitDamageTextures(void)
+{
+	int i;
+
+	sv_numdmgtex = 0;
+
+	if (!sv.numsurfaces)
+	{
+		return;
+	}
+
+	sv_surfacerec = Z_Malloc(sv.numsurfaces * sizeof(int));
+
+	for (i = 0; i < sv.numsurfaces; i++)
+	{
+		int r = SV_RegisterDamageTexture(sv.surfaces[i].texture, 0);
+
+		sv_surfacerec[i] = r;
+		/* the counter starts at the original record's health: the first damage always switches */
+		sv.surfacedamage[i] = sv_dmgtex[r].health;
+		sv.surfacestage[i] = 0;
+	}
+}
+
+/* game import #25 (SPEC-313 s4): damage to a damageable world texture; true when it switched to its next damage
+   stage. svc_damagetexture goes into the multicast buffer, in front of the weapon impact the game writes next. */
 int
 SV_DamageTexture(sof_surface_t *surface, int damage)
 {
-	(void)surface;
-	(void)damage;
-	return 0;
+	cvar_t *show = Cvar_Get("sv_showdamage", "0", 0);
+	const sv_dmgtex_t *rec;
+	int i = SV_SurfaceIndex(surface), next;
+
+	if ((i < 0) || !sv_surfacerec)
+	{
+		return 0;
+	}
+
+	rec = &sv_dmgtex[sv_surfacerec[i]];
+
+	if (show->value)
+	{
+		Com_DPrintf("Doing %d damage\n", damage);
+	}
+
+	if (!rec->damaged || (rec->health <= 0))
+	{
+		return 0;
+	}
+
+	if (show->value)
+	{
+		Com_DPrintf("Damaging %s\n", rec->name);
+	}
+
+	sv.surfacedamage[i] += damage;
+
+	if (sv.surfacedamage[i] < rec->health)
+	{
+		return 0;
+	}
+
+	next = rec->damaged;
+	sv_surfacerec[i] = next;
+	sv.surfacedamage[i] = 0;
+	sv.surfacestage[i]++;
+
+	if (show->value)
+	{
+		Com_DPrintf("Changing to %s, level %d\n", sv_dmgtex[next].name, sv.surfacestage[i]);
+	}
+
+	MSG_WriteByte(&sv.multicast, sofsvc_damagetexture);
+	MSG_WriteShort(&sv.multicast, i);
+	MSG_WriteByte(&sv.multicast, sv.surfacestage[i] & 0xFF);
+	return 1;
 }
 
 /* OpenMerc debugging: sv_tracetest <x> <y> <z> - position tests of the

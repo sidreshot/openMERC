@@ -107,6 +107,232 @@ LoadSTB(const char *origname, const char* type, byte **pic, int *width, int *hei
 	return true;
 }
 
+/*
+ * OpenMerc: DirectDraw Surface replacement textures (issue #5): the top mip level of
+ * an uncompressed 24/32-bit or a DXT1/DXT3/DXT5 compressed .dds becomes RGBA
+ */
+static unsigned
+DDS_U32(const byte *p)
+{
+	return (unsigned)p[0] | ((unsigned)p[1] << 8) | ((unsigned)p[2] << 16) | ((unsigned)p[3] << 24);
+}
+
+static void
+DDS_Color565(unsigned c, byte *out)
+{
+	out[0] = (byte)(((c >> 11) & 31) * 255 / 31);
+	out[1] = (byte)(((c >> 5) & 63) * 255 / 63);
+	out[2] = (byte)((c & 31) * 255 / 31);
+	out[3] = 255;
+}
+
+/* one 4x4 block: format 1 DXT1, 3 DXT3, 5 DXT5 */
+static void
+DDS_DecodeBlock(const byte *b, int format, byte rgba[16][4])
+{
+	const byte *cb = (format == 1) ? b : b + 8;
+	unsigned c0 = cb[0] | (cb[1] << 8), c1 = cb[2] | (cb[3] << 8);
+	unsigned bits = DDS_U32(cb + 4);
+	byte pal[4][4];
+	int i;
+
+	DDS_Color565(c0, pal[0]);
+	DDS_Color565(c1, pal[1]);
+
+	if ((format != 1) || (c0 > c1))
+	{
+		for (i = 0; i < 3; i++)
+		{
+			pal[2][i] = (byte)((2 * pal[0][i] + pal[1][i]) / 3);
+			pal[3][i] = (byte)((pal[0][i] + 2 * pal[1][i]) / 3);
+		}
+
+		pal[2][3] = pal[3][3] = 255;
+	}
+	else
+	{
+		for (i = 0; i < 3; i++)
+		{
+			pal[2][i] = (byte)((pal[0][i] + pal[1][i]) / 2);
+			pal[3][i] = 0;
+		}
+
+		pal[2][3] = 255;
+		pal[3][3] = 0; /* DXT1 one-bit alpha */
+	}
+
+	for (i = 0; i < 16; i++)
+	{
+		memcpy(rgba[i], pal[(bits >> (2 * i)) & 3], 4);
+	}
+
+	if (format == 3)
+	{
+		for (i = 0; i < 16; i++)
+		{
+			rgba[i][3] = (byte)(((b[i / 2] >> (4 * (i & 1))) & 15) * 17);
+		}
+	}
+	else if (format == 5)
+	{
+		unsigned a0 = b[0], a1 = b[1], a[8];
+		unsigned long long abits = 0;
+
+		for (i = 0; i < 6; i++)
+		{
+			abits |= (unsigned long long)b[2 + i] << (8 * i);
+		}
+
+		a[0] = a0;
+		a[1] = a1;
+
+		for (i = 1; i < 7; i++)
+		{
+			a[i + 1] = (a0 > a1) ? ((7 - i) * a0 + i * a1) / 7 : 0;
+		}
+
+		if (a0 <= a1)
+		{
+			for (i = 1; i < 5; i++)
+			{
+				a[i + 1] = ((5 - i) * a0 + i * a1) / 5;
+			}
+
+			a[6] = 0;
+			a[7] = 255;
+		}
+
+		for (i = 0; i < 16; i++)
+		{
+			rgba[i][3] = (byte)a[(abits >> (3 * i)) & 7];
+		}
+	}
+}
+
+static qboolean
+LoadDDS(const char *origname, byte **pic, int *width, int *height)
+{
+	char filename[256];
+	byte *raw = NULL, *out;
+	int len, w, h, format = 0, bpp = 0, x, y;
+	unsigned pfflags, fourcc, rmask = 0, gmask = 0, bmask = 0, amask = 0;
+	const byte *p;
+
+	*pic = NULL;
+	FixFileExt(origname, "dds", filename, sizeof(filename));
+	len = ri.FS_LoadFile(filename, (void **)&raw);
+
+	if (!raw)
+	{
+		return false;
+	}
+
+	if ((len < 128) || memcmp(raw, "DDS ", 4) || (DDS_U32(raw + 4) != 124))
+	{
+		Com_Printf("%s: %s is not a DDS file\n", __func__, filename);
+		ri.FS_FreeFile(raw);
+		return false;
+	}
+
+	h = (int)DDS_U32(raw + 12);
+	w = (int)DDS_U32(raw + 16);
+	pfflags = DDS_U32(raw + 80);
+	fourcc = DDS_U32(raw + 84);
+
+	if (pfflags & 0x4)
+	{
+		format = !memcmp(raw + 84, "DXT1", 4) ? 1 : !memcmp(raw + 84, "DXT3", 4) ? 3 :
+			!memcmp(raw + 84, "DXT5", 4) ? 5 : 0;
+	}
+	else if (pfflags & 0x40)
+	{
+		bpp = (int)DDS_U32(raw + 88);
+		rmask = DDS_U32(raw + 92);
+		gmask = DDS_U32(raw + 96);
+		bmask = DDS_U32(raw + 100);
+		amask = (pfflags & 0x1) ? DDS_U32(raw + 104) : 0;
+	}
+
+	if ((w <= 0) || (h <= 0) || (w > 8192) || (h > 8192) || (!format && (bpp != 24) && (bpp != 32)))
+	{
+		Com_Printf("%s: %s has an unsupported format (fourcc %08x, %d bits)\n", __func__, filename, fourcc, bpp);
+		ri.FS_FreeFile(raw);
+		return false;
+	}
+
+	if ((format && (len < 128 + ((w + 3) / 4) * ((h + 3) / 4) * (format == 1 ? 8 : 16))) ||
+		(!format && (len < 128 + w * h * (bpp / 8))))
+	{
+		Com_Printf("%s: %s is truncated\n", __func__, filename);
+		ri.FS_FreeFile(raw);
+		return false;
+	}
+
+	out = malloc((size_t)w * h * 4);
+	p = raw + 128;
+
+	if (format)
+	{
+		for (y = 0; y < h; y += 4)
+		{
+			for (x = 0; x < w; x += 4)
+			{
+				byte block[16][4];
+				int i;
+
+				DDS_DecodeBlock(p, format, block);
+				p += (format == 1) ? 8 : 16;
+
+				for (i = 0; i < 16; i++)
+				{
+					int px = x + (i & 3), py = y + (i >> 2);
+
+					if ((px < w) && (py < h))
+					{
+						memcpy(out + ((size_t)py * w + px) * 4, block[i], 4);
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		const unsigned masks[4] = {rmask, gmask, bmask, amask};
+
+		for (y = 0; y < w * h; y++, p += bpp / 8)
+		{
+			unsigned v = (bpp == 32) ? DDS_U32(p) : ((unsigned)p[0] | ((unsigned)p[1] << 8) | ((unsigned)p[2] << 16));
+			int c;
+
+			for (c = 0; c < 4; c++)
+			{
+				unsigned m = masks[c], s = 0;
+
+				if (!m)
+				{
+					out[y * 4 + c] = (c == 3) ? 255 : 0;
+					continue;
+				}
+
+				while (!(m & 1))
+				{
+					m >>= 1;
+					s++;
+				}
+
+				out[y * 4 + c] = (byte)(((v >> s) & m) * 255 / m);
+			}
+		}
+	}
+
+	ri.FS_FreeFile(raw);
+	Com_DPrintf("%s() loaded: %s\n", __func__, filename);
+	*pic = out;
+	*width = w;
+	*height = h;
+	return true;
+}
+
 qboolean
 ResizeSTB(const byte *input_pixels, int input_width, int input_height,
 			  byte *output_pixels, int output_width, int output_height)
@@ -476,10 +702,11 @@ LoadHiColorImage(const char *name, const char* namewe, const char *ext,
 		GetM32Info(name, &realwidth, &realheight);
 	}
 
-	/* try to load a tga, png or jpg (in that order/priority) */
+	/* try to load a tga, png, jpg or dds (in that order/priority) */
 	if (  LoadSTB(namewe, "tga", &pic, &width, &height)
 	   || LoadSTB(namewe, "png", &pic, &width, &height)
-	   || LoadSTB(namewe, "jpg", &pic, &width, &height) )
+	   || LoadSTB(namewe, "jpg", &pic, &width, &height)
+	   || LoadDDS(namewe, &pic, &width, &height) )
 	{
 		if (width >= realwidth && height >= realheight)
 		{
