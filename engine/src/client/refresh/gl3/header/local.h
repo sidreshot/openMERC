@@ -546,6 +546,7 @@ extern void GL3_Bump_Free(GLuint texnum);
 extern void GL3_Bump_Bind(GLuint texnum);
 extern void GL3_Bump_SetLights(const byte *lights, int len);
 extern void GL3_Bump_ViewLights(GLuint prog, const float *eye);
+extern float GL3_Bump_SurfClass(const msurface_t *surf);
 
 // gl3_draw.c
 extern void GL3_Draw_InitLocal(void);

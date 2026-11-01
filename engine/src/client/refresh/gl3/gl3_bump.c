@@ -517,3 +517,41 @@ GL3_Bump_ViewLights(GLuint prog, const float *eye)
 		glUniform1i(loc, n);
 	}
 }
+
+/* the gloss class of a face from its SoF surface material (high byte of the texinfo flags, SPEC-401 table),
+ * passed to the world shader as -class in the emissive slot of non-light faces:
+ * 1 stone/brick/concrete/earth, 2 wood/paper, 3 metal, 4 glass/panels, 0 unknown */
+float
+GL3_Bump_SurfClass(const msurface_t *surf)
+{
+	int m;
+
+	if (!surf->texinfo || (surf->texinfo->flags & SURF_LIGHT))
+	{
+		return 0.0f;
+	}
+
+	m = (surf->texinfo->flags >> 24) & 0xff;
+
+	if (m == 0 || (m >= 2 && m <= 9) || (m >= 17 && m <= 24) || m == 33 || m == 34)
+	{
+		return -1.0f;
+	}
+
+	if ((m >= 14 && m <= 16) || m == 40)
+	{
+		return -2.0f;
+	}
+
+	if (m == 1 || (m >= 28 && m <= 32) || m == 42)
+	{
+		return -3.0f;
+	}
+
+	if (m >= 37 && m <= 39)
+	{
+		return -4.0f;
+	}
+
+	return 0.0f;
+}

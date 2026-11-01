@@ -204,6 +204,10 @@ GL3_DrawGLPoly(msurface_t *fa, gl3drawCmd_t drawCmd)
 	glpoly_t *p = fa->polys;
 
 	drawCmd.emissive = GL3_Post_SurfEmissive(fa); /* GFX-modern bloom source */
+	if (drawCmd.emissive == 0.0f)
+	{
+		drawCmd.emissive = GL3_Bump_SurfClass(fa); /* GFX-modern r_om_bump: gloss class as a negative value */
+	}
 	if (GL3_DynLight_PerPixel() && fa->texinfo && fa->texinfo->image)
 	{
 		/* GFX-modern r_om_pdlight: texture units of the face for the SoF dlight rule */
@@ -221,6 +225,10 @@ GL3_DrawGLFlowingPoly(msurface_t *fa, gl3drawCmd_t drawCmd)
 
 	p = fa->polys;
 	drawCmd.emissive = GL3_Post_SurfEmissive(fa); /* GFX-modern bloom source */
+	if (drawCmd.emissive == 0.0f)
+	{
+		drawCmd.emissive = GL3_Bump_SurfClass(fa); /* GFX-modern r_om_bump: gloss class as a negative value */
+	}
 	if (GL3_DynLight_PerPixel() && fa->texinfo && fa->texinfo->image)
 	{
 		/* GFX-modern r_om_pdlight: texture units of the face for the SoF dlight rule */
