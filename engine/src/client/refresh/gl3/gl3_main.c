@@ -877,7 +877,10 @@ void GL3_Draw3DBatchesNow()
 			GL3_UseProgram( shader->shaderProgram );
 		}
 		if(cmd->texnum != gl3state.currenttexture)
+		{
 			GL3_Bind(cmd->texnum);
+			GL3_Bump_Bind(cmd->texnum); /* GFX-modern r_om_bump: its normal map on GL_TEXTURE11 */
+		}
 		if(cmd->lmtexnum >= 0)
 			GL3_BindLightmap(cmd->lmtexnum);
 

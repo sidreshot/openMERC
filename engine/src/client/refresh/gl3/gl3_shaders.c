@@ -775,28 +775,20 @@ static const char* fragmentSrcOmPdl =
 	;
 
 /*
- * GFX-modern r_om_bump: relief lighting of the world surfaces from the game's own textures. The height is the
- * luminance of the face texture (a blurred mip, so pixel noise does not turn into embossing); its gradient tilts the
- * normal. The static light keeps its brightness: only its direction is estimated, from the gradient of the
- * lightmap (light comes from the brighter side, plus the surface normal for the part that falls on the face
- * straight on), and the lightmap is scaled by how much the tilted normal faces that direction compared with the
- * flat one. omBump: x strength (0 = off), y lightmap gradient weight, z shading contrast, w texture lod bias.
- * The height is a detail height (fine luminance minus a mip two levels coarser): grout, cracks and seams give
- * relief, large stains do not. With the omlight deluxe map (gl3_relight.c) the light direction is the baked one
- * and only the directional share of the light is shaded; without it, the lightmap gradient stands in.
+ * GFX-modern r_om_bump: relief lighting of the world walls from the game's own textures. The normal map of the
+ * face texture is made when the texture loads (gl3_bump.c: detail height -> normals, height in alpha). The tangent
+ * frame comes from the screen derivatives of position and texture coordinates. The static light keeps its
+ * brightness; its directional share (the omlight deluxe map, gl3_relight.c; without one a light from above) is
+ * scaled by how much the bumped normal faces that direction compared with the flat face, and the height darkens
+ * grooves and lifts ridges a little (cavity), which gives volume under even, undirected light too.
+ * omBump: x normal strength (0 = off), y cavity amount, z directional contrast, w directional share without a
+ * deluxe map.
  */
 static const char* fragmentSrcOmBump =
 	"uniform vec4 omBump;\n"
 	"uniform float omBumpWalls; // 1: walls only (|normal z| < 0.7), floors and ceilings stay flat\n"
 	"uniform sampler2D omDeluxe;\n"
-	"float omBumpLum(vec2 uv, float lod)\n"
-	"{\n"
-	"	return dot(textureLod(tex, uv, lod).rgb, vec3(0.299, 0.587, 0.114));\n"
-	"}\n"
-	"float omBumpLmLum(vec2 uv)\n"
-	"{\n"
-	"	return dot(textureLod(lightmap0, uv, 0.0).rgb, vec3(0.299, 0.587, 0.114));\n"
-	"}\n"
+	"uniform sampler2D omNormalMap;\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
 	"	if(omBump.x <= 0.0 || omEmissive > 0.0)\n"
@@ -804,6 +796,7 @@ static const char* fragmentSrcOmBump =
 	"	vec3 N = normalize(passNormal);\n"
 	"	if(omBumpWalls > 0.5 && abs(N.z) >= 0.7)\n"
 	"		return lm;\n"
+	"	vec4 nm = texture(omNormalMap, passTexCoord);\n"
 	"	vec3 dp1 = dFdx(passWorldCoord);\n"
 	"	vec3 dp2 = dFdy(passWorldCoord);\n"
 	"	vec2 duv1 = dFdx(passTexCoord);\n"
@@ -817,42 +810,29 @@ static const char* fragmentSrcOmBump =
 	"		return lm;\n"
 	"	T = normalize(T);\n"
 	"	B = normalize(B);\n"
-	"	// height gradient per texel on a blurred mip\n"
-	"	vec2 ts = vec2(textureSize(tex, 0));\n"
-	"	float lod = max(log2(max(length(duv1 * ts), length(duv2 * ts))), 0.0) + omBump.w;\n"
-	"	vec2 o = exp2(lod) / ts;\n"
-	"	// detail height: fine luminance minus a mip two levels coarser, so grout, cracks and seams make relief and\n"
-	"	// large stains do not; the gradient is taken per texel on both and subtracted\n"
-	"	vec2 o2 = o * 4.0;\n"
-	"	vec2 gf = vec2(omBumpLum(passTexCoord + vec2(o.x, 0.0), lod) - omBumpLum(passTexCoord - vec2(o.x, 0.0), lod),\n"
-	"		omBumpLum(passTexCoord + vec2(0.0, o.y), lod) - omBumpLum(passTexCoord - vec2(0.0, o.y), lod)) * (0.5 / exp2(lod));\n"
-	"	vec2 gc = vec2(omBumpLum(passTexCoord + vec2(o2.x, 0.0), lod + 2.0) - omBumpLum(passTexCoord - vec2(o2.x, 0.0), lod + 2.0),\n"
-	"		omBumpLum(passTexCoord + vec2(0.0, o2.y), lod + 2.0) - omBumpLum(passTexCoord - vec2(0.0, o2.y), lod + 2.0)) * (0.125 / exp2(lod));\n"
-	"	vec2 g = gf - gc;\n"
-	"	vec3 Nb = normalize(N - omBump.x * (g.x * T + g.y * B));\n"
-	"	// baked light direction (omlight deluxe map): world vector, length = the directional share of the light\n"
+	"	vec3 nt = nm.xyz * 2.0 - 1.0;\n"
+	"	nt.xy *= omBump.x;\n"
+	"	vec3 Nb = normalize(T * nt.x + B * nt.y + N * max(nt.z, 0.05));\n"
+	"	// light direction and its share: the baked deluxe map, else light from above the face\n"
 	"	vec3 dv = texture(omDeluxe, passLMcoord).rgb * 2.0 - 1.0;\n"
 	"	float k = length(dv);\n"
+	"	vec3 Ld;\n"
 	"	if(k > 0.02)\n"
 	"	{\n"
-	"		vec3 Ld = dv / k;\n"
-	"		float fl = max(dot(N, Ld), 0.15);\n"
-	"		float ratio = clamp(max(dot(Nb, Ld), 0.0) / fl, 0.0, 2.5);\n"
+	"		Ld = dv / k;\n"
 	"		k = clamp(k * omBump.z, 0.0, 1.0);\n"
-	"		return lm * ((1.0 - k) + k * ratio);\n"
 	"	}\n"
-	"	// no deluxe map: light direction from the lightmap gradient along s and t and the normal\n"
-	"	vec2 ls = 1.0 / vec2(textureSize(lightmap0, 0));\n"
-	"	float lc = max(omBumpLmLum(passLMcoord), 1.0 / 255.0);\n"
-	"	vec2 lg = vec2(omBumpLmLum(passLMcoord + vec2(ls.x, 0.0)) - omBumpLmLum(passLMcoord - vec2(ls.x, 0.0)),\n"
-	"		omBumpLmLum(passLMcoord + vec2(0.0, ls.y)) - omBumpLmLum(passLMcoord - vec2(0.0, ls.y))) * (0.5 / lc);\n"
-	"	lg = clamp(lg, -1.0, 1.0) * omBump.y;\n"
-	"	vec3 L = normalize(N + lg.x * T + lg.y * B);\n"
-	"	float f = 1.0 + omBump.z * (dot(Nb, L) - dot(N, L));\n"
-	"	return lm * clamp(f, 0.3, 1.7);\n"
+	"	else\n"
+	"	{\n"
+	"		Ld = normalize(N + vec3(0.0, 0.0, 1.2));\n"
+	"		k = omBump.w;\n"
+	"	}\n"
+	"	float fl = max(dot(N, Ld), 0.25);\n"
+	"	float ratio = clamp(max(dot(Nb, Ld), 0.0) / fl, 0.0, 2.0);\n"
+	"	float cav = 1.0 + omBump.y * (nm.a * 2.0 - 1.0);\n"
+	"	return lm * ((1.0 - k) + k * ratio) * cav;\n"
 	"}\n"
 	;
-
 static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 
 		// it gets attributes and uniforms from fragmentCommon3D
@@ -1651,6 +1631,12 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 
 	/* OpenMerc (I4c): dynamic light layer of the lightmap page on GL_TEXTURE6 (gl3_dynlight.c) */
 	/* GFX-modern r_om_bump: light directions of the lightmap page on GL_TEXTURE10 (gl3_relight.c) */
+	GLint nmLoc = glGetUniformLocation(prog, "omNormalMap"); /* r_om_bump: normal map of the texture (gl3_bump.c) */
+	if(nmLoc != -1)
+	{
+		glUniform1i(nmLoc, 11);
+	}
+
 	GLint dxLoc = glGetUniformLocation(prog, "omDeluxe");
 	if(dxLoc != -1)
 	{
@@ -2045,20 +2031,19 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 
 		if (loc != -1)
 		{
-			static cvar_t *bump, *bumplight, *bumpcontrast, *bumplod, *bumpwalls;
+			static cvar_t *bump, *bumpcavity, *bumpcontrast, *bumpshare, *bumpwalls;
 
 			if (!bump)
 			{
 				bump = ri.Cvar_Get("r_om_bump", "1", CVAR_ARCHIVE);
-				bumplight = ri.Cvar_Get("r_om_bump_light", "1.5", CVAR_ARCHIVE);
-				bumpcontrast = ri.Cvar_Get("r_om_bump_contrast", "2.5", CVAR_ARCHIVE);
-				bumplod = ri.Cvar_Get("r_om_bump_lod", "0.7", CVAR_ARCHIVE);
+				bumpcavity = ri.Cvar_Get("r_om_bump_cavity", "0.25", CVAR_ARCHIVE);
+				bumpcontrast = ri.Cvar_Get("r_om_bump_contrast", "2", CVAR_ARCHIVE);
+				bumpshare = ri.Cvar_Get("r_om_bump_share", "0.6", CVAR_ARCHIVE);
 				bumpwalls = ri.Cvar_Get("r_om_bump_walls", "1", CVAR_ARCHIVE);
 			}
 
 			GL3_UseProgram(si[i]->shaderProgram);
-			glUniform4f(loc, fullbright ? 0.0f : 8.0f * bump->value, bumplight->value, bumpcontrast->value,
-					bumplod->value);
+			glUniform4f(loc, fullbright ? 0.0f : bump->value, bumpcavity->value, bumpcontrast->value, bumpshare->value);
 			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpWalls");
 			if (loc != -1)
 			{

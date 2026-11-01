@@ -587,6 +587,11 @@ GL3_LoadPic(char *name, byte *pic, int width, int realwidth,
 		{
 			image->has_alpha = GL3_Upload32((unsigned *)pic, width, height,
 						(image->type != it_pic && image->type != it_sky));
+
+			if (image->type == it_wall) /* GFX-modern r_om_bump: replacement wall textures too */
+			{
+				GL3_Bump_Make(texNum, pic, width, height);
+			}
 		}
 
 		image->sl = 0;
@@ -870,6 +875,7 @@ FreeImage(gl3image_t *image)
 
 	if (image->texnum && !image->scrap)
 	{
+		GL3_Bump_Free(image->texnum); /* GFX-modern r_om_bump */
 		glDeleteTextures(1, &image->texnum);
 	}
 
@@ -1302,6 +1308,16 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 	GL3_Bind(image->texnum);
 	UploadM32(image, m, size, kind, pictipskip);
 	SetImageFilter(image);
+	/* GFX-modern r_om_bump: normal map of a world texture, from its level-0 texels */
+	if (image->type == it_wall)
+	{
+		int ofs0 = M32Int(m, M32_OFS_OFFSETS), w0 = M32Int(m, M32_OFS_WIDTHS), h0 = M32Int(m, M32_OFS_HEIGHTS);
+
+		if ((ofs0 > 0) && (w0 > 0) && (h0 > 0) && (ofs0 + w0 * h0 * 4 <= size))
+		{
+			GL3_Bump_Make(image->texnum, m + ofs0, w0, h0);
+		}
+	}
 
 	/* damaged variant */
 	M32String(m, M32_OFS_DAMAGENAME, tmp, sizeof(tmp));
@@ -1757,7 +1773,8 @@ GL3_ShutdownImages(void)
 		/* free it */
 		if (image->texnum && !image->scrap)
 		{
-			glDeleteTextures(1, &image->texnum);
+			GL3_Bump_Free(image->texnum); /* GFX-modern r_om_bump */
+		glDeleteTextures(1, &image->texnum);
 		}
 
 		memset(image, 0, sizeof(*image));

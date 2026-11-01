@@ -1,0 +1,297 @@
+/*
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ * Copyright (C) 2026 OpenMerc contributors
+ *
+ * OpenMerc GFX-modern r_om_bump: normal maps of the world textures, made from
+ * the game's own images when they are loaded (no new data files).
+ *
+ * Per wall texture: luminance -> detail height (the luminance minus a wide
+ * blur, so stains and large shading do not count, only grout, cracks, seams
+ * and panels) -> light smoothing against single-texel grain -> contrast
+ * normalised per texture (every texture gets comparable relief; nearly flat
+ * textures are not amplified into noise) -> normals by central differences.
+ * The map is RGBA8 with mipmaps: RGB = tangent-space normal (x along s, y
+ * along t), A = the detail height (cavity term). Bound on GL_TEXTURE11 with
+ * its texture; textures without a map get a flat 1x1 map.
+ */
+
+#include "header/local.h"
+
+static GLuint *nmaps;   /* normal map by colour texture name */
+static int nmapcount;
+static GLuint nflat;
+
+static float *
+Bump_Blur(const float *src, int w, int h, int r)
+{
+	/* separable box blur with wrap-around (textures tile), twice for a tent shape */
+	float *a = malloc(sizeof(float) * w * h), *b = malloc(sizeof(float) * w * h);
+	int pass, x, y, k;
+
+	if (!a || !b)
+	{
+		free(a);
+		free(b);
+		return NULL;
+	}
+
+	memcpy(a, src, sizeof(float) * w * h);
+
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (y = 0; y < h; y++)
+		{
+			const float *row = a + (size_t)y * w;
+			float s = 0;
+
+			for (k = -r; k <= r; k++)
+			{
+				s += row[((k % w) + w) % w];
+			}
+
+			for (x = 0; x < w; x++)
+			{
+				b[(size_t)y * w + x] = s / (2 * r + 1);
+				s += row[(x + r + 1) % w] - row[((x - r) % w + w) % w];
+			}
+		}
+
+		for (x = 0; x < w; x++)
+		{
+			float s = 0;
+
+			for (k = -r; k <= r; k++)
+			{
+				s += b[(size_t)(((k % h) + h) % h) * w + x];
+			}
+
+			for (y = 0; y < h; y++)
+			{
+				a[(size_t)y * w + x] = s / (2 * r + 1);
+				s += b[(size_t)((y + r + 1) % h) * w + x] - b[(size_t)(((y - r) % h + h) % h) * w + x];
+			}
+		}
+	}
+
+	free(b);
+	return a;
+}
+
+static void
+Bump_Store(GLuint texnum, GLuint nm)
+{
+	if ((int)texnum >= nmapcount)
+	{
+		int n = texnum + 1024;
+		GLuint *p = realloc(nmaps, sizeof(GLuint) * n);
+
+		if (!p)
+		{
+			glDeleteTextures(1, &nm);
+			return;
+		}
+
+		memset(p + nmapcount, 0, sizeof(GLuint) * (n - nmapcount));
+		nmaps = p;
+		nmapcount = n;
+	}
+
+	if (nmaps[texnum])
+	{
+		glDeleteTextures(1, &nmaps[texnum]);
+	}
+
+	nmaps[texnum] = nm;
+}
+
+/* builds and uploads the normal map of a wall texture (rgba: w x h, 4 bytes per texel) */
+void
+GL3_Bump_Make(GLuint texnum, const byte *rgba, int w, int h)
+{
+	float *L, *low, *H, *Hs, sum = 0, sum2 = 0, mean, sd, scale;
+	byte *out;
+	int x, y, step = 1, i, n;
+
+	if (!texnum || !rgba || (w < 8) || (h < 8))
+	{
+		return;
+	}
+
+	/* large replacement textures are measured at most 1024 wide */
+	while ((w / step > 1024) || (h / step > 1024))
+	{
+		step *= 2;
+	}
+
+	w /= step;
+	h /= step;
+	n = w * h;
+	L = malloc(sizeof(float) * n);
+	out = malloc((size_t)n * 4);
+
+	if (!L || !out)
+	{
+		free(L);
+		free(out);
+		return;
+	}
+
+	for (y = 0; y < h; y++)
+	{
+		for (x = 0; x < w; x++)
+		{
+			float s = 0;
+			int a, b;
+
+			for (b = 0; b < step; b++)
+			{
+				for (a = 0; a < step; a++)
+				{
+					const byte *p = rgba + ((size_t)(y * step + b) * w * step + (x * step + a)) * 4;
+					s += 0.299f * p[0] + 0.587f * p[1] + 0.114f * p[2];
+				}
+			}
+
+			L[y * w + x] = s / (255.0f * step * step);
+		}
+	}
+
+	/* detail height. Thin features - grout, mortar, seams, cracks - are grooves whether they are darker or lighter
+	   than their surroundings (light mortar between bricks is recessed too): -|L - narrow blur|. Broad brightness
+	   changes add a little (brighter = higher): narrow blur minus a blur over 1/16 of the texture. */
+	{
+		float *narrow = Bump_Blur(L, w, h, (w > h ? w : h) / 96 + 1);
+
+		low = Bump_Blur(L, w, h, (w > h ? w : h) / 32 + 2);
+		H = malloc(sizeof(float) * n);
+
+		if (!narrow || !low || !H)
+		{
+			free(narrow);
+			free(L);
+			free(low);
+			free(H);
+			free(out);
+			return;
+		}
+
+		/* soft threshold at half the mean line response: stains and grain inside a tile or brick stay flat */
+		float mabs = 0;
+
+		for (i = 0; i < n; i++)
+		{
+			mabs += fabsf(L[i] - narrow[i]);
+		}
+
+		mabs /= n;
+
+		for (i = 0; i < n; i++)
+		{
+			float d = fabsf(L[i] - narrow[i]) - 0.5f * mabs;
+
+			H[i] = -(d > 0 ? d : 0) * 2.0f + 0.25f * (narrow[i] - low[i]);
+		}
+
+		free(narrow);
+	}
+
+	Hs = Bump_Blur(H, w, h, (w > h ? w : h) >= 512 ? 2 : 1);
+
+	if (!Hs)
+	{
+		free(L);
+		free(low);
+		free(H);
+		free(out);
+		return;
+	}
+
+	/* contrast: about +-1 at 2.5 standard deviations; textures with little detail stay shallow */
+	for (i = 0; i < n; i++)
+	{
+		sum += Hs[i];
+		sum2 += Hs[i] * Hs[i];
+	}
+
+	mean = sum / n;
+	sd = sqrtf(fmaxf(sum2 / n - mean * mean, 0.0f));
+	scale = 1.0f / (2.5f * fmaxf(sd, 0.015f));
+
+	for (i = 0; i < n; i++)
+	{
+		float v = (Hs[i] - mean) * scale;
+		Hs[i] = v < -1 ? -1 : (v > 1 ? 1 : v);
+	}
+
+	/* normals: a height of +-1 over a texture 32 texels wide makes a 45 degree slope at the steepest */
+	for (y = 0; y < h; y++)
+	{
+		for (x = 0; x < w; x++)
+		{
+			float dx = (Hs[y * w + (x + 1) % w] - Hs[y * w + (x + w - 1) % w]) * 0.5f;
+			float dy = (Hs[((y + 1) % h) * w + x] - Hs[((y + h - 1) % h) * w + x]) * 0.5f;
+			float k = (float)(w > h ? w : h) / 80.0f;
+			float nx = -dx * k, ny = -dy * k, nz = 1.0f, l = sqrtf(nx * nx + ny * ny + nz * nz);
+			byte *o = out + (size_t)(y * w + x) * 4;
+
+			o[0] = (byte)(127.5f + 127.0f * nx / l);
+			o[1] = (byte)(127.5f + 127.0f * ny / l);
+			o[2] = (byte)(127.5f + 127.0f * nz / l);
+			o[3] = (byte)(127.5f + 127.0f * Hs[y * w + x]);
+		}
+	}
+
+	{
+		GLuint nm;
+
+		glGenTextures(1, &nm);
+		GL3_SelectTMU(GL_TEXTURE11);
+		glBindTexture(GL_TEXTURE_2D, nm);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, out);
+		glGenerateMipmap(GL_TEXTURE_2D);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		Bump_Store(texnum, nm);
+		GL3_SelectTMU(GL_TEXTURE0);
+	}
+
+	free(L);
+	free(low);
+	free(H);
+	free(Hs);
+	free(out);
+}
+
+/* the colour texture is deleted: its normal map goes too */
+void
+GL3_Bump_Free(GLuint texnum)
+{
+	if (((int)texnum < nmapcount) && nmaps[texnum])
+	{
+		glDeleteTextures(1, &nmaps[texnum]);
+		nmaps[texnum] = 0;
+	}
+}
+
+/* binds the normal map of a colour texture (or a flat one) to texture unit 11 */
+void
+GL3_Bump_Bind(GLuint texnum)
+{
+	if (!nflat)
+	{
+		static const byte flat[4] = {128, 128, 255, 128};
+
+		glGenTextures(1, &nflat);
+		GL3_SelectTMU(GL_TEXTURE11);
+		glBindTexture(GL_TEXTURE_2D, nflat);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, flat);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	}
+
+	GL3_SelectTMU(GL_TEXTURE11);
+	glBindTexture(GL_TEXTURE_2D, (((int)texnum < nmapcount) && nmaps[texnum]) ? nmaps[texnum] : nflat);
+	GL3_SelectTMU(GL_TEXTURE0);
+}
