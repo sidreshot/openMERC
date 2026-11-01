@@ -716,7 +716,10 @@ light beams and the composite (needs the post path, which r_om_ssao turns on by 
   61.5 %), horizon angles clamped to the hemisphere of the normal rebuilt from depth (smaller
   depth step per axis), cosine-weighted visible arc. Origin moved off the surface by
   0.004 * distance + 0.25 (24-bit depth steps at grazing angles were false occluders); samples
-  beyond the view edge do not occlude; fade out from 1500 to 2500 units.
+  beyond the view edge take the edge pixel (ignoring them faded the occlusion out towards the
+  edges while turning); no distance fade (it made the occlusion build up while walking closer),
+  only the far plane (sky) is skipped. Occluders that have left the view still cast nothing:
+  that is the screen-space limit (baked occlusion in omlight would cover the static world).
 * Two depth-aware 9-tap blurs (RG16F: visibility, distance), then a depth-aware bilinear
   upsample multiplies the scene colour (blend ZERO, SRC_COLOR) of the MSAA framebuffer, or of a
   framebuffer holding only the scene texture without MSAA (the emissive texture is read).
