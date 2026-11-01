@@ -217,8 +217,9 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
 	if (ent->target) {
 		t = NULL;
 		while ((t = G_Find(t, FOFS(targetname), ent->target))) {
-			if (!Q_stricmp(t->classname, "func_areaportal") &&
-			    (!Q_stricmp(ent->classname, "func_door") || !Q_stricmp(ent->classname, "func_door_rotating")))
+			// every door class holds its portals itself (g_func.cpp door_hold_portals): using them here too
+			// toggled them twice, so a smart, portcullis or secret door opened onto an unrendered area
+			if (!Q_stricmp(t->classname, "func_areaportal") && !Q_strncasecmp(ent->classname, "func_door", 9))
 				continue;
 			if (t == ent) {
 				gi.dprintf("WARNING: Entity used itself.\n");
