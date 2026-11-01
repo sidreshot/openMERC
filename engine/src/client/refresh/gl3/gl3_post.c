@@ -616,6 +616,7 @@ static const char *post_lum_fs =
 	"void main()\n"
 	"{\n"
 	"	vec3 l = pow(max(texture(tex, uv).rgb, vec3(0.0)), vec3(2.2));\n"
+	"	if (any(isnan(l)) || any(isinf(l))) l = vec3(0.0);\n"   /* one bad pixel must not blacken the whole exposure */
 	/* the centre counts more (what one looks at), the edges less */
 	"	vec2 d = vuv - 0.5;\n"
 	"	float w = 1.0 - dot(d, d) * 1.6;\n"
@@ -5032,7 +5033,8 @@ static const char *ssr_fs =
 	"	float d = Dist(v);\n"
 	"	vec2 n = v * 2.0 - 1.0;\n"
 	"	return vec3(n.x * d * proj2.x, n.y * d * proj2.y, -d);\n"
-	"}\n"
+	"}\n"	/* a degenerate depth neighbourhood gives no normal (a NaN here spread through the frame and its mipmaps) */
+	"vec3 SafeN(vec3 c) { float l = length(c); return l > 1e-12 ? c / l : vec3(0.0, 0.0, 1.0); }\n"
 	"vec2 Proj(vec3 p) { return vec2(p.x * proj2.z, p.y * proj2.w) / -p.z * 0.5 + 0.5; }\n"
 	"void main()\n"
 	"{\n"
@@ -5057,7 +5059,7 @@ static const char *ssr_fs =
 	"	vec3 Pu = Pos(vuv + vec2(0.0, px.y)), Pd = Pos(vuv - vec2(0.0, px.y));\n"
 	"	vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
 	"	vec3 dy = abs(Pu.z - P.z) < abs(P.z - Pd.z) ? Pu - P : P - Pd;\n"
-	"	vec3 N = normalize(cross(dx, dy));\n"
+	"	vec3 N = SafeN(cross(dx, dy));\n"
 	"	vec3 V = normalize(-P);\n"
 	"	if (dot(N, V) < 0.0) N = -N;\n"
 	"	vec3 R = normalize(reflect(-V, N));\n"
@@ -5138,6 +5140,8 @@ static const char *ssr_fs =
 	   lightmap already holds what they receive) */
 	"	else\n"
 	"		outColor = vec4(c * w, w * smoothstep(0.15, 0.45, refl));\n"
+	"	if (any(isnan(outColor)) || any(isinf(outColor)))\n"
+	"		discard;\n"
 	"}\n";
 
 /* the material smoothed across texture seams, at half size: 9 taps over about r_om_ssr_smooth world units, one axis
@@ -5165,7 +5169,8 @@ static const char *ssr_smooth_fs =
 	"	float d = Dist(v);\n"
 	"	vec2 n = v * 2.0 - 1.0;\n"
 	"	return vec3(n.x * d * proj2.x, n.y * d * proj2.y, -d);\n"
-	"}\n"
+	"}\n"	/* a degenerate depth neighbourhood gives no normal (a NaN here spread through the frame and its mipmaps) */
+	"vec3 SafeN(vec3 c) { float l = length(c); return l > 1e-12 ? c / l : vec3(0.0, 0.0, 1.0); }\n"
 	"vec4 Src(vec2 v) { return params.x > 0.5 ? texture(srctex, rect.xy + v * rect.zw) : texture(srctex, v); }\n"
 	"void main()\n"
 	"{\n"
@@ -5176,7 +5181,7 @@ static const char *ssr_smooth_fs =
 	"	vec3 Pu = Pos(vuv + vec2(0.0, texel.y)), Pd = Pos(vuv - vec2(0.0, texel.y));\n"
 	"	vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
 	"	vec3 dy = abs(Pu.z - P.z) < abs(P.z - Pd.z) ? Pu - P : P - Pd;\n"
-	"	vec3 N = normalize(cross(dx, dy));\n"
+	"	vec3 N = SafeN(cross(dx, dy));\n"
 	/* the radius on the screen at this distance, at most 8 % of the view near the eye */
 	"	vec2 rad = params.yz * min(0.5 * vec2(proj2.z, proj2.w) * params.w / max(d, 1.0), vec2(0.08));\n"
 	"	float tol = 1.5 + d * 0.01;\n"
@@ -5188,10 +5193,13 @@ static const char *ssr_smooth_fs =
 	"		vec2 v = vuv + rad * (float(i) * 0.25);\n"
 	"		if (any(lessThan(v, vec2(0.0))) || any(greaterThan(v, vec2(1.0)))) continue;\n"
 	"		float w = exp(-float(i * i) / 8.0) * (1.0 - smoothstep(tol * 0.5, tol, abs(dot(Pos(v) - P, N))));\n"
-	"		sum += Src(v) * w;\n"
+	"		vec4 sv = Src(v);\n"
+	"		if (any(isnan(sv)) || isnan(w)) continue;\n"
+	"		sum += sv * w;\n"
 	"		ws += w;\n"
 	"	}\n"
 	"	outColor = sum / ws;\n"
+	"	if (any(isnan(outColor)) || any(isinf(outColor))) outColor = vec4(0.0);\n"
 	"}\n";
 
 /* over the scene at full size: the half-size reflections and smoothed material, upsampled where the depth agrees
@@ -5225,7 +5233,8 @@ static const char *ssr_apply_fs =
 	"	float d = Dist(v);\n"
 	"	vec2 n = v * 2.0 - 1.0;\n"
 	"	return vec3(n.x * d * proj2.x, n.y * d * proj2.y, -d);\n"
-	"}\n"
+	"}\n"	/* a degenerate depth neighbourhood gives no normal (a NaN here spread through the frame and its mipmaps) */
+	"vec3 SafeN(vec3 c) { float l = length(c); return l > 1e-12 ? c / l : vec3(0.0, 0.0, 1.0); }\n"
 	"void main()\n"
 	"{\n"
 	"	vec3 P = Pos(vuv);\n"
@@ -5256,7 +5265,7 @@ static const char *ssr_apply_fs =
 	"		vec3 Pu = Pos(vuv + vec2(0.0, texel.y)), Pd = Pos(vuv - vec2(0.0, texel.y));\n"
 	"		vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
 	"		vec3 dy = abs(Pu.z - P.z) < abs(P.z - Pd.z) ? Pu - P : P - Pd;\n"
-	"		vec3 Nv = normalize(cross(dx, dy));\n"
+	"		vec3 Nv = SafeN(cross(dx, dy));\n"
 	"		if (dot(Nv, P) > 0.0) Nv = -Nv;\n"
 	"		vec3 N = normalize(mat3(invview) * Nv);\n"
 	"		vec3 wp = (invview * vec4(P, 1.0)).xyz;\n"
@@ -5279,7 +5288,7 @@ static const char *ssr_apply_fs =
 	"		add += min(acc, vec3(1.5)) * fr * clamp(m.a * 1.6 - 0.05, 0.0, 1.0) * glint.x;\n"
 	"	}\n"
 	"	float a = 1.0 - (1.0 - r.a) * (1.0 - glint.y * wet);\n"
-	"	if (dot(add, vec3(1.0)) + a <= 0.002)\n"
+	"	if (dot(add, vec3(1.0)) + a <= 0.002 || any(isnan(add)) || isnan(a) || any(isinf(add)))\n"
 	"		discard;\n"
 	"	outColor = vec4(add, a);\n"
 	"}\n";
