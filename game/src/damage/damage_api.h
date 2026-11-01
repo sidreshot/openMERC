@@ -360,6 +360,8 @@ public:
 	virtual int LimbInjury(void) { return 0; }             // LIMB_* bits currently active
 	// corpse (SPEC-722 "Corpses")
 	bool readyToRemove;
+	void BloodPool(void);                                 // `gore/bloodpool` under the corpse (SPEC-721 §7)
+	bool pooled;                                          // the corpse's blood pool has been sent
 	// savegame (SPEC-722 "Savegames", SPEC-721 ZGIA/AIGZ, SPEC-700 "Savegame chunks of the AI"): the body image
 	// chunk and the gore chunk are written by Body_WriteData below; families add their fields here
 	uint32_t saveId;                                      // id from the shared AI counter (0 = none yet)

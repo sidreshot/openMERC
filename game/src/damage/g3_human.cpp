@@ -2439,6 +2439,11 @@ public:
 				}
 			}
 			frozenAt = now;
+			// the corpse has come to rest: its blood pool (SPEC-721 §7; human models have no `ooze` note, issue #8)
+			if (!pooled && !gibbed) {
+				pooled = true;
+				BloodPool();
+			}
 		}
 		if (cur == Anim_Human("std_smicro_n_n_n") && AnimDone() && !g3locks.deaths && gore && !gibbed) {
 			G3Hit h;
