@@ -574,6 +574,15 @@ Thunder_Write(const char *path, int variant)
 			/* the crack: bright noise with a fast decay */
 			v += w * 0.9f * expf(-t / 0.07f) + b1 * 2.5f * expf(-t / 0.35f);
 		}
+		else if (variant >= 3)
+		{
+			/* a distant explosion (r_om_war): a low thump that sinks in pitch, then a short rumble */
+			float f0 = 38.0f + 8.0f * (variant - 3);
+
+			env = (1.0f - expf(-t * 60.0f)) * expf(-t / 0.75f);
+			v = sinf(2.0f * (float)M_PI * f0 * t * (1.0f - 0.25f * t)) * expf(-t / 0.3f) * 1.4f +
+				b2 * 14.0f * env + b1 * 0.8f * expf(-t / 0.25f);
+		}
 
 		f[i] = v;
 		peak = Q_max(peak, fabsf(v));
@@ -694,6 +703,91 @@ CL_Thunder_Frame(void)
 	}
 }
 
+/* openMERC GFX-modern: the boom of a distant explosion of the renderer's war (r_om_war_boom "number distance"),
+   after distance / 1200 s like the thunder; three variants synthesised once into <gamedir>/sound/om/ */
+static void
+CL_WarBoom_Frame(void)
+{
+	static cvar_t *boom;
+	static int lastseq = -1, nq;
+	static float qdue[8], qdist[8];   /* booms on their way (they come more often than the sound takes) */
+	static qboolean made;
+	int seq = 0, i, k;
+	float d = 0, dist, now = cls.realtime * 0.001f;
+
+	if (!boom)
+	{
+		boom = Cvar_Get("r_om_war_boom", "0 0", 0);
+	}
+
+	if (sscanf(boom->string, "%d %f", &seq, &d) == 2 && seq != lastseq)
+	{
+		if (lastseq >= 0 && seq > 0 && nq < 8)
+		{
+			qdue[nq] = now + d / 1200.0f;
+			qdist[nq] = d;
+			nq++;
+		}
+
+		lastseq = seq;
+	}
+
+	for (k = 0; k < nq && qdue[k] > now; k++)
+	{
+	}
+
+	if (k == nq)
+	{
+		return;
+	}
+
+	dist = qdist[k];
+	for (i = k; i + 1 < nq; i++)
+	{
+		qdue[i] = qdue[i + 1];
+		qdist[i] = qdist[i + 1];
+	}
+	nq--;
+
+	if (!made)
+	{
+		char path[MAX_OSPATH];
+
+		for (i = 0; i < 3; i++)
+		{
+			FILE *t;
+
+			Com_sprintf(path, sizeof(path), "%s/sound/om/boom%d.wav", FS_Gamedir(), i);
+			t = Q_fopen(path, "rb");
+
+			if (t)
+			{
+				fclose(t);
+				continue;
+			}
+
+			FS_CreatePath(path);
+			Thunder_Write(path, 3 + i);
+		}
+
+		made = true;
+	}
+
+	{
+		char name[64];
+		struct sfx_s *sfx;
+		float vol = Q_clamp(1.0f - dist / 12000.0f, 0.3f, 0.7f);
+
+		Com_sprintf(name, sizeof(name), "om/boom%d.wav", rand() % 3);
+		sfx = S_RegisterSound(name);
+
+		if (sfx)
+		{
+			S_StartSound(NULL, cl.playernum + 1, 0, sfx, vol, 0, 0);
+		}
+	}
+}
+
 void
 V_RenderView(float stereo_separation)
 {
@@ -710,6 +804,7 @@ V_RenderView(float stereo_separation)
 	}
 
 	CL_Thunder_Frame();
+	CL_WarBoom_Frame();
 
 	if (cl_timedemo->value)
 	{

@@ -4132,7 +4132,7 @@ SSAOShutdown(void)
 #define BOLT_MAXPTS 512
 
 static cvar_t *r_om_rain, *r_om_rain_density, *r_om_rain_sky, *r_om_lightning, *r_om_lightning_rate;
-static cvar_t *r_om_storm_maps, *r_om_aa, *r_om_aa_maps;
+static cvar_t *r_om_storm_maps, *r_om_aa, *r_om_aa_maps, *r_om_snow, *r_om_snow_maps, *r_om_war;
 
 /* the loaded map's name ("trn1") is a word of the list */
 static qboolean
@@ -4177,7 +4177,15 @@ static struct
 {
 	qboolean maprain, failed, active;
 	qboolean rain, storm, aa;   /* this map: rain (and lightning), distant lightning only, anti-aircraft fire */
-	GLuint progaa;
+	qboolean snow;              /* this map: snowfall */
+	GLuint progaa, progsnow;
+	GLint n_vp, n_eye, n_time, n_params, n_occ, n_occvp, n_color, n_wind;
+	float windx, windy, windt;  /* snow: the wind drift integrated over time (world units) */
+	/* war on the aa maps: distant explosions (position, start), fires with smoke (position, seed) */
+	GLuint progwar, progsmoke;
+	GLint w_vp, w_eye, w_time, w_exps, w_fires, s2_vp, s2_eye, s2_time, s2_fires, s2_wind;
+	float exps[6][4], fires[4][4], nextexp;
+	int expcur;
 	GLint a_vp, a_eye, a_time, a_guns, a_params;
 	float guns[8][4];           /* anti-aircraft guns: position, seed */
 	vec3_t gunanchor;
@@ -4249,9 +4257,13 @@ WeatherWanted(void)
 		r_om_storm_maps = ri.Cvar_Get("r_om_storm_maps", "trn1", CVAR_ARCHIVE);
 		r_om_aa = ri.Cvar_Get("r_om_aa", "1", CVAR_ARCHIVE);
 		r_om_aa_maps = ri.Cvar_Get("r_om_aa_maps", "kos1 kos2 kos3", CVAR_ARCHIVE);
+		r_om_snow = ri.Cvar_Get("r_om_snow", "1", CVAR_ARCHIVE);
+		/* the war around the aa maps: explosions, fires and smoke on the horizon, ash */
+		r_om_war = ri.Cvar_Get("r_om_war", "1", CVAR_ARCHIVE);
+		r_om_snow_maps = ri.Cvar_Get("r_om_snow_maps", "sib1 sib2 sib3", CVAR_ARCHIVE);
 	}
 
-	WX.rain = WX.storm = WX.aa = false;
+	WX.rain = WX.storm = WX.aa = WX.snow = false;
 
 #ifdef YQ2_GL3_GLES3
 	return false;
@@ -4264,7 +4276,8 @@ WeatherWanted(void)
 	WX.rain = (r_om_rain->value >= 2) || ((r_om_rain->value >= 1) && WX.maprain);
 	WX.storm = !WX.rain && (r_om_rain->value >= 1) && MapListed(r_om_storm_maps->string);
 	WX.aa = (r_om_aa->value > 0) && MapListed(r_om_aa_maps->string);
-	return WX.rain || WX.storm || WX.aa;
+	WX.snow = !WX.rain && (r_om_snow->value > 0) && MapListed(r_om_snow_maps->string);
+	return WX.rain || WX.storm || WX.aa || WX.snow;
 #endif
 }
 
@@ -4420,10 +4433,57 @@ GL3_Post_WeatherFrame(void)
 		GL3_SoF_LightningUniforms(none, none, NULL, 0);
 	}
 
-	if (p && (loc = glGetUniformLocation(p, "omSkyTint")) != -1)
+	/* the war (r_om_war on the aa maps): a distant explosion every 3..9 s; the client plays its boom
+	   (r_om_war_boom "number distance", cl_view.c); the sky glows orange for a moment */
 	{
-		GL3_UseProgram(p);
-		glUniform4f(loc, tint * (0.95f + add), tint * (0.97f + add), tint + add, 0);
+		float warr = 0, warg = 0;
+
+		if (WX.active && WX.aa && r_om_war && r_om_war->value)
+		{
+			float now = r_newrefdef.time;
+			int i;
+
+			if (WX.nextexp <= 0 || WX.nextexp - now > 60)
+			{
+				WX.nextexp = now + 1.0f + frand() * 3.0f;
+			}
+
+			if (now >= WX.nextexp)
+			{
+				float az = frand() * 2 * (float)M_PI, dist = 4500 + frand() * 4000;
+				float *e = WX.exps[WX.expcur];
+				static int seq;
+				char buf[64];
+
+				e[0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
+				e[1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
+				e[2] = r_newrefdef.vieworg[2] - 250 + frand() * 150;
+				e[3] = now;
+				WX.expcur = (WX.expcur + 1) % 6;
+				WX.nextexp = now + (3.0f + frand() * 6.0f) / Q_max(r_om_war->value, 0.1f);
+				Com_sprintf(buf, sizeof(buf), "%d %.0f", ++seq, dist);
+				ri.Cvar_Set("r_om_war_boom", buf);
+			}
+
+			for (i = 0; i < 6; i++)
+			{
+				float age = now - WX.exps[i][3];
+
+				if (WX.exps[i][3] > 0 && age >= 0 && age < 2)
+				{
+					float k = expf(-age * 2.5f) * 0.25f;
+
+					warr += k;
+					warg += k * 0.45f;
+				}
+			}
+		}
+
+		if (p && (loc = glGetUniformLocation(p, "omSkyTint")) != -1)
+		{
+			GL3_UseProgram(p);
+			glUniform4f(loc, tint * (0.95f + add) + warr, tint * (0.97f + add) + warg, tint + add, 0);
+		}
 	}
 
 	/* r_om_ssr: the world shaders write the material target; wet ground needs the top-down map */
@@ -4700,6 +4760,169 @@ static const char *wx_aa_fs =
 	"	outEmis = vec4(c * a * params.z * 0.8, 1.0);\n"
 	"}\n";
 
+/* snowfall: flakes in world-fixed cells wrapped around the eye, falling slowly, each swaying on its own and all
+   carried by the wind (its drift integrated on the CPU, so gusts push the whole fall sideways); only above the
+   first surface of the top-down map, like the rain */
+static const char *wx_snow_vs =
+	"uniform mat4 vp;\n"
+	"uniform vec3 eye;\n"
+	"uniform float time;\n"
+	"uniform vec4 params;\n"   /* box size, box height, fall speed, flake size */
+	"uniform vec4 wind;\n"     /* drift x, y (units), wind x, y (units/s) */
+	"uniform sampler2D occ;\n"
+	"uniform mat4 occvp;\n"
+	"out vec2 vUV;\n"
+	"out float vA;\n"
+	"uint Hu(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }\n"
+	"float H(float n) { return float(Hu(uint(gl_VertexID / 6) * 977u + uint(n * 16.0))) / 4294967295.0; }\n"
+	"void main()\n"
+	"{\n"
+	"	int id = gl_VertexID / 6, c = gl_VertexID - id * 6;\n"
+	"	float f = float(id);\n"
+	"	float B = params.x, Hh = params.y, v = params.z * (0.7 + 0.6 * H(f * 3.7));\n"
+	/* lighter flakes drift more */
+	"	float drift = 0.7 + 0.6 * H(f * 9.1);\n"
+	"	vec3 p;\n"
+	"	p.x = eye.x + (fract((H(f * 1.13) * B + wind.x * drift - eye.x) / B) - 0.5) * B;\n"
+	"	p.y = eye.y + (fract((H(f * 2.71) * B + wind.y * drift - eye.y) / B) - 0.5) * B;\n"
+	"	p.z = eye.z - Hh * 0.45 + fract((H(f * 5.3) * Hh - time * v - eye.z) / Hh) * Hh;\n"
+	"	float ph = H(f * 4.3) * 6.2832, fr = 0.6 + 0.9 * H(f * 6.7);\n"
+	"	p.x += sin(time * fr + ph) * 9.0;\n"
+	"	p.y += cos(time * fr * 0.8 + ph * 1.3) * 9.0;\n"
+	"	vec4 oc = occvp * vec4(p, 1.0);\n"
+	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
+	"	float od = texture(occ, ou).r;\n"
+	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0002);\n"
+	"	float dist = length(p - eye);\n"
+	"	vA = open ? clamp(1.0 - dist / (B * 0.5), 0.0, 1.0) * smoothstep(12.0, 50.0, dist) : 0.0;\n"
+	"	vec2 cr = vec2((c == 1 || c == 2 || c == 5) ? 1.0 : -1.0, (c == 2 || c == 4 || c == 5) ? 1.0 : -1.0);\n"
+	"	vUV = cr;\n"
+	"	vec3 to = normalize(p - eye);\n"
+	"	vec3 r = normalize(cross(to, vec3(0.0, 0.0, 1.0)));\n"
+	"	vec3 u = cross(r, to);\n"
+	"	float s = params.w * (0.6 + 0.8 * H(f * 8.3)) * (1.0 + dist * 0.0015);\n"
+	"	gl_Position = vA > 0.0 ? vp * vec4(p + (r * cr.x + u * cr.y) * s, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"}\n";
+
+static const char *wx_snow_fs =
+	"uniform vec4 color;\n"
+	"in vec2 vUV;\n"
+	"in float vA;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	float r = length(vUV);\n"
+	"	float a = (1.0 - smoothstep(0.35, 1.0, r)) * vA * color.a;\n"
+	"	if (a <= 0.003) discard;\n"
+	"	outColor = vec4(color.rgb * mix(1.0, 0.82, smoothstep(0.2, 0.9, r)), a);\n"
+	"}\n";
+
+/* war glows, additive: six distant explosions (a fireball that swells and cools) and four fires on the ground
+   (a flickering glow); camera-facing quads from gl_VertexID */
+static const char *wx_war_vs =
+	"uniform mat4 vp;\n"
+	"uniform vec3 eye;\n"
+	"uniform float time;\n"
+	"uniform vec4 exps[6];\n"    /* position, start time (0 = none) */
+	"uniform vec4 fires[4];\n"   /* position, seed (0 = none) */
+	"out vec2 vUV;\n"
+	"out vec3 vCol;\n"
+	"out float vA;\n"
+	"void main()\n"
+	"{\n"
+	"	int id = gl_VertexID / 6, c = gl_VertexID - id * 6;\n"
+	"	vec2 cr = vec2((c == 1 || c == 2 || c == 5) ? 1.0 : -1.0, (c == 2 || c == 4 || c == 5) ? 1.0 : -1.0);\n"
+	"	vUV = cr;\n"
+	"	vA = 0.0; vCol = vec3(0.0);\n"
+	"	gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"	vec3 p; float sz;\n"
+	"	if (id < 6)\n"
+	"	{\n"
+	"		vec4 e = exps[id];\n"
+	"		float age = time - e.w;\n"
+	"		if (e.w <= 0.0 || age < 0.0 || age > 3.0) return;\n"
+	"		sz = 520.0 * (0.35 + 0.65 * smoothstep(0.0, 0.35, age));\n"
+	"		vA = (age < 0.1 ? 1.8 : 1.0) * exp(-age * 1.6);\n"
+	"		vCol = mix(vec3(1.0, 0.92, 0.7), vec3(1.0, 0.35, 0.08), smoothstep(0.05, 0.9, age));\n"
+	"		p = e.xyz + vec3(0.0, 0.0, sz * 0.5);\n"
+	"	}\n"
+	"	else\n"
+	"	{\n"
+	"		vec4 fi = fires[id - 6];\n"
+	"		if (fi.w <= 0.0) return;\n"
+	"		float fl = 0.75 + 0.15 * sin(time * 7.3 + fi.w) + 0.1 * sin(time * 13.1 + fi.w * 2.0);\n"
+	"		sz = 380.0 * fl;\n"
+	"		vA = 0.55 * fl;\n"
+	"		vCol = vec3(1.0, 0.45, 0.12);\n"
+	"		p = fi.xyz + vec3(0.0, 0.0, 120.0);\n"
+	"	}\n"
+	"	vec3 to = normalize(p - eye);\n"
+	"	vec3 r = normalize(cross(to, vec3(0.0, 0.0, 1.0)));\n"
+	"	vec3 u = cross(r, to);\n"
+	"	gl_Position = vp * vec4(p + (r * cr.x + u * cr.y) * sz, 1.0);\n"
+	"}\n";
+
+static const char *wx_war_fs =
+	"in vec2 vUV;\n"
+	"in vec3 vCol;\n"
+	"in float vA;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmis;\n"
+	"void main()\n"
+	"{\n"
+	"	float a = pow(max(1.0 - length(vUV), 0.0), 2.2) * vA;\n"
+	"	if (a <= 0.003) discard;\n"
+	"	outColor = vec4(vCol * a, 1.0);\n"
+	"	outEmis = vec4(vCol * a * 0.9, 1.0);\n"
+	"}\n";
+
+/* smoke columns over the fires: an upright quad turned to the eye, widening upwards and bent by the wind; the
+   fragment shader rolls fractal noise upwards (the smoke climbs), the foot lit orange by the fire */
+static const char *wx_smoke_vs =
+	"uniform mat4 vp;\n"
+	"uniform vec3 eye;\n"
+	"uniform vec4 fires[4];\n"
+	"uniform vec2 wind;\n"       /* direction of the bend (units at the top) */
+	"out vec2 vUV;\n"
+	"out float vSeed;\n"
+	"void main()\n"
+	"{\n"
+	"	int id = gl_VertexID / 6, c = gl_VertexID - id * 6;\n"
+	"	vec4 fi = fires[id];\n"
+	"	vec2 cr = vec2((c == 1 || c == 2 || c == 5) ? 1.0 : -1.0, (c == 2 || c == 4 || c == 5) ? 1.0 : 0.0);\n"
+	"	vUV = cr;\n"
+	"	vSeed = fi.w;\n"
+	"	if (fi.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }\n"
+	"	float hgt = 2600.0 + 600.0 * fract(fi.w * 0.37);\n"
+	"	vec3 base = fi.xyz + vec3(wind * cr.y * cr.y, hgt * cr.y);\n"
+	"	vec3 to = base - eye; to.z = 0.0;\n"
+	"	vec3 r = normalize(cross(normalize(to), vec3(0.0, 0.0, 1.0)));\n"
+	"	gl_Position = vp * vec4(base + r * cr.x * mix(260.0, 1300.0, cr.y), 1.0);\n"
+	"}\n";
+
+static const char *wx_smoke_fs =
+	"uniform float time;\n"
+	"in vec2 vUV;\n"
+	"in float vSeed;\n"
+	"out vec4 outColor;\n"
+	"float h2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n"
+	"float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);\n"
+	"	return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + vec2(1.0)), f.x), f.y); }\n"
+	"float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * vn(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }\n"
+	"void main()\n"
+	"{\n"
+	"	float y = vUV.y, x = vUV.x;\n"
+	"	vec2 q = vec2(x * 1.6, y * 4.0 - time * 0.06) + vSeed;\n"
+	"	vec2 w = vec2(fbm(q + vec2(0.0, time * 0.02)), fbm(q + 5.2));\n"
+	"	float n = fbm(q + w * 1.6);\n"
+	"	float edge = 1.0 - smoothstep(0.25, 1.0, abs(x + (w.x - 0.5) * 0.5));\n"
+	"	float d = smoothstep(0.26, 0.62, n) * edge * smoothstep(0.0, 0.06, y) * (1.0 - smoothstep(0.6, 1.0, y));\n"
+	"	if (d <= 0.004) discard;\n"
+	"	vec3 col = mix(vec3(0.7, 0.32, 0.1), vec3(0.2, 0.18, 0.17), smoothstep(0.02, 0.3, y));\n"
+	"	col *= 0.6 + 0.7 * n;\n"
+	"	outColor = vec4(col, d * 0.92);\n"
+	"}\n";
+
 static GLuint
 WXLink(const char *vs, const char *fs, qboolean twoout)
 {
@@ -4757,11 +4980,35 @@ WXCreate(void)
 	WX.progflash = WXLink(NULL, wx_flash_fs, false);
 	WX.progbolt = WXLink(wx_bolt_vs, wx_bolt_fs, true);
 	WX.progaa = WXLink(wx_aa_vs, wx_aa_fs, true);
+	WX.progsnow = WXLink(wx_snow_vs, wx_snow_fs, false);
+	WX.progwar = WXLink(wx_war_vs, wx_war_fs, true);
+	WX.progsmoke = WXLink(wx_smoke_vs, wx_smoke_fs, false);
 
-	if (!WX.prograin || !WX.progsplash || !WX.progflash || !WX.progbolt || !WX.progaa)
+	if (!WX.prograin || !WX.progsplash || !WX.progflash || !WX.progbolt || !WX.progaa || !WX.progsnow ||
+		!WX.progwar || !WX.progsmoke)
 	{
 		return false;
 	}
+
+	WX.w_vp = glGetUniformLocation(WX.progwar, "vp");
+	WX.w_eye = glGetUniformLocation(WX.progwar, "eye");
+	WX.w_time = glGetUniformLocation(WX.progwar, "time");
+	WX.w_exps = glGetUniformLocation(WX.progwar, "exps");
+	WX.w_fires = glGetUniformLocation(WX.progwar, "fires");
+	WX.s2_vp = glGetUniformLocation(WX.progsmoke, "vp");
+	WX.s2_eye = glGetUniformLocation(WX.progsmoke, "eye");
+	WX.s2_time = glGetUniformLocation(WX.progsmoke, "time");
+	WX.s2_fires = glGetUniformLocation(WX.progsmoke, "fires");
+	WX.s2_wind = glGetUniformLocation(WX.progsmoke, "wind");
+
+	WX.n_vp = glGetUniformLocation(WX.progsnow, "vp");
+	WX.n_eye = glGetUniformLocation(WX.progsnow, "eye");
+	WX.n_time = glGetUniformLocation(WX.progsnow, "time");
+	WX.n_params = glGetUniformLocation(WX.progsnow, "params");
+	WX.n_occ = glGetUniformLocation(WX.progsnow, "occ");
+	WX.n_occvp = glGetUniformLocation(WX.progsnow, "occvp");
+	WX.n_color = glGetUniformLocation(WX.progsnow, "color");
+	WX.n_wind = glGetUniformLocation(WX.progsnow, "wind");
 
 	WX.a_vp = glGetUniformLocation(WX.progaa, "vp");
 	WX.a_eye = glGetUniformLocation(WX.progaa, "eye");
@@ -5040,6 +5287,43 @@ GL3_Post_Weather(void)
 				WX.guns[i][2] = r_newrefdef.vieworg[2] - 300 + frand() * 200;
 				WX.guns[i][3] = 1 + frand() * 100;
 			}
+
+			/* three or four burning places on the horizon */
+			memset(WX.fires, 0, sizeof(WX.fires));
+			n = 3 + (rand() & 1);
+			for (i = 0; i < n; i++)
+			{
+				float az = (i + 0.3f + 0.4f * frand()) * 2 * (float)M_PI / n + 0.7f, dist = 3800 + frand() * 3500;
+
+				WX.fires[i][0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
+				WX.fires[i][1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
+				WX.fires[i][2] = r_newrefdef.vieworg[2] - 300 + frand() * 100;
+				WX.fires[i][3] = 1 + frand() * 50;
+			}
+		}
+
+		/* the war: smoke columns (blended), then the glows of fires and explosions (additive) */
+		if (r_om_war->value)
+		{
+			glDrawBuffers(1, one);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			GL3_UseProgram(WX.progsmoke);
+			glUniformMatrix4fv(WX.s2_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+			glUniform3fv(WX.s2_eye, 1, r_newrefdef.vieworg);
+			glUniform1f(WX.s2_time, fmodf(r_newrefdef.time, 3600.0f));
+			glUniform4fv(WX.s2_fires, 4, &WX.fires[0][0]);
+			glUniform2f(WX.s2_wind, 700.0f, 250.0f);
+			glDrawArrays(GL_TRIANGLES, 0, 6 * 4);
+
+			glDrawBuffers(2, two);
+			glBlendFunc(GL_ONE, GL_ONE);
+			GL3_UseProgram(WX.progwar);
+			glUniformMatrix4fv(WX.w_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+			glUniform3fv(WX.w_eye, 1, r_newrefdef.vieworg);
+			glUniform1f(WX.w_time, r_newrefdef.time);
+			glUniform4fv(WX.w_exps, 6, &WX.exps[0][0]);
+			glUniform4fv(WX.w_fires, 4, &WX.fires[0][0]);
+			glDrawArrays(GL_TRIANGLES, 0, 6 * 10);
 		}
 
 		glDrawBuffers(2, two);
@@ -5053,6 +5337,50 @@ GL3_Post_Weather(void)
 		glDrawArrays(GL_TRIANGLES, 0, 6 * 40 * 8);
 		glDrawBuffers(1, one);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
+
+	/* snowfall (r_om_snow); on the war maps the same pass lets ash drift down */
+	if (WX.snow || (WX.aa && r_om_war->value))
+	{
+		qboolean ash = !WX.snow;
+		float now = r_newrefdef.time, dt = now - WX.windt, wx, wy, gust, light;
+		vec3_t lc;
+
+		if ((dt < 0) || (dt > 0.25f))
+		{
+			dt = 0;
+		}
+		WX.windt = now;
+
+		/* a steady breeze turning slowly, now and then a gust that sweeps the fall sideways */
+		gust = Q_max(0.0f, sinf(now * 0.37f) + sinf(now * 0.83f + 1.7f) - 0.7f) * 140.0f;
+		wx = cosf(now * 0.05f) * (35.0f + gust);
+		wy = sinf(now * 0.05f) * (35.0f + gust) * 0.6f + 10.0f;
+		WX.windx = fmodf(WX.windx + wx * dt, 100000.0f);
+		WX.windy = fmodf(WX.windy + wy * dt, 100000.0f);
+
+		/* the flakes take the light of the place (the probe at the eye), never fully dark */
+		GL3_SoF_LightPoint(r_newrefdef.vieworg, lc, 255);
+		light = Q_max(0.65f, Q_min(1.1f, 0.6f + Q_max(lc[0], Q_max(lc[1], lc[2]))));
+
+		GL3_UseProgram(WX.progsnow);
+		glUniformMatrix4fv(WX.n_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+		glUniform3fv(WX.n_eye, 1, r_newrefdef.vieworg);
+		glUniform1f(WX.n_time, fmodf(r_newrefdef.time, 3600.0f));
+		glUniform4f(WX.n_params, 900.0f, 700.0f, ash ? 38.0f : 75.0f, ash ? 1.0f : 2.2f);
+		glUniform4f(WX.n_wind, WX.windx, WX.windy, wx, wy);
+		glUniform1i(WX.n_occ, 0);
+		glUniformMatrix4fv(WX.n_occvp, 1, GL_FALSE, WX.occvp);
+		if (ash)
+		{
+			glUniform4f(WX.n_color, 0.2f * light, 0.19f * light, 0.18f * light, 0.8f);
+		}
+		else
+		{
+			glUniform4f(WX.n_color, 0.93f * light, 0.95f * light, 1.0f * light, 0.95f);
+		}
+		BindTex(GL_TEXTURE0, WX.occtex);
+		glDrawArrays(GL_TRIANGLES, 0, 6 * (int)((ash ? 1800 : 14000) * Q_min(ash ? 1.0f : r_om_snow->value, 3.0f)));
 	}
 
 	if (!WX.rain)

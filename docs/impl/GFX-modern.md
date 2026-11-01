@@ -843,3 +843,20 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   sorted and fog passes dropped afterwards) into a window-sized RGBA16F texture (unit 13). The lightmapped shaders
   replace faces on that plane by the texture at gl_FragCoord (92 %) and write no SSR material there. World only - no
   models or effects in the mirror yet; mirrors on other planes keep SSR. Cost (tsr1 restroom, 1080p): +0.7 ms.
+
+## Snow and the war around kos
+
+* r_om_snow 1 (density) on r_om_snow_maps ("sib1 sib2 sib3"; the maps have only wind sounds, no snow effect):
+  14000 flakes in world-fixed cells wrapped around the eye (900 x 700 units), falling 50..90 u/s, each swaying, all
+  carried by a wind whose drift is integrated on the CPU (a slow-turning breeze with gusts up to ~175 u/s); only above
+  the first surface of the rain's top-down map, so none indoors or under overhangs. Soft round sprites lit by the
+  light probe at the eye (never below 0.65). Flake hashing uses an integer hash: the sin() hash of the rain repeats for
+  high particle numbers on the GPU and made columns of flakes.
+* r_om_war 1 (rate) on the r_om_aa_maps: a distant explosion every 3..9 s 4500..8500 units away (a fireball that
+  swells and cools, additive into the scene and bloom; the sky tinted orange for a moment); three or four fires on
+  the horizon (flickering glows) with smoke columns (an upright quad turned to the eye, widening and bent by the wind,
+  domain-warped fractal noise rolling upwards, the foot lit by the fire); ash drifting down (the snow pass, dark grey,
+  sparse). Each explosion is reported in r_om_war_boom ("number distance"); the client (cl_view.c CL_WarBoom_Frame)
+  synthesises three booms once (sound/om/boom0..2.wav: a low thump falling in pitch and a short rumble) and plays
+  them after distance / 1200 s from a queue (explosions come more often than the sound takes).
+* Cost: sib1 snow and kos2 war each under 0.3 ms (1080p, GTX 1050 Ti).
