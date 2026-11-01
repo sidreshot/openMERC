@@ -1954,6 +1954,9 @@ GL3_RenderView(refdef_t *fd)
 	// make sure all remaining batched 3D stuff is drawn
 	GL3_Draw3DBatchesNow();
 
+	/* GFX-modern: ambient occlusion of the finished opaque view (r_om_ssao) */
+	GL3_Post_SSAO();
+
 	/* GFX-modern: volumetric light beams in place of the painted Ghoul light cones */
 	GL3_Post_Beams();
 

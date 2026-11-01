@@ -1309,7 +1309,10 @@ DrawEntity(entity_t *e, int index)
 
 	if (e->flags & SOF_RF_GHOUL)
 	{
+		/* GFX-modern r_om_ssao: the view weapon is marked in the stencil and gets no occlusion */
+		GL3_Post_MarkWeapon((e->flags & SOF_RF_WEAPONMODEL) != 0);
 		DrawGhoulEntity(e, se);
+		GL3_Post_MarkWeapon(false);
 	}
 	else if (!e->model)
 	{

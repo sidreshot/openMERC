@@ -704,3 +704,29 @@ textures/*.m32 and ghoul/*.tga, mostly 4x, some 2x, aspect never changed).
   door texture stretched 4x.
 * Drawbacks: a mod that ships a deliberately different-size replacement keeps the retail scale
   (r_retexturing 0 restores old behaviour); one extra small read per texture load; more VRAM.
+
+## r_om_ssao: ambient occlusion (GTAO)
+
+gl3_post.c, section "r_om_ssao"; called from GL3_RenderView after the sorted pass, before the
+light beams and the composite (needs the post path, which r_om_ssao turns on by itself).
+
+* The finished depth is copied (texdepthcopy) and turned into view distance at half resolution
+  (R32F). GTAO (Jimenez 2016 / XeGTAO): per pixel 2-4 screen directions rotated by interleaved
+  gradient noise, 4-6 steps each way within r_om_ssao_radius world units (falloff over the last
+  61.5 %), horizon angles clamped to the hemisphere of the normal rebuilt from depth (smaller
+  depth step per axis), cosine-weighted visible arc. Origin moved off the surface by
+  0.004 * distance + 0.25 (24-bit depth steps at grazing angles were false occluders); samples
+  beyond the view edge do not occlude; fade out from 1500 to 2500 units.
+* Two depth-aware 9-tap blurs (RG16F: visibility, distance), then a depth-aware bilinear
+  upsample multiplies the scene colour (blend ZERO, SRC_COLOR) of the MSAA framebuffer, or of a
+  framebuffer holding only the scene texture without MSAA (the emissive texture is read).
+* Left alone: the view weapon (stencil bit 0x80 written while SOF_RF_WEAPONMODEL Ghoul entities
+  are drawn, the stencil is now cleared with the depth in GL3_Post_BeginView), the sky and far
+  pixels, light sources (visibility -> 1 by the emissive target's brightness x 4).
+* Cvars: r_om_ssao 1.5 (exponent of the visibility, 0 = off), r_om_ssao_radius 48,
+  r_om_ssao_quality 3 (1: 2x4, 2: 3x5, 3: 4x6 directions x steps), r_om_ssao_full 0 (1 = full
+  resolution), r_om_ssao_debug 1 (occlusion only). Not in GLES3 builds.
+* Cost (tsr1, 1080p, GTX 1050 Ti, timerefresh): about +1.6 ms at quality 3 (365 -> 230 fps).
+* Translucent effects in front of occluded places (smoke in a corner) are darkened with them:
+  SoF draws Ghoul models and translucent items in one sorted pass, so there is no point where
+  only the opaque view is finished.

@@ -39,6 +39,9 @@ static void VolFogShutdown(void);
 static qboolean BeamsWanted(void);
 static void BeamsBeginView(void);
 static void BeamShutdown(void);
+static qboolean SSAOWanted(void);
+static void SSAOShutdown(void);
+static qboolean ssaomark; /* r_om_ssao runs this view: the weapon is marked in the stencil */
 
 static struct
 {
@@ -897,6 +900,7 @@ GL3_Post_Shutdown(void)
 	if (P.vao) glDeleteVertexArrays(1, &P.vao);
 	VolFogShutdown();
 	BeamShutdown();
+	SSAOShutdown();
 
 	if ((gl3state.currentShaderProgram == P.progdown) || (gl3state.currentShaderProgram == P.progup) ||
 		(gl3state.currentShaderProgram == P.progcomp))
@@ -919,10 +923,11 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 {
 	static const float zero[4] = {0, 0, 0, 0};
 	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
-	qboolean bloom, soft, volfog, beams;
+	qboolean bloom, soft, volfog, beams, ssao;
 
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
 	P.bound = P.depthcopied = false;
+	ssaomark = false;
 	BeamsBeginView();
 
 	if (P.failed || !r_om_bloom || (r_newrefdef.rdflags & RDF_NOWORLDMODEL) || !gl3_worldmodel)
@@ -934,8 +939,9 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	soft = (r_om_softparticles->value != 0);
 	volfog = VolFogWanted() && !nv;
 	beams = BeamsWanted() && !nv;
+	ssao = SSAOWanted() && !nv;
 
-	if (!bloom && !soft && !volfog && !beams && !r_om_post_debug->value)
+	if (!bloom && !soft && !volfog && !beams && !ssao && !r_om_post_debug->value)
 	{
 		return false;
 	}
@@ -992,7 +998,9 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	{
 		float zfar = (gl3depthmin > gl3depthmax) ? 0.0f : 1.0f;
 
-		glClearBufferfv(GL_DEPTH, 0, &zfar);
+		/* stencil too: r_om_ssao marks the view weapon there */
+		glStencilMask(0xff);
+		glClearBufferfi(GL_DEPTH_STENCIL, 0, zfar, 0);
 	}
 
 	glClearBufferfv(GL_COLOR, 1, zero);
@@ -1007,6 +1015,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	gl3post.bloom = bloom || (r_om_post_debug->value != 0);
 	gl3post.soft = soft;
 	gl3post.volfog = volfog;
+	ssaomark = ssao;
 	return true;
 }
 
@@ -3052,4 +3061,543 @@ BeamShutdown(void)
 	free(B.flt);
 	free(B.tmp);
 	memset(&B, 0, sizeof(B));
+}
+
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_ssao: ambient occlusion of the view (GTAO). After the
+ * whole view is drawn (before the light beams and the composite), the
+ * final depth is copied and, at half resolution, each pixel's view-space
+ * position and normal are rebuilt from it. Four screen directions (rotated
+ * per pixel) are marched six steps each way within r_om_ssao_radius world
+ * units; the highest horizon on both sides of each slice gives the
+ * cosine-weighted visible arc around the normal (ground-truth AO, Jimenez
+ * et al. 2016 / XeGTAO). Two depth-aware blur passes remove the noise and
+ * a depth-aware upsample multiplies the scene by the result. The view
+ * weapon (marked in the stencil while it is drawn), the sky, far pixels and
+ * light sources (the emissive target) are left alone. r_om_ssao is the
+ * strength (exponent of the visibility, 0 = off), r_om_ssao_debug 1 shows
+ * the occlusion alone. Not in GLES3 builds (needs a float render target).
+ * ------------------------------------------------------------------ */
+
+static cvar_t *r_om_ssao, *r_om_ssao_radius, *r_om_ssao_debug, *r_om_ssao_full, *r_om_ssao_quality;
+
+static struct
+{
+	qboolean failed;
+	int w, h, vw, vh;
+	GLuint colortex;  /* scene texture the apply framebuffer was made for */
+	GLuint aotex[2], aofbo[2], applyfbo, lintex, linfbo;
+	GLuint proglin, progao, progblur, progapply;
+	GLint ln_depth, ln_rect, ln_proj;
+	GLint ao_lin, ao_rect, ao_proj2, ao_params, ao_quality;
+	GLint bl_tex, bl_rect, bl_step;
+	GLint ap_ao, ap_depth, ap_emis, ap_rect, ap_proj, ap_size, ap_params;
+} S;
+
+static const char *ssao_common =
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 proj;\n"     /* projection C, D; depth range min, max */
+	"float Dist(vec2 t)\n"
+	"{\n"
+	"	float z = texture(depthtex, t).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	return proj.y / (ndc + proj.x);\n"
+	"}\n";
+
+/* view distance at the occlusion resolution (one full-resolution sample per texel) */
+static const char *ssao_lin_fs =
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	outColor = vec4(Dist(uv), 0.0, 0.0, 1.0);\n"
+	"}\n";
+
+static const char *ssao_ao_fs =
+	"uniform sampler2D lintex;\n"
+	"uniform vec4 proj2;\n"    /* 1/P00, 1/P11, texel of lintex */
+	"uniform vec4 params;\n"   /* radius (units), texels per unit at distance 1, fade distance, max radius (texels) */
+	"uniform ivec2 quality;\n" /* directions, steps each way */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"const float PI = 3.14159265;\n"
+	"vec3 Pos(vec2 t)\n"
+	"{\n"
+	"	vec2 v = t * 2.0 - 1.0;\n"
+	"	float d = texture(lintex, t).r;\n"
+	"	return vec3(v.x * d * proj2.x, v.y * d * proj2.y, -d);\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	vec2 px = proj2.zw;\n"
+	"	vec2 uv = vuv;\n"
+	"	vec2 lo = px * 0.5, hi = vec2(1.0) - px * 0.5;\n"
+	"	vec3 P = Pos(uv);\n"
+	"	float d = -P.z;\n"
+	"	if (d > params.z || d <= 0.0)\n"
+	"	{\n"
+	"		outColor = vec4(1.0, d, 0.0, 1.0);\n"
+	"		return;\n"
+	"	}\n"
+	/* normal from the neighbours with the smaller depth step (no smearing across edges) */
+	"	vec3 Pr = Pos(uv + vec2(px.x, 0.0)), Pl = Pos(uv - vec2(px.x, 0.0));\n"
+	"	vec3 Pu = Pos(uv + vec2(0.0, px.y)), Pd = Pos(uv - vec2(0.0, px.y));\n"
+	"	vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
+	"	vec3 dy = abs(Pu.z - P.z) < abs(P.z - Pd.z) ? Pu - P : P - Pd;\n"
+	"	vec3 N = normalize(cross(dx, dy));\n"
+	"	vec3 V = normalize(-P);\n"
+	"	if (dot(N, V) < 0.0) N = -N;\n"
+	/* off the surface a little: depth steps of flat faces seen at a grazing angle are no occluders */
+	"	P += N * (d * 0.004 + 0.25);\n"
+	"	float rpx = min(params.x * params.y / d, params.w);\n"
+	"	if (rpx < 2.0)\n"
+	"	{\n"
+	"		outColor = vec4(1.0, d, 0.0, 1.0);\n"
+	"		return;\n"
+	"	}\n"
+	/* per-pixel rotation and step jitter (interleaved gradient noise) */
+	"	float n1 = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
+	"	float n2 = fract(n1 * 7.13 + 0.371);\n"
+	"	float frange = params.x * 0.615, ffrom = params.x - frange;\n"
+	"	float vis = 0.0;\n"
+	"	int DIRS = quality.x;\n"
+	"	int STEPS = quality.y;\n"
+	"	for (int i = 0; i < DIRS; i++)\n"
+	"	{\n"
+	"		float phi = (float(i) + n1) * PI / float(DIRS);\n"
+	"		vec2 dir = vec2(cos(phi), sin(phi));\n"
+	"		vec3 dv = vec3(dir, 0.0);\n"
+	"		vec3 ortho = dv - dot(dv, V) * V;\n"
+	"		vec3 axis = normalize(cross(ortho, V));\n"
+	"		vec3 pn = N - axis * dot(N, axis);\n"
+	"		float pl = length(pn);\n"
+	"		float cn = clamp(dot(pn, V) / max(pl, 1e-4), 0.0, 1.0);\n"
+	"		float n = sign(dot(ortho, pn)) * acos(cn);\n"
+	"		float low0 = cos(n + PI * 0.5), low1 = cos(n - PI * 0.5);\n"
+	"		float hc0 = low0, hc1 = low1;\n"
+	"		for (int s = 0; s < STEPS; s++)\n"
+	"		{\n"
+	"			float t = (float(s) + n2) / float(STEPS);\n"
+	"			vec2 o = dir * (t * t * rpx + 1.0) * px;\n"
+	"			vec2 ta = uv + o, tb = uv - o;\n"
+	"			vec3 a = Pos(clamp(ta, lo, hi)) - P;\n"
+	"			vec3 b = Pos(clamp(tb, lo, hi)) - P;\n"
+	"			float la = length(a), lb = length(b);\n"
+	/* samples beyond the view edge know nothing: no occlusion from them */
+	"			float wa = clamp((ffrom - la) / frange + 1.0, 0.0, 1.0) * float(ta == clamp(ta, lo, hi));\n"
+	"			float wb = clamp((ffrom - lb) / frange + 1.0, 0.0, 1.0) * float(tb == clamp(tb, lo, hi));\n"
+	"			hc0 = max(hc0, mix(low0, dot(a, V) / max(la, 1e-4), wa));\n"
+	"			hc1 = max(hc1, mix(low1, dot(b, V) / max(lb, 1e-4), wb));\n"
+	"		}\n"
+	"		float h0 = -acos(clamp(hc1, -1.0, 1.0)), h1 = acos(clamp(hc0, -1.0, 1.0));\n"
+	"		h0 = n + clamp(h0 - n, -PI * 0.5, PI * 0.5);\n"
+	"		h1 = n + clamp(h1 - n, -PI * 0.5, PI * 0.5);\n"
+	"		float sn = sin(n);\n"
+	"		vis += pl * ((cn + 2.0 * h0 * sn - cos(2.0 * h0 - n)) + (cn + 2.0 * h1 * sn - cos(2.0 * h1 - n))) * 0.25;\n"
+	"	}\n"
+	"	vis = clamp(vis / float(DIRS), 0.0, 1.0);\n"
+	"	vis = mix(vis, 1.0, clamp((d - params.z * 0.6) / (params.z * 0.4), 0.0, 1.0));\n"
+	"	outColor = vec4(vis, d, 0.0, 1.0);\n"
+	"}\n";
+
+static const char *ssao_blur_fs =
+	"uniform sampler2D tex;\n"
+	"uniform vec2 step;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec2 c = texture(tex, vuv).rg;\n"
+	"	float sum = c.r, ws = 1.0;\n"
+	"	for (int i = -4; i <= 4; i++)\n"
+	"	{\n"
+	"		if (i == 0) continue;\n"
+	"		vec2 s = texture(tex, vuv + step * float(i)).rg;\n"
+	"		float w = exp(-float(i * i) / 12.0) * exp(-abs(s.g - c.g) * 30.0 / max(c.g, 1.0));\n"
+	"		sum += s.r * w;\n"
+	"		ws += w;\n"
+	"	}\n"
+	"	outColor = vec4(sum / ws, c.g, 0.0, 1.0);\n"
+	"}\n";
+
+static const char *ssao_apply_fs =
+	"uniform sampler2D aotex;\n"
+	"uniform sampler2D emis;\n"
+	"uniform vec4 size;\n"     /* occlusion target width, height and texel */
+	"uniform vec4 params;\n"   /* strength, debug */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	float d = Dist(uv);\n"
+	"	vec2 p = vuv * size.xy - 0.5;\n"
+	"	vec2 f = fract(p), b = (floor(p) + 0.5) * size.zw;\n"
+	"	vec2 s00 = texture(aotex, b).rg, s10 = texture(aotex, b + vec2(size.z, 0.0)).rg;\n"
+	"	vec2 s01 = texture(aotex, b + vec2(0.0, size.w)).rg, s11 = texture(aotex, b + size.zw).rg;\n"
+	"	vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);\n"
+	"	float k = 25.0 / max(d, 1.0);\n"
+	"	w *= vec4(exp(-abs(s00.g - d) * k), exp(-abs(s10.g - d) * k), exp(-abs(s01.g - d) * k), exp(-abs(s11.g - d) * k));\n"
+	"	w += 1e-4;\n"
+	"	float ao = dot(w, vec4(s00.r, s10.r, s01.r, s11.r)) / dot(w, vec4(1.0));\n"
+	"	vec3 e = texture(emis, uv).rgb;\n"
+	"	ao = mix(ao, 1.0, clamp(max(e.r, max(e.g, e.b)) * 4.0, 0.0, 1.0));\n"
+	"	ao = pow(ao, params.x);\n"
+	"	outColor = vec4(vec3(ao), 1.0);\n"
+	"}\n";
+
+static qboolean
+SSAOWanted(void)
+{
+#ifdef YQ2_GL3_GLES3
+	return false;
+#else
+	if (!r_om_ssao)
+	{
+		r_om_ssao = ri.Cvar_Get("r_om_ssao", "1.5", CVAR_ARCHIVE);
+		r_om_ssao_radius = ri.Cvar_Get("r_om_ssao_radius", "48", CVAR_ARCHIVE);
+		r_om_ssao_debug = ri.Cvar_Get("r_om_ssao_debug", "0", 0);
+		r_om_ssao_full = ri.Cvar_Get("r_om_ssao_full", "0", CVAR_ARCHIVE);
+		r_om_ssao_quality = ri.Cvar_Get("r_om_ssao_quality", "3", CVAR_ARCHIVE);
+	}
+
+	return !S.failed && (r_om_ssao->value > 0);
+#endif
+}
+
+static GLuint
+SSAOLink(const char *a, const char *b)
+{
+	size_t la = strlen(a), lb = strlen(b);
+	char *src = malloc(la + lb + 1);
+	GLuint p;
+
+	if (!src)
+	{
+		return 0;
+	}
+
+	memcpy(src, a, la);
+	memcpy(src + la, b, lb + 1);
+	p = LinkPost(src);
+	free(src);
+	return p;
+}
+
+static qboolean
+SSAOPrograms(void)
+{
+	if (S.progapply)
+	{
+		return true;
+	}
+
+	S.proglin = SSAOLink(ssao_common, ssao_lin_fs);
+	S.progao = SSAOLink("", ssao_ao_fs);
+	S.progblur = SSAOLink("", ssao_blur_fs);
+	S.progapply = SSAOLink(ssao_common, ssao_apply_fs);
+
+	if (!S.proglin || !S.progao || !S.progblur || !S.progapply)
+	{
+		return false;
+	}
+
+	S.ln_depth = glGetUniformLocation(S.proglin, "depthtex");
+	S.ln_rect = glGetUniformLocation(S.proglin, "rect");
+	S.ln_proj = glGetUniformLocation(S.proglin, "proj");
+	S.ao_lin = glGetUniformLocation(S.progao, "lintex");
+	S.ao_rect = glGetUniformLocation(S.progao, "rect");
+	S.ao_quality = glGetUniformLocation(S.progao, "quality");
+	S.ao_proj2 = glGetUniformLocation(S.progao, "proj2");
+	S.ao_params = glGetUniformLocation(S.progao, "params");
+	S.bl_tex = glGetUniformLocation(S.progblur, "tex");
+	S.bl_rect = glGetUniformLocation(S.progblur, "rect");
+	S.bl_step = glGetUniformLocation(S.progblur, "step");
+	S.ap_ao = glGetUniformLocation(S.progapply, "aotex");
+	S.ap_depth = glGetUniformLocation(S.progapply, "depthtex");
+	S.ap_emis = glGetUniformLocation(S.progapply, "emis");
+	S.ap_rect = glGetUniformLocation(S.progapply, "rect");
+	S.ap_proj = glGetUniformLocation(S.progapply, "proj");
+	S.ap_size = glGetUniformLocation(S.progapply, "size");
+	S.ap_params = glGetUniformLocation(S.progapply, "params");
+	return true;
+}
+
+static void
+SSAODeleteTargets(void)
+{
+	if (S.aofbo[0]) glDeleteFramebuffers(2, S.aofbo);
+	if (S.aotex[0]) glDeleteTextures(2, S.aotex);
+	if (S.applyfbo) glDeleteFramebuffers(1, &S.applyfbo);
+	if (S.linfbo) glDeleteFramebuffers(1, &S.linfbo);
+	if (S.lintex) glDeleteTextures(1, &S.lintex);
+	S.aofbo[0] = S.aofbo[1] = S.aotex[0] = S.aotex[1] = S.applyfbo = S.linfbo = S.lintex = 0;
+	S.w = S.h = S.vw = S.vh = 0;
+	S.colortex = 0;
+}
+
+static qboolean
+SSAOTargets(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	int div = (r_om_ssao_full->value != 0) ? 1 : 2;
+	int w = Q_max(P.vw / div, 1), h = Q_max(P.vh / div, 1), i;
+
+	if (S.aotex[0] && (S.vw == P.vw) && (S.vh == P.vh) && (S.w == w) && (S.colortex == P.texcolor))
+	{
+		return true;
+	}
+
+	SSAODeleteTargets();
+
+	for (i = 0; i < 2; i++)
+	{
+		S.aotex[i] = NewTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, w, h, GL_NEAREST);
+		glGenFramebuffers(1, &S.aofbo[i]);
+		glBindFramebuffer(GL_FRAMEBUFFER, S.aofbo[i]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, S.aotex[i], 0);
+		glDrawBuffers(1, one);
+
+		if (!Complete("ssao"))
+		{
+			return false;
+		}
+	}
+
+	S.lintex = NewTexture(GL_R32F, GL_RED, GL_FLOAT, w, h, GL_NEAREST);
+	glGenFramebuffers(1, &S.linfbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, S.linfbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, S.lintex, 0);
+	glDrawBuffers(1, one);
+
+	if (!Complete("ssao depth"))
+	{
+		return false;
+	}
+
+	/* without MSAA the scene texture is drawn through a framebuffer of its own (the emissive
+	   texture of the scene framebuffer is read meanwhile); the stencil comes along for the weapon */
+	if (!P.samples)
+	{
+		glGenFramebuffers(1, &S.applyfbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, S.applyfbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, P.texcolor, 0);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, P.rbdepth);
+		glDrawBuffers(1, one);
+
+		if (!Complete("ssao apply"))
+		{
+			return false;
+		}
+	}
+
+	S.w = w;
+	S.h = h;
+	S.vw = P.vw;
+	S.vh = P.vh;
+	S.colortex = P.texcolor;
+	return true;
+}
+
+/* while the view weapon is drawn: stencil bit 0x80 marks its pixels */
+void
+GL3_Post_MarkWeapon(qboolean begin)
+{
+	if (!ssaomark || !P.bound)
+	{
+		return;
+	}
+
+	if (begin)
+	{
+		glEnable(GL_STENCIL_TEST);
+		glStencilFunc(GL_ALWAYS, 0x80, 0x80);
+		glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		glStencilMask(0x80);
+	}
+	else
+	{
+		glDisable(GL_STENCIL_TEST);
+		glStencilMask(0xff);
+	}
+}
+
+void
+GL3_Post_SSAO(void)
+{
+	static const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	float fw = (float)P.w, fh = (float)P.h, C, D, rect[4];
+	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
+	int dbg;
+
+	if (!P.bound || nv || !ssaomark || !SSAOWanted())
+	{
+		return;
+	}
+
+	if (!SSAOPrograms())
+	{
+		S.failed = true;
+		return;
+	}
+
+	if (!SSAOTargets())
+	{
+		SSAODeleteTargets();
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		S.failed = true;
+		return;
+	}
+
+	GL3_Draw3DBatchesNow();
+	GL3_FX_Flush();
+	dbg = (int)r_om_ssao_debug->value;
+
+	/* the finished depth (and, with MSAA, the emissive target) as textures */
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+
+	if (P.samples)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT1);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.resolvefbo[1]);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+	}
+
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glDisable(GL_SCISSOR_TEST);
+	glDepthMask(GL_FALSE);
+
+	C = gl3state.projMat3D.Elements[2][2];
+	D = gl3state.projMat3D.Elements[3][2];
+	rect[0] = P.vx / fw;
+	rect[1] = P.vy / fh;
+	rect[2] = P.vw / fw;
+	rect[3] = P.vh / fh;
+
+	/* view distance at the occlusion resolution */
+	glBindFramebuffer(GL_FRAMEBUFFER, S.linfbo);
+	glViewport(0, 0, S.w, S.h);
+	GL3_UseProgram(S.proglin);
+	glUniform1i(S.ln_depth, 0);
+	glUniform4fv(S.ln_rect, 1, rect);
+	glUniform4f(S.ln_proj, C, D, gl3depthmin, gl3depthmax);
+	BindTex(GL_TEXTURE0, P.texdepthcopy);
+	DrawQuad();
+
+	/* occlusion */
+	glBindFramebuffer(GL_FRAMEBUFFER, S.aofbo[0]);
+	GL3_UseProgram(S.progao);
+	glUniform1i(S.ao_lin, 0);
+	glUniform4f(S.ao_rect, 0, 0, 1, 1);
+	glUniform4f(S.ao_proj2, 1.0f / gl3state.projMat3D.Elements[0][0], 1.0f / gl3state.projMat3D.Elements[1][1],
+		1.0f / S.w, 1.0f / S.h);
+	glUniform4f(S.ao_params, Q_max(r_om_ssao_radius->value, 4.0f),
+		0.5f * S.w * gl3state.projMat3D.Elements[0][0], 2500.0f, 0.1f * S.h);
+	{
+		/* 1: 2 directions x 4 steps, 2: 3 x 5, 3: 4 x 6 */
+		int q = Q_max(1, Q_min((int)r_om_ssao_quality->value, 3));
+
+		glUniform2i(S.ao_quality, q + 1, q + 3);
+	}
+	BindTex(GL_TEXTURE0, S.lintex);
+	DrawQuad();
+
+	/* depth-aware blur, horizontal then vertical */
+	GL3_UseProgram(S.progblur);
+	glUniform1i(S.bl_tex, 0);
+	glUniform4f(S.bl_rect, 0, 0, 1, 1);
+	glBindFramebuffer(GL_FRAMEBUFFER, S.aofbo[1]);
+	BindTex(GL_TEXTURE0, S.aotex[0]);
+	glUniform2f(S.bl_step, 1.0f / S.w, 0.0f);
+	DrawQuad();
+	glBindFramebuffer(GL_FRAMEBUFFER, S.aofbo[0]);
+	BindTex(GL_TEXTURE0, S.aotex[1]);
+	glUniform2f(S.bl_step, 0.0f, 1.0f / S.h);
+	DrawQuad();
+
+	/* multiply the scene (not the weapon) */
+	if (P.samples)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		glDrawBuffers(1, one);
+	}
+	else
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, S.applyfbo);
+	}
+
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	GL3_UseProgram(S.progapply);
+	glUniform1i(S.ap_ao, 0);
+	glUniform1i(S.ap_depth, 1);
+	glUniform1i(S.ap_emis, 2);
+	glUniform4fv(S.ap_rect, 1, rect);
+	glUniform4f(S.ap_proj, C, D, gl3depthmin, gl3depthmax);
+	glUniform4f(S.ap_size, (float)S.w, (float)S.h, 1.0f / S.w, 1.0f / S.h);
+	glUniform4f(S.ap_params, Q_min(r_om_ssao->value, 4.0f), (float)dbg, 0, 0);
+	BindTex(GL_TEXTURE2, P.texemis);
+	BindTex(GL_TEXTURE1, P.texdepthcopy);
+	BindTex(GL_TEXTURE0, S.aotex[0]);
+
+	glEnable(GL_STENCIL_TEST);
+	glStencilFunc(GL_EQUAL, 0, 0x80);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+	glStencilMask(0);
+
+	if (!dbg)
+	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+	}
+
+	DrawQuad();
+
+	glDisable(GL_STENCIL_TEST);
+	glStencilMask(0xff);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+
+	/* back to the scene framebuffer for the rest of the view */
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	glDrawBuffers(2, bufs);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	gl3state.currentlightmap = -1;
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+}
+
+static void
+SSAOShutdown(void)
+{
+	SSAODeleteTargets();
+
+	if (S.proglin) glDeleteProgram(S.proglin);
+	if (S.progao) glDeleteProgram(S.progao);
+	if (S.progblur) glDeleteProgram(S.progblur);
+	if (S.progapply) glDeleteProgram(S.progapply);
+
+	if ((gl3state.currentShaderProgram == S.proglin) || (gl3state.currentShaderProgram == S.progao) ||
+		(gl3state.currentShaderProgram == S.progblur) ||
+		(gl3state.currentShaderProgram == S.progapply))
+	{
+		gl3state.currentShaderProgram = 0;
+	}
+
+	memset(&S, 0, sizeof(S));
 }

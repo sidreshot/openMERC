@@ -338,6 +338,8 @@ qboolean GL3_Post_BeginView(int x, int y, int w, int h);
 void GL3_Post_DepthCopy(void);
 qboolean GL3_Post_DepthReady(void);
 void GL3_Post_EndView(void);
+void GL3_Post_SSAO(void);
+void GL3_Post_MarkWeapon(qboolean begin);
 char *GL3_Post_WrapFragment(const char *src, const char *src2);
 void GL3_Post_BindOutputs(GLuint prog);
 float GL3_Post_SurfEmissive(const msurface_t *surf);
