@@ -720,6 +720,15 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
+			// OpenMerc GFX-modern r_om_ssr: reflectivity for the reflection pass (opaque faces: translucent ones
+			// keep the default and fade what is behind them); wet ground under the rain is darker
+			if(omTranslucent == 0)
+			{
+				float omWetK;
+				outMaterial = omMaterial(passWorldCoord, passNormal, omWetK);
+				outMaterial.rg *= omFogK;
+				outColor.rgb *= 1.0 - 0.25 * omWetK;
+			}
 		}
 );
 
@@ -832,6 +841,60 @@ static const char* fragmentSrcOmBump =
 	"		open = min(open, s * 0.25);\n"
 	"	}\n"
 	"	return omLtCol.rgb * omLt.w * (0.3 + 0.7 * ndl) * open;\n"
+	"}\n"
+	/* GFX-modern r_om_ssr: what the reflection pass (gl3_post.c) gets from a face: reflectivity and roughness by the
+	   SoF material class and how smooth the texture is (little fine detail = polished), floors more than walls;
+	   under the rain (the same top-down map as the lightning) open ground is wet, with puddles from a noise */
+	"uniform vec4 omSsr;\n"   /* x reflections on (0 = off), y rain wetness (0 = dry) */
+	"float omH2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n"
+	"float omVN(vec2 p)\n"
+	"{\n"
+	"	vec2 i = floor(p), f = fract(p);\n"
+	"	f = f * f * (3.0 - 2.0 * f);\n"
+	"	return mix(mix(omH2(i), omH2(i + vec2(1.0, 0.0)), f.x), mix(omH2(i + vec2(0.0, 1.0)), omH2(i + vec2(1.0)), f.x), f.y);\n"
+	"}\n"
+	"float omWet(vec3 wp, vec3 N)\n"
+	"{\n"
+	"	if (omSsr.y <= 0.0 || N.z < -0.3)\n"
+	"		return 0.0;\n"
+	"	vec4 oc = omLtOccVP * vec4(wp + N * 4.0, 1.0);\n"
+	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
+	"	if (any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))))\n"
+	"		return 0.0;\n"
+	"	float z = oc.z * 0.5 + 0.5, t = 2.0 / 1024.0, s = 0.0;\n"
+	"	for (int j = 0; j < 4; j++)\n"
+	"	{\n"
+	"		vec2 o = vec2((j & 1) == 0 ? -t : t, (j & 2) == 0 ? -t : t);\n"
+	"		s += 1.0 - smoothstep(0.0, 0.002, z - texture(omLtOcc, ou + o).r);\n"
+	"	}\n"
+	"	return s * 0.25 * omSsr.y;\n"
+	"}\n"
+	"vec4 omMaterial(vec3 wp, vec3 nrm, out float wet)\n"
+	"{\n"
+	"	wet = 0.0;\n"
+	"	if (omSsr.x <= 0.0 || omEmissive > 0.0)\n"
+	"		return vec4(0.0, 0.0, 0.0, 1.0);\n"
+	"	vec3 N = normalize(nrm);\n"
+	"	int mc = omEmissive < 0.0 ? int(-omEmissive + 0.5) : 0;\n"
+	"	float fl = smoothstep(0.6, 0.85, N.z);\n"
+	"	float det = abs(dot(texture(tex, passTexCoord).rgb - texture(tex, passTexCoord, 3.0).rgb, vec3(0.333)));\n"
+	"	float sm = 1.0 - smoothstep(0.04, 0.25, det);\n"
+	"	float r = 0.0, rough = 0.5;\n"
+	/* gl3_bump.c GL3_Bump_SurfClass: 1 stone, 2 wood, 3 metal, 4 glass, 5 pictures, 6 loose ground, 7 liquids */
+	"	if (mc == 3) { r = 0.16; rough = mix(0.5, 0.3, sm); }\n"
+	"	else if (mc == 4) { r = 0.45; rough = 0.03; }\n"
+	"	else if (mc == 7) { r = 0.4 * fl; rough = 0.06; }\n"
+	"	else if (mc == 2) { r = fl * 0.1 * mix(0.3, 1.0, sm); rough = mix(0.5, 0.25, sm); }\n"
+	"	else if (mc == 1 || mc == 0) { r = fl * 0.13 * mix(0.3, 1.0, sm); rough = mix(0.45, 0.15, sm); }\n"
+	"	wet = omWet(wp, N);\n"
+	"	if (wet > 0.0)\n"
+	"	{\n"
+	"		float pud = smoothstep(0.56, 0.6, omVN(wp.xy / 96.0) * 0.7 + omVN(wp.xy / 23.0) * 0.3) * fl;\n"
+	"		r = mix(r, max(r, mix(0.16, 0.5, pud) * fl), wet);\n"
+	"		rough = mix(rough, mix(0.3, 0.03, pud), wet);\n"
+	"		wet *= 0.6 + 0.4 * pud;\n"
+	"	}\n"
+	"	return vec4(r, r * rough, 0.0, 1.0);\n"
 	"}\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
@@ -1092,6 +1155,15 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
+			// OpenMerc GFX-modern r_om_ssr: reflectivity for the reflection pass (opaque faces: translucent ones
+			// keep the default and fade what is behind them); wet ground under the rain is darker
+			if(omTranslucent == 0)
+			{
+				float omWetK;
+				outMaterial = omMaterial(passWorldCoord, passNormal, omWetK);
+				outMaterial.rg *= omFogK;
+				outColor.rgb *= 1.0 - 0.25 * omWetK;
+			}
 		}
 );
 
@@ -2128,6 +2200,26 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 		GL3_SelectTMU(GL_TEXTURE12);
 		glBindTexture(GL_TEXTURE_2D, occtex);
 		GL3_SelectTMU(GL_TEXTURE0);
+	}
+}
+
+/* GFX-modern r_om_ssr: reflections on, rain wetness (gl3_post.c) */
+void GL3_SoF_SSRUniforms(const float *ssr)
+{
+	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		GLint loc;
+
+		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omSsr")) == -1)
+		{
+			continue;
+		}
+
+		GL3_UseProgram(si[i]->shaderProgram);
+		glUniform4fv(loc, 1, ssr);
 	}
 }
 

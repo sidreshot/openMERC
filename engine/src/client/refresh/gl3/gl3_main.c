@@ -1959,6 +1959,9 @@ GL3_RenderView(refdef_t *fd)
 	/* GFX-modern: ambient occlusion of the finished opaque view (r_om_ssao) */
 	GL3_Post_SSAO();
 
+	/* GFX-modern: screen-space reflections on reflective and wet faces (r_om_ssr) */
+	GL3_Post_SSR();
+
 	/* GFX-modern: rain, splashes and lightning (r_om_rain) */
 	GL3_Post_Weather();
 

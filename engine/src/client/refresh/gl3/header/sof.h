@@ -346,6 +346,10 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 void GL3_Post_MarkWeapon(qboolean begin);
 char *GL3_Post_WrapFragment(const char *src, const char *src2);
 void GL3_Post_BindOutputs(GLuint prog);
+void GL3_Post_SceneDrawBuffers(void);
+void GL3_Post_MaterialWrites(qboolean on);
+void GL3_Post_SSR(void);
+void GL3_SoF_SSRUniforms(const float *ssr);
 float GL3_Post_SurfEmissive(const msurface_t *surf);
 void GL3_Post_EmisForBlend(GLenum src, GLenum dst, qboolean blend, float glow, float out[4]);
 void GL3_Post_FxEmis(int blend, float out[4]);

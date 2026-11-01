@@ -436,9 +436,7 @@ GL3_Ghoul_LeaveFixedFunction(void)
 
 	if (gl3post.active)
 	{
-		static const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-
-		glDrawBuffers(2, both);
+		GL3_Post_SceneDrawBuffers();
 	}
 
 	/* the uniform blocks are bound to binding points, not to GL_UNIFORM_BUFFER; rebinding them is cheap */

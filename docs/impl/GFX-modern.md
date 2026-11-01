@@ -753,3 +753,39 @@ gl3_post.c. The scene target is RGBA16F (MSAA renderbuffer too); every wrapped 3
 * r_om_hdr_overbright (default 1) scales the lightmaps for headroom above white; above 1 the sky and unlit effects
   get darker by the compensation, so it is off by default. r_om_hdr_debug 1 prints the exposure every 30 frames.
 * Off with night vision and r_fullbright. About +0.3 ms (1080p, GTX 1050 Ti).
+
+## r_om_ssr: screen-space reflections, wet ground under the rain
+
+gl3_post.c, section "r_om_ssr"; material side in gl3_shaders.c (omMaterial, omWet, spliced into the lightmapped
+world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and the light beams.
+
+* Material target: a third colour attachment (RG8; MSAA renderbuffer + resolve framebuffer), made only while
+  r_om_ssr > 0. The fragment wrapper gives every 3D shader an outMaterial output defaulting to (0, 0, 0, a): opaque
+  models clear it, translucent surfaces and fog fade it with their alpha. The opaque lightmapped faces write
+  reflectivity and roughness x reflectivity (premultiplied, so blending keeps the ratio). Passes that modulate faces
+  already drawn (FX blends DST_COLOR: detail/environment textures, marks) are masked off with glColorMaski.
+* Reflectivity by GL3_Bump_SurfClass, which now has two more classes: 6 loose ground (sand, dirt, gravel, snow,
+  grass, hay, mud: none), 7 liquids (water, slime, blood, tar: 0.4 on floors). Stone/unknown floors 0.13, wood floors
+  0.1, scaled 0.3..1 by how smooth the texture is (difference of the texel and the texture at LOD bias 3); metal
+  0.16 everywhere, glass 0.45; walls and ceilings of stone and wood none.
+* Rain (r_om_rain active, top-down map valid): faces open to the sky (4 taps of the rain occlusion map, the point
+  moved 4 units off the face) are wet: floors 0.16, puddles 0.5 from two octaves of value noise (sharp edges),
+  roughness 0.3 / 0.03; the diffuse colour is darkened by up to 25 %. r_om_ssr_wet scales it.
+* Tracing at half size: position and normal rebuilt from the depth copy (shared with r_om_ssao when it ran), Schlick
+  towards grazing angles (at most 3x head-on, less on rough faces), perspective-correct march over the on-screen part
+  of the ray (16/24/40 steps by r_om_ssr_quality, quadratic spacing, interleaved-gradient jitter, thickness
+  max(4, 1.5 % of the distance) + the step), 5 bisection steps. Colour from the last finished frame: GL3_Post_EndView
+  blits the resolved scene to a half-size mipmapped RGBA16F texture, the hit is reprojected with last frame's
+  projection * view (no copy of the unfinished view: that copy cost about 0.8 ms with MSAA). LOD from roughness x
+  the way to the hit. Fades at the screen edges, at r_om_ssr_dist, for rays coming back at the eye.
+* Composite at full size over pixels whose full-size material is reflective, premultiplied (ONE,
+  ONE_MINUS_SRC_ALPHA): mirrors (reflectivity >= 0.45) replace the scene by the reflection, dry floors and metal
+  mostly add it (a dark wall reflected in a floor must not darken the lightmapped floor; a lamp makes it shine).
+  Mirror rays that hit nothing take the blurred colour where they leave the view (puddles were dark stains).
+* Cvars: r_om_ssr 1 (strength, 0 = off and no material target), r_om_ssr_wet 1, r_om_ssr_dist 1500,
+  r_om_ssr_quality 2, r_om_ssr_debug 1 (reflection weight), 2 (material target: red reflectivity x 3, green
+  roughness). Not in GLES3 builds (the shaders still declare the output).
+* Cost (arm1 street in the rain, 1080p, MSAA 2x, GTX 1050 Ti, r_om_gputime): about +1.8 ms (5.5 -> 7.3 ms):
+  0.6 the world shaders and the extra target, 0.6 tracing, the rest resolves, apply and the colour of the frame.
+* Screen-space limits: what is not on screen is not reflected; Ghoul models (cars) and brush faces drawn with the
+  FX shader write no reflectivity.

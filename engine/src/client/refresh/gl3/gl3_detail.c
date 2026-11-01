@@ -325,5 +325,6 @@ GL3_Detail_DrawPass(void)
 	}
 
 	GL3_FX_Flush();
+	GL3_Post_MaterialWrites(true);   /* GFX-modern r_om_ssr: the modulating blend turned it off */
 	numdetail = 0;
 }

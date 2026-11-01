@@ -26,6 +26,11 @@
 
 #define POST_MAXLEVELS 7
 
+#ifdef YQ2_GL3_GLES3
+/* GLES 3.0 has no per-buffer colour mask; r_om_ssr (the only user) is desktop only */
+#define glColorMaski(i, r, g, b, a) ((void)0)
+#endif
+
 gl3post_t gl3post;
 
 static cvar_t *r_om_bloom, *r_om_bloom_threshold, *r_om_bloom_intensity, *r_om_bloom_radius;
@@ -45,14 +50,19 @@ static void BeamShutdown(void);
 static qboolean SSAOWanted(void);
 static void SSAOShutdown(void);
 static qboolean ssaomark; /* r_om_ssao runs this view: the weapon is marked in the stencil */
+static qboolean SSRWanted(void);
+static void SSRShutdown(void);
+static void SSRKeepColour(void);
+static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
 
 static struct
 {
 	qboolean failed;
 	int w, h, samples;
-	GLuint fbo, resolvefbo[2], depthfbo;
-	GLuint rbcolor, rbemis, rbdepth;
-	GLuint texcolor, texemis, texdepthcopy;
+	GLuint fbo, resolvefbo[3], depthfbo;
+	GLuint rbcolor, rbemis, rbmat, rbdepth;
+	GLuint texcolor, texemis, texmat, texdepthcopy;
+	qboolean mat;           /* r_om_ssr: the targets have the material attachment (2) */
 
 	int nlevels, lw[POST_MAXLEVELS], lh[POST_MAXLEVELS];
 	int chainw, chainh;
@@ -74,6 +84,7 @@ static struct
 	GLint lum_tex, lum_rect, exp_lum, exp_prev, exp_params, exp_rect, exp_neutral;
 
 	qboolean bound, bloomthis, depthcopied;
+	qboolean depthfinal;    /* the depth copy holds the finished view (r_om_ssao made it) */
 	int vx, vy, vw, vh;
 } P;
 
@@ -262,13 +273,14 @@ GL3_Post_WrapFragment(const char *src, const char *src2)
 
 		*oc0 = '\0';
 		Append(&out, &ol, &oc, "layout(location = 1) out vec4 outEmissive;\n");
+		Append(&out, &ol, &oc, "layout(location = 2) out vec4 outMaterial;\n");
 		Append(&out, &ol, &oc, joined);
 		Append(&out, &ol, &oc, "layout(location = 0) out vec4 outColor;");
 		Append(&out, &ol, &oc, oc0 + strlen("out vec4 outColor;"));
 	}
 	(void)decl;
 #else
-	decl = "out vec4 outEmissive;\n";
+	decl = "out vec4 outEmissive;\nout vec4 outMaterial;\n";
 	Append(&out, &ol, &oc, decl);
 	Append(&out, &ol, &oc, joined);
 #endif
@@ -276,11 +288,14 @@ GL3_Post_WrapFragment(const char *src, const char *src2)
 	Append(&out, &ol, &oc,
 		"\nvoid main()\n{\n"
 		"\toutEmissive = vec4(0.0, 0.0, 0.0, -1.0);\n"
+		/* r_om_ssr: reflectivity, roughness x reflectivity (world shaders); nothing reflects by default */
+		"\toutMaterial = vec4(0.0, 0.0, 0.0, -1.0);\n"
 		"\tomMn();\n"
 		/* r_om_hdr: a float scene target does not clamp what the shader writes; alpha out of 0..1 or negative
 		   colour would break blending (an 8-bit target clamped them); colour above 1 is the HDR headroom */
 		"\toutColor = vec4(clamp(outColor.rgb, 0.0, 64.0), clamp(outColor.a, 0.0, 1.0));\n"
 		"\tif (outEmissive.a < 0.0) outEmissive = vec4(0.0, 0.0, 0.0, outColor.a);\n"
+		"\tif (outMaterial.a < 0.0) outMaterial = vec4(0.0, 0.0, 0.0, outColor.a);\n"
 		"}\n");
 
 	free(joined);
@@ -294,6 +309,7 @@ GL3_Post_BindOutputs(GLuint prog)
 #ifndef YQ2_GL3_GLES3
 	glBindFragDataLocation(prog, 0, "outColor");
 	glBindFragDataLocation(prog, 1, "outEmissive");
+	glBindFragDataLocation(prog, 2, "outMaterial");
 #else
 	(void)prog;
 #endif
@@ -745,13 +761,21 @@ DeleteTargets(void)
 	int i;
 
 	if (P.fbo) glDeleteFramebuffers(1, &P.fbo);
-	if (P.resolvefbo[0]) glDeleteFramebuffers(2, P.resolvefbo);
+	for (i = 0; i < 3; i++)
+	{
+		if (P.resolvefbo[i]) glDeleteFramebuffers(1, &P.resolvefbo[i]);
+		P.resolvefbo[i] = 0;
+	}
 	if (P.depthfbo) glDeleteFramebuffers(1, &P.depthfbo);
 	if (P.rbcolor) glDeleteRenderbuffers(1, &P.rbcolor);
 	if (P.rbemis) glDeleteRenderbuffers(1, &P.rbemis);
+	if (P.rbmat) glDeleteRenderbuffers(1, &P.rbmat);
 	if (P.rbdepth) glDeleteRenderbuffers(1, &P.rbdepth);
 	if (P.texcolor) glDeleteTextures(1, &P.texcolor);
 	if (P.texemis) glDeleteTextures(1, &P.texemis);
+	if (P.texmat) glDeleteTextures(1, &P.texmat);
+	P.rbmat = P.texmat = 0;
+	P.mat = false;
 	if (P.texdepthcopy) glDeleteTextures(1, &P.texdepthcopy);
 	if (P.lumfbo) glDeleteFramebuffers(1, &P.lumfbo);
 	if (P.lumtex) glDeleteTextures(1, &P.lumtex);
@@ -766,7 +790,7 @@ DeleteTargets(void)
 		P.levelfbo[i] = P.leveltex[i] = 0;
 	}
 
-	P.fbo = P.resolvefbo[0] = P.resolvefbo[1] = P.depthfbo = 0;
+	P.fbo = P.depthfbo = 0;
 	P.rbcolor = P.rbemis = P.rbdepth = 0;
 	P.texcolor = P.texemis = P.texdepthcopy = 0;
 	P.w = P.h = 0;
@@ -826,10 +850,34 @@ Complete(const char *what)
 	return true;
 }
 
+/* the draw buffers of the scene framebuffer (bound): scene, emissive and, for r_om_ssr, the material target */
+static void
+SceneBuffers(void)
+{
+	static const GLenum bufs[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+
+	glDrawBuffers(P.mat ? 3 : 2, bufs);
+}
+
+void
+GL3_Post_SceneDrawBuffers(void)
+{
+	SceneBuffers();
+}
+
+/* r_om_ssr: off while a pass modulates faces already drawn (their reflectivity stays) */
+void
+GL3_Post_MaterialWrites(qboolean on)
+{
+	if (P.bound && P.mat)
+	{
+		glColorMaski(2, on, on, on, on);
+	}
+}
+
 static qboolean
 CreateTargets(int w, int h)
 {
-	static const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
 	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
 	static const GLenum none[1] = {GL_NONE};
 	GLint samples = 0;
@@ -843,6 +891,12 @@ CreateTargets(int w, int h)
 	P.h = h;
 
 	P.hdr = HDRWanted();
+	P.mat = SSRWanted();
+
+	if (P.mat)
+	{
+		P.texmat = NewTexture(GL_RG8, GL_RG, GL_UNSIGNED_BYTE, w, h, GL_NEAREST);
+	}
 
 	if (P.hdr)
 	{
@@ -865,15 +919,26 @@ CreateTargets(int w, int h)
 		P.rbemis = NewRenderbuffer(GL_RGBA8, w, h, P.samples);
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, P.rbcolor);
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, P.rbemis);
+
+		if (P.mat)
+		{
+			P.rbmat = NewRenderbuffer(GL_RG8, w, h, P.samples);
+			glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_RENDERBUFFER, P.rbmat);
+		}
 	}
 	else
 	{
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, P.texcolor, 0);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, P.texemis, 0);
+
+		if (P.mat)
+		{
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, P.texmat, 0);
+		}
 	}
 
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, P.rbdepth);
-	glDrawBuffers(2, bufs);
+	SceneBuffers();
 
 	if (!Complete("scene"))
 	{
@@ -889,13 +954,12 @@ CreateTargets(int w, int h)
 	{
 		int i;
 
-		glGenFramebuffers(2, P.resolvefbo);
-
-		for (i = 0; i < 2; i++)
+		for (i = 0; i < (P.mat ? 3 : 2); i++)
 		{
+			glGenFramebuffers(1, &P.resolvefbo[i]);
 			glBindFramebuffer(GL_FRAMEBUFFER, P.resolvefbo[i]);
 			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-				i ? P.texemis : P.texcolor, 0);
+				(i == 2) ? P.texmat : i ? P.texemis : P.texcolor, 0);
 			glDrawBuffers(1, one);
 
 			if (!Complete("resolve"))
@@ -1078,6 +1142,7 @@ GL3_Post_Shutdown(void)
 	VolFogShutdown();
 	BeamShutdown();
 	SSAOShutdown();
+	SSRShutdown();
 
 	if ((gl3state.currentShaderProgram == P.progdown) || (gl3state.currentShaderProgram == P.progup) ||
 		(gl3state.currentShaderProgram == P.progcomp))
@@ -1103,7 +1168,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	qboolean bloom, soft, volfog, beams, ssao;
 
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
-	P.bound = P.depthcopied = false;
+	P.bound = P.depthcopied = P.depthfinal = false;
 	ssaomark = false;
 	BeamsBeginView();
 
@@ -1118,7 +1183,8 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	beams = BeamsWanted() && !nv;
 	ssao = SSAOWanted() && !nv;
 
-	if (!bloom && !soft && !volfog && !beams && !ssao && !HDRWanted() && !r_om_post_debug->value)
+	if (!bloom && !soft && !volfog && !beams && !ssao && !HDRWanted() && !(SSRWanted() && !nv) &&
+		!r_om_post_debug->value)
 	{
 		return false;
 	}
@@ -1134,7 +1200,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 		return false;
 	}
 
-	if ((P.w != vid.width) || (P.h != vid.height) || !P.fbo || (P.hdr != HDRWanted()))
+	if ((P.w != vid.width) || (P.h != vid.height) || !P.fbo || (P.hdr != HDRWanted()) || (P.mat != SSRWanted()))
 	{
 		if (!CreateTargets(vid.width, vid.height))
 		{
@@ -1181,6 +1247,12 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	}
 
 	glClearBufferfv(GL_COLOR, 1, zero);
+
+	if (P.mat)
+	{
+		glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glClearBufferfv(GL_COLOR, 2, zero);
+	}
 
 	P.bound = true;
 	P.bloomthis = bloom;
@@ -1402,6 +1474,14 @@ GL3_Post_EndView(void)
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
+	}
+
+	/* r_om_ssr: this view for the reflections of the next frame */
+	if (P.mat)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.samples ? P.resolvefbo[0] : P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+		SSRKeepColour();
 	}
 
 	if (P.bloomthis)
@@ -3748,6 +3828,31 @@ SSAOTargets(void)
 	return true;
 }
 
+/* view space -> world: the view matrix is a rotation and a translation, inverse = transposed rotation, -R^T t */
+static hmm_mat4
+ViewInverse(void)
+{
+	const hmm_mat4 *v = &gl3state.viewMat3D;
+	hmm_mat4 inv;
+	int r, c;
+
+	memset(&inv, 0, sizeof(inv));
+	for (c = 0; c < 3; c++)
+	{
+		for (r = 0; r < 3; r++)
+		{
+			inv.Elements[c][r] = v->Elements[r][c];
+		}
+	}
+	for (r = 0; r < 3; r++)
+	{
+		inv.Elements[3][r] = -(inv.Elements[0][r] * v->Elements[3][0] + inv.Elements[1][r] * v->Elements[3][1] +
+			inv.Elements[2][r] * v->Elements[3][2]);
+	}
+	inv.Elements[3][3] = 1.0f;
+	return inv;
+}
+
 /* while the view weapon is drawn: stencil bit 0x80 marks its pixels */
 void
 GL3_Post_MarkWeapon(qboolean begin)
@@ -3774,7 +3879,6 @@ GL3_Post_MarkWeapon(qboolean begin)
 void
 GL3_Post_SSAO(void)
 {
-	static const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
 	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
 	float fw = (float)P.w, fh = (float)P.h, C, D, rect[4];
 	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
@@ -3808,6 +3912,7 @@ GL3_Post_SSAO(void)
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
 	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
 		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	P.depthfinal = true;
 
 	if (P.samples)
 	{
@@ -3865,26 +3970,10 @@ GL3_Post_SSAO(void)
 
 	/* temporal accumulation into the next history texture: this view space -> last frame's clip space */
 	{
-		const hmm_mat4 *v = &gl3state.viewMat3D;
-		hmm_mat4 inv, reproj;
-		int next = S.histcur ^ 1, r, c;
+		hmm_mat4 reproj;
+		int next = S.histcur ^ 1;
 
-		/* the view matrix is a rotation and a translation: inverse = transposed rotation, -R^T t */
-		memset(&inv, 0, sizeof(inv));
-		for (c = 0; c < 3; c++)
-		{
-			for (r = 0; r < 3; r++)
-			{
-				inv.Elements[c][r] = v->Elements[r][c];
-			}
-		}
-		for (r = 0; r < 3; r++)
-		{
-			inv.Elements[3][r] = -(inv.Elements[0][r] * v->Elements[3][0] + inv.Elements[1][r] * v->Elements[3][1] +
-				inv.Elements[2][r] * v->Elements[3][2]);
-		}
-		inv.Elements[3][3] = 1.0f;
-		reproj = HMM_MultiplyMat4(S.prevpv, inv);
+		reproj = HMM_MultiplyMat4(S.prevpv, ViewInverse());
 
 		glBindFramebuffer(GL_FRAMEBUFFER, S.histfbo[next]);
 		GL3_UseProgram(S.progtemp);
@@ -3980,7 +4069,7 @@ GL3_Post_SSAO(void)
 
 	/* back to the scene framebuffer for the rest of the view */
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
-	glDrawBuffers(2, bufs);
+	SceneBuffers();
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 	gl3state.currentlightmap = -1;
 	GL3_SelectTMU(GL_TEXTURE7);
@@ -4275,6 +4364,20 @@ GL3_Post_WeatherFrame(void)
 	{
 		GL3_UseProgram(p);
 		glUniform4f(loc, tint * (0.95f + add), tint * (0.97f + add), tint + add, 0);
+	}
+
+	/* r_om_ssr: the world shaders write the material target; wet ground needs the top-down map */
+	{
+		qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
+		float ssr[4] = {0, 0, 0, 0};
+
+		if (SSRWanted() && !nv)
+		{
+			ssr[0] = 1;
+			ssr[1] = (WX.active && WX.occvalid) ? Q_max(0.0f, Q_min(r_om_ssr_wet->value, 1.0f)) : 0;
+		}
+
+		GL3_SoF_SSRUniforms(ssr);
 	}
 }
 
@@ -4840,8 +4943,8 @@ GL3_Post_Weather(void)
 	GL3_BindVAO(0);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDisable(GL_BLEND);
-	glDrawBuffers(2, bufs);
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	SceneBuffers();
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 	gl3state.currentlightmap = -1;
 	GL3_SelectTMU(GL_TEXTURE7);
@@ -4849,4 +4952,486 @@ GL3_Post_Weather(void)
 	GL3_SelectTMU(GL_TEXTURE0);
 	glDepthMask(GL_TRUE);
 	glEnable(GL_DEPTH_TEST);
+}
+
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_ssr: screen-space reflections. The lightmapped world
+ * shaders write a material target (attachment 2): reflectivity by the SoF
+ * surface material, floors more than walls, polished (little fine texture
+ * detail) more than rough, and wet ground with puddles under the rain
+ * (r_om_rain's top-down map); everything else writes 0, translucent
+ * surfaces and fog fade what is behind them. After the view (and its
+ * occlusion) each reflective pixel rebuilds its position and normal from
+ * the depth copy, marches the mirrored eye ray across the screen in
+ * perspective-correct steps (more of them near the start), refines the
+ * hit by bisection and takes its colour from the last finished frame
+ * (half size, mipmapped, reprojected; no copy of the unfinished view):
+ * rough surfaces read a higher level, the farther the hit the blurrier.
+ * Fresnel raises the reflection towards grazing angles; it fades at the
+ * screen edges, with the distance and for rays coming back at the eye.
+ * Tracing runs at half size; the result goes over the reflective pixels of
+ * the full-size target. Mirrors (puddles, glass, liquids) replace the scene
+ * by the reflection, dry floors and metal mostly add it (lamps shine on
+ * them). The modulating passes (detail textures, marks) keep the material
+ * target as it is (per-buffer colour mask).
+ * r_om_ssr strength (0 = off, also removes the material target),
+ * r_om_ssr_wet rain wetness, r_om_ssr_dist ray length in units,
+ * r_om_ssr_quality 1..3 (16 / 24 / 40 steps), r_om_ssr_debug 1 shows the
+ * reflection weight, 2 the material target. Not in GLES3 builds.
+ * ------------------------------------------------------------------ */
+
+static struct
+{
+	qboolean failed;
+	int cw, ch, vw, vh;
+	GLuint colortex;   /* scene texture the apply framebuffer was made for */
+	GLuint coltex, colfbo, applyfbo, reftex, reffbo;
+	qboolean havecol;  /* coltex holds the last frame (seen through prevpv) */
+	hmm_mat4 prevpv;
+	float frame;
+	GLuint prog, progapply;
+	GLint u_depth, u_mat, u_col, u_rect, u_proj, u_proj2, u_params, u_texel, u_frame, u_strength, u_reproj;
+	GLint a_ref, a_mat, a_rect;
+} SR;
+
+static const char *ssr_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform sampler2D mattex;\n"
+	"uniform sampler2D coltex;\n"   /* the last frame's view, half size, with mipmaps (0..1 = the view) */
+	"uniform mat4 reproj;\n"        /* this view space -> the last frame's clip space */
+	"uniform vec4 rect;\n"
+	"uniform vec4 proj;\n"          /* projection C, D; depth range min, max */
+	"uniform vec4 proj2;\n"         /* 1/P00, 1/P11, P00, P11 */
+	"uniform vec4 params;\n"        /* ray length, steps, far distance, debug */
+	"uniform vec4 texel;\n"         /* one pixel in view coordinates (x, y), colour copy height */
+	"uniform float frame;\n"
+	"uniform float strength;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"float Dist(vec2 v)\n"
+	"{\n"
+	"	float z = texture(depthtex, rect.xy + v * rect.zw).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	return proj.y / (ndc + proj.x);\n"
+	"}\n"
+	"vec3 Pos(vec2 v)\n"
+	"{\n"
+	"	float d = Dist(v);\n"
+	"	vec2 n = v * 2.0 - 1.0;\n"
+	"	return vec3(n.x * d * proj2.x, n.y * d * proj2.y, -d);\n"
+	"}\n"
+	"vec2 Proj(vec3 p) { return vec2(p.x * proj2.z, p.y * proj2.w) / -p.z * 0.5 + 0.5; }\n"
+	"void main()\n"
+	"{\n"
+	"	vec4 m = texture(mattex, uv);\n"
+	"	float refl = m.r;\n"
+	"	int dbg = int(params.w + 0.5);\n"
+	"	if (dbg == 2)\n"
+	"	{\n"
+	"		outColor = vec4(refl * 3.0, m.r > 0.003 ? m.g / m.r : 0.0, 0.0, 1.0);\n"
+	"		return;\n"
+	"	}\n"
+	"	if (refl < 0.003)\n"
+	"		discard;\n"
+	"	float rough = clamp(m.g / refl, 0.0, 1.0);\n"
+	"	vec3 P = Pos(vuv);\n"
+	"	float d = -P.z;\n"
+	"	if (d > params.z || d < 1.0)\n"
+	"		discard;\n"
+	/* normal from the neighbours with the smaller depth step (no smearing across edges) */
+	"	vec2 px = texel.xy;\n"
+	"	vec3 Pr = Pos(vuv + vec2(px.x, 0.0)), Pl = Pos(vuv - vec2(px.x, 0.0));\n"
+	"	vec3 Pu = Pos(vuv + vec2(0.0, px.y)), Pd = Pos(vuv - vec2(0.0, px.y));\n"
+	"	vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
+	"	vec3 dy = abs(Pu.z - P.z) < abs(P.z - Pd.z) ? Pu - P : P - Pd;\n"
+	"	vec3 N = normalize(cross(dx, dy));\n"
+	"	vec3 V = normalize(-P);\n"
+	"	if (dot(N, V) < 0.0) N = -N;\n"
+	"	vec3 R = normalize(reflect(-V, N));\n"
+	"	float ndv = clamp(dot(N, V), 0.0, 1.0);\n"
+	/* Schlick towards grazing angles, at most three times the head-on value, less on rough faces */
+	"	float k = refl + (min(0.85, refl * 3.0) - refl) * pow(1.0 - ndv, 5.0) * (1.0 - rough);\n"
+	"	vec3 P0 = P + N * (0.5 + d * 0.002);\n"
+	"	float len = params.x;\n"
+	"	if (R.z > 0.0) len = min(len, (-P0.z - 2.0) / R.z);\n"   /* stay in front of the eye */
+	"	if (len < 2.0)\n"
+	"		discard;\n"
+	"	vec3 E = P0 + R * len;\n"
+	"	vec2 s0 = Proj(P0), s1 = Proj(E), ds = s1 - s0;\n"
+	/* the part of the ray on the screen */
+	"	float tmax = 1.0;\n"
+	"	if (ds.x > 0.0) tmax = min(tmax, (1.0 - s0.x) / ds.x); else if (ds.x < 0.0) tmax = min(tmax, -s0.x / ds.x);\n"
+	"	if (ds.y > 0.0) tmax = min(tmax, (1.0 - s0.y) / ds.y); else if (ds.y < 0.0) tmax = min(tmax, -s0.y / ds.y);\n"
+	"	float lpx = length(ds / px) * tmax;\n"
+	"	if (lpx < 2.0)\n"
+	"		discard;\n"
+	"	float tmin = 1.5 / length(ds / px);\n"
+	"	float iz0 = 1.0 / P0.z, iz1 = 1.0 / E.z;\n"
+	"	int steps = int(params.y);\n"
+	"	float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + frame * 0.618034);\n"
+	"	float tp = 0.0, hit = -1.0, rdp = -P0.z;\n"
+	"	for (int i = 0; i < steps; i++)\n"
+	"	{\n"
+	"		float f = (float(i) + j) / float(steps);\n"
+	"		float t = max(tmax * f * f, tmin);\n"
+	"		float rd = -1.0 / mix(iz0, iz1, t);\n"
+	"		float sd = Dist(s0 + ds * t);\n"
+	"		float diff = rd - sd;\n"
+	"		if (diff > 0.0 && diff < max(4.0, sd * 0.015) + abs(rd - rdp))\n"
+	"		{\n"
+	"			hit = t;\n"
+	"			break;\n"
+	"		}\n"
+	"		tp = t;\n"
+	"		rdp = rd;\n"
+	"	}\n"
+	"	if (hit < 0.0)\n"
+	"	{\n"
+	/* no hit (the ray left the view or went into the sky): mirrors take the blurred colour where it left, else a
+	   puddle would show as a dark stain; the rest keeps the scene */
+	"		if (refl < 0.2 || dbg != 0)\n"
+	"			discard;\n"
+	"		vec3 c = textureLod(coltex, clamp(s0 + ds * tmax, 0.0, 1.0), 4.0).rgb;\n"
+	"		float w = clamp(k * strength * 0.7 * (1.0 - smoothstep(0.35, 0.9, R.z)), 0.0, 0.85);\n"
+	"		outColor = vec4(c * w, w * smoothstep(0.15, 0.45, refl));\n"
+	"		return;\n"
+	"	}\n"
+	"	float a = tp, b = hit;\n"
+	"	for (int i = 0; i < 5; i++)\n"
+	"	{\n"
+	"		float mid = (a + b) * 0.5;\n"
+	"		if (-1.0 / mix(iz0, iz1, mid) > Dist(s0 + ds * mid)) b = mid; else a = mid;\n"
+	"	}\n"
+	"	vec2 sh = s0 + ds * b;\n"
+	"	vec3 H = Pos(sh);\n"
+	"	if (-H.z > params.z)\n"
+	"		discard;\n"   /* the sky */
+	"	float dist = length(H - P);\n"
+	/* the colour of the hit in the last frame */
+	"	vec4 pc = reproj * vec4(H, 1.0);\n"
+	"	vec2 su = pc.w > 0.0 ? pc.xy / pc.w * 0.5 + 0.5 : vec2(-1.0);\n"
+	"	vec2 e = min(min(sh, 1.0 - sh), min(su, 1.0 - su));\n"
+	"	float conf = smoothstep(0.0, 0.07, min(e.x, e.y));\n"
+	"	conf *= 1.0 - smoothstep(params.x * 0.6, params.x, dist);\n"
+	"	conf *= 1.0 - smoothstep(0.35, 0.9, R.z);\n"
+	/* glossy: the blur grows with the roughness and the way to the hit, seen at this pixel's distance */
+	"	float blur = rough * dist * proj2.w * texel.z / max(d, 1.0);\n"
+	"	vec3 c = textureLod(coltex, su, clamp(log2(1.0 + blur), rough * 3.0, 6.0)).rgb;\n"
+	"	float w = clamp(k * conf * strength, 0.0, 0.85);\n"
+	"	if (dbg == 1)\n"
+	"		outColor = vec4(vec3(w), 1.0);\n"
+	/* premultiplied (filtered up without dark fringes). Mirrors (puddles, glass) replace the scene by the reflection;
+	   dry floors and metal mostly add it, so bright lamps shine on them and dark walls don't darken them (their
+	   lightmap already holds what they receive) */
+	"	else\n"
+	"		outColor = vec4(c * w, w * smoothstep(0.15, 0.45, refl));\n"
+	"}\n";
+
+/* the half-size reflections over the scene, only on reflective pixels of the full-size material target */
+static const char *ssr_apply_fs =
+	"uniform sampler2D reftex;\n"
+	"uniform sampler2D mattex;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	if (texture(mattex, uv).r < 0.003)\n"
+	"		discard;\n"
+	"	vec4 r = texture(reftex, vuv);\n"
+	"	if (r.r + r.g + r.b + r.a <= 0.002)\n"
+	"		discard;\n"
+	"	outColor = r;\n"
+	"}\n";
+
+static qboolean
+SSRWanted(void)
+{
+#ifdef YQ2_GL3_GLES3
+	return false;
+#else
+	if (!r_om_ssr)
+	{
+		r_om_ssr = ri.Cvar_Get("r_om_ssr", "1", CVAR_ARCHIVE);
+		r_om_ssr_wet = ri.Cvar_Get("r_om_ssr_wet", "1", CVAR_ARCHIVE);
+		r_om_ssr_dist = ri.Cvar_Get("r_om_ssr_dist", "1500", CVAR_ARCHIVE);
+		r_om_ssr_quality = ri.Cvar_Get("r_om_ssr_quality", "2", CVAR_ARCHIVE);
+		r_om_ssr_debug = ri.Cvar_Get("r_om_ssr_debug", "0", 0);
+	}
+
+	return !SR.failed && (r_om_ssr->value > 0);
+#endif
+}
+
+static void
+SSRDeleteTargets(void)
+{
+	if (SR.colfbo) glDeleteFramebuffers(1, &SR.colfbo);
+	if (SR.coltex) glDeleteTextures(1, &SR.coltex);
+	if (SR.applyfbo) glDeleteFramebuffers(1, &SR.applyfbo);
+	if (SR.reffbo) glDeleteFramebuffers(1, &SR.reffbo);
+	if (SR.reftex) glDeleteTextures(1, &SR.reftex);
+	SR.colfbo = SR.coltex = SR.applyfbo = SR.reffbo = SR.reftex = 0;
+	SR.havecol = false;
+	SR.cw = SR.ch = SR.vw = SR.vh = 0;
+	SR.colortex = 0;
+}
+
+static qboolean
+SSRTargets(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	int w = Q_max(P.vw / 2, 1), h = Q_max(P.vh / 2, 1);
+
+	if (SR.coltex && (SR.vw == P.vw) && (SR.vh == P.vh) && (SR.colortex == P.texcolor))
+	{
+		return true;
+	}
+
+	SSRDeleteTargets();
+
+	SR.coltex = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glGenFramebuffers(1, &SR.colfbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, SR.colfbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, SR.coltex, 0);
+	glDrawBuffers(1, one);
+
+	if (!Complete("ssr colour"))
+	{
+		return false;
+	}
+
+	SR.reftex = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR);
+	glGenFramebuffers(1, &SR.reffbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, SR.reffbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, SR.reftex, 0);
+	glDrawBuffers(1, one);
+
+	if (!Complete("ssr reflections"))
+	{
+		return false;
+	}
+
+	/* without MSAA the scene texture is drawn through a framebuffer of its own (the material
+	   texture of the scene framebuffer is read meanwhile) */
+	if (!P.samples)
+	{
+		glGenFramebuffers(1, &SR.applyfbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, SR.applyfbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, P.texcolor, 0);
+		glDrawBuffers(1, one);
+
+		if (!Complete("ssr apply"))
+		{
+			return false;
+		}
+	}
+
+	SR.cw = w;
+	SR.ch = h;
+	SR.vw = P.vw;
+	SR.vh = P.vh;
+	SR.colortex = P.texcolor;
+	return true;
+}
+
+void
+GL3_Post_SSR(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	float fw = (float)P.w, fh = (float)P.h;
+	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
+	int dbg, q;
+
+	if (!P.bound || nv || !P.mat || !SSRWanted())
+	{
+		return;
+	}
+
+	if (!SR.prog)
+	{
+		SR.prog = LinkPost(ssr_fs);
+		SR.progapply = LinkPost(ssr_apply_fs);
+
+		if (!SR.prog || !SR.progapply)
+		{
+			SR.failed = true;
+			return;
+		}
+
+		SR.a_ref = glGetUniformLocation(SR.progapply, "reftex");
+		SR.a_mat = glGetUniformLocation(SR.progapply, "mattex");
+		SR.a_rect = glGetUniformLocation(SR.progapply, "rect");
+
+		SR.u_depth = glGetUniformLocation(SR.prog, "depthtex");
+		SR.u_mat = glGetUniformLocation(SR.prog, "mattex");
+		SR.u_col = glGetUniformLocation(SR.prog, "coltex");
+		SR.u_rect = glGetUniformLocation(SR.prog, "rect");
+		SR.u_proj = glGetUniformLocation(SR.prog, "proj");
+		SR.u_proj2 = glGetUniformLocation(SR.prog, "proj2");
+		SR.u_params = glGetUniformLocation(SR.prog, "params");
+		SR.u_texel = glGetUniformLocation(SR.prog, "texel");
+		SR.u_frame = glGetUniformLocation(SR.prog, "frame");
+		SR.u_strength = glGetUniformLocation(SR.prog, "strength");
+		SR.u_reproj = glGetUniformLocation(SR.prog, "reproj");
+	}
+
+	if (!SSRTargets())
+	{
+		SSRDeleteTargets();
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		SR.failed = true;
+		return;
+	}
+
+	GL3_Draw3DBatchesNow();
+	GL3_FX_Flush();
+	dbg = (int)r_om_ssr_debug->value;
+
+	if (!SR.havecol)
+	{
+		return; /* the colour of the last frame comes at the end of this one */
+	}
+
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glDisable(GL_SCISSOR_TEST);
+	glDepthMask(GL_FALSE);
+
+	/* the finished depth (unless r_om_ssao copied it) and the material target as textures; the scene colour is
+	   the last frame's (SSRKeepColour), reprojected: no copy of the unfinished view */
+	if (!P.depthfinal)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		P.depthfinal = true;
+	}
+
+	if (P.samples)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT2);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.resolvefbo[2]);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+	}
+
+	/* the reflections at half size (premultiplied colour, weight) */
+	{
+		static const float zero[4] = {0, 0, 0, 0};
+
+		glBindFramebuffer(GL_FRAMEBUFFER, SR.reffbo);
+		glViewport(0, 0, SR.cw, SR.ch);
+		glClearBufferfv(GL_COLOR, 0, zero);
+	}
+
+	GL3_UseProgram(SR.prog);
+	glUniform1i(SR.u_depth, 0);
+	glUniform1i(SR.u_mat, 1);
+	glUniform1i(SR.u_col, 2);
+	glUniform4f(SR.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	glUniform4f(SR.u_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+	glUniform4f(SR.u_proj2, 1.0f / gl3state.projMat3D.Elements[0][0], 1.0f / gl3state.projMat3D.Elements[1][1],
+		gl3state.projMat3D.Elements[0][0], gl3state.projMat3D.Elements[1][1]);
+	/* 1: 16 steps, 2: 24, 3: 40 */
+	q = Q_max(1, Q_min((int)r_om_ssr_quality->value, 3));
+	glUniform4f(SR.u_params, Q_max(r_om_ssr_dist->value, 64.0f), (float)(q == 1 ? 16 : q == 2 ? 24 : 40),
+		r_farclipdist->value * 0.98f, (float)dbg);
+	glUniform4f(SR.u_texel, 1.0f / P.vw, 1.0f / P.vh, (float)SR.ch, 0);
+	SR.frame = (SR.frame >= 1000.0f) ? 0.0f : SR.frame + 1.0f;
+	glUniform1f(SR.u_frame, SR.frame);
+	glUniform1f(SR.u_strength, Q_min(r_om_ssr->value, 4.0f));
+	{
+		hmm_mat4 reproj = HMM_MultiplyMat4(SR.prevpv, ViewInverse());
+
+		glUniformMatrix4fv(SR.u_reproj, 1, GL_FALSE, &reproj.Elements[0][0]);
+	}
+	BindTex(GL_TEXTURE2, SR.coltex);
+	BindTex(GL_TEXTURE1, P.texmat);
+	BindTex(GL_TEXTURE0, P.texdepthcopy);
+	DrawQuad();
+
+	/* over the scene */
+	if (P.samples)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		glDrawBuffers(1, one);
+	}
+	else
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, SR.applyfbo);
+	}
+
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	GL3_UseProgram(SR.progapply);
+	glUniform1i(SR.a_ref, 0);
+	glUniform1i(SR.a_mat, 1);
+	glUniform4f(SR.a_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	BindTex(GL_TEXTURE1, P.texmat);
+	BindTex(GL_TEXTURE0, SR.reftex);
+
+	if (!dbg)
+	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	}
+
+	DrawQuad();
+
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+
+	/* back to the scene framebuffer for the rest of the view */
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	SceneBuffers();
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	gl3state.currentlightmap = -1;
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+}
+
+/* GL3_Post_EndView, the scene resolved (read framebuffer bound, attachment 0): the finished view, half size and
+   mipmapped, for the reflections of the next frame */
+static void
+SSRKeepColour(void)
+{
+	if (!SR.coltex || !P.mat || (SR.vw != P.vw) || (SR.vh != P.vh) || !SSRWanted())
+	{
+		SR.havecol = false;
+		return;
+	}
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, SR.colfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, 0, 0, SR.cw, SR.ch, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	BindTex(GL_TEXTURE0, SR.coltex);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	SR.prevpv = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
+	SR.havecol = true;
+}
+
+static void
+SSRShutdown(void)
+{
+	SSRDeleteTargets();
+
+	if ((gl3state.currentShaderProgram == SR.prog) || (gl3state.currentShaderProgram == SR.progapply))
+	{
+		gl3state.currentShaderProgram = 0;
+	}
+
+	if (SR.prog) glDeleteProgram(SR.prog);
+	if (SR.progapply) glDeleteProgram(SR.progapply);
+
+	memset(&SR, 0, sizeof(SR));
 }

@@ -114,6 +114,9 @@ GL3_FX_DefaultState(gl3fxstate_t *st)
 static void
 ApplyBlend(int blend)
 {
+	/* GFX-modern r_om_ssr: modulating passes (detail, marks) keep the reflectivity of the faces below */
+	GL3_Post_MaterialWrites((blend != 4) && (blend != 5));
+
 	switch (blend)
 	{
 		case 0:
