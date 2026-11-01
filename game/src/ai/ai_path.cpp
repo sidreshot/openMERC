@@ -108,6 +108,53 @@ public:
 			gi.dprintf("waiting: time %f\n", Now());
 	}
 
+	/* openMERC: the 50-unit arrival is taken only when the way on to the next point is free; otherwise the corner is
+	   walked to (16 units). arm3: Sam, pushed aside at the door she had just opened, counted sam16 as reached at the
+	   jamb and walked into it on the diagonal to sam17 */
+	/* the character's box (above step height) can move straight from a to p */
+	static bool StraightOpenFrom(edict_t *ent, const vec3_t a, const vec3_t p)
+	{
+		vec3_t mn, end;
+		VectorCopy(ent->mins, mn);
+		mn[2] += 18; /* steps */
+		VectorCopy(p, end);
+		end[2] = a[2];
+		trace_t tr = gi.trace(a, mn, ent->maxs, end, ent, MASK_MONSTERSOLID);
+		return tr.fraction >= 1.0f && !tr.startsolid;
+	}
+
+	static bool StraightOpen(edict_t *ent, const vec3_t p) { return StraightOpenFrom(ent, ent->s.origin, p); }
+
+	/* openMERC: a straight line into a door jamb or a corner is replaced by a side step from where the goal is in
+	   sight (arm3: Sam, pushed back by her door-opening animation, aimed past the jamb at sam17) */
+	static void AroundCorner(edict_t *ent, vec3_t pt)
+	{
+		static const float offs[6] = {16, -16, 32, -32, 48, -48};
+		vec3_t d, perp, c;
+		if (StraightOpen(ent, pt))
+			return;
+		VectorSubtract(pt, ent->s.origin, d);
+		d[2] = 0;
+		if (VectorNormalize(d) == 0)
+			return;
+		VectorSet(perp, -d[1], d[0], 0);
+		for (int i = 0; i < 6; i++) {
+			VectorMA(ent->s.origin, offs[i], perp, c);
+			if (StraightOpen(ent, c) && StraightOpenFrom(ent, c, pt)) {
+				VectorCopy(c, pt);
+				return;
+			}
+		}
+	}
+
+	bool NextOpen(edict_t *ent)
+	{
+		edict_t *next = corner->target ? G_PickTarget(corner->target) : nullptr;
+		if (!next || next == corner)
+			return true;
+		return StraightOpen(ent, next->s.origin);
+	}
+
 	void Leave(edict_t *ent, AI *ai)
 	{
 		waiting = 0;
@@ -152,7 +199,8 @@ public:
 			ai->Alert(ent, target_time, target, target_pos);
 		if (PendingExecutable(ent) && ExecutePending(ent, ai))
 			return;
-		if (!waiting && !arrived && HDist2(corner->s.origin, ent->s.origin) <= 50.0f * 50.0f)
+		if (!waiting && !arrived && HDist2(corner->s.origin, ent->s.origin) <= 50.0f * 50.0f &&
+		    (HDist2(corner->s.origin, ent->s.origin) <= 16.0f * 16.0f || NextOpen(ent)))
 			Arrive(ent, ai);
 		if (ended)
 			return;
@@ -222,8 +270,12 @@ public:
 			/* path corners (kind 7) are walked to in a straight line (SPEC-710 C12 "towards the current corner";
 			 * black-box: irq1a `introknocker` walks t390 -> t391 -> t392 straight in the original, while the
 			 * navigation approach point sent it away east); combat points keep the navigation query */
-			if (kind == DK_PATH || !NavPoint(ent, ai, corner->s.origin, NAV_APPROACH, pt))
+			/* openMERC: a combat point in plain sight is walked to straight as well; the navigation approach point
+			   led arm3's Sam from the door she had opened into its jamb */
+			if (kind == DK_PATH || StraightOpen(ent, corner->s.origin) ||
+			    !NavPoint(ent, ai, corner->s.origin, NAV_APPROACH, pt))
 				VectorCopy(corner->s.origin, pt);
+			AroundCorner(ent, pt);
 			VectorSubtract(pt, ent->s.origin, dir);
 			dir[2] = 0;
 			float len = VectorNormalize(dir);

@@ -137,6 +137,24 @@ static void Cmd_OmFire_f(edict_t *ent)
 	gi.cprintf(ent, PRINT_HIGH, "omfire %s: %d used\n", gi.argv(1), n);
 }
 
+/* test aid: omboxents x0 y0 z0 x1 y1 z1 - the solid entities touching that box */
+static void Cmd_OmBoxEnts_f(edict_t *ent)
+{
+	if (!CheatsOK(ent) || gi.argc() < 7)
+		return;
+	vec3_t mn, mx;
+	for (int i = 0; i < 3; i++) {
+		mn[i] = (float)atof(gi.argv(1 + i));
+		mx[i] = (float)atof(gi.argv(4 + i));
+	}
+	edict_t *list[64];
+	int n = gi.BoxEdicts(mn, mx, list, 64, AREA_SOLID);
+	for (int i = 0; i < n; i++)
+		gi.cprintf(ent, PRINT_HIGH, "omboxents %d %s tn %s solid %d absmin %s absmax %s state %d\n",
+		           G_EdictNum(list[i]), list[i]->classname, list[i]->targetname ? list[i]->targetname : "-",
+		           (int)list[i]->solid, vtos(list[i]->absmin), vtos(list[i]->absmax), list[i]->moveinfo.state);
+}
+
 /* test aid: prints the nearest dead character (origin, solid, svflags, box) */
 static void Cmd_OmCorpse_f(edict_t *ent)
 {
@@ -144,6 +162,20 @@ static void Cmd_OmCorpse_f(edict_t *ent)
 		return;
 	edict_t *best = NULL;
 	float bd = 1e9f;
+	if (gi.argc() >= 2) {
+		/* omcorpse <targetname>: that entity instead (alive or not) */
+		const char *a = gi.argv(1);
+		if (a[0] == '#') {
+			int n = atoi(a + 1);
+			best = (n > 0 && n < globals.num_edicts && g_edicts[n].inuse) ? &g_edicts[n] : NULL;
+		} else
+			best = G_Find(NULL, FOFS(targetname), a);
+		if (best)
+			gi.cprintf(ent, PRINT_HIGH, "omcorpse %s at %s health %d solid %d absmin %s absmax %s state %d\n",
+			           best->classname, vtos(best->s.origin), best->health, (int)best->solid, vtos(best->absmin),
+			           vtos(best->absmax), best->moveinfo.state);
+		return;
+	}
 	for (int i = 1; i < globals.num_edicts; i++) {
 		edict_t *e = &g_edicts[i];
 		if (!e->inuse || e->client || !e->ai || e->health > 0)
@@ -534,6 +566,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_OmCorpse_f(ent);
 	else if (Q_stricmp(cmd, "omfire") == 0)
 		Cmd_OmFire_f(ent);
+	else if (Q_stricmp(cmd, "omboxents") == 0)
+		Cmd_OmBoxEnts_f(ent);
 	else if (Q_stricmp(cmd, "defaultweapons") == 0) {
 		if (CheatsOK(ent))
 			GM_DefaultWeapons(ent); /* G9: SPEC-790 the level's default weapons */
