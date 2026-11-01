@@ -52,6 +52,8 @@
 #include "header/cl_ghoul.h" /* I1c: the Ghoul client system */
 #include "header/cl_player.h" /* I1d: client side of the player module */
 
+void HUD_DamageTexture(int surface); /* cl_hud.c: renderer slot 0xa8 */
+
 /* ---------------------------------------------------------------------
  * protocol constants (SPEC-201, SPEC-202, SPEC-203)
  * --------------------------------------------------------------------- */
@@ -1962,8 +1964,15 @@ CL_SoF_ParseServerMessage(void)
 			}
 
 			case sofsvc_damagetexture:
-				SoF_Skip(3);
+			{
+				/* SPEC-201 s25: short surface (texinfo) index, byte stage; the renderer switches that
+				   texinfo to its damaged image (SPEC-002 slot 0xa8) */
+				int surface = MSG_ReadShort(&net_message);
+
+				MSG_ReadByte(&net_message);
+				HUD_DamageTexture(surface);
 				break;
+			}
 
 			case sofsvc_ghoulreliable:
 				SoF_ParseGhoul("reliable");

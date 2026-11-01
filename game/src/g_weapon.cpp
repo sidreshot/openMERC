@@ -560,7 +560,10 @@ static void FireBullet(edict_t *ent, int a, const vec3_t start_in, const vec3_t 
 	if (tr.fraction < 1.0f && !DM()) {
 		if (!tr.ent || !(tr.ent->client || (tr.ent->svflags & SVF_MONSTER))) {
 			bool door = tr.ent && tr.ent->classname && strstr(tr.ent->classname, "door");
-			ImpactTempEnt(6, tr, dir, attacks[a].imp, door ? 0 : 1);
+			// the hit surface takes 25 damage-texture points; TE 7 when it changed its damage stage (SPEC-771 C.2,
+			// vending machines, computer screens: issue #9)
+			bool stage = tr.surface && gix.damagetexture(tr.surface, 25) != 0;
+			ImpactTempEnt(stage ? 7 : 6, tr, dir, attacks[a].imp, door ? 0 : 1);
 			if (ent->client)
 				om_ai::ShotAtNotice(ent, start, tr.endpos); /* G2: "shot at me" notices (SPEC-710 E1) */
 		}
@@ -672,8 +675,10 @@ static void KnifeSlash(edict_t *ent, const vec3_t start, const vec3_t dir, int d
 	trace_t tr = gi.trace(back, NULL, NULL, end, ent, 0x60000b9);
 	if (tr.fraction == 1.0f || !tr.ent)
 		return;
-	if (!DM() && !(tr.ent->client || (tr.ent->svflags & SVF_MONSTER)))
-		ImpactTempEnt(6, tr, dir, 6, 2);
+	if (!DM() && !(tr.ent->client || (tr.ent->svflags & SVF_MONSTER))) {
+		bool stage = tr.surface && gix.damagetexture(tr.surface, 25) != 0;
+		ImpactTempEnt(stage ? 7 : 6, tr, dir, 6, 2);
+	}
 	if (tr.ent->takedamage) {
 		T_Damage(tr.ent, ent, ent, dir, tr.endpos, start, damage, 1, 0x400100, MOD_KNIFE_SLASH);
 		if (ent->client && !ent->client->pers.isbot && ent->client->inv &&

@@ -703,7 +703,7 @@ FX_FireLight(fx_run_t *r, const fx_eft_light_t *l)
 static void
 FX_FireDecal(fx_run_t *r, const fx_eft_decal_t *d)
 {
-	vec3_t dir, end;
+	vec3_t dir, start, end;
 	trace_t tr;
 	int hit;
 	fx_impact_t im;
@@ -723,8 +723,18 @@ FX_FireDecal(fx_run_t *r, const fx_eft_decal_t *d)
 			break;
 	}
 
+	/* the trace starts 2 units back: an origin on the surface itself (a game trace end point, rounded to
+	   1/8 unit on the wire) would start inside the brush and pass through it (issue #8) */
+	VectorMA(r->p.origin, -2, dir, start);
 	VectorMA(r->p.origin, 512, dir, end);
-	FX_Trace(r->p.origin, NULL, NULL, end, FXTR_SOLID, &tr, &hit);
+	FX_Trace(start, NULL, NULL, end, FXTR_SOLID, &tr, &hit);
+
+	if (hit && tr.startsolid)
+	{
+		/* the effect starts inside an entity's box - the blood pool under its own corpse
+		   (gore/bloodpool, issue #8): the decal goes on the world below it */
+		FX_Trace(start, NULL, NULL, end, FXTR_WORLD, &tr, &hit);
+	}
 
 	if ((tr.fraction >= 1.0f) || hit || tr.allsolid)
 	{
