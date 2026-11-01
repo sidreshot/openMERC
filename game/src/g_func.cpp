@@ -883,7 +883,9 @@ void door_use(edict_t *self, edict_t *other, edict_t *activator)
 static void door_direct_use(edict_t *self, edict_t *other, edict_t *activator)
 {
 	edict_t *master = (self->flags & FL_TEAMSLAVE) && self->teammaster ? self->teammaster : self;
-	if (master->targetname && !(master->spawnflags & DOOR_PLAYER_USABLE))
+	// SPEC-760 B5.7: the door that is used decides (no targetname, or 0x2000), not its team master - trn1's bomb
+	// wagon has two unnamed sliding doors in a team whose master is a hidden part named "door" that nothing fires
+	if (self->targetname && !(self->spawnflags & DOOR_PLAYER_USABLE))
 		return;
 	if (master->spawnflags & DOOR_LOCKED)
 		return;
