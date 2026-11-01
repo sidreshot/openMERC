@@ -33,6 +33,8 @@ static cvar_t *r_om_bloom_surfscale, *r_om_bloom_ghoulmin, *r_om_bloom_fullbrigh
 static cvar_t *r_om_bloom_fromscene, *r_om_softparticles, *r_om_softparticles_dist;
 static cvar_t *r_om_softparticles_add, *r_om_post_debug, *r_om_gputime;
 static cvar_t *r_om_overbright, *r_om_overbright_scale, *r_om_overbright_models;
+static cvar_t *r_om_hdr, *r_om_hdr_key, *r_om_hdr_adapt, *r_om_hdr_min, *r_om_hdr_max, *r_om_hdr_saturation;
+static cvar_t *r_om_hdr_overbright, *r_om_hdr_debug, *r_om_hdr_adapt_strength;
 
 static qboolean VolFogWanted(void);
 static void VolFogShutdown(void);
@@ -60,6 +62,15 @@ static struct
 	GLint down_tex, down_rect, down_half, down_mode, down_knee, down_clamp;
 	GLint up_tex, up_rect, up_half;
 	GLint comp_scene, comp_bloom, comp_emis, comp_rect, comp_intensity, comp_mode;
+	GLint comp_hdr, comp_exp, comp_sat;
+
+	/* r_om_hdr: float scene, log luminance with mipmaps, exposure adapted over time (1x1 ping-pong) */
+	qboolean hdr;           /* the targets were made with a float scene */
+	GLuint lumtex, lumfbo, exptex[2], expfbo[2];
+	int expcur;
+	float exptime;
+	GLuint proglum, progexp;
+	GLint lum_tex, lum_rect, exp_lum, exp_prev, exp_params, exp_rect, exp_neutral;
 
 	qboolean bound, bloomthis, depthcopied;
 	int vx, vy, vw, vh;
@@ -265,6 +276,9 @@ GL3_Post_WrapFragment(const char *src, const char *src2)
 		"\nvoid main()\n{\n"
 		"\toutEmissive = vec4(0.0, 0.0, 0.0, -1.0);\n"
 		"\tomMn();\n"
+		/* r_om_hdr: a float scene target does not clamp what the shader writes; alpha out of 0..1 or negative
+		   colour would break blending (an 8-bit target clamped them); colour above 1 is the HDR headroom */
+		"\toutColor = vec4(clamp(outColor.rgb, 0.0, 64.0), clamp(outColor.a, 0.0, 1.0));\n"
 		"\tif (outEmissive.a < 0.0) outEmissive = vec4(0.0, 0.0, 0.0, outColor.a);\n"
 		"}\n");
 
@@ -386,12 +400,35 @@ GL3_Post_FxEmis(int blend, float out[4])
  * SoF Buddy-style overbright (GFX-modern.md section 11, non-original option): the lightmap light is
  * multiplied after the colour table (1.0 = authentic, SPEC-410); the frame clamps the result
  */
+/* r_om_hdr: float scene target, exposure and filmic curve (not in GLES3 builds) */
+static qboolean
+HDRWanted(void)
+{
+#ifdef YQ2_GL3_GLES3
+	return false;
+#else
+	return r_om_hdr && (r_om_hdr->value != 0);
+#endif
+}
+
 float
 GL3_Post_Overbright(void)
 {
 	float s;
 
-	if (!r_om_overbright || !r_om_overbright->value || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES))
+	if (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES)
+	{
+		return 1.0f;
+	}
+
+	/* r_om_hdr: the lightmaps get headroom above white, the filmic curve compresses it instead of clipping */
+	if (HDRWanted() && !P.failed && (r_fullbright->value == 0))
+	{
+		s = r_om_hdr_overbright->value;
+		return (s < 1.0f) ? 1.0f : ((s > 4.0f) ? 4.0f : s);
+	}
+
+	if (!r_om_overbright || !r_om_overbright->value)
 	{
 		return 1.0f;
 	}
@@ -510,11 +547,16 @@ static const char *post_comp_fs =
 	"uniform sampler2D scene;\n"
 	"uniform sampler2D bloom;\n"
 	"uniform sampler2D emis;\n"
+	"uniform sampler2D exptex;\n"
 	"uniform float intensity;\n"
 	"uniform int mode;\n"    /* 0 scene, 1 scene + bloom, 2 emissive target, 3 bloom only */
+	"uniform int hdr;\n"     /* r_om_hdr: exposure and the filmic curve */
+	"uniform float saturation;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
+	/* ACES filmic curve (Narkowicz fit): soft shoulder for the highlights, a little more contrast in the mids */
+	"vec3 Aces(vec3 x) { return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }\n"
 	"void main()\n"
 	"{\n"
 	"	vec3 c;\n"
@@ -524,8 +566,51 @@ static const char *post_comp_fs =
 	"	{\n"
 	"		c = texture(scene, uv).rgb;\n"
 	"		if (mode == 1) c += texture(bloom, vuv).rgb * intensity;\n"
+	"		if (hdr != 0)\n"
+	"		{\n"
+	/* the scene is display-encoded (the shaders applied vid_gamma): to linear, expose, curve, back */
+	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r;\n"
+	"			l = Aces(l);\n"
+	"			float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
+	"			l = max(mix(vec3(y), l, saturation), vec3(0.0));\n"
+	"			c = pow(l, vec3(1.0 / 2.2));\n"
+	"		}\n"
 	"	}\n"
 	"	outColor = vec4(c, 1.0);\n"
+	"}\n";
+
+/* r_om_hdr: log luminance of the view (linear), averaged by the mipmaps */
+static const char *post_lum_fs =
+	"uniform sampler2D tex;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec3 l = pow(max(texture(tex, uv).rgb, vec3(0.0)), vec3(2.2));\n"
+	/* the centre counts more (what one looks at), the edges less */
+	"	vec2 d = vuv - 0.5;\n"
+	"	float w = 1.0 - dot(d, d) * 1.6;\n"
+	"	outColor = vec4(log(max(dot(l, vec3(0.2126, 0.7152, 0.0722)), 1e-4)) * w, w, 0.0, 1.0);\n"
+	"}\n";
+
+/* r_om_hdr: the exposure this frame from the mean log luminance, eased towards over time */
+static const char *post_exp_fs =
+	"uniform sampler2D lum;\n"
+	"uniform sampler2D prev;\n"
+	"uniform vec4 params;\n"   /* key, ease factor (0..1), min, max of the adaptation */
+	"uniform vec2 neutral;\n"  /* exposure that keeps the original mid tones, adaptation strength */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec2 m = textureLod(lum, vec2(0.5), 16.0).rg;\n"
+	"	float avg = exp(m.x / max(m.y, 1e-4)) * neutral.x;\n"
+	/* gentle: dark places are lifted a little, bright ones brought down a little, the map's mood stays */
+	"	float target = neutral.x * clamp(pow(params.x / max(avg, 1e-5), neutral.y), params.z, params.w);\n"
+	"	float p = texture(prev, vec2(0.5)).r;\n"
+	"	outColor = vec4(p <= 0.0 ? target : mix(p, target, params.y), 0.0, 0.0, 1.0);\n"
 	"}\n";
 
 static GLuint
@@ -603,11 +688,24 @@ CreatePrograms(void)
 	P.progdown = LinkPost(post_down_fs);
 	P.progup = LinkPost(post_up_fs);
 	P.progcomp = LinkPost(post_comp_fs);
+	P.proglum = LinkPost(post_lum_fs);
+	P.progexp = LinkPost(post_exp_fs);
 
-	if (!P.progdown || !P.progup || !P.progcomp)
+	if (!P.progdown || !P.progup || !P.progcomp || !P.proglum || !P.progexp)
 	{
 		return false;
 	}
+
+	P.comp_hdr = glGetUniformLocation(P.progcomp, "hdr");
+	P.comp_exp = glGetUniformLocation(P.progcomp, "exptex");
+	P.comp_sat = glGetUniformLocation(P.progcomp, "saturation");
+	P.lum_tex = glGetUniformLocation(P.proglum, "tex");
+	P.lum_rect = glGetUniformLocation(P.proglum, "rect");
+	P.exp_lum = glGetUniformLocation(P.progexp, "lum");
+	P.exp_prev = glGetUniformLocation(P.progexp, "prev");
+	P.exp_params = glGetUniformLocation(P.progexp, "params");
+	P.exp_rect = glGetUniformLocation(P.progexp, "rect");
+	P.exp_neutral = glGetUniformLocation(P.progexp, "neutral");
 
 	P.down_tex = glGetUniformLocation(P.progdown, "tex");
 	P.down_rect = glGetUniformLocation(P.progdown, "rect");
@@ -643,6 +741,11 @@ DeleteTargets(void)
 	if (P.texcolor) glDeleteTextures(1, &P.texcolor);
 	if (P.texemis) glDeleteTextures(1, &P.texemis);
 	if (P.texdepthcopy) glDeleteTextures(1, &P.texdepthcopy);
+	if (P.lumfbo) glDeleteFramebuffers(1, &P.lumfbo);
+	if (P.lumtex) glDeleteTextures(1, &P.lumtex);
+	if (P.expfbo[0]) glDeleteFramebuffers(2, P.expfbo);
+	if (P.exptex[0]) glDeleteTextures(2, P.exptex);
+	P.lumfbo = P.lumtex = P.expfbo[0] = P.expfbo[1] = P.exptex[0] = P.exptex[1] = 0;
 
 	for (i = 0; i < POST_MAXLEVELS; i++)
 	{
@@ -727,7 +830,17 @@ CreateTargets(int w, int h)
 	P.w = w;
 	P.h = h;
 
-	P.texcolor = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
+	P.hdr = HDRWanted();
+
+	if (P.hdr)
+	{
+		P.texcolor = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR);
+	}
+	else
+	{
+		P.texcolor = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
+	}
+
 	P.texemis = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
 	P.rbdepth = NewRenderbuffer(GL_DEPTH24_STENCIL8, w, h, P.samples);
 
@@ -736,7 +849,7 @@ CreateTargets(int w, int h)
 
 	if (P.samples)
 	{
-		P.rbcolor = NewRenderbuffer(GL_RGBA8, w, h, P.samples);
+		P.rbcolor = NewRenderbuffer(P.hdr ? GL_RGBA16F : GL_RGBA8, w, h, P.samples);
 		P.rbemis = NewRenderbuffer(GL_RGBA8, w, h, P.samples);
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, P.rbcolor);
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, P.rbemis);
@@ -778,6 +891,44 @@ CreateTargets(int w, int h)
 				return false;
 			}
 		}
+	}
+
+	/* r_om_hdr: 64x64 log luminance with mipmaps, two 1x1 exposures */
+	if (P.hdr)
+	{
+		static const float zero[4] = {0, 0, 0, 0};
+		int i;
+
+		P.lumtex = NewTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, 64, 64, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glGenerateMipmap(GL_TEXTURE_2D);
+		glGenFramebuffers(1, &P.lumfbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, P.lumfbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, P.lumtex, 0);
+		glDrawBuffers(1, one);
+
+		if (!Complete("hdr luminance"))
+		{
+			return false;
+		}
+
+		for (i = 0; i < 2; i++)
+		{
+			P.exptex[i] = NewTexture(GL_R32F, GL_RED, GL_FLOAT, 1, 1, GL_NEAREST);
+			glGenFramebuffers(1, &P.expfbo[i]);
+			glBindFramebuffer(GL_FRAMEBUFFER, P.expfbo[i]);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, P.exptex[i], 0);
+			glDrawBuffers(1, one);
+
+			if (!Complete("hdr exposure"))
+			{
+				return false;
+			}
+
+			glClearBufferfv(GL_COLOR, 0, zero); /* 0 = take the first measurement as it is */
+		}
+
+		P.expcur = 0;
 	}
 
 	/* soft particles: depth copy */
@@ -884,6 +1035,15 @@ GL3_Post_Init(void)
 	r_om_overbright = ri.Cvar_Get("r_om_overbright", "0", CVAR_ARCHIVE);
 	r_om_overbright_scale = ri.Cvar_Get("r_om_overbright_scale", "2", CVAR_ARCHIVE);
 	r_om_overbright_models = ri.Cvar_Get("r_om_overbright_models", "1", CVAR_ARCHIVE);
+	r_om_hdr = ri.Cvar_Get("r_om_hdr", "1", CVAR_ARCHIVE);
+	r_om_hdr_key = ri.Cvar_Get("r_om_hdr_key", "0.1", CVAR_ARCHIVE);
+	r_om_hdr_adapt = ri.Cvar_Get("r_om_hdr_adapt", "1.5", CVAR_ARCHIVE);
+	r_om_hdr_adapt_strength = ri.Cvar_Get("r_om_hdr_adapt_strength", "0.35", CVAR_ARCHIVE);
+	r_om_hdr_min = ri.Cvar_Get("r_om_hdr_min", "0.7", CVAR_ARCHIVE);
+	r_om_hdr_max = ri.Cvar_Get("r_om_hdr_max", "1.6", CVAR_ARCHIVE);
+	r_om_hdr_saturation = ri.Cvar_Get("r_om_hdr_saturation", "1.1", CVAR_ARCHIVE);
+	r_om_hdr_overbright = ri.Cvar_Get("r_om_hdr_overbright", "1", CVAR_ARCHIVE);
+	r_om_hdr_debug = ri.Cvar_Get("r_om_hdr_debug", "0", 0);
 
 	memset(&P, 0, sizeof(P));
 	memset(&gl3post, 0, sizeof(gl3post));
@@ -897,6 +1057,8 @@ GL3_Post_Shutdown(void)
 	if (P.progdown) glDeleteProgram(P.progdown);
 	if (P.progup) glDeleteProgram(P.progup);
 	if (P.progcomp) glDeleteProgram(P.progcomp);
+	if (P.proglum) glDeleteProgram(P.proglum);
+	if (P.progexp) glDeleteProgram(P.progexp);
 	if (P.vao) glDeleteVertexArrays(1, &P.vao);
 	VolFogShutdown();
 	BeamShutdown();
@@ -941,7 +1103,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	beams = BeamsWanted() && !nv;
 	ssao = SSAOWanted() && !nv;
 
-	if (!bloom && !soft && !volfog && !beams && !ssao && !r_om_post_debug->value)
+	if (!bloom && !soft && !volfog && !beams && !ssao && !HDRWanted() && !r_om_post_debug->value)
 	{
 		return false;
 	}
@@ -957,7 +1119,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 		return false;
 	}
 
-	if ((P.w != vid.width) || (P.h != vid.height) || !P.fbo)
+	if ((P.w != vid.width) || (P.h != vid.height) || !P.fbo || (P.hdr != HDRWanted()))
 	{
 		if (!CreateTargets(vid.width, vid.height))
 		{
@@ -1127,12 +1289,68 @@ Bloom(void)
 	glDisable(GL_BLEND);
 }
 
+/* r_om_hdr: mean log luminance of the view, then the exposure eased towards key / mean */
+static void
+HDRExposure(void)
+{
+	float fw = (float)P.w, fh = (float)P.h, now = r_newrefdef.time, dt, ease;
+	int next = P.expcur ^ 1;
+
+	dt = now - P.exptime;
+	if ((dt < 0) || (dt > 0.5f))
+	{
+		dt = 0.5f;
+	}
+	P.exptime = now;
+	ease = 1.0f - expf(-dt * Q_max(r_om_hdr_adapt->value, 0.01f));
+
+	glDisable(GL_BLEND);
+	glBindFramebuffer(GL_FRAMEBUFFER, P.lumfbo);
+	glViewport(0, 0, 64, 64);
+	GL3_UseProgram(P.proglum);
+	glUniform1i(P.lum_tex, 0);
+	glUniform4f(P.lum_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	BindTex(GL_TEXTURE0, P.texcolor);
+	DrawQuad();
+	BindTex(GL_TEXTURE0, P.lumtex);
+	glGenerateMipmap(GL_TEXTURE_2D);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.expfbo[next]);
+	glViewport(0, 0, 1, 1);
+	GL3_UseProgram(P.progexp);
+	glUniform1i(P.exp_lum, 0);
+	glUniform1i(P.exp_prev, 1);
+	glUniform4f(P.exp_rect, 0, 0, 1, 1);
+	glUniform4f(P.exp_params, Q_max(r_om_hdr_key->value, 0.01f), ease, Q_max(r_om_hdr_min->value, 0.05f),
+		Q_max(r_om_hdr_max->value, r_om_hdr_min->value));
+	/* ACES(0.13) ~ 0.18: 0.72 keeps a mid grey; the lightmap headroom (overbright, display-encoded) is taken back */
+	glUniform2f(P.exp_neutral, 0.72f / powf(GL3_Post_Overbright(), 2.2f), Q_max(r_om_hdr_adapt_strength->value, 0.0f));
+	BindTex(GL_TEXTURE1, P.exptex[P.expcur]);
+	BindTex(GL_TEXTURE0, P.lumtex);
+	DrawQuad();
+	P.expcur = next;
+
+	if (r_om_hdr_debug->value)
+	{
+		static int frames;
+
+		if ((++frames % 30) == 0)
+		{
+			float e = 0;
+
+			glReadPixels(0, 0, 1, 1, GL_RED, GL_FLOAT, &e);
+			R_Printf(PRINT_ALL, "OMHDR exposure %.3f\n", e);
+		}
+	}
+}
+
 /* end of the 3D view: resolve, bloom and composite into the default framebuffer */
 void
 GL3_Post_EndView(void)
 {
 	float fw, fh;
 	int mode, dbg;
+	qboolean hdr;
 
 	if (!P.bound)
 	{
@@ -1173,6 +1391,13 @@ GL3_Post_EndView(void)
 		Bloom();
 	}
 
+	hdr = P.hdr && P.lumfbo && !(r_newrefdef.rdflags & SOF_RDF_IRGOGGLES) && (r_fullbright->value == 0);
+
+	if (hdr)
+	{
+		HDRExposure();
+	}
+
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 
@@ -1196,6 +1421,13 @@ GL3_Post_EndView(void)
 	glUniform4f(P.comp_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniform1f(P.comp_intensity, r_om_bloom_intensity->value * 2.0f / (float)Q_max(P.nlevels, 1));
 	glUniform1i(P.comp_mode, mode);
+	glUniform1i(P.comp_hdr, hdr ? 1 : 0);
+	glUniform1i(P.comp_exp, 3);
+	glUniform1f(P.comp_sat, r_om_hdr_saturation->value);
+	if (hdr)
+	{
+		BindTex(GL_TEXTURE3, P.exptex[P.expcur]);
+	}
 	BindTex(GL_TEXTURE2, P.texemis);
 	BindTex(GL_TEXTURE1, P.nlevels ? P.leveltex[0] : P.texemis);
 	BindTex(GL_TEXTURE0, P.texcolor);
@@ -3080,6 +3312,7 @@ BeamShutdown(void)
  * ------------------------------------------------------------------ */
 
 static cvar_t *r_om_ssao, *r_om_ssao_radius, *r_om_ssao_debug, *r_om_ssao_full, *r_om_ssao_quality;
+static cvar_t *r_om_ssao_temporal, *r_om_ssao_bounce;
 
 static struct
 {
@@ -3087,9 +3320,16 @@ static struct
 	int w, h, vw, vh;
 	GLuint colortex;  /* scene texture the apply framebuffer was made for */
 	GLuint aotex[2], aofbo[2], applyfbo, lintex, linfbo;
-	GLuint proglin, progao, progblur, progapply;
+	GLuint histtex[2], histfbo[2], coltex, colfbo;  /* temporal history (ping-pong), scene colour copy */
+	int histcur;
+	qboolean havehist;
+	hmm_mat4 prevpv;   /* projection * view of the last frame */
+	float frame;
+	GLuint proglin, progao, progblur, progapply, progtemp;
 	GLint ln_depth, ln_rect, ln_proj;
-	GLint ao_lin, ao_rect, ao_proj2, ao_params, ao_quality;
+	GLint ao_lin, ao_rect, ao_proj2, ao_params, ao_quality, ao_frame;
+	GLint tm_cur, tm_hist, tm_rect, tm_reproj, tm_proj2, tm_keep;
+	GLint ap_col, ap_bounce;
 	GLint bl_tex, bl_rect, bl_step;
 	GLint ap_ao, ap_depth, ap_emis, ap_rect, ap_proj, ap_size, ap_params;
 } S;
@@ -3119,6 +3359,7 @@ static const char *ssao_ao_fs =
 	"uniform vec4 proj2;\n"    /* 1/P00, 1/P11, texel of lintex */
 	"uniform vec4 params;\n"   /* radius (units), texels per unit at distance 1, fade distance, max radius (texels) */
 	"uniform ivec2 quality;\n" /* directions, steps each way */
+	"uniform float frame;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -3158,7 +3399,8 @@ static const char *ssao_ao_fs =
 	"		return;\n"
 	"	}\n"
 	/* per-pixel rotation and step jitter (interleaved gradient noise) */
-	"	float n1 = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
+	/* the pattern moves every frame: the temporal pass averages the rotations */
+	"	float n1 = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + frame * 0.618034);\n"
 	"	float n2 = fract(n1 * 7.13 + 0.371);\n"
 	"	float frange = params.x * 0.615, ffrom = params.x - frange;\n"
 	"	float vis = 0.0;\n"
@@ -3226,6 +3468,8 @@ static const char *ssao_blur_fs =
 static const char *ssao_apply_fs =
 	"uniform sampler2D aotex;\n"
 	"uniform sampler2D emis;\n"
+	"uniform sampler2D col;\n"  /* the scene colour (a smaller copy) */
+	"uniform float bounce;\n"   /* multi-bounce amount (0 = plain occlusion) */
 	"uniform vec4 size;\n"     /* occlusion target width, height and texel */
 	"uniform vec4 params;\n"   /* strength, debug */
 	"in vec2 uv;\n"
@@ -3246,7 +3490,43 @@ static const char *ssao_apply_fs =
 	"	vec3 e = texture(emis, uv).rgb;\n"
 	"	ao = mix(ao, 1.0, clamp(max(e.r, max(e.g, e.b)) * 4.0, 0.0, 1.0));\n"
 	"	ao = pow(ao, params.x);\n"
-	"	outColor = vec4(vec3(ao), 1.0);\n"
+	/* multi-bounce (Jimenez 2016): light bounced inside the occluded corner lifts it by the surface colour;
+	   the albedo is guessed from the scene colour (its hue at a moderate brightness) */
+	"	vec3 c = texture(col, vuv).rgb;\n"
+	"	vec3 al = clamp(c / max(max(c.r, max(c.g, c.b)), 0.2) * 0.65, 0.0, 0.9) * bounce;\n"
+	"	vec3 a = 2.0404 * al - 0.3324, bb = -4.7951 * al + 0.6417, cc = 2.7552 * al + 0.6903;\n"
+	"	vec3 mb = max(vec3(ao), ((ao * a + bb) * ao + cc) * ao);\n"
+	"	outColor = vec4(mb, 1.0);\n"
+	"}\n";
+
+/* temporal accumulation: last frame's occlusion reprojected into this frame where the depth agrees */
+static const char *ssao_temp_fs =
+	"uniform sampler2D cur;\n"   /* this frame: visibility, distance */
+	"uniform sampler2D hist;\n"  /* the accumulated result of the last frame */
+	"uniform mat4 reproj;\n"     /* this frame's view space -> last frame's clip space */
+	"uniform vec4 proj2;\n"      /* 1/P00, 1/P11 */
+	"uniform float keep;\n"      /* weight of the history (0 = off) */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec2 c = texture(cur, vuv).rg;\n"
+	"	float d = c.g;\n"
+	"	vec2 v = vuv * 2.0 - 1.0;\n"
+	"	vec4 pc = reproj * vec4(v.x * d * proj2.x, v.y * d * proj2.y, -d, 1.0);\n"
+	"	float r = c.r;\n"
+	"	if (keep > 0.0 && pc.w > 0.0)\n"
+	"	{\n"
+	"		vec2 pu = pc.xy / pc.w * 0.5 + 0.5;\n"
+	"		if (all(greaterThan(pu, vec2(0.0))) && all(lessThan(pu, vec2(1.0))))\n"
+	"		{\n"
+	"			vec2 h = texture(hist, pu).rg;\n"
+	"			if (abs(h.g - pc.w) < 0.04 * pc.w + 1.0)\n"
+	"				r = mix(c.r, h.r, keep);\n"
+	"		}\n"
+	"	}\n"
+	"	outColor = vec4(r, d, 0.0, 1.0);\n"
 	"}\n";
 
 static qboolean
@@ -3262,6 +3542,8 @@ SSAOWanted(void)
 		r_om_ssao_debug = ri.Cvar_Get("r_om_ssao_debug", "0", 0);
 		r_om_ssao_full = ri.Cvar_Get("r_om_ssao_full", "0", CVAR_ARCHIVE);
 		r_om_ssao_quality = ri.Cvar_Get("r_om_ssao_quality", "3", CVAR_ARCHIVE);
+		r_om_ssao_temporal = ri.Cvar_Get("r_om_ssao_temporal", "0.85", CVAR_ARCHIVE);
+		r_om_ssao_bounce = ri.Cvar_Get("r_om_ssao_bounce", "0.6", CVAR_ARCHIVE);
 	}
 
 	return !S.failed && (r_om_ssao->value > 0);
@@ -3299,8 +3581,9 @@ SSAOPrograms(void)
 	S.progao = SSAOLink("", ssao_ao_fs);
 	S.progblur = SSAOLink("", ssao_blur_fs);
 	S.progapply = SSAOLink(ssao_common, ssao_apply_fs);
+	S.progtemp = SSAOLink("", ssao_temp_fs);
 
-	if (!S.proglin || !S.progao || !S.progblur || !S.progapply)
+	if (!S.proglin || !S.progao || !S.progblur || !S.progapply || !S.progtemp)
 	{
 		return false;
 	}
@@ -3323,6 +3606,15 @@ SSAOPrograms(void)
 	S.ap_proj = glGetUniformLocation(S.progapply, "proj");
 	S.ap_size = glGetUniformLocation(S.progapply, "size");
 	S.ap_params = glGetUniformLocation(S.progapply, "params");
+	S.ap_col = glGetUniformLocation(S.progapply, "col");
+	S.ap_bounce = glGetUniformLocation(S.progapply, "bounce");
+	S.ao_frame = glGetUniformLocation(S.progao, "frame");
+	S.tm_cur = glGetUniformLocation(S.progtemp, "cur");
+	S.tm_hist = glGetUniformLocation(S.progtemp, "hist");
+	S.tm_rect = glGetUniformLocation(S.progtemp, "rect");
+	S.tm_reproj = glGetUniformLocation(S.progtemp, "reproj");
+	S.tm_proj2 = glGetUniformLocation(S.progtemp, "proj2");
+	S.tm_keep = glGetUniformLocation(S.progtemp, "keep");
 	return true;
 }
 
@@ -3334,7 +3626,13 @@ SSAODeleteTargets(void)
 	if (S.applyfbo) glDeleteFramebuffers(1, &S.applyfbo);
 	if (S.linfbo) glDeleteFramebuffers(1, &S.linfbo);
 	if (S.lintex) glDeleteTextures(1, &S.lintex);
+	if (S.histfbo[0]) glDeleteFramebuffers(2, S.histfbo);
+	if (S.histtex[0]) glDeleteTextures(2, S.histtex);
+	if (S.colfbo) glDeleteFramebuffers(1, &S.colfbo);
+	if (S.coltex) glDeleteTextures(1, &S.coltex);
 	S.aofbo[0] = S.aofbo[1] = S.aotex[0] = S.aotex[1] = S.applyfbo = S.linfbo = S.lintex = 0;
+	S.histfbo[0] = S.histfbo[1] = S.histtex[0] = S.histtex[1] = S.colfbo = S.coltex = 0;
+	S.havehist = false;
 	S.w = S.h = S.vw = S.vh = 0;
 	S.colortex = 0;
 }
@@ -3365,6 +3663,31 @@ SSAOTargets(void)
 		{
 			return false;
 		}
+	}
+
+	for (i = 0; i < 2; i++)
+	{
+		S.histtex[i] = NewTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, w, h, GL_LINEAR);
+		glGenFramebuffers(1, &S.histfbo[i]);
+		glBindFramebuffer(GL_FRAMEBUFFER, S.histfbo[i]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, S.histtex[i], 0);
+		glDrawBuffers(1, one);
+
+		if (!Complete("ssao history"))
+		{
+			return false;
+		}
+	}
+
+	S.coltex = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
+	glGenFramebuffers(1, &S.colfbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, S.colfbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, S.coltex, 0);
+	glDrawBuffers(1, one);
+
+	if (!Complete("ssao colour"))
+	{
+		return false;
 	}
 
 	S.lintex = NewTexture(GL_R32F, GL_RED, GL_FLOAT, w, h, GL_NEAREST);
@@ -3512,21 +3835,80 @@ GL3_Post_SSAO(void)
 
 		glUniform2i(S.ao_quality, q + 1, q + 3);
 	}
+	S.frame = (S.frame >= 1000.0f) ? 0.0f : S.frame + 1.0f;
+	glUniform1f(S.ao_frame, S.frame);
 	BindTex(GL_TEXTURE0, S.lintex);
 	DrawQuad();
+
+	/* temporal accumulation into the next history texture: this view space -> last frame's clip space */
+	{
+		const hmm_mat4 *v = &gl3state.viewMat3D;
+		hmm_mat4 inv, reproj;
+		int next = S.histcur ^ 1, r, c;
+
+		/* the view matrix is a rotation and a translation: inverse = transposed rotation, -R^T t */
+		memset(&inv, 0, sizeof(inv));
+		for (c = 0; c < 3; c++)
+		{
+			for (r = 0; r < 3; r++)
+			{
+				inv.Elements[c][r] = v->Elements[r][c];
+			}
+		}
+		for (r = 0; r < 3; r++)
+		{
+			inv.Elements[3][r] = -(inv.Elements[0][r] * v->Elements[3][0] + inv.Elements[1][r] * v->Elements[3][1] +
+				inv.Elements[2][r] * v->Elements[3][2]);
+		}
+		inv.Elements[3][3] = 1.0f;
+		reproj = HMM_MultiplyMat4(S.prevpv, inv);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, S.histfbo[next]);
+		GL3_UseProgram(S.progtemp);
+		glUniform1i(S.tm_cur, 0);
+		glUniform1i(S.tm_hist, 1);
+		glUniform4f(S.tm_rect, 0, 0, 1, 1);
+		glUniformMatrix4fv(S.tm_reproj, 1, GL_FALSE, &reproj.Elements[0][0]);
+		glUniform4f(S.tm_proj2, 1.0f / gl3state.projMat3D.Elements[0][0], 1.0f / gl3state.projMat3D.Elements[1][1], 0, 0);
+		glUniform1f(S.tm_keep, S.havehist ? Q_max(0.0f, Q_min(r_om_ssao_temporal->value, 0.95f)) : 0.0f);
+		BindTex(GL_TEXTURE1, S.histtex[S.histcur]);
+		BindTex(GL_TEXTURE0, S.aotex[0]);
+		DrawQuad();
+		S.histcur = next;
+		S.havehist = true;
+		S.prevpv = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
+	}
 
 	/* depth-aware blur, horizontal then vertical */
 	GL3_UseProgram(S.progblur);
 	glUniform1i(S.bl_tex, 0);
 	glUniform4f(S.bl_rect, 0, 0, 1, 1);
 	glBindFramebuffer(GL_FRAMEBUFFER, S.aofbo[1]);
-	BindTex(GL_TEXTURE0, S.aotex[0]);
+	BindTex(GL_TEXTURE0, S.histtex[S.histcur]);
 	glUniform2f(S.bl_step, 1.0f / S.w, 0.0f);
 	DrawQuad();
 	glBindFramebuffer(GL_FRAMEBUFFER, S.aofbo[0]);
 	BindTex(GL_TEXTURE0, S.aotex[1]);
 	glUniform2f(S.bl_step, 0.0f, 1.0f / S.h);
 	DrawQuad();
+
+	/* a small copy of the scene colour for the multi-bounce tint (with MSAA resolved first) */
+	if (P.samples)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.resolvefbo[0]);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.resolvefbo[0]);
+	}
+	else
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+	}
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, S.colfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, 0, 0, S.w, S.h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 	/* multiply the scene (not the weapon) */
 	if (P.samples)
@@ -3548,6 +3930,9 @@ GL3_Post_SSAO(void)
 	glUniform4f(S.ap_proj, C, D, gl3depthmin, gl3depthmax);
 	glUniform4f(S.ap_size, (float)S.w, (float)S.h, 1.0f / S.w, 1.0f / S.h);
 	glUniform4f(S.ap_params, Q_min(r_om_ssao->value, 4.0f), (float)dbg, 0, 0);
+	glUniform1i(S.ap_col, 3);
+	glUniform1f(S.ap_bounce, Q_max(0.0f, Q_min(r_om_ssao_bounce->value, 1.5f)));
+	BindTex(GL_TEXTURE3, S.coltex);
 	BindTex(GL_TEXTURE2, P.texemis);
 	BindTex(GL_TEXTURE1, P.texdepthcopy);
 	BindTex(GL_TEXTURE0, S.aotex[0]);
@@ -3588,6 +3973,7 @@ SSAOShutdown(void)
 	SSAODeleteTargets();
 
 	if (S.proglin) glDeleteProgram(S.proglin);
+	if (S.progtemp) glDeleteProgram(S.progtemp);
 	if (S.progao) glDeleteProgram(S.progao);
 	if (S.progblur) glDeleteProgram(S.progblur);
 	if (S.progapply) glDeleteProgram(S.progapply);

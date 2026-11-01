@@ -733,3 +733,23 @@ light beams and the composite (needs the post path, which r_om_ssao turns on by 
 * Translucent effects in front of occluded places (smoke in a corner) are darkened with them:
   SoF draws Ghoul models and translucent items in one sorted pass, so there is no point where
   only the opaque view is finished.
+* Later additions: temporal accumulation (r_om_ssao_temporal 0.85: the noise rotation moves every frame, a
+  half-resolution pass reprojects last frame's result with last frame's projection * view and this view's rigid
+  inverse, keeps it where the reprojected distance agrees within 4 % + 1 unit) and multi-bounce (r_om_ssao_bounce
+  0.6: Jimenez 2016 polynomial per channel, albedo guessed from a half-resolution copy of the scene colour, its hue
+  at a moderate brightness). Cost now about +1.8 ms.
+
+## r_om_hdr: float scene, filmic curve, exposure
+
+gl3_post.c. The scene target is RGBA16F (MSAA renderbuffer too); every wrapped 3D fragment shader clamps its alpha to
+0..1 and its colour to 0..64 (an 8-bit target clamped them; out-of-range alpha would break blending).
+
+* Composite: scene (+ bloom) -> linear (pow 2.2, the shaders output display-encoded colour) -> x exposure -> ACES
+  filmic fit (Narkowicz) -> saturation r_om_hdr_saturation 1.1 -> pow 1/2.2.
+* Exposure: log luminance of the view into 64x64 RG16F (centre-weighted, weight in G), mipmapped to the mean;
+  a 1x1 R32F ping-pong eases towards neutral * clamp((r_om_hdr_key / mean)^r_om_hdr_adapt_strength, r_om_hdr_min,
+  r_om_hdr_max) at r_om_hdr_adapt per second. neutral = 0.72 / overbright^2.2 (ACES(0.13) ~ 0.18 keeps mid grey).
+  Defaults key 0.1, strength 0.35, min 0.7, max 1.6: dark places are lifted a little, the mood stays.
+* r_om_hdr_overbright (default 1) scales the lightmaps for headroom above white; above 1 the sky and unlit effects
+  get darker by the compensation, so it is off by default. r_om_hdr_debug 1 prints the exposure every 30 frames.
+* Off with night vision and r_fullbright. About +0.3 ms (1080p, GTX 1050 Ti).
