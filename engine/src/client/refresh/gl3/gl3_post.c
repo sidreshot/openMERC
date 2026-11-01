@@ -35,6 +35,7 @@ static cvar_t *r_om_softparticles_add, *r_om_post_debug, *r_om_gputime;
 static cvar_t *r_om_overbright, *r_om_overbright_scale, *r_om_overbright_models;
 static cvar_t *r_om_hdr, *r_om_hdr_key, *r_om_hdr_adapt, *r_om_hdr_min, *r_om_hdr_max, *r_om_hdr_saturation;
 static cvar_t *r_om_hdr_overbright, *r_om_hdr_debug, *r_om_hdr_adapt_strength;
+static cvar_t *r_om_hdr_curve, *r_om_hdr_shadows, *r_om_hdr_brightness;
 
 static qboolean VolFogWanted(void);
 static void VolFogShutdown(void);
@@ -62,7 +63,7 @@ static struct
 	GLint down_tex, down_rect, down_half, down_mode, down_knee, down_clamp;
 	GLint up_tex, up_rect, up_half;
 	GLint comp_scene, comp_bloom, comp_emis, comp_rect, comp_intensity, comp_mode;
-	GLint comp_hdr, comp_exp, comp_sat;
+	GLint comp_hdr, comp_exp, comp_sat, comp_grade;
 
 	/* r_om_hdr: float scene, log luminance with mipmaps, exposure adapted over time (1x1 ping-pong) */
 	qboolean hdr;           /* the targets were made with a float scene */
@@ -552,11 +553,20 @@ static const char *post_comp_fs =
 	"uniform int mode;\n"    /* 0 scene, 1 scene + bloom, 2 emissive target, 3 bloom only */
 	"uniform int hdr;\n"     /* r_om_hdr: exposure and the filmic curve */
 	"uniform float saturation;\n"
+	"uniform vec4 grade;\n"  /* curve (0 shoulder, 1 ACES), shadow gamma, brightness, - */
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
 	/* ACES filmic curve (Narkowicz fit): soft shoulder for the highlights, a little more contrast in the mids */
 	"vec3 Aces(vec3 x) { return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }\n"
+	/* shoulder only: unchanged up to 0.6 (linear), above it rolls off smoothly towards white (no darkened toe:
+	   ACES made the dark SoF maps about a third darker in the shadows) */
+	"vec3 Shoulder(vec3 x)\n"
+	"{\n"
+	"	const float T = 0.6;\n"
+	"	vec3 s = T + (1.0 - T) * (1.0 - exp(-(x - T) / (1.0 - T)));\n"
+	"	return mix(x, s, step(T, x));\n"
+	"}\n"
 	"void main()\n"
 	"{\n"
 	"	vec3 c;\n"
@@ -569,11 +579,12 @@ static const char *post_comp_fs =
 	"		if (hdr != 0)\n"
 	"		{\n"
 	/* the scene is display-encoded (the shaders applied vid_gamma): to linear, expose, curve, back */
-	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r;\n"
-	"			l = Aces(l);\n"
+	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r * grade.z;\n"
+	"			l = grade.x > 0.5 ? Aces(l) : Shoulder(l);\n"
 	"			float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
-	"			l = max(mix(vec3(y), l, saturation), vec3(0.0));\n"
-	"			c = pow(l, vec3(1.0 / 2.2));\n"
+	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
+	/* shadow gamma in display space: below 1 opens the dark tones, white stays white */
+	"			c = pow(pow(l, vec3(1.0 / 2.2)), vec3(grade.y));\n"
 	"		}\n"
 	"	}\n"
 	"	outColor = vec4(c, 1.0);\n"
@@ -699,6 +710,7 @@ CreatePrograms(void)
 	P.comp_hdr = glGetUniformLocation(P.progcomp, "hdr");
 	P.comp_exp = glGetUniformLocation(P.progcomp, "exptex");
 	P.comp_sat = glGetUniformLocation(P.progcomp, "saturation");
+	P.comp_grade = glGetUniformLocation(P.progcomp, "grade");
 	P.lum_tex = glGetUniformLocation(P.proglum, "tex");
 	P.lum_rect = glGetUniformLocation(P.proglum, "rect");
 	P.exp_lum = glGetUniformLocation(P.progexp, "lum");
@@ -1042,6 +1054,9 @@ GL3_Post_Init(void)
 	r_om_hdr_min = ri.Cvar_Get("r_om_hdr_min", "0.7", CVAR_ARCHIVE);
 	r_om_hdr_max = ri.Cvar_Get("r_om_hdr_max", "1.6", CVAR_ARCHIVE);
 	r_om_hdr_saturation = ri.Cvar_Get("r_om_hdr_saturation", "1.1", CVAR_ARCHIVE);
+	r_om_hdr_curve = ri.Cvar_Get("r_om_hdr_curve", "0", CVAR_ARCHIVE);
+	r_om_hdr_shadows = ri.Cvar_Get("r_om_hdr_shadows", "0.9", CVAR_ARCHIVE);
+	r_om_hdr_brightness = ri.Cvar_Get("r_om_hdr_brightness", "1.1", CVAR_ARCHIVE);
 	r_om_hdr_overbright = ri.Cvar_Get("r_om_hdr_overbright", "1", CVAR_ARCHIVE);
 	r_om_hdr_debug = ri.Cvar_Get("r_om_hdr_debug", "0", 0);
 
@@ -1324,7 +1339,10 @@ HDRExposure(void)
 	glUniform4f(P.exp_params, Q_max(r_om_hdr_key->value, 0.01f), ease, Q_max(r_om_hdr_min->value, 0.05f),
 		Q_max(r_om_hdr_max->value, r_om_hdr_min->value));
 	/* ACES(0.13) ~ 0.18: 0.72 keeps a mid grey; the lightmap headroom (overbright, display-encoded) is taken back */
-	glUniform2f(P.exp_neutral, 0.72f / powf(GL3_Post_Overbright(), 2.2f), Q_max(r_om_hdr_adapt_strength->value, 0.0f));
+	/* neutral keeps the original mid tones: 1 for the shoulder curve (unchanged below its knee), 0.72 for ACES
+	   (ACES(0.13) ~ 0.18); the lightmap headroom (overbright, display-encoded) is taken back */
+	glUniform2f(P.exp_neutral, (r_om_hdr_curve->value > 0.5f ? 0.72f : 1.0f) / powf(GL3_Post_Overbright(), 2.2f),
+		Q_max(r_om_hdr_adapt_strength->value, 0.0f));
 	BindTex(GL_TEXTURE1, P.exptex[P.expcur]);
 	BindTex(GL_TEXTURE0, P.lumtex);
 	DrawQuad();
@@ -1424,6 +1442,8 @@ GL3_Post_EndView(void)
 	glUniform1i(P.comp_hdr, hdr ? 1 : 0);
 	glUniform1i(P.comp_exp, 3);
 	glUniform1f(P.comp_sat, r_om_hdr_saturation->value);
+	glUniform4f(P.comp_grade, r_om_hdr_curve->value, Q_max(0.3f, Q_min(r_om_hdr_shadows->value, 2.0f)),
+		Q_max(0.1f, r_om_hdr_brightness->value), 0);
 	if (hdr)
 	{
 		BindTex(GL_TEXTURE3, P.exptex[P.expcur]);
