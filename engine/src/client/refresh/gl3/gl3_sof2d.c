@@ -1664,6 +1664,30 @@ GL3_SoF_ScreenShotFrame(void)
 	{
 		fclose(f);
 		Com_Printf("Wrote %s\n", path);
+
+		/* OpenMerc: where it was taken, beside it (sofNN.txt): the map and the omsetpos line that returns there */
+		if (gl3_worldmodel)
+		{
+			char txt[MAX_OSPATH + 8];
+			char *dot;
+			FILE *t;
+
+			Q_strlcpy(txt, path, sizeof(txt));
+			dot = strrchr(txt, '.');
+			if (dot)
+			{
+				*dot = 0;
+			}
+			Q_strlcat(txt, ".txt", sizeof(txt));
+			t = Q_fopen(txt, "w");
+			if (t)
+			{
+				fprintf(t, "map %s\nomsetpos %.0f %.0f %.0f %.0f %.0f\n", gl3_worldmodel->name,
+					r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2] - 22.0f,
+					r_newrefdef.viewangles[YAW], r_newrefdef.viewangles[PITCH]);
+				fclose(t);
+			}
+		}
 	}
 	else
 	{

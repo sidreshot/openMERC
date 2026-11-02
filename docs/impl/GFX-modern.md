@@ -1010,3 +1010,14 @@ correction away and put ours in its place".
   tsr1: 244 strips, jpn2: about 100.
 * r_om_seams 0 off, 2 paints the strips red (where they lie). Menu: Video > Effects. Cost: one small draw per
   visible strip within 2500 units.
+* Follow-up (owner: shutter panels got a soft band): also never between two textures of one material class. tsr1: 86
+  strips.
+
+### r_om_hdr and r_om_overbright (owner: "dark after the jpn2 elevator")
+
+* The lobby is dark in the map's own data (base light 3..18 of 255; the style-33 office lights come on further on, by a
+  trigger_once at y 1020), but r_om_hdr made it darker still: with r_om_hdr the lightmaps get headroom instead of the
+  menu's overbright, and r_om_overbright (scale 2 in the owner's config) was silently dropped - the HDR picture was
+  0.66 of the non-HDR one everywhere. The overbright now enters the neutral exposure (the adaptation measures the
+  brighter scene, the shoulder rolls off what passes white): the lobby 24.8 with HDR, 21.7 without.
+* Screenshots (gl3_sof2d.c): beside each sofNN.tga a sofNN.txt with the map and the omsetpos line of the view.

@@ -760,7 +760,7 @@ static const char *post_comp_fs =
 	"uniform int mode;\n"    /* 0 scene, 1 scene + bloom, 2 emissive target, 3 bloom only */
 	"uniform int hdr;\n"     /* r_om_hdr: exposure and the filmic curve */
 	"uniform float saturation;\n"
-	"uniform vec4 grade;\n"  /* curve (0 shoulder, 1 ACES), shadow gamma, brightness, - */
+	"uniform vec4 grade;\n"  /* curve (0 shoulder, 1 ACES), shadow gamma, brightness, r_om_overbright (linear) */
 	/* r_om_look (gl3_look.c): the picture graded in float instead of SoF's 8-bit colour table */
 	"uniform int look;\n"
 	"uniform vec4 look0;\n"  /* exposure (EV), toe, shoulder start, saturation */
@@ -805,7 +805,7 @@ static const char *post_comp_fs =
 	"vec3 Grade(vec3 c, float autoexp)\n"
 	"{\n"
 	/* the scene is display-encoded: to linear, exposure (auto by the look's share, look, menu brightness) */
-	"	vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * pow(autoexp, look4.z) * exp2(look0.x);\n"
+	"	vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * pow(autoexp, look4.z) * exp2(look0.x) * grade.w;\n"
 	/* split toning by luminance: cold shadows, warm light, luminance kept */
 	"	float y = Luma(l);\n"
 	"	float t = smoothstep(0.02, 0.35, pow(y, 1.0 / 2.2));\n"
@@ -843,7 +843,7 @@ static const char *post_comp_fs =
 	"		else if (hdr != 0)\n"
 	"		{\n"
 	/* the scene is display-encoded (the shaders applied vid_gamma): to linear, expose, curve, back */
-	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r * grade.z;\n"
+	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r * grade.z * grade.w;\n"
 	"			l = grade.x > 0.5 ? Aces(l) : Shoulder(l);\n"
 	"			float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
 	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
@@ -1669,7 +1669,11 @@ HDRExposure(void)
 	/* ACES(0.13) ~ 0.18: 0.72 keeps a mid grey; the lightmap headroom (overbright, display-encoded) is taken back */
 	/* neutral keeps the original mid tones: 1 for the shoulder curve (unchanged below its knee), 0.72 for ACES
 	   (ACES(0.13) ~ 0.18); the lightmap headroom (overbright, display-encoded) is taken back */
-	glUniform2f(P.exp_neutral, (r_om_hdr_curve->value > 0.5f ? 0.72f : 1.0f) / powf(GL3_Post_Overbright(), 2.2f),
+	/* r_om_overbright (the brighter light of the menu) is not in the lightmaps while r_om_hdr gives them headroom:
+	   it comes back as part of the neutral exposure, so the adaptation measures the brighter scene and the curve
+	   rolls off what it pushes past white */
+	glUniform2f(P.exp_neutral, (r_om_hdr_curve->value > 0.5f ? 0.72f : 1.0f) / powf(GL3_Post_Overbright(), 2.2f) *
+		((r_om_overbright && r_om_overbright->value) ? powf(Q_clamp(r_om_overbright_scale->value, 1.0f, 4.0f), 2.2f) : 1.0f),
 		Q_max(r_om_hdr_adapt_strength->value, 0.0f));
 	BindTex(GL_TEXTURE1, P.exptex[P.expcur]);
 	BindTex(GL_TEXTURE0, P.lumtex);
@@ -1778,8 +1782,12 @@ GL3_Post_EndView(void)
 	glUniform1i(P.comp_hdr, hdr ? 1 : 0);
 	glUniform1i(P.comp_exp, 3);
 	glUniform1f(P.comp_sat, r_om_hdr_saturation->value);
-	glUniform4f(P.comp_grade, r_om_hdr_curve->value, Q_max(0.3f, Q_min(r_om_hdr_shadows->value, 2.0f)),
-		Q_max(0.1f, r_om_hdr_brightness->value), 0);
+	{
+		float ob = 1.0f; /* (r_om_overbright is in the exposure, HDRExposure) */
+
+		glUniform4f(P.comp_grade, r_om_hdr_curve->value, Q_max(0.3f, Q_min(r_om_hdr_shadows->value, 2.0f)),
+			Q_max(0.1f, r_om_hdr_brightness->value), ob);
+	}
 	if (hdr)
 	{
 		BindTex(GL_TEXTURE3, P.exptex[P.expcur]);

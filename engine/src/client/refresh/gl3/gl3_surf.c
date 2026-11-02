@@ -494,7 +494,7 @@ GL3_DrawAlphaSurfaces(void)
  * styles (si3DlmSeam), blended by the shader (half at the seam, so both sides meet; raised texels and noise break
  * the line), colour only. Only between surface materials (stone, ground, damp, smooth concrete, tiles); never
  * pictures, glass, mirrors, metal, wood, fabric, trims, hidden alpha images or animated textures; never between
- * variants of one texture family (1_tile, 1_tile_graf3: fitted by the artist); only where the seam shows (the two
+ * variants of one texture family (1_tile, 1_tile_graf3: fitted by the artist) nor between two textures of one material class\n * (two shutter panels); only where the seam shows (the two
  * textures differ along it by more than a quarter of their brightness). r_om_seams 2 paints the strips red.
  */
 typedef struct
@@ -1005,7 +1005,7 @@ SeamBuild(void)
 		/* only a seam that shows: the variants of one surface (dirty tiles, tiles with graffiti, a frieze) were
 		   fitted to each other at their seams by the artist */
 		if ((a->texinfo->image == b->texinfo->image) || SeamFamily(a->texinfo->image->name, b->texinfo->image->name) ||
-			!SeamVisible(mod, a, b, i))
+			((int)(-GL3_Bump_SurfClass(a) + 0.5f) == (int)(-GL3_Bump_SurfClass(b) + 0.5f)) || !SeamVisible(mod, a, b, i))
 		{
 			continue;
 		}
