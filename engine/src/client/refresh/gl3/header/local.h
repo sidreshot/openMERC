@@ -556,6 +556,13 @@ extern void GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int 
 extern void GL3_Mat_Free(GLuint texnum);
 extern void GL3_Mat_Bind(GLuint texnum);
 extern void GL3_Mat_Frame(void);
+// gl3_look.c: colour grading of the picture (r_om_look)
+extern void GL3_FX_DrawGhoulMirrored(void); /* gl3_fx.c */
+extern void GL3_Look_Init(void);
+extern void GL3_Look_Shutdown(void);
+extern qboolean GL3_Look_Active(void);
+extern void GL3_Look_MapLoad(const char *name);
+extern void GL3_Look_Uniforms(GLuint prog, float time, float aspect);
 
 // gl3_draw.c
 extern void GL3_Draw_InitLocal(void);

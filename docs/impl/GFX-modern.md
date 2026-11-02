@@ -891,6 +891,33 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   Ghoul system (OM_BEAM_HINT param 2, ghoul_texture.cpp) and drawn into the bloom source only (scene colour and
   material masked): the bloom makes the halo. Without bloom (and on GLES) they are not drawn. 1 = the original sprites.
 
+## r_om_look: colour grading (gl3_look.c, looks/om_looks.txt)
+
+Owner: "gamma and colour filter: the atmosphere of The Darkness - gloom"; "do it properly, take the existing colour
+correction away and put ours in its place".
+
+* Before: SoF's colour table (vid_gamma, vid_brightness, vid_contrast; SPEC-413 §9) baked into every texture and
+  lightmap at load, in 8 bits (banding, restart per change), then r_om_hdr's exposure, shoulder, saturation and
+  shadow gamma. Now (r_om_look 1) the table is neutral (0, 0.5, 0.5) and the composite pass grades the linear scene
+  in float: auto exposure x the look's "adapt" share (dark rooms may stay dark) -> look exposure + r_om_hdr_brightness
+  + menu brightness (+0.3 EV per 0.1 above 0.5) -> split toning (shadow/highlight tints, luminance kept) -> saturation
+  (r_om_hdr_saturation x look) -> filmic curve (toe presses the blacks with mid grey fixed, shoulder) -> menu gamma
+  (v^(1-g)) and contrast (SoF's S power k) as the table had them -> brightness lift of lit dark tones (a plain offset
+  greyed every black) -> optional LUT (strip N*N x N, looks/neutral_lut.png to grade in an editor) -> vignette,
+  film grain stronger in the dark, dither.
+* Looks per map from looks/om_looks.txt ("look" and "map" lines, '*' patterns, loose copy overrides the pak,
+  r_om_looks_reload), r_om_look_preset forces one, r_om_look_strength (menu Colour: Gloom) blends from neutral. Neutral
+  matches the original picture on the measured views (mean brightness kos1 23.5 vs 24.0, tsr1 16.8 vs 16.6).
+  Looks: darkness (default), nyc (tsr, nyc, arm, trn), kosovo, desert (sud, irq), siberia, castle (ger).
+  r_om_look 0 brings the old table and HDR grade back (renderer restart).
+
+### Characters in mirrors
+
+* The mirror passes draw the Ghoul models too (characters, props and the player's whole body; not the view weapon),
+  with the winding turned round (glFrontFace CW); in a mirror image there are no ground shadows, no sun/beam casters
+  and no second painted light cone (gl3_ghoul_mirror). Verified in the tsr1 restroom: the player stands in the middle
+  mirror.
+
 ## Water reflections, anti-aircraft fire, distant storm
 
 * Liquids (gl3_liquid.c, drawn with the FX shader) write the material target through the new FX uniform omFxMat

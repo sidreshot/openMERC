@@ -685,7 +685,15 @@ GL3_Init(void)
 
 	/* SPEC-413 §1 step 10: image system with gl_modulate latched and the colour table */
 	gl3_modulate_latched = gl_modulate->value;
-	GL3_SoF_BuildColorTable(vid_gamma->value, vid_brightness->value, vid_contrast->value, 1.0f);
+	/* GFX-modern r_om_look: the picture is graded in float at the end of the view, the 8-bit table stays neutral */
+	if (GL3_Look_Active())
+	{
+		GL3_SoF_BuildColorTable(0.0f, 0.5f, 0.5f, 1.0f);
+	}
+	else
+	{
+		GL3_SoF_BuildColorTable(vid_gamma->value, vid_brightness->value, vid_contrast->value, 1.0f);
+	}
 	GL3_SoF_InitImages();
 
 	GL3_Scrap_Init();
@@ -706,6 +714,7 @@ GL3_Init(void)
 
 	GL3_CSM_Init(); /* GFX-modern: cascaded sun shadows */
 	GL3_Mat_Init(); /* GFX-modern: material classes (r_om_ssr) */
+	GL3_Look_Init(); /* GFX-modern: colour grading (r_om_look) */
 
 	GL3_Liquid_Init(); /* I4c: SPEC-413 §1 step 1, the warp table is halved at every start */
 
@@ -757,6 +766,7 @@ GL3_Shutdown(void)
 		GL3_Post_Shutdown();
 		GL3_CSM_Shutdown();
 		GL3_Mat_Shutdown();
+		GL3_Look_Shutdown();
 		GL3_ShutdownImages();
 		GL3_SurfShutdown();
 		GL3_Draw_ShutdownLocal();

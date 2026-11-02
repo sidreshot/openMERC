@@ -523,7 +523,15 @@ SoF_DamageTexture(int texinfo, int unused)
 static void
 SoF_SetColorCorrection(float gamma, float brightness, float contrast, float scale)
 {
-	GL3_SoF_BuildColorTable(gamma, brightness, contrast, scale);
+	/* GFX-modern r_om_look grades the picture instead: the table stays neutral (the scale is kept) */
+	if (GL3_Look_Active())
+	{
+		GL3_SoF_BuildColorTable(0.0f, 0.5f, 0.5f, scale);
+	}
+	else
+	{
+		GL3_SoF_BuildColorTable(gamma, brightness, contrast, scale);
+	}
 
 	if (gl3_ghoul)
 	{

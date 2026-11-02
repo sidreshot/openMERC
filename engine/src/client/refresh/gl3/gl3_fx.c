@@ -1324,6 +1324,30 @@ DrawGhoulEntity(entity_t *e, sofentity_t *se)
 	GL3_Ghoul_DrawEntity(e, se); /* I4b */
 }
 
+/* GFX-modern r_om_mirror: the Ghoul models of the view (characters, the player's own body, props) into the mirror image
+   being drawn; not the view weapon */
+void
+GL3_FX_DrawGhoulMirrored(void)
+{
+	int i;
+
+	for (i = 0; i < r_newrefdef.num_entities; i++)
+	{
+		entity_t *e = &r_newrefdef.entities[i];
+
+		if (!(e->flags & SOF_RF_GHOUL) || (e->flags & SOF_RF_WEAPONMODEL))
+		{
+			continue;
+		}
+
+		GL3_FX_Flush();
+		DrawGhoulEntity(e, (gl3_sofframe.active && (i < gl3_sofframe.num_entities)) ? gl3_sofframe.entities[i] : NULL);
+	}
+
+	GL3_FX_Flush();
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
 static void
 DrawEntity(entity_t *e, int index)
 {

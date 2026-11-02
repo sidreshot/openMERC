@@ -594,6 +594,9 @@ DebugPrint(const entity_t *e, const ghlparams_t *p)
  * entity with flag 0x400000; se is the engine's entity (SPEC-002 layout) when
  * the frame came through the SPEC-002 RenderFrame.
  */
+/* GFX-modern r_om_mirror: set while the models are drawn into a mirror image (gl3_post.c) */
+qboolean gl3_ghoul_mirror;
+
 void
 GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 {
@@ -668,7 +671,8 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		mode = 2;
 	}
 
-	if (ghl_shadow_darkness->value <= 0)
+	/* no ground shadows in a mirror image */
+	if ((ghl_shadow_darkness->value <= 0) || gl3_ghoul_mirror)
 	{
 		mode = 0;
 	}
@@ -682,8 +686,8 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 	P.shadowMode = mode;
 
-	/* step 6: the player's own model is drawn shadow-only, or not at all */
-	if (flags & SOF_RF_VIEWERMODEL)
+	/* step 6: the player's own model is drawn shadow-only, or not at all; a mirror shows all of it */
+	if ((flags & SOF_RF_VIEWERMODEL) && !gl3_ghoul_mirror)
 	{
 		if (!mode || (ghl_player_shadow->value < 0.5f))
 		{
@@ -939,8 +943,10 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 	{
 		qboolean viewer = (flags & SOF_RF_VIEWERMODEL) != 0;
 
-		GL3_GhoulEmu_SetCsm(GL3_CSM_Active() && !weapon && !viewer && !hack, GL3_CSM_ReplaceGhoul() && !viewer && !weapon);
-		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack); /* shadows in light beams */
+		/* (a mirror image adds no casters: they would be the mirrored bodies) */
+		GL3_GhoulEmu_SetCsm(GL3_CSM_Active() && !weapon && !viewer && !hack && !gl3_ghoul_mirror,
+			GL3_CSM_ReplaceGhoul() && !viewer && !weapon);
+		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack && !gl3_ghoul_mirror); /* shadows in light beams */
 		/* characters (the models that cast a ground shadow) only: vehicles and props carry flat decals
 		   that part from a curved body */
 		{

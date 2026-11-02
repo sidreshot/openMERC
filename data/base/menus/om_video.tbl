@@ -62,3 +62,4 @@ slider | menu_gamma | 0 | 1 | 0.1 | Gamma | Гамма | stage
 slider | menu_contrast | 0 | 1 | 0.1 | Contrast | Контраст | stage
 slider | menu_brightness | 0 | 1 | 0.1 | Brightness | Яркость | stage
 slider | menu_modulate | 0.4 | 4.0 | 0.1 | Light Intensity | Интенсивность света | stage
+slider | r_om_look_strength | 0 | 1 | 0.1 | Gloom | Мрачность | requires=r_om_look_strength | tip=0: the original colours; 1: the full look of the level/0: исходные цвета; 1: полный образ уровня

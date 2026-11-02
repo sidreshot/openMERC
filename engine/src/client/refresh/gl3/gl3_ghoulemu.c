@@ -1251,6 +1251,16 @@ Flush(void)
 		out = Tessellate(out, &n);
 	}
 
+	/* a painted light cone in a mirror image: the beam pass draws the real one only (no second beam) */
+	{
+		extern qboolean gl3_ghoul_mirror;
+
+		if (gl3_ghoul_mirror && GL3_Beam_IsBeam(E.boundtex))
+		{
+			return;
+		}
+	}
+
 	/* GFX-modern light beams: a painted light cone is taken over by the volumetric beam pass */
 	if ((mode == GL_TRIANGLES) && GL3_Beam_IsBeam(E.boundtex) &&
 		GL3_Beam_Capture(out[0].pos, out[0].st, n, sizeof(emuvtx_t) / sizeof(float), E.boundtex))

@@ -761,6 +761,14 @@ static const char *post_comp_fs =
 	"uniform int hdr;\n"     /* r_om_hdr: exposure and the filmic curve */
 	"uniform float saturation;\n"
 	"uniform vec4 grade;\n"  /* curve (0 shoulder, 1 ACES), shadow gamma, brightness, - */
+	/* r_om_look (gl3_look.c): the picture graded in float instead of SoF's 8-bit colour table */
+	"uniform int look;\n"
+	"uniform vec4 look0;\n"  /* exposure (EV), toe, shoulder start, saturation */
+	"uniform vec4 look1;\n"  /* shadow tint rgb, menu contrast power */
+	"uniform vec4 look2;\n"  /* highlight tint rgb, menu gamma power (1 - vid_gamma) */
+	"uniform vec4 look3;\n"  /* vignette, grain, time, LUT strength */
+	"uniform vec4 look4;\n"  /* aspect, LUT size, auto exposure share, menu brightness offset */
+	"uniform sampler2D lut;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -774,6 +782,53 @@ static const char *post_comp_fs =
 	"	vec3 s = T + (1.0 - T) * (1.0 - exp(-(x - T) / (1.0 - T)));\n"
 	"	return mix(x, s, step(T, x));\n"
 	"}\n"
+	"float Luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }\n"
+	/* a tint that keeps the luminance */
+	"vec3 Tint(vec3 t) { return t / max(Luma(t), 1e-3); }\n"
+	/* filmic curve: the toe presses the blacks down with mid grey (0.18) fixed, the shoulder rolls the highlights off
+	   from its start towards white */
+	"vec3 Film(vec3 x, float toe, float sh)\n"
+	"{\n"
+	"	x = pow(max(x, vec3(0.0)) / 0.18, vec3(1.0 + toe)) * 0.18;\n"
+	"	vec3 s = sh + (1.0 - sh) * (1.0 - exp(-(x - sh) / max(1.0 - sh, 1e-3)));\n"
+	"	return clamp(mix(x, s, step(sh, x)), 0.0, 1.0);\n"
+	"}\n"
+	/* the LUT strip: N slices of N x N, blue across the slices */
+	"vec3 Lut(vec3 c, float n)\n"
+	"{\n"
+	"	float b = clamp(c.b, 0.0, 1.0) * (n - 1.0), b0 = floor(b), b1 = min(b0 + 1.0, n - 1.0);\n"
+	"	vec2 p = vec2(clamp(c.r, 0.0, 1.0) * (n - 1.0) + 0.5, clamp(c.g, 0.0, 1.0) * (n - 1.0) + 0.5) / vec2(n * n, n);\n"
+	"	vec3 a = texture(lut, p + vec2(b0 / n, 0.0)).rgb, d = texture(lut, p + vec2(b1 / n, 0.0)).rgb;\n"
+	"	return mix(a, d, b - b0);\n"
+	"}\n"
+	"float Hash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }\n"
+	"vec3 Grade(vec3 c, float autoexp)\n"
+	"{\n"
+	/* the scene is display-encoded: to linear, exposure (auto by the look's share, look, menu brightness) */
+	"	vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * pow(autoexp, look4.z) * exp2(look0.x);\n"
+	/* split toning by luminance: cold shadows, warm light, luminance kept */
+	"	float y = Luma(l);\n"
+	"	float t = smoothstep(0.02, 0.35, pow(y, 1.0 / 2.2));\n"
+	"	l *= mix(Tint(look1.rgb), Tint(look2.rgb), t);\n"
+	"	l = max(mix(vec3(Luma(l)), l, look0.w), vec3(0.0));\n"
+	"	l = Film(l, look0.y, look0.z);\n"
+	"	vec3 d = pow(l, vec3(1.0 / 2.2));\n"
+	/* the menu's gamma, contrast and brightness as SoF's colour table had them (SPEC-413 §9), in float: v^(1-g), an S
+	   curve of power k around the middle, an offset */
+	"	d = pow(max(d, vec3(0.0)), vec3(look2.a));\n"
+	"	vec3 e = pow(abs(2.0 * d - 1.0), vec3(look1.a));\n"
+	/* the offset lifts what is already lit, not black (on the finished picture a plain offset turned every black
+	   into grey; SoF's table added it to the texture and the light separately) */
+	"	d = 0.5 + 0.5 * sign(d - 0.5) * e;\n"
+	"	d = clamp(d + look4.w * (1.0 - d) * smoothstep(0.0, 0.2, d) * 2.0, 0.0, 1.0);\n"
+	"	if (look3.w > 0.0) d = mix(d, Lut(d, look4.y), look3.w);\n"
+	"	vec2 v = (vuv - 0.5) * vec2(look4.x, 1.0);\n"
+	"	d *= 1.0 - look3.x * smoothstep(0.25, 0.95, length(v));\n"
+	/* film grain, stronger in the dark, and a dither against banding in the deep shadows */
+	"	float g = Hash(gl_FragCoord.xy + fract(look3.z * 7.13) * 512.0) - 0.5;\n"
+	"	d += g * (look3.y * (1.0 - 0.6 * Luma(d)) + 1.0 / 255.0);\n"
+	"	return clamp(d, 0.0, 1.0);\n"
+	"}\n"
 	"void main()\n"
 	"{\n"
 	"	vec3 c;\n"
@@ -783,7 +838,9 @@ static const char *post_comp_fs =
 	"	{\n"
 	"		c = texture(scene, uv).rgb;\n"
 	"		if (mode == 1) c += texture(bloom, vuv).rgb * intensity;\n"
-	"		if (hdr != 0)\n"
+	"		if (look != 0)\n"
+	"			c = Grade(c, hdr != 0 ? texture(exptex, vec2(0.5)).r : 1.0);\n"
+	"		else if (hdr != 0)\n"
 	"		{\n"
 	/* the scene is display-encoded (the shaders applied vid_gamma): to linear, expose, curve, back */
 	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r * grade.z;\n"
@@ -1726,6 +1783,15 @@ GL3_Post_EndView(void)
 	if (hdr)
 	{
 		BindTex(GL_TEXTURE3, P.exptex[P.expcur]);
+	}
+	/* r_om_look: the grade of this view (not over the debug views nor night vision) */
+	if (GL3_Look_Active() && !dbg && !(r_newrefdef.rdflags & SOF_RDF_IRGOGGLES))
+	{
+		GL3_Look_Uniforms(P.progcomp, r_newrefdef.time, (float)P.vw / (float)Q_max(P.vh, 1));
+	}
+	else
+	{
+		glUniform1i(glGetUniformLocation(P.progcomp, "look"), 0);
 	}
 	BindTex(GL_TEXTURE2, P.texemis);
 	BindTex(GL_TEXTURE1, P.nlevels ? P.leveltex[0] : P.texemis);
@@ -7085,6 +7151,20 @@ MirrorPass(const float *n, float d, GLuint fbo)
 		}
 
 		GL3_FX_Flush();
+
+		/* the models too: characters, the player's own body and props (the mirrored view turns the winding round) */
+		{
+			extern qboolean gl3_ghoul_mirror;
+
+			gl3_ghoul_mirror = true;
+			glFrontFace(GL_CW);
+			GL3_FX_DrawGhoulMirrored();
+			glFrontFace(GL_CCW);
+			gl3_ghoul_mirror = false;
+			glDisable(GL_BLEND);
+			glDepthMask(GL_TRUE);
+			glEnable(GL_DEPTH_TEST);
+		}
 	}
 
 	GL3_Draw3DBatchesNow();
