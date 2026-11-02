@@ -513,6 +513,12 @@ void Object::Prepare(bool spec)
 	// textures: none without a GL table (dedicated server); geometry is already in memory for traces
 	if (!G().gl)
 		return;
+	// openMERC: a client's (or menu's) textures are uploaded now too, not at their first draw (hitches when a
+	// prop first comes into view); the server system of a listen server only decodes, as before
+	auto Preload = [this](Texture *t) {
+		if (!sys->IsServer())
+			PreloadTexture(t, sys->role);
+	};
 	for (GhbFile *f : files)
 	{
 		for (size_t fm = 0; fm < f->materials.size(); fm++)
@@ -529,10 +535,10 @@ void Object::Prepare(bool spec)
 				if (G().gs.precacheAll)
 				{
 					for (size_t i = 0; i < l->images.size(); i++)
-						ListTexture(l, (int)i, true);
+						Preload(ListTexture(l, (int)i, true));
 				}
 				else
-					ListTexture(l, 0, true);
+					Preload(ListTexture(l, 0, true));
 			}
 		}
 	}
@@ -540,7 +546,7 @@ void Object::Prepare(bool spec)
 	{
 		ImageList *l = MaterialList(sk.material);
 		if (l && sk.image >= 0)
-			ListTexture(l, sk.image, true);
+			Preload(ListTexture(l, sk.image, true));
 	}
 }
 

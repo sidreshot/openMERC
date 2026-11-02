@@ -5336,6 +5336,25 @@ GL3_Post_WeatherFrame(void)
 		tint = (WX.rain && !WX.forced) ? Q_max(0.05f, Q_min(r_om_rain_sky->value, 1.0f)) : 1.0f;
 		add = 0;
 
+		/* at the first frame of a stormy map: the sky mask (sky images read back), the extra caster geometry and
+		   the strike's shadow target are made now, not at the first strike (a 30-40 ms hitch on arm1 and jpn2) */
+		{
+			static const void *warm;
+
+			if (warm != gl3_worldmodel)
+			{
+				vec3_t keep;
+
+				warm = gl3_worldmodel;
+				WXSkyMask();
+				VectorCopy(WX.ldir, keep);
+				VectorSet(WX.ldir, 0, 0, 1);
+				WXLightningShadow();
+				VectorCopy(keep, WX.ldir);
+				WX.shvalid = false;
+			}
+		}
+
 		if (WX.shneed)
 		{
 			WXLightningShadow();

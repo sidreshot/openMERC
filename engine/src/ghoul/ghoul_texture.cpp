@@ -410,6 +410,18 @@ static void Upload(Texture *t)
 	t->uploaded = true;
 }
 
+// openMERC (hitch hunt): upload a decoded texture now (model preparation at map load) instead of at its first draw -
+// the mip chain is built on the CPU, 20-25 ms for one HD texture of a lamp seen for the first time
+void PreloadTexture(Texture *t, int role)
+{
+	if (!t || !t->decoded || t->uploaded || !G().gl)
+		return;
+	int keep = g_drawRole;
+	g_drawRole = role;
+	Upload(t);
+	g_drawRole = keep;
+}
+
 bool BindTexture(Texture *t, bool tileU, bool tileV)
 {
 	const GhoulGLTable *g = G().gl;

@@ -158,6 +158,7 @@ ImageList *AcquireImageList(const std::string &modelDir, const std::string &name
 void ReleaseImageList(ImageList *l);
 int ImageListAddCustom(ImageList *l, const std::string &upperName); // CUSTOM/ entries
 Texture *ListTexture(ImageList *l, int index, bool load);      // clamped index; load = decode now
+void PreloadTexture(Texture *t, int role);                     // upload a decoded texture now (openMERC)
 bool BindTexture(Texture *t, bool tileU, bool tileV);          // uploads when needed
 void ReleaseShadowTextures(const GhoulGLTable *g);                // ghoul_draw.cpp, from ReleaseAllTextures
 void ReleaseAllTextures();                                      // system method 3

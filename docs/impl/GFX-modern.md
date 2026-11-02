@@ -897,6 +897,16 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   instances (SOF_RF_GHOUL without shadows) in Ghl_Bounds / DrawLevel / Shadow - not GL submission (0 ms), not chunk
   decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,
   Ghoul shadows, texture stacking or the light method.
+* Hitches found and closed (2026-11-03, owner: "there are drops"). The perf tour (turn in place, walk; arm1, sud1,
+  jpn2, nyc1, tsr1, ger1) showed 29-42 ms frames of two kinds:
+  - the first lightning strike of a map: the sky mask (sky images read back to the CPU, WXSkyMask), the extra caster
+    geometry and the strike's 2048 shadow target were all made then (arm1 "weather" 27 ms CPU, jpn2 "setup" 30 ms).
+    They are made at the first frame of a stormy map now;
+  - a prop's first draw: timing each Ghoul instance draw (a temporary OMGHLSLOW print) named them - the caged lamp
+    23-26 ms, the burning barrel 20, the alley lamp 10, all in DrawLevel. Object preparation decoded the textures
+    but uploaded them (the mip chain built on the CPU) at their first bind; a client or menu object uploads them in
+    Prepare now (map load). The earlier "not texture uploads" was measured with the original textures, not HD ones.
+  After both: no frame over twice the mean on nyc1, arm1, tsr1, jpn2 (two strikes).
 
 * Windows (owner: "SSR on houses does not find the window edges, the whole window reflects with sill and frame",
   tsr1 intro): even surface material 37 is mostly a painted facade (brick, frame, sill, curtains around the glass).
