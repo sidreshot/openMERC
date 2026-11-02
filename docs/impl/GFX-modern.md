@@ -873,6 +873,9 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   (jagged torn rows on the jpn2 office floor in motion). A normal within ~10 degrees of a world axis is now that axis
   (map faces are level or upright). r_om_ssr_checker defaults to 0: the filled half zipped along reflection edges.
   A/B in motion at omsetpos -930 948 -1205 -336 4 (jpn2, `omfire officelt`): straight, steady reflections.
+  The apply pass blurs the reflections by as much as the trace resolution is reduced (owner: "50 % less resolution,
+  50 % blur"): 3x3 depth-weighted taps one trace pixel apart at half size, none at full size; the stair edges of the
+  upsampling are gone, nothing bleeds onto the objects standing on the floor.
 * Open: CPU hitches of 20-45 ms a few times a minute (sud1, arm1) inside the Ghoul library while it evaluates prop
   instances (SOF_RF_GHOUL without shadows) in Ghl_Bounds / DrawLevel / Shadow - not GL submission (0 ms), not chunk
   decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,
