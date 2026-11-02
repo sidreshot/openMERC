@@ -1264,12 +1264,17 @@ public:
 		}
 		// 11.1 forced and blocked
 		bool forced = false;
+		/* OpenMerc (DEVIATIONS): only a living body is killed by the setting. A corpse whose hit resolved no zone kept
+		   the 9999 (the corpse zone rule 11.6 needs zones) and was gibbed: the tsr1 intro's executioner, shooting the
+		   dead SWAT officer again with a lethal action, blew him apart with a pistol */
 		if (scriptedKill) {
-			h.damage = 9999;
-			if (scriptedKill == 2)
-				dflags |= DMGF_SPREAD;
+			if (H > 0) {
+				h.damage = 9999;
+				if (scriptedKill == 2)
+					dflags |= DMGF_SPREAD;
+				forced = true;
+			}
 			scriptedKill = 0;
-			forced = true;
 		}
 		if ((dflags & DMGF_0x800000) && gore && gore->armourType == 3)
 			return 0;
@@ -2150,7 +2155,10 @@ public:
 	bool DeathFits(const char *n)
 	{
 		float t = DeathTravel(n);
-		if (t == 0)
+		/* the room check is OpenMerc's (falls into walls during play); a scripted scene keeps the original's choice:
+		   jpn2's kneeling hostage, a bench behind her, flew across the room in the blown-back death instead of
+		   sinking back from her knees */
+		if (t == 0 || G3_Cinematic())
 			return true;
 		vec3_t f, l, u, end, mins = {-12, -12, 0}, maxs = {12, 12, 8};
 		G3_EntityAxes(ent, f, l, u);

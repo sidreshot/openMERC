@@ -88,3 +88,21 @@ behaviour where that makes sense.
   of walls (64 units, 112 for the blown-back throw); otherwise the chain falls through to an in-place death. The
   blown-back throw is scaled down by the room behind the body. The original had no check and bodies fell into walls.
 | Light probe (GL3 renderer) | the first lightmapped face along the probe, either side; a direction probe that hits nothing in 256 units gives 0.1 | only faces turned towards the probe count; a direction probe that hits nothing falls back to the probe straight down | the view weapon and characters went black under beams and in the open (ger1 dock, irq1b, sib1) | — |
+
+## Scripted shots and deaths in cinematics (2026-11-02)
+
+Owner: cinematics broken - jpn2 hostage "just moves and everything stops", the tsr1 intro policeman falls apart from a
+pistol, Sabre "shoots the hostage and hits nothing".
+
+- **Aim of a scripted shot with a target-bolt selector** (SPEC-AMEND-006 G2.11, ai_fire.cpp ScriptedShot): aimed a
+  fifth of the way from the bolt towards the target's origin instead of exactly at the bolt. The bolts sit on the skin
+  (sbolt_mouth on the face); a ray at one grazed the mesh and passed through - Sabre's lethal shot at the kneeling
+  hostage (tsr1 nycintro, ai 182) missed, and a lethal action ends only with the target's death.
+- **Scripted kill setting only on a living body** (SPEC-720 11.1, g3_human.cpp): a corpse keeps the hit's own damage.
+  The tsr1 executioner's second lethal action (ai 101) shot the dead officer; that hit resolved no zone, so the corpse
+  zone rule (11.6) did not cut the 9999 and health - damage < -750 gibbed him.
+- **Death room check off in cinematics** (DeathFits, our own addition for falls into walls): a scripted scene keeps
+  the original's death choice. jpn2's kneeling hostage (bench behind her) got the blown-back death and flew across the
+  room instead of sinking back from her knees.
+  Verified against the original game module on the same engine (jpn2 intro) and on screenshots (tsr1 intro).
+  77 lethal scripted shots in 37 scripts use these paths.
