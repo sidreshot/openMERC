@@ -357,6 +357,14 @@ static void Upload(Texture *t)
 		if (ends("/BEAM") || ends("/REDCONE") || ends("/BLUECONE") ||
 		    (ends("/4X16") && u.find("EMERGENCY") != std::string::npos))
 			g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 1);
+		// r_om_coronas: the painted halo of a lamp ("comskin/glow1", "lamp_hang/glow_spike", ".../glow"), param 2;
+		// the renderer may let its bloom make the halo instead
+		else
+		{
+			size_t slash = u.find_last_of('/');
+			if (u.compare(slash == std::string::npos ? 0 : slash + 1, 4, "GLOW") == 0)
+				g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 2);
+		}
 	}
 	t->uploaded = true;
 }

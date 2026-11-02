@@ -873,6 +873,18 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,
   Ghoul shadows, texture stacking or the light method.
 
+### Mirrors in motion, coronas (owner: "mirrors vanish when moving"; "turn the coronas off, use the new technology")
+
+* Mirrors: one plane per frame, the plane of the nearest mirror face. In the tsr1 restroom a step towards the side wall
+  made its mirror the nearest and the three mirrors over the sinks went blank. Now up to two planes per frame
+  (textures on units 13 and 15, one shared depth buffer), chosen by the share of last frame's view their faces took
+  (area x facing / distance^2, summed per plane); a plane drawn last frame keeps its place unless another scores
+  1.5 times more. Verified strafing in the restroom: both walls keep their images in every frame.
+* r_om_coronas 0 (default): the painted halos of the Ghoul lamps (textures named glow*: comskin/glow1, glow3,
+  lamp_hang/glow_spike, military_door_outside/glow - 22 lamp models, also the police car siren) are marked by the
+  Ghoul system (OM_BEAM_HINT param 2, ghoul_texture.cpp) and drawn into the bloom source only (scene colour and
+  material masked): the bloom makes the halo. Without bloom (and on GLES) they are not drawn. 1 = the original sprites.
+
 ## Water reflections, anti-aircraft fire, distant storm
 
 * Liquids (gl3_liquid.c, drawn with the FX shader) write the material target through the new FX uniform omFxMat

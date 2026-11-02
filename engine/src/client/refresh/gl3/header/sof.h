@@ -354,7 +354,8 @@ void GL3_Mirror_Note(const msurface_t *surf);
 void GL3_Mirror_Render(void);
 void GL3_Mirror_MapLoad(void);
 void GL3_Post_MapLoad(void);
-void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *rect, GLuint tex);
+void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
+	GLuint tex2);
 void GL3_Post_SSR(void);
 void GL3_SoF_SSRUniforms(const float *ssr);
 float GL3_Post_SurfEmissive(const msurface_t *surf);

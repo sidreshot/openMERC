@@ -1077,12 +1077,60 @@ Tessellate(emuvtx_t *in, int *n)
 	return E.tessbuf;
 }
 
+/* r_om_coronas: the painted halos of lamps (Ghoul textures "glow*", marked by the Ghoul system). With 0 they are
+   drawn into the bloom source only: the bloom makes the halo around the lamp instead of the flat sprite */
+#define GLOW_MAX 64
+static GLuint glowtex[GLOW_MAX];
+static int numglow;
+static cvar_t *r_om_coronas;
+
+static void
+GlowMark(GLuint tex, qboolean on)
+{
+	int i;
+
+	for (i = 0; i < numglow; i++)
+	{
+		if (glowtex[i] == tex)
+		{
+			if (!on)
+			{
+				glowtex[i] = glowtex[--numglow];
+			}
+
+			return;
+		}
+	}
+
+	if (on && tex && numglow < GLOW_MAX)
+	{
+		glowtex[numglow++] = tex;
+	}
+}
+
+static qboolean
+IsGlow(GLuint tex)
+{
+	int i;
+
+	for (i = 0; i < numglow; i++)
+	{
+		if (glowtex[i] == tex)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static void
 Flush(void)
 {
 	GLenum mode = GL_TRIANGLES;
 	emuvtx_t *out;
 	int n = 0, i, count = E.numverts;
+	qboolean halo;
 
 	if (!count || !CreateObjects())
 	{
@@ -1210,6 +1258,26 @@ Flush(void)
 		return;
 	}
 
+	/* r_om_coronas 0: a lamp's painted halo only feeds the bloom (nothing at all without bloom) */
+	if (!r_om_coronas)
+	{
+		r_om_coronas = ri.Cvar_Get("r_om_coronas", "0", CVAR_ARCHIVE);
+	}
+
+	halo = !r_om_coronas->value && IsGlow(E.boundtex);
+
+#ifdef YQ2_GL3_GLES3
+	if (halo)
+	{
+		return;
+	}
+#else
+	if (halo && !gl3post.bloom)
+	{
+		return;
+	}
+#endif
+
 	GL3_UseProgram(E.prog);
 	GL3_BindVAO(E.vao);
 	GL3_BindVBO(E.vbo);
@@ -1244,6 +1312,11 @@ Flush(void)
 			}
 
 			glow = Q_max(glow, E.entityglow);
+
+			if (halo)
+			{
+				glow = 0.8f;
+			}
 		}
 
 		GL3_Post_EmisForBlend(E.bsrc, E.bdst, E.blendon, glow, emis);
@@ -1336,6 +1409,19 @@ Flush(void)
 			glUniform4fv(E.u_pplM, 6, M);
 		}
 	}
+
+#ifndef YQ2_GL3_GLES3
+	if (halo)
+	{
+		/* the bloom source only: not the scene colour, not the material of the reflections */
+		glColorMaski(0, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glColorMaski(2, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		glDrawArrays(mode, 0, n);
+		glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		GL3_Post_MaterialWrites(true);
+		return;
+	}
+#endif
 
 	glDrawArrays(mode, 0, n);
 }
@@ -1574,6 +1660,7 @@ Emu_DeleteTextures(GLsizei n, const GLuint *textures)
 
 		SetTexSwizzle(textures[i], SWZ_RGBA);
 		GL3_Beam_ForgetTexture(textures[i]);
+		GlowMark(textures[i], false);
 	}
 
 	glDeleteTextures(n, textures);
@@ -1979,9 +2066,13 @@ Emu_TexParameteri(GLenum target, GLenum pname, GLint param)
 	{
 		return;
 	}
-	else if (pname == OM_GHL_BEAM_HINT) /* openMERC: the bound texture is a painted light cone */
+	else if (pname == OM_GHL_BEAM_HINT) /* openMERC: the bound texture is a painted light cone (1) or halo (2) */
 	{
-		if (param)
+		if (param == 2)
+		{
+			GlowMark(E.boundtex, true);
+		}
+		else if (param)
 		{
 			GL3_Beam_MarkTexture(E.boundtex);
 		}
