@@ -6619,6 +6619,19 @@ static const char *ssr_fs =
 	"	vec3 N = SafeN(cross(dx, dy));\n"
 	"	vec3 V = normalize(-P);\n"
 	"	if (dot(N, V) < 0.0) N = -N;\n"
+	/* the faces of a map are nearly all level or upright: a normal within ~10 degrees of a world axis is that axis.
+	   Rebuilt from the half-size depth it wobbles at grazing angles, and every wobble moved the reflection: stripes,
+	   torn rows, sparkle at the edges */
+	"	{\n"
+	"		vec3 Nw = mat3(invview) * N;\n"
+	"		vec3 an = abs(Nw);\n"
+	"		float mc = max(an.x, max(an.y, an.z));\n"
+	"		if (mc > 0.985)\n"
+	"		{\n"
+	"			Nw = an.z == mc ? vec3(0.0, 0.0, sign(Nw.z)) : an.x == mc ? vec3(sign(Nw.x), 0.0, 0.0) : vec3(0.0, sign(Nw.y), 0.0);\n"
+	"			N = transpose(mat3(invview)) * Nw;\n"
+	"		}\n"
+	"	}\n"
 	/* smooth level faces (water, puddles, polished floors) ripple a little: the reflection wobbles softly instead
 	   of showing the exact pattern of what it hits (arch ribs over the kos1 channel gave stripes) */
 	"	if (rough < 0.12 && ripple.y > 0.0)\n"
@@ -6977,7 +6990,8 @@ SSRWanted(void)
 		r_om_ssr_smooth = ri.Cvar_Get("r_om_ssr_smooth", "32", CVAR_ARCHIVE);
 		r_om_ssr_temporal = ri.Cvar_Get("r_om_ssr_temporal", "0.85", CVAR_ARCHIVE);
 		r_om_ssr_ripple = ri.Cvar_Get("r_om_ssr_ripple", "1", CVAR_ARCHIVE);
-		r_om_ssr_checker = ri.Cvar_Get("r_om_ssr_checker", "1", CVAR_ARCHIVE);
+		/* 0: the filled half of the checkerboard zipped along reflection edges in motion */
+		r_om_ssr_checker = ri.Cvar_Get("r_om_ssr_checker", "0", CVAR_ARCHIVE);
 	}
 
 	return !SR.failed && (r_om_ssr->value > 0);

@@ -868,6 +868,11 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   1), five smoothing taps instead of nine (matte, dry pixels skipped), the apply pass leaves untouched pixels at once
   and computes lamp glints from reflectivity 0.06 (tiled walls cost 1 ms of glints at full size). tsr1 3.5 -> 2.2 ms,
   sud1 3.1 -> 0.5, kos2 1.5 -> 0.5, jpn1 2.5 -> 1.1; ger1 rose 1.8 -> 2.5 (its marble floors are polished now).
+* SSR stability (2026-11-02, owner: "SSR keeps noising in stripes, edges flicker, tears at grazing angles"): the
+  trace's normal, rebuilt from the half-size depth, wobbled at grazing angles and each wobble moved the reflection
+  (jagged torn rows on the jpn2 office floor in motion). A normal within ~10 degrees of a world axis is now that axis
+  (map faces are level or upright). r_om_ssr_checker defaults to 0: the filled half zipped along reflection edges.
+  A/B in motion at omsetpos -930 948 -1205 -336 4 (jpn2, `omfire officelt`): straight, steady reflections.
 * Open: CPU hitches of 20-45 ms a few times a minute (sud1, arm1) inside the Ghoul library while it evaluates prop
   instances (SOF_RF_GHOUL without shadows) in Ghl_Bounds / DrawLevel / Shadow - not GL submission (0 ms), not chunk
   decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,
