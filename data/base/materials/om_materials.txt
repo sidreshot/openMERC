@@ -8,7 +8,8 @@
 #   refl    reflectivity on floors (0 = matte, 0.9 = mirror)
 #   rough   roughness of the reflection (0 = sharp, 1 = blurred away)
 #   walls   factor on walls, ceil factor on ceilings (floors 1)
-#   detail  how much the texels decide (dark grout, cracks, grime and gritty patches are dull)
+#   detail  how much the texels decide (dark grout, cracks, grime and gritty patches are dull; for glass:
+#           only the panes of a painted window, not its frame, sill or the wall around it)
 #   stain   how much rust and dirt colours dull the surface
 #   damp    natural dampness without rain (sewers, catacombs), scaled by r_om_ssr_damp
 #   soak    how much rain water it holds: 1 puddles and wet sheen, under 0.5 no puddles, 0 only darkens
@@ -25,7 +26,7 @@ class   unknown    0.00  0.70  0.30  0.15  1.0    0.5   0.0  1.0
 class   stone      0.00  0.75  0.30  0.15  1.0    0.5   0.0  1.0
 class   wood       0.00  0.65  0.30  0.15  1.0    0.5   0.0  0.6
 class   metal      0.07  0.40  0.30  0.15  1.0    1.0   0.0  0.8
-class   glass      0.45  0.03  1.00  1.00  0.2    0.0   0.0  0.0
+class   glass      0.45  0.03  1.00  1.00  1.0    0.0   0.0  0.0
 class   picture    0.00  0.60  0.30  0.15  0.0    0.0   0.0  0.0
 class   ground     0.00  0.85  0.30  0.15  1.0    0.0   0.0  0.35
 class   liquid     0.45  0.09  1.00  1.00  0.0    0.0   0.0  0.0

@@ -21,7 +21,8 @@
  *    grime spots darker than their surroundings and gritty patches are dull,
  *    the clean surface keeps the class's shine), G height from the relative
  *    brightness (rain water gathers in the low parts), B rust and dirt
- *    colours (stains on metal).
+ *    colours (stains on metal), A the panes of painted windows (glass shines
+ *    only there, not on its frame, sill or the wall around it).
  *
  * Class parameters go to the world shaders as two vec4 arrays (omMatA:
  * floor reflectivity, roughness, wall and ceiling factors; omMatB: weight of
@@ -59,7 +60,7 @@ static const matclass_t builtin[MC_BUILTIN] = {
 	{"stone",     {0.00f, 0.75f, 0.30f, 0.15f}, {1.0f, 0.5f, 0.0f, 1.0f}},
 	{"wood",      {0.00f, 0.65f, 0.30f, 0.15f}, {1.0f, 0.5f, 0.0f, 0.6f}},
 	{"metal",     {0.07f, 0.40f, 0.30f, 0.15f}, {1.0f, 1.0f, 0.0f, 0.8f}},
-	{"glass",     {0.45f, 0.03f, 1.00f, 1.00f}, {0.2f, 0.0f, 0.0f, 0.0f}},
+	{"glass",     {0.45f, 0.03f, 1.00f, 1.00f}, {1.0f, 0.0f, 0.0f, 0.0f}},
 	{"picture",   {0.00f, 0.60f, 0.30f, 0.15f}, {0.0f, 0.0f, 0.0f, 0.0f}},
 	{"ground",    {0.00f, 0.85f, 0.30f, 0.15f}, {1.0f, 0.0f, 0.0f, 0.35f}},
 	{"liquid",    {0.45f, 0.09f, 1.00f, 1.00f}, {0.0f, 0.0f, 0.0f, 0.0f}},
@@ -751,9 +752,9 @@ void
 GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 {
 	float *L = NULL, *rm = NULL, *M1 = NULL, *M3 = NULL, *V1 = NULL, *V3 = NULL, *hf = NULL, *G = NULL, *st = NULL;
-	float *tmp = NULL, hfmean = 0, rust = 0, scale;
+	float *tmp = NULL, *pane = NULL, *wm = NULL, hfmean = 0, rust = 0, scale;
 	byte *out = NULL;
-	int x, y, i, n, step = 1, md, hist[256] = {0}, acc;
+	int x, y, i, n, step = 1, md, hist[256] = {0}, acc, panew = 1, panek = 1;
 
 	(void)name;
 
@@ -775,9 +776,10 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 	L = malloc(sizeof(float) * n);
 	rm = malloc(sizeof(float) * n);
 	tmp = malloc(sizeof(float) * n);
+	wm = malloc(sizeof(float) * n);
 	out = malloc((size_t)n * 4);
 
-	if (!L || !rm || !tmp || !out)
+	if (!L || !rm || !tmp || !wm || !out)
 	{
 		goto done;
 	}
@@ -808,6 +810,8 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 			mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
 			mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
 			sat = mx > 0.03f ? (mx - mn) / mx : 0;
+			/* brick and wooden window frames: red-brown and saturated (never a pane) */
+			wm[y * w + x] = SStep(0.03f, 0.08f, r - g) * SStep(0.25f, 0.4f, sat);
 			/* rust and dirt: red the largest, blue the smallest, saturated, neither black nor bright */
 			rm[y * w + x] = (r >= g && g >= b && (g - b) <= (r - b) * 0.75f && sat > 0.3f && mx > 0.06f && mx < 0.85f)
 				? 1.0f : 0.0f;
@@ -884,8 +888,98 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 		hist[(int)(G[i] * 255.0f + 0.5f)]++;
 	}
 
-	/* the cleanest 15 % keep the full shine of the class */
-	for (i = 255, acc = 0; i > 0 && acc < n * 15 / 100; i--)
+	/* the panes of painted windows (A): texels with no strong step to a neighbour within one texel and little
+	   detail around them (frames, bars and sills of the 64-texel SoF windows are one or two texels wide), and no
+	   red-brown brick or wood next to them. Measured at most 128 wide, so replacement textures give the same mask
+	   as the originals (the thresholds are per texel) */
+	{
+		int k = 1, pw, ph, x2, y2, dx, dy;
+		float *Lp, *Wp, *pb;
+
+		while (md / k > 128)
+		{
+			k *= 2;
+		}
+
+		pw = w / k > 1 ? w / k : 1;
+		ph = h / k > 1 ? h / k : 1;
+		Lp = malloc(sizeof(float) * pw * ph);
+		Wp = malloc(sizeof(float) * pw * ph);
+		pane = malloc(sizeof(float) * pw * ph);
+
+		if (!Lp || !Wp || !pane)
+		{
+			free(Lp);
+			free(Wp);
+			goto done;
+		}
+
+		for (y2 = 0; y2 < ph; y2++)
+		{
+			for (x2 = 0; x2 < pw; x2++)
+			{
+				float s = 0, ww = 0;
+				int a, c;
+
+				for (c = 0; c < k; c++)
+				{
+					for (a = 0; a < k; a++)
+					{
+						s += L[(y2 * k + c) * w + x2 * k + a];
+						ww += wm[(y2 * k + c) * w + x2 * k + a];
+					}
+				}
+
+				Lp[y2 * pw + x2] = s / (k * k);
+				Wp[y2 * pw + x2] = ww / (k * k);
+			}
+		}
+
+		for (y2 = 0; y2 < ph; y2++)
+		{
+			for (x2 = 0; x2 < pw; x2++)
+			{
+				float near = 0, lo = 1e9f, hi = -1e9f, warm = 0;
+
+				for (dy = -1; dy <= 1; dy++)
+				{
+					for (dx = -1; dx <= 1; dx++)
+					{
+						int xx = (x2 + dx + pw) % pw, yy = (y2 + dy + ph) % ph;
+						float v = Lp[yy * pw + xx];
+						float s1 = fabsf(v - Lp[yy * pw + (xx + 1) % pw]), s2 = fabsf(v - Lp[((yy + 1) % ph) * pw + xx]);
+
+						near = fmaxf(near, fmaxf(s1, s2));
+						lo = fminf(lo, v);
+						hi = fmaxf(hi, v);
+						warm = fmaxf(warm, Wp[yy * pw + xx]);
+					}
+				}
+
+				pane[y2 * pw + x2] = (1.0f - SStep(0.035f, 0.08f, near)) * (1.0f - SStep(0.06f, 0.14f, hi - lo)) *
+					(1.0f - warm);
+			}
+		}
+
+		free(Lp);
+		free(Wp);
+		pb = MatBlur(pane, pw, ph, 1);
+
+		if (!pb)
+		{
+			goto done;
+		}
+
+		for (i = 0; i < pw * ph; i++)
+		{
+			pane[i] = SStep(0.35f, 0.7f, pb[i]);
+		}
+
+		free(pb);
+		panew = pw;
+		panek = k;
+	}
+	/* the cleanest 15 % keep the full shine of the class */	for (i = 255, acc = 0; i > 0 && acc < n * 15 / 100; i--)
 	{
 		acc += hist[i];
 	}
@@ -901,7 +995,13 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 		o[0] = (byte)(fminf(g, 1.0f) * 255.0f + 0.5f);
 		o[1] = (byte)(fminf(fmaxf(ht, 0.0f), 1.0f) * 255.0f + 0.5f);
 		o[2] = (byte)(fminf(st[i], 1.0f) * 255.0f + 0.5f);
-		o[3] = 255;
+		{
+			int px = (i % w) / panek, py = (i / w) / panek;
+
+			px = px < panew ? px : panew - 1;
+			py = py < (h / panek > 1 ? h / panek : 1) ? py : (h / panek > 1 ? h / panek : 1) - 1;
+			o[3] = (byte)(pane[py * panew + px] * 255.0f + 0.5f);
+		}
 	}
 
 	{
@@ -931,6 +1031,8 @@ done:
 	free(V3);
 	free(hf);
 	free(st);
+	free(pane);
+	free(wm);
 }
 
 /* the colour texture is deleted: its material map goes too */

@@ -873,6 +873,12 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,
   Ghoul shadows, texture stacking or the light method.
 
+* Windows (owner: "SSR on houses does not find the window edges, the whole window reflects with sill and frame",
+  tsr1 intro): even surface material 37 is mostly a painted facade (brick, frame, sill, curtains around the glass).
+  The material map got an A channel, the panes: texels with no strong step to a neighbour within one texel, little
+  detail in their 3x3 window and no red-brown (brick, wooden frame) texel next to them, softened by one texel;
+  measured at most 128 wide so HD replacements get the same mask. The glass class (detail weight 1) shines only
+  there. Frames, bars, sills and walls are matte now; panes behind curtains or heavy cracks mostly stay matte too.
 ### Mirrors in motion, coronas (owner: "mirrors vanish when moving"; "turn the coronas off, use the new technology")
 
 * Mirrors: one plane per frame, the plane of the nearest mirror face. In the tsr1 restroom a step towards the side wall

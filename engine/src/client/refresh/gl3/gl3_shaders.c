@@ -904,7 +904,7 @@ static const char* fragmentSrcOmBump =
 	/* the material classes (gl3_material.c, materials/om_materials.txt) and the material map of the texture */
 	"uniform vec4 omMatA[24];\n"    /* floor reflectivity, roughness, wall factor, ceiling factor */
 	"uniform vec4 omMatB[24];\n"    /* gloss map weight, stain weight, natural dampness, rain water held */
-	"uniform sampler2D omMatMap;\n" /* R gloss (dark grout, cracks, grime and grit are dull), G height, B rust/dirt */
+	"uniform sampler2D omMatMap;\n" /* R gloss (dark grout, cracks, grime and grit are dull), G height, B rust/dirt, A window panes */
 	"vec4 omMaterial(vec3 wp, vec3 nrm, out float wet)\n"
 	"{\n"
 	"	wet = 0.0;\n"
@@ -914,9 +914,10 @@ static const char* fragmentSrcOmBump =
 	"	int mc = clamp(omEmissive < 0.0 ? int(-omEmissive + 0.5) : 0, 0, 23);\n"
 	"	vec4 A = omMatA[mc], B = omMatB[mc];\n"
 	"	float fl = smoothstep(0.6, 0.85, N.z);\n"
-	"	vec3 mm = texture(omMatMap, passTexCoord).rgb;\n"
+	"	vec4 mm = texture(omMatMap, passTexCoord);\n"
 	/* the texels decide where the class shines: dull spots do not reflect at all, they only get rougher */
-	"	float g = mix(1.0, mm.r, B.x) * (1.0 - mm.b * B.y);\n"
+	/* glass: only the panes of a painted window shine (A), not its frame, sill or the wall around it */
+	"	float g = mix(1.0, mc == 4 ? mm.a : mm.r, B.x) * (1.0 - mm.b * B.y);\n"
 	"	float r = A.x * smoothstep(0.08, 0.55, g);\n"
 	"	float rough = min(1.0, A.y + 0.45 * (1.0 - g));\n"
 	/* walls and ceilings by their own factor of the class (corridor walls seen at grazing angles looked as glossy as
