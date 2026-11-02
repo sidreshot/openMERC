@@ -33,6 +33,43 @@ static bool LoadBytes(const std::string &path, std::vector<uint8_t> &out)
 	return true;
 }
 
+// openMERC GFX-modern (r_om_tess): the models that are round in truth (barrels, bins, cans, cones, pots) and may
+// be drawn curved - Ghoul/om_round.txt, one folder or name part per line (upper case compare, '#' comments)
+static bool IsRound(const std::string &upper)
+{
+	static std::vector<std::string> parts;
+	static bool loaded;
+	if (!loaded)
+	{
+		std::vector<uint8_t> d;
+		loaded = true;
+		if (LoadBytes("Ghoul/om_round.txt", d))
+		{
+			std::string line;
+			d.push_back('\n');
+			for (uint8_t c : d)
+			{
+				if (c == '\n' || c == '\r')
+				{
+					size_t h = line.find('#');
+					if (h != std::string::npos)
+						line.erase(h);
+					size_t a = line.find_first_not_of(" \t"), b = line.find_last_not_of(" \t");
+					if (a != std::string::npos)
+						parts.push_back(Upper(line.substr(a, b - a + 1)));
+					line.clear();
+				}
+				else
+					line.push_back((char)(c == '\\' ? '/' : c));
+			}
+		}
+	}
+	for (const std::string &p : parts)
+		if (upper.find(p) != std::string::npos)
+			return true;
+	return false;
+}
+
 static std::string StripExt(const std::string &n)
 {
 	size_t slash = n.find_last_of('/');
@@ -364,6 +401,10 @@ static void Upload(Texture *t)
 			size_t slash = u.find_last_of('/');
 			if (u.compare(slash == std::string::npos ? 0 : slash + 1, 4, "GLOW") == 0)
 				g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 2);
+			// r_om_tess: a texture of a round model (Ghoul/om_round.txt), param 3; the renderer may draw the
+			// whole model curved
+			else if (IsRound(u))
+				g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 3);
 		}
 	}
 	t->uploaded = true;

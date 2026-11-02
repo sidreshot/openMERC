@@ -1047,6 +1047,15 @@ correction away and put ours in its place".
   brighter scene, the shoulder rolls off what passes white): the lobby 24.8 with HDR, 21.7 without.
 * Screenshots (gl3_sof2d.c): beside each sofNN.tga a sofNN.txt with the map and the omsetpos line of the view.
 
+## r_om_tess_round: round props drawn curved (owner: "sort out the objects that must be round and tessellate them, the bin for one")
+
+* PN tessellation was for characters only (props carry flat decals, boxes with smoothed normals swell). The Ghoul
+  system now marks the textures of the models listed in Ghoul/om_round.txt (data/base/ghoul, one model folder per
+  line: barrels, bins, cans, cones, extinguishers, hydrants, gas tanks, pots, fruit, globe, cannon, lamps, grenade)
+  with OM_GHL_BEAM_HINT 3; an instance that drew such a texture is remembered by its handle (gl3_ghoul.c) and from its
+  next frame the whole model is tessellated at r_om_tess_models - the whole model, so lid and body meet without a
+  crack. The arm1 bin's five-sided lid gets a round silhouette. r_om_tess_round 0 turns it off.
+
 ## r_om_lshadow: lamp shadows of moving casters (owner: "at least dynamic shadows from the lights")
 
 * The lightmaps keep the static world's shadows; this adds those of characters and Ghoul props from the map's own

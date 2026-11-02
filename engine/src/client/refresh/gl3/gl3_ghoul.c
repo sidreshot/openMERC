@@ -142,6 +142,8 @@ static cvar_t *ghl_gllight_directional, *ghl_gllight_attenuation, *ghl_gllight_m
 static cvar_t *ghl_shadows, *ghl_player_shadow, *ghl_shadow_darkness, *ghl_shadow_dist, *ghl_obj_fog;
 static cvar_t *ghl_no_render, *ghl_wireframe, *ghl_no_cull, *ghl_pre_cull, *ghl_no_texture_stack;
 static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess, *r_om_tess_weapon, *r_om_tess_models, *r_om_ppl_models;
+static cvar_t *r_om_tess_round;
+static byte roundinst[65536]; /* per instance handle: it drew a round model's texture (r_om_tess) */
 
 static void
 GetCvars(void)
@@ -180,6 +182,7 @@ GetCvars(void)
 	r_om_tess = ri.Cvar_Get("r_om_tess", "8", CVAR_ARCHIVE);
 	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "0", CVAR_ARCHIVE);
 	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "3", CVAR_ARCHIVE);
+	r_om_tess_round = ri.Cvar_Get("r_om_tess_round", "1", CVAR_ARCHIVE);
 	/* GFX-modern: the GL lighting of Ghoul models (ghl_light_method 3) per pixel instead of per vertex */
 	r_om_ppl_models = ri.Cvar_Get("r_om_ppl_models", "1", CVAR_ARCHIVE);
 }
@@ -953,22 +956,27 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		GL3_GhoulEmu_SetCsm((GL3_CSM_Active() || GL3_LShadow_Capturing()) && !weapon && !viewer && !hack && !gl3_ghoul_mirror,
 			GL3_CSM_ReplaceGhoul() && !viewer && !weapon);
 		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack && !gl3_ghoul_mirror); /* shadows in light beams */
-		/* characters (the models that cast a ground shadow) only: vehicles and props carry flat decals
-		   that part from a curved body */
+		/* characters (the models that cast a ground shadow) and the props that are round in truth (a texture
+		   listed in Ghoul/om_round.txt, seen when the instance was last drawn): other vehicles and props carry
+		   flat decals that part from a curved body, or are boxes their smoothed normals would inflate */
 		{
 			float k = Q_clamp(r_om_tess->value, 0.0f, 10.0f) / 10.0f;
+			qboolean round = roundinst[(unsigned short)(e->frame & 0xFFFF)] && (r_om_tess_round->value != 0);
 			int level = (k <= 0) ? 0 : weapon ? (int)r_om_tess_weapon->value :
-				((flags & SOF_RF_CASTSHADOW) ? (int)Q_clamp(r_om_tess_models->value, 0.0f, 3.0f) : 0);
+				(((flags & SOF_RF_CASTSHADOW) || round) ? (int)Q_clamp(r_om_tess_models->value, 0.0f, 3.0f) : 0);
 
 			GL3_GhoulEmu_SetTess(level, k);
 		}
 		GL3_GhoulEmu_SetPPL(r_om_ppl_models->value != 0);
 	}
 
+	GL3_GhoulEmu_TakeRound();
 	Ghl_Draw(inst, &P);
 
 	if (ff_emulated)
 	{
+		/* a reused handle forgets the old model's answer at its first draw */
+		roundinst[(unsigned short)(e->frame & 0xFFFF)] = GL3_GhoulEmu_TakeRound() ? 1 : 0;
 		GL3_GhoulEmu_SetEntityGlow(0.0f);
 		GL3_GhoulEmu_SetCsm(false, false);
 		GL3_GhoulEmu_SetCaster(false);

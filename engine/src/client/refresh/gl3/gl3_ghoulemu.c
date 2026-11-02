@@ -1124,6 +1124,58 @@ IsGlow(GLuint tex)
 	return false;
 }
 
+/* r_om_tess: the textures of round models (Ghoul/om_round.txt, marked by the Ghoul system); an entity that draws
+   one is remembered (gl3_ghoul.c) and drawn curved as a whole from its next frame */
+#define ROUND_MAX 256
+static GLuint roundtex[ROUND_MAX];
+static int numround;
+static qboolean sawround;
+
+static void
+RoundMark(GLuint tex)
+{
+	int i;
+
+	for (i = 0; i < numround; i++)
+	{
+		if (roundtex[i] == tex)
+		{
+			return;
+		}
+	}
+
+	if (tex && numround < ROUND_MAX)
+	{
+		roundtex[numround++] = tex;
+	}
+}
+
+static qboolean
+IsRound(GLuint tex)
+{
+	int i;
+
+	for (i = 0; i < numround; i++)
+	{
+		if (roundtex[i] == tex)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/* whether the entity drawn since the last call drew a round model's texture */
+qboolean
+GL3_GhoulEmu_TakeRound(void)
+{
+	qboolean r = sawround;
+
+	sawround = false;
+	return r;
+}
+
 static void
 Flush(void)
 {
@@ -1241,6 +1293,8 @@ Flush(void)
 	{
 		return;
 	}
+
+	sawround |= E.texture2d && IsRound(E.boundtex);
 
 	/* GFX-modern tessellation of the entity being drawn: every pass over its surfaces gets the same curved
 	   triangles (a decal or glass pass drawn over a tessellated body must not z-fight with it), but not the
@@ -1671,6 +1725,18 @@ Emu_DeleteTextures(GLsizei n, const GLuint *textures)
 		SetTexSwizzle(textures[i], SWZ_RGBA);
 		GL3_Beam_ForgetTexture(textures[i]);
 		GlowMark(textures[i], false);
+
+		{
+			int k;
+
+			for (k = 0; k < numround; k++)
+			{
+				if (roundtex[k] == textures[i])
+				{
+					roundtex[k--] = roundtex[--numround];
+				}
+			}
+		}
 	}
 
 	glDeleteTextures(n, textures);
@@ -2078,7 +2144,11 @@ Emu_TexParameteri(GLenum target, GLenum pname, GLint param)
 	}
 	else if (pname == OM_GHL_BEAM_HINT) /* openMERC: the bound texture is a painted light cone (1) or halo (2) */
 	{
-		if (param == 2)
+		if (param == 3)
+		{
+			RoundMark(E.boundtex);
+		}
+		else if (param == 2)
 		{
 			GlowMark(E.boundtex, true);
 		}

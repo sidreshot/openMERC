@@ -1,0 +1,49 @@
+# openMERC GFX-modern (r_om_tess): Ghoul models that are round in truth and are drawn curved (PN tessellation of
+# the whole model, as characters are). One part of a texture path per line, compared in upper case: a model folder
+# with its trailing slash. Flat faces with their own normals stay flat; a model whose smoothed normals belong to a
+# box would swell - keep such models out. Lines after '#' are comments.
+
+# barrels, bins, baskets
+objects/generic/barrel_burning/
+objects/generic/barrel_chemical/
+objects/generic/trashcan_barrel/
+objects/generic/waste_basket/
+objects/generic/trash_ashtray/
+objects/newyork/trashcan/
+objects/iraq/basket/
+
+# cylinders and cones
+objects/generic/fire_extinguisher/
+objects/generic/fire_hydrant/
+objects/generic/orange_cone/
+objects/generic/soda_can/
+objects/generic/tank_gas/
+objects/generic/tank_propane/
+objects/generic/urn/
+objects/generic/table_round/
+objects/newyork/gumball/
+objects/uganda/rocket_core/
+objects/uganda/rocket_engine/
+objects/castle/cannon/
+
+# pots, bowls, spheres
+objects/iraq/pottery/
+objects/iraq/fruit_melon/
+objects/iraq/fruit_orange/
+objects/tokyo/bowl/
+objects/tokyo/gong/
+objects/castle/globe/
+
+# lamps (their painted beams and halos are never tessellated)
+objects/light/caged/
+objects/light/hanging/
+objects/light/lamp_hang/
+objects/light/lantern/
+objects/light/lantern2/
+objects/light/lantern3/
+objects/light/candle/
+objects/light/candle2/
+objects/light/street_old/
+
+# thrown
+items/projectiles/grenade
