@@ -591,6 +591,7 @@ GL3_LoadPic(char *name, byte *pic, int width, int realwidth,
 			if (image->type == it_wall) /* GFX-modern r_om_bump: replacement wall textures too */
 			{
 				GL3_Bump_Make(texNum, image->name, pic, width, height);
+				GL3_Mat_Make(texNum, image->name, pic, width, height); /* r_om_ssr material map */
 			}
 		}
 
@@ -876,6 +877,7 @@ FreeImage(gl3image_t *image)
 	if (image->texnum && !image->scrap)
 	{
 		GL3_Bump_Free(image->texnum); /* GFX-modern r_om_bump */
+		GL3_Mat_Free(image->texnum); /* r_om_ssr */
 		glDeleteTextures(1, &image->texnum);
 	}
 
@@ -1316,6 +1318,7 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 		if ((ofs0 > 0) && (w0 > 0) && (h0 > 0) && (ofs0 + w0 * h0 * 4 <= size))
 		{
 			GL3_Bump_Make(image->texnum, image->name, m + ofs0, w0, h0);
+			GL3_Mat_Make(image->texnum, image->name, m + ofs0, w0, h0); /* r_om_ssr material map */
 		}
 	}
 
@@ -1774,6 +1777,7 @@ GL3_ShutdownImages(void)
 		if (image->texnum && !image->scrap)
 		{
 			GL3_Bump_Free(image->texnum); /* GFX-modern r_om_bump */
+		GL3_Mat_Free(image->texnum); /* r_om_ssr */
 		glDeleteTextures(1, &image->texnum);
 		}
 

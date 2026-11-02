@@ -427,7 +427,8 @@ typedef struct image_s
 	float detail_scale[2];
 	float detail_shift[2];
 	float detail_scroll[2];
-	int omgloss;                        /* GFX-modern r_om_ssr: gloss class by name + 1 (0 = not worked out yet) */
+	int omgloss;                        /* GFX-modern r_om_ssr: material class + 1 (0 = not worked out yet) */
+	int omglossgen;                     /* ... for this generation of the material table (gl3_material.c) */
 } gl3image_t;
 
 enum {MAX_GL3TEXTURES = 1024};
@@ -547,7 +548,14 @@ extern void GL3_Bump_Free(GLuint texnum);
 extern void GL3_Bump_Bind(GLuint texnum);
 extern void GL3_Bump_SetLights(const byte *lights, int len);
 extern void GL3_Bump_ViewLights(GLuint prog, const float *eye);
-extern float GL3_Bump_SurfClass(const msurface_t *surf);
+extern float GL3_Bump_SurfClass(const msurface_t *surf); /* gl3_material.c */
+// gl3_material.c: material classes and material maps of the world textures (r_om_ssr)
+extern void GL3_Mat_Init(void);
+extern void GL3_Mat_Shutdown(void);
+extern void GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h);
+extern void GL3_Mat_Free(GLuint texnum);
+extern void GL3_Mat_Bind(GLuint texnum);
+extern void GL3_Mat_Frame(void);
 
 // gl3_draw.c
 extern void GL3_Draw_InitLocal(void);

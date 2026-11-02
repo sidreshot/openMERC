@@ -823,6 +823,56 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   luminance (a NaN fed back through the last frame's colour and spread as black blotches).
 * Follow-up 4 (owner: "everything shines the same; less shine on walls, floors as they are"): outside mirrors and glass, walls get 0.3 of their class reflectivity, ceilings 0.15 (blended by the floor factor); damp walls 0.04 instead of 0.12. Floors unchanged.
 
+### Materials (gl3_material.c, materials/om_materials.txt)
+
+Owner: floors that cannot reflect did (unknown stone floors got 0.13 by default), "sort the textures carefully",
+dark parts of concrete and brick must not reflect, a flexible per-material setting; FPS drops.
+
+* Inventory of the 3401 world textures of all maps (scratchpad tooling, not shipped): area on floors/walls/ceilings,
+  SoF surface material, the artist's detail texture and the share of rust colours. Two artist hints proved telling:
+  the detail texture name (d_stonerough, d_stonecracked, d_stucco, d_metalrough, d_metalsmooth, d_woodsmooth, d_tile
+  ...) and an environment map as detail (574 textures, mostly metal objects, glass, signs). Sorted offline from name
+  words, material, detail and rust share, checked on contact sheets per class (marbfloor was missed by "marbl", metal
+  "clean"/"tile" panels were tiles, shelves with goods were furniture, castle/woodfloor1 has a d_metalribbed detail).
+* Classes (fixed numbers, the shader indexes two vec4 arrays): 0 unknown, 1 stone (concrete, brick, asphalt, plaster:
+  matte), 2 wood (raw), 3 metal (painted/plain, 0.07), 4 glass, 5 picture, 6 ground, 7 liquid, 8 polished (marble,
+  0.28), 9 chrome, 10 rusty (matte), 11 mirror, 12 damp (wet without rain), 13 smoothcon (cement slab, garage floors,
+  0.04), 14 varnish (0.10), 15 tiles (0.15), 16 ice, 17 fabric (never puddles), 18 plastic, 19 sky; up to 4 more.
+  Per class: floor reflectivity, roughness, wall and ceiling factors, gloss map weight, stain weight, natural
+  dampness, rain water held (soak: under 0.5 no puddles, 0 only darkens). The default is matte now: of the floor
+  area only polished, tiles, varnish, smoothcon, metal, chrome, ice and liquids reflect dry (about 17 %).
+* The table: "class" lines, then "tex <texture> <class>" for every texture ('*' patterns allowed, later lines win).
+  A loose copy in the game folder overrides the pak; r_om_materials_reload re-reads it in the game; r_om_material
+  prints the face under the crosshair (texture, SoF material, detail, rust share, class and its values, table or
+  rules). Textures missing from the table (mods) go through the same rules in short (MatFallback).
+* Material map per world texture, made when it loads (GL_TEXTURE14, RGBA8, at most 256 wide, mipmapped): R gloss -
+  texels darker than their wide (1/16 texture) and narrow (1/48) surroundings by more than their local spread
+  (grout, cracks, grime blotches) and gritty patches (fine change above the texture mean) are dull, normalised so
+  the cleanest 15 % keep the class value; G height from the relative brightness (rain water gathers in grout and
+  cracks first); B rust/dirt colours (red > green > blue, saturated). The shader: reflectivity x smoothstep(0.08,
+  0.55, gloss), roughness + 0.45 x (1 - gloss); stains weigh by class (metal fully, rusty and ground not).
+* Mirror replacement only for class 11 (classes above 11 would have matched the old "< -10.5" test).
+
+### Frame time (owner: "strong FPS drops")
+
+* r_om_gputime 2: GPU (timestamp queries) and CPU time of each part of the frame (GL3_Post_ProfMark), mean and worst
+  over 200 frames ("OMPROF"), frames over twice the running mean ("OMSPIKE") and whole frames over twice the mean
+  including the game ("OMHITCH"). Toured 11 maps at 1080p, MSAA 2x, GTX 1050 Ti while turning and walking.
+* Volumetric fog was the heaviest: 4.6 ms mean, 9.3 worst on ger1, up to 6-7 ms on nyc1/kos2. r_om_volfog_half 1:
+  marched at half size into an RGBA16F target and brought up depth-aware (four taps weighted by depth agreement, the
+  nearest in depth when none agrees; it also fades the material target now). ger1 4.6 -> 1.6 ms, nyc1 2.5 -> 1.5,
+  kos2 1.2 -> 0.7; mean difference to the full-size march 0.4-0.6 / 255. Its program is compiled at map load
+  (GL3_Post_MapLoad): compiling it when the first fog came into view stalled kos1 for 50 ms.
+* SSR: the matte default removes most traced pixels; tracing only from reflectivity 0.015 up, half the steps on
+  rough faces, a checkerboard of traced pixels alternating per frame filled by the temporal pass (r_om_ssr_checker
+  1), five smoothing taps instead of nine (matte, dry pixels skipped), the apply pass leaves untouched pixels at once
+  and computes lamp glints from reflectivity 0.06 (tiled walls cost 1 ms of glints at full size). tsr1 3.5 -> 2.2 ms,
+  sud1 3.1 -> 0.5, kos2 1.5 -> 0.5, jpn1 2.5 -> 1.1; ger1 rose 1.8 -> 2.5 (its marble floors are polished now).
+* Open: CPU hitches of 20-45 ms a few times a minute (sud1, arm1) inside the Ghoul library while it evaluates prop
+  instances (SOF_RF_GHOUL without shadows) in Ghl_Bounds / DrawLevel / Shadow - not GL submission (0 ms), not chunk
+  decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,
+  Ghoul shadows, texture stacking or the light method.
+
 ## Water reflections, anti-aircraft fire, distant storm
 
 * Liquids (gl3_liquid.c, drawn with the FX shader) write the material target through the new FX uniform omFxMat

@@ -669,6 +669,7 @@ void GL3_EndFrame(void)
 
 	/* a requested screenshot, also before the swap */
 	GL3_SoF_ScreenShotFrame();
+	GL3_Post_ProfMark("2d");
 	GL3_Post_GpuTimer(false);
 
 #ifdef YQ2_GL3_GLES

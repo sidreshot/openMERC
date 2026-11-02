@@ -54,7 +54,7 @@ static qboolean SSRWanted(void);
 static void SSRShutdown(void);
 static void SSRKeepColour(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
-static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth, *r_om_ssr_temporal, *r_om_ssr_ripple;
+static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth, *r_om_ssr_temporal, *r_om_ssr_ripple, *r_om_ssr_checker;
 
 static struct
 {
@@ -188,11 +188,201 @@ GL3_Post_GpuTimer(qboolean begin)
 		T.qi = (T.qi + 1) % GPUQ;
 	}
 }
+
+/* r_om_gputime 2: GPU and CPU time of each part of the frame (timestamps at GL3_Post_ProfMark), mean and worst over
+   200 frames ("OMPROF"), and every frame whose GPU or CPU time is more than twice the running mean ("OMSPIKE") with
+   its parts: where the drops come from */
+#ifndef GL_TIMESTAMP
+#define GL_TIMESTAMP 0x8E28
+#endif
+
+#define PROFMARKS 24
+
+typedef void (APIENTRY *pfnQueryCounter)(GLuint, GLenum);
+
+static struct
+{
+	qboolean tried;
+	pfnQueryCounter counter;
+	GLuint q[GPUQ][PROFMARKS];
+	const char *name[GPUQ][PROFMARKS];
+	double cpu[GPUQ][PROFMARKS];
+	int n[GPUQ];
+	int cur, frames;
+	double sum[PROFMARKS], worst[PROFMARKS], csum[PROFMARKS], cworst[PROFMARKS];
+	const char *sname[PROFMARKS];
+	int sn;
+	double mean, cmean;
+	LARGE_INTEGER freq;
+} PR;
+
+static void
+ProfCollect(int f)
+{
+	GLuint64 t[PROFMARKS];
+	double gpu = 0, cpu = 0;
+	int i, n = PR.n[f];
+
+	if (n < 2)
+	{
+		return;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		T.getui64(PR.q[f][i], GL_QUERY_RESULT, &t[i]);
+	}
+
+	gpu = (double)(t[n - 1] - t[0]) / 1.0e6;
+	cpu = PR.cpu[f][n - 1] - PR.cpu[f][0];
+
+	/* a frame with other parts than the ones being summed starts the sums again */
+	if (PR.sn != n - 1)
+	{
+		memset(PR.sum, 0, sizeof(PR.sum));
+		memset(PR.worst, 0, sizeof(PR.worst));
+		memset(PR.csum, 0, sizeof(PR.csum));
+		memset(PR.cworst, 0, sizeof(PR.cworst));
+		PR.frames = 0;
+		PR.sn = n - 1;
+	}
+
+	for (i = 1; i < n; i++)
+	{
+		double g = (double)(t[i] - t[i - 1]) / 1.0e6, c = PR.cpu[f][i] - PR.cpu[f][i - 1];
+
+		PR.sname[i - 1] = PR.name[f][i];
+		PR.sum[i - 1] += g;
+		PR.csum[i - 1] += c;
+		PR.worst[i - 1] = fmax(PR.worst[i - 1], g);
+		PR.cworst[i - 1] = fmax(PR.cworst[i - 1], c);
+	}
+
+	if (PR.mean > 0 && (gpu > PR.mean * 2.0 + 1.0 || cpu > PR.cmean * 2.0 + 1.0))
+	{
+		char line[1024];
+		size_t len = 0;
+
+		len += snprintf(line + len, sizeof(line) - len, "OMSPIKE gpu %.2f (mean %.2f) cpu %.2f (mean %.2f):", gpu, PR.mean,
+			cpu, PR.cmean);
+
+		for (i = 1; i < n && len < sizeof(line) - 40; i++)
+		{
+			len += snprintf(line + len, sizeof(line) - len, " %s %.2f/%.2f", PR.name[f][i],
+				(double)(t[i] - t[i - 1]) / 1.0e6, PR.cpu[f][i] - PR.cpu[f][i - 1]);
+		}
+
+		R_Printf(PRINT_ALL, "%s\n", line);
+	}
+
+	PR.mean = PR.mean > 0 ? PR.mean * 0.95 + gpu * 0.05 : gpu;
+	PR.cmean = PR.cmean > 0 ? PR.cmean * 0.95 + cpu * 0.05 : cpu;
+
+	if (++PR.frames >= 200)
+	{
+		char line[1024];
+		size_t len = 0;
+
+		len += snprintf(line + len, sizeof(line) - len, "OMPROF gpu/cpu mean(worst):");
+
+		for (i = 0; i < PR.sn && len < sizeof(line) - 48; i++)
+		{
+			len += snprintf(line + len, sizeof(line) - len, " %s %.2f(%.1f)/%.2f(%.1f)", PR.sname[i], PR.sum[i] / PR.frames,
+				PR.worst[i], PR.csum[i] / PR.frames, PR.cworst[i]);
+		}
+
+		R_Printf(PRINT_ALL, "%s\n", line);
+		PR.sn = 0;
+	}
+}
+
+void
+GL3_Post_ProfMark(const char *name)
+{
+	LARGE_INTEGER now;
+	int f;
+
+	if (!r_om_gputime || r_om_gputime->value < 2 || !T.getui64)
+	{
+		return;
+	}
+
+	if (!PR.tried)
+	{
+		typedef PROC (WINAPI *pfnWglGetProcAddress)(LPCSTR);
+		HMODULE gl = GetModuleHandleA("opengl32.dll");
+		pfnWglGetProcAddress wgp = gl ? (pfnWglGetProcAddress)(void *)GetProcAddress(gl, "wglGetProcAddress") : NULL;
+
+		PR.tried = true;
+		PR.counter = wgp ? (pfnQueryCounter)(void *)wgp("glQueryCounter") : NULL;
+		QueryPerformanceFrequency(&PR.freq);
+
+		if (PR.counter)
+		{
+			glGenQueries(GPUQ * PROFMARKS, &PR.q[0][0]);
+		}
+	}
+
+	if (!PR.counter)
+	{
+		return;
+	}
+
+	QueryPerformanceCounter(&now);
+
+	/* "frame" starts the next frame: the oldest one's results are read first (GPUQ frames ago); the whole frame
+	   (game, sound and the rest of the client too) is timed from one start to the next */
+	if (!strcmp(name, "frame"))
+	{
+		static double last, fmean;
+		double t = (double)now.QuadPart * 1000.0 / (double)PR.freq.QuadPart;
+
+		if (last > 0)
+		{
+			double dt = t - last;
+
+			if (fmean > 0 && dt > fmean * 2.0 + 2.0)
+			{
+				R_Printf(PRINT_ALL, "OMHITCH frame %.1f ms (mean %.1f)\n", dt, fmean);
+			}
+
+			fmean = fmean > 0 ? fmean * 0.95 + dt * 0.05 : dt;
+		}
+
+		last = t;
+		PR.cur = (PR.cur + 1) % GPUQ;
+
+		if (PR.n[PR.cur])
+		{
+			ProfCollect(PR.cur);
+		}
+
+		PR.n[PR.cur] = 0;
+	}
+
+	f = PR.cur;
+
+	if (PR.n[f] >= PROFMARKS)
+	{
+		return;
+	}
+
+	PR.counter(PR.q[f][PR.n[f]], GL_TIMESTAMP);
+	PR.name[f][PR.n[f]] = name;
+	PR.cpu[f][PR.n[f]] = (double)now.QuadPart * 1000.0 / (double)PR.freq.QuadPart;
+	PR.n[f]++;
+}
 #else
 void
 GL3_Post_GpuTimer(qboolean begin)
 {
 	(void)begin;
+}
+
+void
+GL3_Post_ProfMark(const char *name)
+{
+	(void)name;
 }
 #endif
 
@@ -1567,15 +1757,64 @@ GL3_Post_EndView(void)
 #define VOLFOG_MAXREGIONS 16
 
 static cvar_t *r_om_volfog, *r_om_volfog_quality, *r_om_volfog_intensity, *r_om_volfog_overlaydim;
-static cvar_t *r_om_volfog_shafts, *r_om_volfog_noise;
+static cvar_t *r_om_volfog_shafts, *r_om_volfog_noise, *r_om_volfog_half;
 
 static struct
 {
 	qboolean tried;
-	GLuint prog;
+	GLuint prog, progup;
 	GLint u_depth, u_invpv, u_eye, u_prm, u_prm2, u_vr, u_rect;
+	GLint up_fog, up_depth, up_rect, up_proj, up_size;
+	GLuint halftex, halffbo;   /* the fog at half size (r_om_volfog_half) */
+	int hw, hh;
 	float vr[VOLFOG_MAXREGIONS * 32];
 } V;
+
+/* r_om_volfog_half: the fog marched at half size and brought up to the view where the depth agrees (the fog is
+   smooth; the march at every pixel of a 1080p view took 2-9 ms in the fog of ger1, nyc1 and kos2) */
+static const char *volfog_up_fs =
+	"uniform sampler2D fogtex;\n"    /* half size: premultiplied fog colour, transmittance */
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 proj;\n"           /* projection C, D; depth range min, max */
+	"uniform vec4 size;\n"           /* half size: width, height, 1/width, 1/height */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmissive;\n"
+	"out vec4 outMaterial;\n"
+	"float Dist(vec2 v)\n"
+	"{\n"
+	"	float z = texture(depthtex, rect.xy + v * rect.zw).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	return proj.y / (ndc + proj.x);\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	float d = Dist(vuv);\n"
+	"	vec2 p = vuv * size.xy - 0.5;\n"
+	"	vec2 f = fract(p), b = (floor(p) + 0.5) * size.zw;\n"
+	"	vec2 t[4] = vec2[4](b, b + vec2(size.z, 0.0), b + vec2(0.0, size.w), b + size.zw);\n"
+	"	vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);\n"
+	"	float k = 3.0 / (0.03 * d + 1.0), best = 1e9;\n"
+	"	vec4 near = vec4(0.0, 0.0, 0.0, 1.0), sum = vec4(0.0);\n"
+	"	float ws = 0.0;\n"
+	"	for (int i = 0; i < 4; i++)\n"
+	"	{\n"
+	"		vec2 tc = clamp(t[i], size.zw * 0.5, 1.0 - size.zw * 0.5);\n"
+	"		float e = abs(Dist(tc) - d);\n"
+	"		vec4 s = texture(fogtex, tc);\n"
+	"		float wi = w[i] * exp(-e * k);\n"
+	"		sum += s * wi;\n"
+	"		ws += wi;\n"
+	"		if (e < best) { best = e; near = s; }\n"
+	"	}\n"
+	/* no tap at this depth (a thin edge): the nearest in depth, the fog never drops out */
+	"	vec4 fog = ws > 0.02 ? sum / ws : near;\n"
+	"	outColor = fog;\n"
+	"	outEmissive = vec4(0.0, 0.0, 0.0, fog.a);\n"
+	"	outMaterial = vec4(0.0, 0.0, 0.0, fog.a);\n"
+	"}\n";
 
 static const char *volfog_fs =
 	"uniform sampler2D depthtex;\n"
@@ -1675,6 +1914,7 @@ VolFogCvars(void)
 		r_om_volfog_overlaydim = ri.Cvar_Get("r_om_volfog_overlaydim", "0.85", CVAR_ARCHIVE);
 		r_om_volfog_shafts = ri.Cvar_Get("r_om_volfog_shafts", "1", CVAR_ARCHIVE);
 		r_om_volfog_noise = ri.Cvar_Get("r_om_volfog_noise", "0.25", CVAR_ARCHIVE);
+		r_om_volfog_half = ri.Cvar_Get("r_om_volfog_half", "1", CVAR_ARCHIVE);
 	}
 }
 
@@ -1759,6 +1999,86 @@ VolFogProgram(void)
 	GL3_UseProgram(p);
 	GL3_CSM_BindProgram(p);
 	glUniform1i(V.u_depth, 7);
+
+	/* the upsampling pass of r_om_volfog_half (without it the fog is marched at full size) */
+	v = CompilePost(GL_VERTEX_SHADER, post_vs);
+	f = CompilePost(GL_FRAGMENT_SHADER, volfog_up_fs);
+
+	if (v && f)
+	{
+		p = glCreateProgram();
+		glAttachShader(p, v);
+		glAttachShader(p, f);
+		GL3_Post_BindOutputs(p);
+		glLinkProgram(p);
+		glGetProgramiv(p, GL_LINK_STATUS, &ok);
+
+		if (ok)
+		{
+			V.progup = p;
+			V.up_fog = glGetUniformLocation(p, "fogtex");
+			V.up_depth = glGetUniformLocation(p, "depthtex");
+			V.up_rect = glGetUniformLocation(p, "rect");
+			V.up_proj = glGetUniformLocation(p, "proj");
+			V.up_size = glGetUniformLocation(p, "size");
+			GL3_UseProgram(p);
+			glUniform1i(V.up_fog, 0);
+			glUniform1i(V.up_depth, 7);
+		}
+		else
+		{
+			glDeleteProgram(p);
+		}
+	}
+
+	if (v) glDeleteShader(v);
+	if (f) glDeleteShader(f);
+	return true;
+}
+
+/* the half-size fog target for this view size; false: march at full size */
+static qboolean
+VolFogHalfTarget(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	int w = Q_max(P.vw / 2, 1), h = Q_max(P.vh / 2, 1);
+	GLint fbo = 0;
+
+	if (!V.progup || !r_om_volfog_half->value)
+	{
+		return false;
+	}
+
+	if (V.halftex && V.hw == w && V.hh == h)
+	{
+		return true;
+	}
+
+	if (V.halffbo) glDeleteFramebuffers(1, &V.halffbo);
+	if (V.halftex) glDeleteTextures(1, &V.halftex);
+	V.halffbo = V.halftex = 0;
+
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+	V.halftex = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_NEAREST);
+	glGenFramebuffers(1, &V.halffbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, V.halffbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, V.halftex, 0);
+	glDrawBuffers(1, one);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		glDeleteFramebuffers(1, &V.halffbo);
+		glDeleteTextures(1, &V.halftex);
+		V.halffbo = V.halftex = 0;
+		glDeleteProgram(V.progup);
+		V.progup = 0;
+		return false;
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	V.hw = w;
+	V.hh = h;
 	return true;
 }
 
@@ -1806,9 +2126,37 @@ GL3_Post_VolFog(void)
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
 	glDisable(GL_CULL_FACE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_SRC_ALPHA);
-	DrawQuad();
+
+	if (VolFogHalfTarget())
+	{
+		GLint fbo = 0, vp[4];
+
+		/* marched at half size, then over the view where the depth agrees */
+		glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+		glGetIntegerv(GL_VIEWPORT, vp);
+		glDisable(GL_BLEND);
+		glBindFramebuffer(GL_FRAMEBUFFER, V.halffbo);
+		glViewport(0, 0, V.hw, V.hh);
+		DrawQuad();
+
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		glViewport(vp[0], vp[1], vp[2], vp[3]);
+		GL3_UseProgram(V.progup);
+		glUniform4f(V.up_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(V.up_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin,
+			gl3depthmax);
+		glUniform4f(V.up_size, (float)V.hw, (float)V.hh, 1.0f / V.hw, 1.0f / V.hh);
+		BindTex(GL_TEXTURE0, V.halftex);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_SRC_ALPHA);
+		DrawQuad();
+	}
+	else
+	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_SRC_ALPHA);
+		DrawQuad();
+	}
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDisable(GL_BLEND);
@@ -1829,6 +2177,18 @@ VolFogShutdown(void)
 		glDeleteProgram(V.prog);
 	}
 
+	if (V.progup)
+	{
+		if (gl3state.currentShaderProgram == V.progup)
+		{
+			gl3state.currentShaderProgram = 0;
+		}
+
+		glDeleteProgram(V.progup);
+	}
+
+	if (V.halffbo) glDeleteFramebuffers(1, &V.halffbo);
+	if (V.halftex) glDeleteTextures(1, &V.halftex);
 	memset(&V, 0, sizeof(V));
 }
 
@@ -5622,8 +5982,17 @@ static const char *ssr_fs =
 	"		outColor = vec4(refl * 3.0, m.r > 0.003 ? m.g / m.r : 0.0, 0.0, 1.0);\n"
 	"		return;\n"
 	"	}\n"
-	"	if (refl < 0.003)\n"
+	/* below this a reflection is not seen (walls of faintly glossy classes); the lamp glints of the apply pass still
+	   come from the material */
+	"	if (refl < 0.015)\n"
 	"		discard;\n"
+	/* r_om_ssr_checker: half the pixels are traced each frame, in a checkerboard that alternates; the others are
+	   filled from their neighbours and the history by the temporal pass (marked with alpha -1) */
+	"	if (texel.w > 0.5 && ((int(gl_FragCoord.x) + int(gl_FragCoord.y) + int(frame)) & 1) != 0)\n"
+	"	{\n"
+	"		outColor = vec4(0.0, 0.0, 0.0, -1.0);\n"
+	"		return;\n"
+	"	}\n"
 	"	float rough = clamp(m.g / refl, 0.0, 1.0);\n"
 	"	vec3 P = Pos(vuv);\n"
 	"	float d = -P.z;\n"
@@ -5673,7 +6042,8 @@ static const char *ssr_fs =
 	"		discard;\n"
 	"	float tmin = 1.5 / length(ds / px);\n"
 	"	float iz0 = 1.0 / P0.z, iz1 = 1.0 / E.z;\n"
-	"	int steps = int(params.y);\n"
+	/* rough faces read a blurred level of the colour: half the steps find the same */
+	"	int steps = rough > 0.35 ? int(params.y) / 2 : int(params.y);\n"
 	"	float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + frame * 0.618034);\n"
 	"	float tp = 0.0, hit = -1.0, rdp = -P0.z;\n"
 	"	for (int i = 0; i < steps; i++)\n"
@@ -5795,9 +6165,15 @@ static const char *ssr_smooth_fs =
 	"vec4 Src(vec2 v) { return params.x > 0.5 ? texture(srctex, rect.xy + v * rect.zw) : texture(srctex, v); }\n"
 	"void main()\n"
 	"{\n"
+	"	vec4 c = Src(vuv);\n"
+	/* matte and dry (most of a view since the material classes): nothing to smooth */
+	"	if (c.r < 0.002 && c.b < 0.002)\n"
+	"	{\n"
+	"		outColor = c;\n"
+	"		return;\n"
+	"	}\n"
 	"	vec3 P = Pos(vuv);\n"
 	"	float d = -P.z;\n"
-	"	vec4 c = Src(vuv);\n"
 	"	vec3 Pr = Pos(vuv + vec2(texel.x, 0.0)), Pl = Pos(vuv - vec2(texel.x, 0.0));\n"
 	"	vec3 Pu = Pos(vuv + vec2(0.0, texel.y)), Pd = Pos(vuv - vec2(0.0, texel.y));\n"
 	"	vec3 dx = abs(Pr.z - P.z) < abs(P.z - Pl.z) ? Pr - P : P - Pl;\n"
@@ -5808,12 +6184,13 @@ static const char *ssr_smooth_fs =
 	"	float tol = 1.5 + d * 0.01;\n"
 	"	vec4 sum = c;\n"
 	"	float ws = 1.0;\n"
-	"	for (int i = -4; i <= 4; i++)\n"
+	/* five taps half the radius apart (nine cost 0.6 ms on the tiled subway of tsr1 for no visible difference) */
+	"	for (int i = -2; i <= 2; i++)\n"
 	"	{\n"
 	"		if (i == 0) continue;\n"
-	"		vec2 v = vuv + rad * (float(i) * 0.25);\n"
+	"		vec2 v = vuv + rad * (float(i) * 0.5);\n"
 	"		if (any(lessThan(v, vec2(0.0))) || any(greaterThan(v, vec2(1.0)))) continue;\n"
-	"		float w = exp(-float(i * i) / 8.0) * (1.0 - smoothstep(tol * 0.5, tol, abs(dot(Pos(v) - P, N))));\n"
+	"		float w = exp(-float(i * i) / 2.0) * (1.0 - smoothstep(tol * 0.5, tol, abs(dot(Pos(v) - P, N))));\n"
 	"		vec4 sv = Src(v);\n"
 	"		if (any(isnan(sv)) || isnan(w)) continue;\n"
 	"		sum += sv * w;\n"
@@ -5842,14 +6219,22 @@ static const char *ssr_temporal_fs =
 	"void main()\n"
 	"{\n"
 	"	vec4 c = texture(cur, vuv);\n"
-	"	vec4 mn = c, mx = c;\n"
+	/* a pixel not traced this frame (r_om_ssr_checker, alpha -1): the mean of its traced neighbours for now, the
+	   history carries it; the neighbourhood range only from traced pixels */
+	"	bool skip = c.a < -0.5;\n"
+	"	vec4 mn = vec4(1e9), mx = vec4(-1e9), nsum = vec4(0.0);\n"
+	"	float nn = 0.0;\n"
 	"	for (int y = -1; y <= 1; y++)\n"
 	"		for (int x = -1; x <= 1; x++)\n"
 	"		{\n"
 	"			vec4 s = texture(cur, vuv + vec2(float(x), float(y)) * size.zw);\n"
+	"			if (s.a < -0.5) continue;\n"
 	"			mn = min(mn, s);\n"
 	"			mx = max(mx, s);\n"
+	"			if (x == 0 || y == 0) { nsum += s; nn += 1.0; }\n"
 	"		}\n"
+	"	if (skip) c = nn > 0.0 ? nsum / nn : vec4(0.0);\n"
+	"	if (mn.a > 1e8) { mn = c; mx = c; }\n"
 	"	float z = texture(depthtex, rect.xy + vuv * rect.zw).r;\n"
 	"	float d = proj.y / ((z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0 + proj.x);\n"
 	"	vec2 n = vuv * 2.0 - 1.0;\n"
@@ -5861,7 +6246,7 @@ static const char *ssr_temporal_fs =
 	"		if (all(greaterThan(pu, vec2(0.0))) && all(lessThan(pu, vec2(1.0))))\n"
 	"		{\n"
 	"			vec4 h = clamp(texture(hist, pu), mn, mx);\n"
-	"			outColor = mix(c, h, keep);\n"
+	"			outColor = mix(c, h, skip ? max(keep, 0.6) : keep);\n"
 	"		}\n"
 	"	}\n"
 	"	if (any(isnan(outColor)) || any(isinf(outColor))) outColor = vec4(0.0);\n"
@@ -5902,6 +6287,10 @@ static const char *ssr_apply_fs =
 	"vec3 SafeN(vec3 c) { float l = length(c); return l > 1e-12 ? c / l : vec3(0.0, 0.0, 1.0); }\n"
 	"void main()\n"
 	"{\n"
+	/* nothing reflected, matte and dry around here (one filtered tap covers the four the upsampling reads) */
+	"	vec4 r0 = texture(reftex, vuv), m0 = texture(smtex, vuv);\n"
+	"	if (r0.r + r0.g + r0.b + r0.a + m0.r + m0.b <= 0.0)\n"
+	"		discard;\n"
 	"	vec3 P = Pos(vuv);\n"
 	"	float d = -P.z;\n"
 	"	vec2 p = vuv * size.xy - 0.5;\n"
@@ -5923,7 +6312,8 @@ static const char *ssr_apply_fs =
 	"	vec4 m = texture(smtex, t0) * w.x + texture(smtex, t1) * w.y + texture(smtex, t2) * w.z + texture(smtex, t3) * w.w;\n"
 	"	float refl = m.r, wet = m.b;\n"
 	"	vec3 add = r.rgb;\n"
-	"	if (glint.x > 0.0 && refl > 0.02 && omBN > 0)\n"
+	/* the glints where the face is really glossy (the faint sheen of tiled walls cost 1 ms at full size for nothing) */
+	"	if (glint.x > 0.0 && refl > 0.06 && omBN > 0)\n"
 	"	{\n"
 	"		float rough = clamp(m.g / refl, 0.02, 1.0);\n"
 	"		vec3 Pr = Pos(vuv + vec2(texel.x, 0.0)), Pl = Pos(vuv - vec2(texel.x, 0.0));\n"
@@ -5975,6 +6365,7 @@ SSRWanted(void)
 		r_om_ssr_smooth = ri.Cvar_Get("r_om_ssr_smooth", "32", CVAR_ARCHIVE);
 		r_om_ssr_temporal = ri.Cvar_Get("r_om_ssr_temporal", "0.85", CVAR_ARCHIVE);
 		r_om_ssr_ripple = ri.Cvar_Get("r_om_ssr_ripple", "1", CVAR_ARCHIVE);
+		r_om_ssr_checker = ri.Cvar_Get("r_om_ssr_checker", "1", CVAR_ARCHIVE);
 	}
 
 	return !SR.failed && (r_om_ssr->value > 0);
@@ -6205,6 +6596,8 @@ GL3_Post_SSR(void)
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 	}
 
+	GL3_Post_ProfMark("ssr_blit");
+
 	/* the material smoothed across texture seams (half size, two passes) */
 	{
 		float rad = Q_max(r_om_ssr_smooth->value, 0.0f);
@@ -6230,6 +6623,8 @@ GL3_Post_SSR(void)
 		}
 	}
 
+	GL3_Post_ProfMark("ssr_smooth");
+
 	/* the reflections at half size (premultiplied colour, weight) */
 	{
 		static const float zero[4] = {0, 0, 0, 0};
@@ -6251,7 +6646,9 @@ GL3_Post_SSR(void)
 	q = Q_max(1, Q_min((int)r_om_ssr_quality->value, 3));
 	glUniform4f(SR.u_params, Q_max(r_om_ssr_dist->value, 64.0f), (float)(q == 1 ? 16 : q == 2 ? 24 : 40),
 		r_farclipdist->value * 0.98f, (float)dbg);
-	glUniform4f(SR.u_texel, 1.0f / P.vw, 1.0f / P.vh, (float)SR.ch, 0);
+	/* w: r_om_ssr_checker (only with a history to fill the gaps from) */
+	glUniform4f(SR.u_texel, 1.0f / P.vw, 1.0f / P.vh, (float)SR.ch,
+		(r_om_ssr_checker->value && SR.havehist && !dbg && r_om_ssr_temporal->value > 0) ? 1.0f : 0.0f);
 	SR.frame = (SR.frame >= 1000.0f) ? 0.0f : SR.frame + 1.0f;
 	glUniform1f(SR.u_frame, SR.frame);
 	glUniform1f(SR.u_strength, Q_min(r_om_ssr->value, 4.0f));
@@ -6267,6 +6664,8 @@ GL3_Post_SSR(void)
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
 	BindTex(GL_TEXTURE0, P.texdepthcopy);
 	DrawQuad();
+
+	GL3_Post_ProfMark("ssr_trace");
 
 	/* accumulated over frames into the next history texture (its reprojection uses last frame's projection x view,
 	   the same one the colour of the last frame was made with) */
@@ -6293,6 +6692,8 @@ GL3_Post_SSR(void)
 		SR.histcur = next;
 		SR.havehist = true;
 	}
+
+	GL3_Post_ProfMark("ssr_temporal");
 
 	/* over the scene */
 	if (P.samples)
@@ -6702,4 +7103,17 @@ GL3_Mirror_MapLoad(void)
 {
 	MR.candvalid = MR.valid = false;
 	MR.candframe = 0;
+}
+
+/* a new map is loading: the volumetric fog program is compiled now, not when the first fog comes into view (a
+   50 ms stall in the middle of kos1) */
+void
+GL3_Post_MapLoad(void)
+{
+	VolFogCvars();
+
+	if (r_om_volfog->value)
+	{
+		VolFogProgram();
+	}
 }

@@ -837,6 +837,7 @@ Mod_LoadBrushModel(gl3model_t *mod, void *buffer, int modfilelen)
 		/* GFX-modern r_om_rain: maps whose entities speak of rain */
 		GL3_Weather_MapLoad((const char *)(mod_base + h46->lumps[LUMP_ENTITIES].fileofs), h46->lumps[LUMP_ENTITIES].filelen);
 		GL3_Mirror_MapLoad();
+		GL3_Post_MapLoad();
 	}
 	else
 	{

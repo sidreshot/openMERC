@@ -627,6 +627,7 @@ set(GL3-Source
 	${REF_SRC_DIR}/gl3/gl3_avi.c
 	${REF_SRC_DIR}/gl3/gl3_relight.c
 	${REF_SRC_DIR}/gl3/gl3_bump.c
+	${REF_SRC_DIR}/gl3/gl3_material.c
 	${REF_SRC_DIR}/gl3/gl3_dynlight.c
 	${REF_SRC_DIR}/gl3/gl3_sofapi.c
 	${REF_SRC_DIR}/gl3/gl3_ghoul.c

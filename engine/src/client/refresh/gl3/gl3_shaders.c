@@ -728,7 +728,7 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			if(omTranslucent == 0)
 				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
 			// OpenMerc GFX-modern r_om_mirror: a face on the mirrored plane shows the mirror image (no screen-space reflection)
-			if(omEmissive < -10.5 && omMirror.x > 0.5)
+			if(abs(omEmissive + 11.0) < 0.5 && omMirror.x > 0.5)
 			{
 				vec3 omMc = omMirrorColor(outColor.rgb, passWorldCoord);
 				if(omMc != outColor.rgb)
@@ -897,43 +897,42 @@ static const char* fragmentSrcOmBump =
 	"	}\n"
 	"	return s * 0.25 * omSsr.y;\n"
 	"}\n"
+	/* the material classes (gl3_material.c, materials/om_materials.txt) and the material map of the texture */
+	"uniform vec4 omMatA[24];\n"    /* floor reflectivity, roughness, wall factor, ceiling factor */
+	"uniform vec4 omMatB[24];\n"    /* gloss map weight, stain weight, natural dampness, rain water held */
+	"uniform sampler2D omMatMap;\n" /* R gloss (dark grout, cracks, grime and grit are dull), G height, B rust/dirt */
 	"vec4 omMaterial(vec3 wp, vec3 nrm, out float wet)\n"
 	"{\n"
 	"	wet = 0.0;\n"
 	"	if (omSsr.x <= 0.0 || omEmissive > 0.0)\n"
 	"		return vec4(0.0, 0.0, 0.0, 1.0);\n"
 	"	vec3 N = normalize(nrm);\n"
-	"	int mc = omEmissive < 0.0 ? int(-omEmissive + 0.5) : 0;\n"
+	"	int mc = clamp(omEmissive < 0.0 ? int(-omEmissive + 0.5) : 0, 0, 23);\n"
+	"	vec4 A = omMatA[mc], B = omMatB[mc];\n"
 	"	float fl = smoothstep(0.6, 0.85, N.z);\n"
-	"	float det = abs(dot(texture(tex, passTexCoord).rgb - texture(tex, passTexCoord, 3.0).rgb, vec3(0.333)));\n"
-	"	float sm = 1.0 - smoothstep(0.04, 0.25, det);\n"
-	"	float r = 0.0, rough = 0.5, damp = 0.0;\n"
-	/* gl3_bump.c GL3_Bump_SurfClass: 1 stone, 2 wood, 3 metal, 4 glass, 5 pictures, 6 loose ground, 7 liquids,
-	   8 polished stone, 9 polished metal, 10 rusty metal, 11 mirror, 12 damp stone */
-	"	if (mc == 11) { r = 0.9; rough = 0.0; }\n"
-	"	else if (mc == 4) { r = 0.45; rough = 0.03; }\n"
-	"	else if (mc == 7) { r = mix(0.2, 0.45, fl); rough = 0.09; }\n"
-	"	else if (mc == 8) { r = mix(0.12, 0.28, fl) * mix(0.6, 1.0, sm); rough = mix(0.2, 0.06, sm); }\n"
-	"	else if (mc == 9) { r = mix(0.2, 0.3, fl); rough = mix(0.35, 0.12, sm); }\n"
-	"	else if (mc == 3) { r = 0.16; rough = mix(0.5, 0.3, sm); }\n"
-	"	else if (mc == 10) { r = 0.06; rough = 0.6; }\n"
-	"	else if (mc == 12) { r = fl * 0.13; rough = 0.3; damp = 1.0; }\n"
-	"	else if (mc == 2) { r = fl * 0.1 * mix(0.3, 1.0, sm); rough = mix(0.5, 0.25, sm); }\n"
-	"	else if (mc == 1 || mc == 0) { r = fl * 0.13 * mix(0.3, 1.0, sm); rough = mix(0.45, 0.15, sm); }\n"
-	/* walls shine about a third as much as floors, ceilings less still (corridor walls seen at grazing angles made
-	   everything look equally glossy); mirrors and glass keep theirs */
-	"	if (mc != 11 && mc != 4)\n"
-	"		r *= mix(N.z < -0.7 ? 0.15 : 0.3, 1.0, fl);\n"
-	/* wet: open to the rain, or damp by nature (sewers, catacombs): floors with puddles, damp walls glisten */
-	"	wet = max(omWet(wp, N), damp * omSsr.w);\n"
+	"	vec3 mm = texture(omMatMap, passTexCoord).rgb;\n"
+	/* the texels decide where the class shines: dull spots do not reflect at all, they only get rougher */
+	"	float g = mix(1.0, mm.r, B.x) * (1.0 - mm.b * B.y);\n"
+	"	float r = A.x * smoothstep(0.08, 0.55, g);\n"
+	"	float rough = min(1.0, A.y + 0.45 * (1.0 - g));\n"
+	/* walls and ceilings by their own factor of the class (corridor walls seen at grazing angles looked as glossy as
+	   the floor); mirrors and glass keep theirs */
+	"	r *= mix(N.z < -0.7 ? A.w : A.z, 1.0, fl);\n"
+	/* wet: open to the rain, or damp by nature (sewers, catacombs). What holds water (soak) gets puddles from a noise
+	   and water in the low parts of the texture first (grout, cracks); porous ground only darkens and sheens a little,
+	   carpets only darken */
+	"	wet = max(omWet(wp, N), B.z * omSsr.w);\n"
 	"	if (wet > 0.0)\n"
 	"	{\n"
-	"		float pud = smoothstep(0.56, 0.6, omVN(wp.xy / 96.0) * 0.7 + omVN(wp.xy / 23.0) * 0.3) * fl;\n"
-	"		r = mix(r, max(r, mix(0.16, 0.5, pud) * fl + 0.04 * damp * (1.0 - fl)), wet);\n"
-	"		rough = mix(rough, mix(0.3, 0.06, pud) - 0.1 * damp * (1.0 - fl), wet);\n"
+	"		float low = smoothstep(0.42, 0.22, mm.g) * fl;\n"
+	"		float pud = max(smoothstep(0.56, 0.6, omVN(wp.xy / 96.0) * 0.7 + omVN(wp.xy / 23.0) * 0.3) * fl, low * 0.7)\n"
+	"			* step(0.5, B.w);\n"
+	"		float wr = (mix(0.16, 0.5, pud) * fl + 0.04 * B.z * (1.0 - fl)) * B.w;\n"
+	"		r = mix(r, max(r, wr), wet);\n"
+	"		rough = mix(rough, mix(0.3, 0.06, pud) - 0.1 * B.z * (1.0 - fl), wet * B.w);\n"
 	"		wet *= 0.6 + 0.4 * pud;\n"
 	"	}\n"
-	"	return vec4(r, r * rough, 0.0, 1.0);\n"
+	"	return vec4(r, r * clamp(rough, 0.0, 1.0), 0.0, 1.0);\n"
 	"}\n"
 	"vec3 omBumpLight(vec3 lm)\n"
 	"{\n"
@@ -1202,7 +1201,7 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			if(omTranslucent == 0)
 				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
 			// OpenMerc GFX-modern r_om_mirror: a face on the mirrored plane shows the mirror image (no screen-space reflection)
-			if(omEmissive < -10.5 && omMirror.x > 0.5)
+			if(abs(omEmissive + 11.0) < 0.5 && omMirror.x > 0.5)
 			{
 				vec3 omMc = omMirrorColor(outColor.rgb, passWorldCoord);
 				if(omMc != outColor.rgb)
@@ -1852,6 +1851,12 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 		glUniform1i(nmLoc, 11);
 	}
 
+	GLint mmLoc = glGetUniformLocation(prog, "omMatMap"); /* r_om_ssr: material map of the texture (gl3_material.c) */
+	if(mmLoc != -1)
+	{
+		glUniform1i(mmLoc, 14);
+	}
+
 	GLint dxLoc = glGetUniformLocation(prog, "omDeluxe");
 	if(dxLoc != -1)
 	{
@@ -2280,6 +2285,27 @@ void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *re
 		GL3_SelectTMU(GL_TEXTURE13);
 		glBindTexture(GL_TEXTURE_2D, tex);
 		GL3_SelectTMU(GL_TEXTURE0);
+	}
+}
+
+/* GFX-modern r_om_ssr: the parameters of the material classes (gl3_material.c) */
+void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
+{
+	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		GLint loc;
+
+		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omMatA[0]")) == -1)
+		{
+			continue;
+		}
+
+		GL3_UseProgram(si[i]->shaderProgram);
+		glUniform4fv(loc, n, a);
+		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omMatB[0]"), n, b);
 	}
 }
 

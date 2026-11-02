@@ -353,6 +353,7 @@ void GL3_Post_MaterialWrites(qboolean on);
 void GL3_Mirror_Note(const msurface_t *surf);
 void GL3_Mirror_Render(void);
 void GL3_Mirror_MapLoad(void);
+void GL3_Post_MapLoad(void);
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *rect, GLuint tex);
 void GL3_Post_SSR(void);
 void GL3_SoF_SSRUniforms(const float *ssr);
@@ -364,6 +365,8 @@ float GL3_Post_FullbrightScale(void);
 int GL3_Post_SoftMode(int blend, qboolean billboard, qboolean depthtest);
 void GL3_Post_SoftUniforms(GLint uparams, GLint uview, int mode);
 void GL3_Post_GpuTimer(qboolean begin);
+void GL3_Post_ProfMark(const char *name);
+void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n);
 float GL3_Post_Overbright(void);
 float GL3_Post_OverbrightModels(void);
 

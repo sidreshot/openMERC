@@ -705,6 +705,7 @@ GL3_Init(void)
 	GL3_Post_Init(); /* GFX-modern: bloom and soft particles */
 
 	GL3_CSM_Init(); /* GFX-modern: cascaded sun shadows */
+	GL3_Mat_Init(); /* GFX-modern: material classes (r_om_ssr) */
 
 	GL3_Liquid_Init(); /* I4c: SPEC-413 §1 step 1, the warp table is halved at every start */
 
@@ -755,6 +756,7 @@ GL3_Shutdown(void)
 		GL3_FX_Shutdown();
 		GL3_Post_Shutdown();
 		GL3_CSM_Shutdown();
+		GL3_Mat_Shutdown();
 		GL3_ShutdownImages();
 		GL3_SurfShutdown();
 		GL3_Draw_ShutdownLocal();
@@ -880,6 +882,7 @@ void GL3_Draw3DBatchesNow()
 		{
 			GL3_Bind(cmd->texnum);
 			GL3_Bump_Bind(cmd->texnum); /* GFX-modern r_om_bump: its normal map on GL_TEXTURE11 */
+			GL3_Mat_Bind(cmd->texnum); /* r_om_ssr: its material map on GL_TEXTURE14 */
 		}
 		if(cmd->lmtexnum >= 0)
 			GL3_BindLightmap(cmd->lmtexnum);
@@ -1881,6 +1884,7 @@ GL3_RenderView(refdef_t *fd)
 		return;
 	}
 
+	GL3_Post_ProfMark("client");
 	r_newrefdef = *fd;
 	GL3_Fog_ViewTest(&r_newrefdef);
 	GL3_DynLight_TestLight(&r_newrefdef); /* GFX-modern: r_om_pdlight_test A/B light */
@@ -1910,8 +1914,11 @@ GL3_RenderView(refdef_t *fd)
 	R_SetFrustum(vup, vpn, vright, gl3_origin,
 		r_newrefdef.fov_x, r_newrefdef.fov_y, frustum);
 
+	GL3_Post_ProfMark("dlights");
+
 	/* GFX-modern: the sun shadow maps of this view (r_om_csm) */
 	GL3_CSM_Frame();
+	GL3_Post_ProfMark("csm");
 
 	SetupGL();
 
@@ -1926,11 +1933,16 @@ GL3_RenderView(refdef_t *fd)
 	GL3_SoF_ApplyMonoLightmap((r_fullbright->value != 0) || (r_newrefdef.rdflags & RDF_IRGOGGLES));
 	/* GFX-modern r_om_rain: lightning timeline and the sky tint */
 	GL3_Post_WeatherFrame();
+	/* GFX-modern r_om_ssr: the material classes for the world shaders */
+	GL3_Mat_Frame();
+	GL3_Post_ProfMark("setup");
 
 	/* GFX-modern: the world seen in the nearest mirror (r_om_mirror) */
 	GL3_Mirror_Render();
+	GL3_Post_ProfMark("mirror");
 
 	GL3_DrawWorld();
+	GL3_Post_ProfMark("world");
 
 	/* GFX-modern: depth of the world for soft particles */
 	GL3_Post_DepthCopy();
@@ -1940,6 +1952,7 @@ GL3_RenderView(refdef_t *fd)
 
 	/* GFX-modern: volumetric fog in the fog regions, over the world and its overlay */
 	GL3_Post_VolFog();
+	GL3_Post_ProfMark("fog");
 
 	if (!gl3_sofframe.active)
 	{
@@ -1958,21 +1971,27 @@ GL3_RenderView(refdef_t *fd)
 
 	// make sure all remaining batched 3D stuff is drawn
 	GL3_Draw3DBatchesNow();
+	GL3_Post_ProfMark("ents");
 
 	/* GFX-modern: ambient occlusion of the finished opaque view (r_om_ssao) */
 	GL3_Post_SSAO();
+	GL3_Post_ProfMark("ssao");
 
 	/* GFX-modern: screen-space reflections on reflective and wet faces (r_om_ssr) */
 	GL3_Post_SSR();
+	GL3_Post_ProfMark("ssr");
 
 	/* GFX-modern: rain, splashes and lightning (r_om_rain) */
 	GL3_Post_Weather();
+	GL3_Post_ProfMark("weather");
 
 	/* GFX-modern: volumetric light beams in place of the painted Ghoul light cones */
 	GL3_Post_Beams();
+	GL3_Post_ProfMark("beams");
 
 	/* GFX-modern: bloom and the copy of the view into the window */
 	GL3_Post_EndView();
+	GL3_Post_ProfMark("post");
 
 	if (r_speeds->value == 1)
 	{
@@ -2108,6 +2127,7 @@ GL3_BeginFrame(float camera_separation)
 	(void)camera_separation;
 
 	GL3_Post_GpuTimer(true); /* r_om_gputime measurement */
+	GL3_Post_ProfMark("frame");
 
 	/* SPEC-413 §6 Begin frame */
 #ifdef OM_SOFREF
