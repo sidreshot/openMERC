@@ -586,6 +586,12 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 		// OpenMerc: 1 for translucent surfaces with lightmap (si3DlmTrans)
 		uniform int omTranslucent;
 
+		// OpenMerc GFX-modern r_om_seams: 1 for the strips that blend a texture seam (si3DlmSeam, gl3_surf.c);
+		// the seam line (a point on it, the strip width) and the direction into the face
+		uniform int omSeam;
+		uniform vec4 omSeamP;
+		uniform vec4 omSeamD;
+
 		// OpenMerc: SPEC-410 lightmap colour correction (256 x 1, GL_TEXTURE5;
 		// all 255 for r_fullbright and night vision)
 		uniform sampler2D omColorTable;
@@ -736,6 +742,32 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 					outColor.rgb = omMc;
 					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
 				}
+			}
+			// OpenMerc GFX-modern r_om_seams: the neighbour's texture fades in over the strip - half at the seam
+			// (both sides meet there), none at its inner end; in between its raised texels (brighter than the
+			// texture's mean) reach further and a world-space noise breaks the straight line
+			if(omSeam != 0)
+			{
+				float omSb = clamp(1.0 - dot(passWorldCoord - omSeamP.xyz, omSeamD.xyz) / omSeamP.w, 0.0, 1.0);
+				vec3 omLw = vec3(0.3, 0.59, 0.11);
+				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw) * 2.0;
+				vec3 omQ = passWorldCoord * 0.11;
+				vec3 omQi = floor(omQ);
+				vec3 omQf = fract(omQ);
+				omQf = omQf * omQf * (3.0 - 2.0 * omQf);
+				vec4 omHk = vec4(0.0, 1.0, 57.0, 58.0) + dot(omQi, vec3(1.0, 57.0, 113.0));
+				vec4 omN0 = fract(sin(omHk) * 43758.5453);
+				vec4 omN1 = fract(sin(omHk + 113.0) * 43758.5453);
+				vec4 omNz = mix(omN0, omN1, omQf.z);
+				vec2 omNy = mix(omNz.xz, omNz.yw, omQf.x);
+				float omSn = mix(omNy.x, omNy.y, omQf.y);
+				float omSm = omSb * (1.0 - omSb) * 4.0;
+				float omSa = 0.5 * omSb + omSm * (0.4 * omSh + 0.35 * (omSn - 0.5));
+				outColor.a = smoothstep(0.05, 0.95, clamp(omSa, 0.0, 1.0));
+				if(outColor.a < 0.004)
+					discard;
+				if(omSeam == 2)
+					outColor.rgb = vec3(1.0, 0.0, 0.0); // r_om_seams 2: where the strips lie
 			}
 		}
 );
@@ -1054,6 +1086,12 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 		// OpenMerc: 1 for translucent surfaces with lightmap (si3DlmTrans)
 		uniform int omTranslucent;
 
+		// OpenMerc GFX-modern r_om_seams: 1 for the strips that blend a texture seam (si3DlmSeam, gl3_surf.c);
+		// the seam line (a point on it, the strip width) and the direction into the face
+		uniform int omSeam;
+		uniform vec4 omSeamP;
+		uniform vec4 omSeamD;
+
 		// OpenMerc: SPEC-410 lightmap colour correction (256 x 1, GL_TEXTURE5;
 		// all 255 for r_fullbright and night vision)
 		uniform sampler2D omColorTable;
@@ -1207,6 +1245,32 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 					outColor.rgb = omMc;
 					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
 				}
+			}
+			// OpenMerc GFX-modern r_om_seams: the neighbour's texture fades in over the strip - half at the seam
+			// (both sides meet there), none at its inner end; in between its raised texels (brighter than the
+			// texture's mean) reach further and a world-space noise breaks the straight line
+			if(omSeam != 0)
+			{
+				float omSb = clamp(1.0 - dot(passWorldCoord - omSeamP.xyz, omSeamD.xyz) / omSeamP.w, 0.0, 1.0);
+				vec3 omLw = vec3(0.3, 0.59, 0.11);
+				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw) * 2.0;
+				vec3 omQ = passWorldCoord * 0.11;
+				vec3 omQi = floor(omQ);
+				vec3 omQf = fract(omQ);
+				omQf = omQf * omQf * (3.0 - 2.0 * omQf);
+				vec4 omHk = vec4(0.0, 1.0, 57.0, 58.0) + dot(omQi, vec3(1.0, 57.0, 113.0));
+				vec4 omN0 = fract(sin(omHk) * 43758.5453);
+				vec4 omN1 = fract(sin(omHk + 113.0) * 43758.5453);
+				vec4 omNz = mix(omN0, omN1, omQf.z);
+				vec2 omNy = mix(omNz.xz, omNz.yw, omQf.x);
+				float omSn = mix(omNy.x, omNy.y, omQf.y);
+				float omSm = omSb * (1.0 - omSb) * 4.0;
+				float omSa = 0.5 * omSb + omSm * (0.4 * omSh + 0.35 * (omSn - 0.5));
+				outColor.a = smoothstep(0.05, 0.95, clamp(omSa, 0.0, 1.0));
+				if(outColor.a < 0.004)
+					discard;
+				if(omSeam == 2)
+					outColor.rgb = vec3(1.0, 0.0, 0.0); // r_om_seams 2: where the strips lie
 			}
 		}
 );
@@ -2052,6 +2116,22 @@ static qboolean createShaders(void)
 			glUniform1i(transLoc, 1);
 		}
 	}
+	// OpenMerc GFX-modern r_om_seams: same lightmapped shader, its alpha the blend over a texture seam (gl3_surf.c)
+	if(!initShader3D(&gl3state.si3DlmSeam, vertexSrc3Dlm, lightmappedFrag))
+	{
+		Com_Printf("WARNING: Failed to create shader program for texture seam blending!\n");
+		return false;
+	}
+	else
+	{
+		GLint seamLoc = glGetUniformLocation(gl3state.si3DlmSeam.shaderProgram, "omSeam");
+
+		if(seamLoc != -1)
+		{
+			glUseProgram(gl3state.si3DlmSeam.shaderProgram);
+			glUniform1i(seamLoc, 1);
+		}
+	}
 	if(!initShader3D(&gl3state.si3DtransFlow, vertexSrc3Dflow, fragmentSrc3D))
 	{
 		Com_Printf("WARNING: Failed to create shader program for scrolling textured translucent 3D rendering!\n");
@@ -2223,10 +2303,10 @@ void GL3_UpdateUBOLights(void)
 /* GFX-modern r_om_rain (gl3_post.c): the strike's shadow map (texture unit 9) and its view-projection */
 void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
 {
-	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
 	int i;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 4; i++)
 	{
 		GLint loc;
 
@@ -2252,10 +2332,10 @@ void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
    and strength (w 0 = none), colour, the top-down depth map (texture unit 12) and its view-projection */
 void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const float *occvp, GLuint occtex)
 {
-	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
 	int i;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 4; i++)
 	{
 		GLint loc;
 
@@ -2288,10 +2368,10 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
 	GLuint tex2)
 {
-	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
 	int i;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 4; i++)
 	{
 		GLint loc;
 
@@ -2327,10 +2407,10 @@ void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *pl
 /* GFX-modern r_om_ssr: the parameters of the material classes (gl3_material.c) */
 void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 {
-	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
 	int i;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 4; i++)
 	{
 		GLint loc;
 
@@ -2348,10 +2428,10 @@ void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 /* GFX-modern r_om_ssr: reflections on, rain wetness (gl3_post.c) */
 void GL3_SoF_SSRUniforms(const float *ssr)
 {
-	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
 	int i;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 4; i++)
 	{
 		GLint loc;
 
@@ -2368,11 +2448,11 @@ void GL3_SoF_SSRUniforms(const float *ssr)
 void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 {
 	extern int gl3_monolightmap_mode;
-	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
 	int mode = fullbright ? 0 : gl3_monolightmap_mode;
 	int i;
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 4; i++)
 	{
 		GLint loc;
 

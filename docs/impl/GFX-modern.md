@@ -987,3 +987,26 @@ correction away and put ours in its place".
   half-second fades) and lay clip over clip every 4.5 s. Loudness s_om_rain_volume (0.8) x (0.12 + 0.88 x openness),
   openness = the share of 9 rays (up and 50 degrees slantwise, 4000 units) that reach the sky or nothing: under a roof
   only a murmur.
+
+## r_om_seams: soft seams between textures (owner: "smooth texture transitions by best practice" - hard seams between different textures on one surface, tiles next to concrete)
+
+* A seam between two textures on one plane is always an edge two coplanar faces share (one texture per BSP face).
+  At the first frame of a map (gl3_surf.c SeamBuild) every shared edge of two coplanar world faces is checked; for
+  a seam that passes, a strip is cut on either face: the face clipped to r_om_seams_width (12) units from the edge,
+  at most 40 % of the face's depth (thin trims stay themselves), between perpendicular caps at the edge's ends.
+  Lightmap coordinates of the new vertices: an affine fit to the face's own vertices; texture coordinates: the
+  neighbour's texinfo.
+* Drawn after the opaque world, before the detail pass, with the lightmapped shader (si3DlmSeam: the face's own
+  lightmaps, styles, dynamic lights, CSM, lightning, fog), the neighbour's texture, alpha-blended, colour target only
+  (the face keeps its material for SSR). Alpha: half at the seam (both strips meet, no line left), none at the inner
+  end; in between the neighbour's raised texels (brighter than its mean, the lowest mip) reach further and a
+  world-space value noise breaks the straight line - a height blend in the manner of vertex-painted terrain blends.
+* Which seams: both faces stone, ground, damp, smooth concrete or tiles (material classes, gl3_material.c); no
+  pictures, glass, mirrors, metal (steel plates in concrete keep their hard edge), wood, fabric, trims, signs, doors,
+  windows, hidden alpha images, animated textures; not between variants of one texture family (1_tile,
+  1_tile_graf3, 1_tile_bottom: the artist fitted their edges; same name over 70 % of the shorter one, or the same
+  stem before the last '_'); only where the seam shows - the two textures, read back at a mip level of at most 64
+  texels, differ along the edge (2 units either side, every 4 units) by more than a quarter of their brightness.
+  tsr1: 244 strips, jpn2: about 100.
+* r_om_seams 0 off, 2 paints the strips red (where they lie). Menu: Video > Effects. Cost: one small draw per
+  visible strip within 2500 units.

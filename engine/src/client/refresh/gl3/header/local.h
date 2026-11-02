@@ -265,6 +265,7 @@ typedef struct
 	gl3ShaderInfo_t si3Dturb;      // for water etc - always without lightmap
 	gl3ShaderInfo_t si3DlmFlow;    // for flowing/scrolling things with lightmap (conveyor, ..?)
 	gl3ShaderInfo_t si3DlmTrans;   // OpenMerc: translucent surface with lightmap (SoF stores lightmaps for them)
+	gl3ShaderInfo_t si3DlmSeam;    // OpenMerc GFX-modern r_om_seams: a strip of the neighbour's texture over a seam
 	gl3ShaderInfo_t si3DtransFlow; // for transparent flowing/scrolling things (=> no lightmap)
 	gl3ShaderInfo_t si3Dsky;       // guess what..
 	gl3ShaderInfo_t si3Dsprite;    // for sprites
