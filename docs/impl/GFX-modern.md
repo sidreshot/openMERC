@@ -1073,4 +1073,11 @@ correction away and put ours in its place".
 * r_om_lshadow_debug 1: red the darkening, green a lamp's share, blue a caster blocks a lamp. r_om_lshadow_info: the
   lamps in the slots, views, static cubes drawn and caster vertices since the last call. Menu: Video > Effects (Lamp
   Shadows, Shadowed Lamps, Lamp Shadow Resolution).
-* Not yet: shadows on characters (models do not receive), the Ghoul blob under the feet stays.
+* Not yet: shadows on characters (models do not receive).
+* Follow-up (owner: "remove the old blob under the feet when there is a lamp shadow; the arm1 bin's shadow is
+  literally black"): a character a slotted lamp lights by more than 4 lightmap units loses its ground blob (gone at
+  16, gl3_ghoul.c shadowDarkness). The bin under its wall lamp (a lone panel, share 1) kept 0.2 of the light and a
+  hard edge: a shadow now keeps r_om_lshadow_floor (0.4) of the lightmap - the bounced and ambient light are in it
+  too - and panels filter over twice the texels (an area light, a wider penumbra). The floor counts from the lightmap
+  before the sun's shadow, so sun and lamp shadows on one spot do not stack below it; the CSM stays (it is the sun's
+  light, which the lamps do not replace).

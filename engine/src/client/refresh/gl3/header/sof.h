@@ -404,6 +404,7 @@ qboolean GL3_LShadow_Capturing(void);
 const char *GL3_LShadow_Glsl(void);
 void GL3_LShadow_BindProgram(GLuint prog);
 void GL3_LShadow_Info(void);
+float GL3_LShadow_BlobKeep(const vec3_t origin);
 
 /* GFX-modern: volumetric light beams in place of the painted Ghoul light cones (gl3_post.c, r_om_beams).
    The Ghoul system marks a texture whose name ends in "/BEAM" with TexParameteri(OM_GHL_BEAM_HINT, 1). */

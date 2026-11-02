@@ -624,8 +624,9 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			lmTex     += texture(lightmap1, passLMcoord) * lmScales[1];
 			lmTex     += texture(lightmap2, passLMcoord) * lmScales[2];
 			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
+			vec3 omLm0 = lmTex.rgb; // the lightmap before the shadows of moving casters (their common floor)
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
-			omLsApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
+			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
 			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
 			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
@@ -1147,8 +1148,9 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			lmTex     += texture(lightmap1, passLMcoord) * lmScales[1];
 			lmTex     += texture(lightmap2, passLMcoord) * lmScales[2];
 			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
+			vec3 omLm0 = lmTex.rgb; // the lightmap before the shadows of moving casters (their common floor)
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
-			omLsApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
+			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
 			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
 			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate

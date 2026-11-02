@@ -891,6 +891,12 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		}
 	}
 
+	/* GFX-modern r_om_lshadow: a character under a lamp that casts its shadow loses the ground blob */
+	if (!weapon && !(flags & SOF_RF_VIEWERMODEL))
+	{
+		darkness *= GL3_LShadow_BlobKeep(e->origin);
+	}
+
 	P.shadowDarkness = darkness;
 
 	/* step 11: draw */

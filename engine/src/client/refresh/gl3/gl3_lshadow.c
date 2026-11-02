@@ -27,7 +27,7 @@
 #endif
 
 static cvar_t *r_om_lshadow, *r_om_lshadow_lights, *r_om_lshadow_size, *r_om_lshadow_strength;
-static cvar_t *r_om_lshadow_debug, *r_om_lshadow_range, *r_om_lshadow_gain;
+static cvar_t *r_om_lshadow_debug, *r_om_lshadow_range, *r_om_lshadow_gain, *r_om_lshadow_floor;
 
 enum { LS_POINT, LS_SPOT, LS_SURF };
 
@@ -50,6 +50,7 @@ typedef struct
 	float a[LS_MAXSLOTS][4];     /* lamp: intensity, fade, focus, cone cosine; panel: normal, intensity x k */
 	float dir[LS_MAXSLOTS][4];   /* spotlight axis, nearest caster distance */
 	float cone[LS_MAXSLOTS][4];  /* the cone from the lamp around its casters: axis, cosine (-1 all around) */
+	float soft[LS_MAXSLOTS][4];  /* filter tap spacing in texels (a panel is no point: a wider penumbra) */
 	float params[4];             /* slots, strength, darkest fraction, texel size per unit of distance */
 	float params2[4];            /* 1 / size, debug view, -, - */
 } lsubo_t;
@@ -403,16 +404,18 @@ static const char *ls_glsl =
 	"	vec4 omLsA[8];\n"
 	"	vec4 omLsDir[8];\n"
 	"	vec4 omLsCone[8];\n"
+	"	vec4 omLsSoft[8];\n"
 	"	vec4 omLsP;\n"
 	"	vec4 omLsP2;\n"
 	"};\n"
 	"uniform highp sampler2DArrayShadow omLsMap;\n"
-	"void omLsApply(inout vec3 lm, vec3 wp, vec3 nrm)\n"
+	/* lm0: the lightmap before the sun's shadow too - together they never go below the floor of it */
+	"void omLsApply(inout vec3 lm, vec3 lm0, vec3 wp, vec3 nrm)\n"
 	"{\n"
 	"	int n = int(omLsP.x + 0.5);\n"
 	"	if (n <= 0) return;\n"
 	"	vec3 N = normalize(nrm);\n"
-	"	float lum = max(max(lm.r, lm.g), lm.b);\n"
+	"	float lum = max(max(lm0.r, lm0.g), lm0.b);\n"
 	"	float keep = 1.0, total = 0.0;\n"
 	"	vec3 dbg = vec3(0.0);\n"
 	"	float cl[8];\n"
@@ -473,7 +476,7 @@ static const char *ls_glsl =
 	"		if (texture(omLsMap, uv[i]) < 0.5) continue;\n"
 	"		float share = min(cl[i] / max(lum, 0.004), cl[i] / total);\n"
 	/* four bilinear compare taps a texel apart: a 4 x 4 texel filter */
-	"		vec2 t = vec2(omLsP2.x);\n"
+	"		vec2 t = vec2(omLsP2.x * omLsSoft[i].x);\n"
 	"		float s = texture(omLsMap, vec4(uv[i].xy + vec2(-t.x, -t.y), uv[i].z + 6.0, uv[i].w))\n"
 	"			+ texture(omLsMap, vec4(uv[i].xy + vec2(t.x, -t.y), uv[i].z + 6.0, uv[i].w))\n"
 	"			+ texture(omLsMap, vec4(uv[i].xy + vec2(-t.x, t.y), uv[i].z + 6.0, uv[i].w))\n"
@@ -485,7 +488,7 @@ static const char *ls_glsl =
 	/* r_om_lshadow_debug: red = the darkening (share x blocked), green = a lamp's share of the light, blue = a
 	   caster blocks a lamp */
 	"	if (omLsP2.y > 0.5) { lm = dbg; return; }\n"
-	"	lm *= max(keep, omLsP.z);\n"
+	"	if (keep < 1.0) lm = max(lm * keep, min(lm, lm0 * omLsP.z));\n"
 	"}\n";
 
 const char *
@@ -570,6 +573,7 @@ GL3_LShadow_Init(void)
 	r_om_lshadow_range = ri.Cvar_Get("r_om_lshadow_range", "1500", CVAR_ARCHIVE);
 	r_om_lshadow_debug = ri.Cvar_Get("r_om_lshadow_debug", "0", 0);
 	r_om_lshadow_gain = ri.Cvar_Get("r_om_lshadow_gain", "4", CVAR_ARCHIVE);
+	r_om_lshadow_floor = ri.Cvar_Get("r_om_lshadow_floor", "0.4", CVAR_ARCHIVE);
 
 	memset(&L.u, 0, sizeof(L.u));
 	L.failed = L.active = L.capturing = false;
@@ -1097,6 +1101,7 @@ GL3_LShadow_Frame(void)
 			L.u.a[j][1] = l->n[1];
 			L.u.a[j][2] = l->n[2];
 			L.u.a[j][3] = l->intensity * 0.012f;
+			L.u.soft[j][0] = 2.0f;
 		}
 		else
 		{
@@ -1107,6 +1112,7 @@ GL3_LShadow_Frame(void)
 			L.u.dir[j][0] = l->dir[0];
 			L.u.dir[j][1] = l->dir[1];
 			L.u.dir[j][2] = l->dir[2];
+			L.u.soft[j][0] = 1.0f;
 		}
 
 		/* the cone around the casters in reach (their box corners), a few degrees wider for the filter; past
@@ -1178,7 +1184,9 @@ GL3_LShadow_Frame(void)
 
 	L.u.params[0] = (float)top;
 	L.u.params[1] = Q_clamp(r_om_lshadow_strength->value, 0.0f, 1.0f);
-	L.u.params[2] = 0.2f;
+	/* the lightmap holds the bounced and ambient light too, which a caster does not block: a shadow keeps
+	   r_om_lshadow_floor of the light (0.2 left a bin under its wall lamp black) */
+	L.u.params[2] = Q_clamp(r_om_lshadow_floor->value, 0.0f, 1.0f);
 	L.u.params[3] = 2.0f * LS_TAN / size;
 	L.u.params2[0] = 1.0f / size;
 	L.u.params2[1] = r_om_lshadow_debug->value ? 1.0f : 0.0f;
@@ -1292,6 +1300,58 @@ GL3_LShadow_Frame(void)
 
 	BindMap();
 	L.active = true;
+}
+
+/* how much of a character's ground blob is left: none where a lamp with a shadow cube lights it well (its own
+   shadow grounds it), faded over a few lightmap units so a lamp taking or leaving a slot does not pop */
+float
+GL3_LShadow_BlobKeep(const vec3_t origin)
+{
+	float best = 0;
+	int j;
+
+	if (!L.active)
+	{
+		return 1;
+	}
+
+	for (j = 0; j < LS_MAXSLOTS; j++)
+	{
+		const lslight_t *l;
+		vec3_t d;
+		float dist, c;
+
+		if (L.slot[j] < 0)
+		{
+			continue;
+		}
+
+		l = &lights[L.slot[j]];
+		VectorSubtract(origin, l->o, d);
+		dist = VectorLength(d);
+
+		if ((dist >= l->radius) || (dist < 1))
+		{
+			continue;
+		}
+
+		VectorScale(d, 1.0f / dist, d);
+
+		if ((l->kind == LS_SPOT) && (DotProduct(d, l->dir) < l->stopdot))
+		{
+			continue;
+		}
+
+		if ((l->kind == LS_SURF) && (DotProduct(d, l->n) <= 0))
+		{
+			continue;
+		}
+
+		c = LampLight(l, dist) * StyleScale(l);
+		best = Q_max(best, c);
+	}
+
+	return 1.0f - Q_clamp((best - 4.0f) / 12.0f, 0.0f, 1.0f);
 }
 
 /* r_om_lshadow_info: the lamps in the slots */
