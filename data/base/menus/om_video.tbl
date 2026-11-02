@@ -54,6 +54,9 @@ list | r_om_softparticles | 0,1 | Off,On | Выкл,Вкл | Soft Particles | М
 list | r_om_softparticles_dist | 6,12,24 | Short,Normal,Long | Короткое,Обычное,Длинное | Particle Fade Distance | Расстояние смягчения | requires=r_om_softparticles
 list | r_om_ppfog | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Fog | Попиксельный туман | requires=r_om_ppfog
 list | r_om_seams | 0,1 | Off,On | Выкл,Вкл | Soft Texture Seams | Мягкие швы текстур | requires=r_om_seams | tip=Tiles meeting concrete and similar seams blend instead of a hard line/Плитка у бетона и похожие стыки переходят мягко вместо резкой линии
+list | r_om_ssr | 0,0.5,1,1.5 | Off,Weak,Normal,Strong | Выкл,Слабые,Обычные,Сильные | Screen-Space Reflections | Экранные отражения (SSR) | requires=r_om_ssr | tip=Reflections on polished floors, tiles, metal, glass, water and wet ground/Отражения на полированных полах, плитке, металле, стекле, воде и мокрой земле
+list | r_om_ssr_quality | 1,2,3 | Low,Medium,High | Низкое,Среднее,Высокое | Reflection Quality | Качество отражений | requires=r_om_ssr
+list | r_om_ssr_wet | 0,1 | Off,On | Выкл,Вкл | Wet Ground in Rain | Мокрая земля под дождём | requires=r_om_ssr
 # per-pixel dynamic lights: A/B check passed (GFX-modern.md 14)
 list | r_om_pdlight | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Dynamic Lights | Попиксельные источники света | requires=r_om_pdlight
 list | r_om_overbright | 0,1 | Off,On | Выкл,Вкл | Overbright Lighting (not original) | Пересвет (не как в оригинале) | requires=r_om_overbright | tip=Brighter lighting that the original game does not have/Более яркое освещение, которого нет в оригинальной игре
