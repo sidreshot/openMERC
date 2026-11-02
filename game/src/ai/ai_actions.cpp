@@ -535,6 +535,7 @@ class DyingAction : public GroundAction { /* classes 3, 4, 5 */
 public:
 	float death_start = 0;
 	int notified = 0;
+	float air_since = 0, air_z = 0; /* the in-air pause (not saved: a loaded body re-measures) */
 	/* SPEC-711 tail of classes 3-5: 112 death start, 116 notified, 120 requested death record */
 	void SaveTail(SaveRec &r) override
 	{
@@ -624,10 +625,22 @@ public:
 				ai->ChangeBBox(ent, b->cur ? b->cur->posture : record->posture, true);
 			return false;
 		}
-		if (ent->groundentity && b->pauseKind) {
-			b->eventFlags |= BODYEV_THUD;
-			b->Resume();
-		}
+		/* OpenMerc (DEVIATIONS): the in-air pause of a death also ends when the body has stopped falling without a
+		   ground entity - a corpse box touching a wall or a window sill never gets one, the death stayed on its
+		   standing frame and the 5 s corpse freeze kept the body upright */
+		if (b->pauseKind) {
+			float now = Now();
+			if (air_since == 0)
+				air_since = now;
+			bool resting = (now - air_since > 0.5f) && (fabsf(ent->s.origin[2] - air_z) < 0.25f);
+			air_z = ent->s.origin[2];
+			if (ent->groundentity || resting || (now - air_since > 2.0f)) {
+				b->eventFlags |= BODYEV_THUD;
+				b->Resume();
+				air_since = 0;
+			}
+		} else
+			air_since = 0;
 		Step(ent, ai, false, true);
 		if (!ent->inuse || ent->ai != ai)
 			return false;

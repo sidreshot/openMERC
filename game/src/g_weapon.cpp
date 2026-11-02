@@ -1030,15 +1030,13 @@ static void MPGCook(edict_t *e)
 
 static void MPGBeam(edict_t *ent, const vec3_t start, const vec3_t dir)
 {
-	trace_t tr = gi.trace(ent->s.origin, NULL, NULL, start, ent, SHOT_MASK);
-	if (tr.startsolid)
+	trace_t tr = gi.trace(ent->s.origin, NULL, NULL, start, ent, SHOT_MASK);	if (tr.startsolid)
 		return;
 	vec3_t s, end;
 	VectorCopy(start, s);
 	VectorMA(start, 1024, dir, end);
 	for (int i = 0; i < 12; i++) {
-		tr = gi.trace(s, NULL, NULL, end, ent, SHOT_MASK);
-		if (!tr.ent || tr.fraction == 1.0f)
+		tr = gi.trace(s, NULL, NULL, end, ent, SHOT_MASK);		if (!tr.ent || tr.fraction == 1.0f)
 			break;
 		edict_t *e = tr.ent;
 		if (e == world || !e->takedamage)
@@ -1058,8 +1056,10 @@ static void MPGBeam(edict_t *ent, const vec3_t start, const vec3_t dir)
 		MPGCook(e);
 		VectorMA(tr.endpos, 8, dir, s);
 	}
+	/* a player shooter draws its own playermz beam (predicted fire); the original sends this one to the others only
+	   (I5 beams1) - the shooter got both, the othermz orbit ball over the target filled half the screen */
 	FX_EffectBeam(fxn(level.framenum & 1 ? "weapons/othermz/mpgbeam1" : "weapons/othermz/mpgbeam2"), start,
-	              tr.endpos, MULTICAST_PHS);
+	              tr.endpos, MULTICAST_PHS, ent->client ? ent : NULL);
 }
 
 static void MPGBurst(edict_t *ent, const vec3_t start, const vec3_t dir)
@@ -1083,7 +1083,7 @@ static void MPGBurst(edict_t *ent, const vec3_t start, const vec3_t dir)
 
 static void FlameStream(edict_t *ent, const vec3_t start, const vec3_t dir)
 {
-	FX_EffectDir(fxn("weapons/world/fthrower"), start, dir, MULTICAST_PHS);
+	FX_EffectDir(fxn("weapons/world/fthrower"), start, dir, MULTICAST_PHS, ent->client ? ent : NULL); /* (as the MPG beam) */
 	vec3_t b1 = {-1, -1, -1}, b2 = {1, 1, 1}, s, end;
 	trace_t tr = gi.trace(ent->s.origin, b1, b2, start, ent, SHOT_MASK);
 	if (tr.startsolid || (tr.fraction < 1 && (!tr.ent || tr.ent == world)))
@@ -1092,8 +1092,7 @@ static void FlameStream(edict_t *ent, const vec3_t start, const vec3_t dir)
 	VectorCopy(start, s);
 	VectorMA(start, reach, dir, end);
 	for (int i = 0; i < 3; i++) {
-		tr = gi.trace(s, NULL, NULL, end, ent, SHOT_MASK);
-		if (!tr.ent || tr.fraction == 1.0f)
+		tr = gi.trace(s, NULL, NULL, end, ent, SHOT_MASK);		if (!tr.ent || tr.fraction == 1.0f)
 			break;
 		if (tr.ent == world || tr.ent->solid == SOLID_BSP) {
 			vec3_t d;
@@ -1562,7 +1561,9 @@ void WeaponFire(edict_t *ent, PlayerInventory *inv, int alt)
 			float along = DotProduct(d, dir);
 			VectorMA(muzzle, -along, dir, start);
 		}
-		if (wd->Converges()) {
+		/* OpenMerc (DEVIATIONS): the MPG and flamethrower streams also go to the point under the crosshair - from the
+		   muzzle, parallel to the view, they passed a character's +-8 box beside it and never hurt anyone */
+		if (wd->Converges() || weapon == WP_MPG || weapon == WP_FLAMEGUN) {
 			vec3_t end;
 			VectorMA(eye, 2048, dir, end);
 			trace_t tr = gi.trace(eye, NULL, NULL, end, ent, SHOT_MASK);

@@ -2541,7 +2541,8 @@ public:
 		/* out of the walls: a little each think while falling, the rest when it has come to rest */
 		if (frozenAt == 0 && !G3_Cinematic())
 			SettleCorpse(6.0f);
-		if (frozenAt == 0 && (AnimDone() || now - deathTime > 5.0f)) {
+		/* (not while the fall waits in the air: the body would stay on its standing frame) */
+		if (frozenAt == 0 && (AnimDone() || (!pauseKind && now - deathTime > 7.0f))) {
 			if (!G3_Cinematic())
 				for (int k = 0; k < 3; k++)
 					SettleCorpse(40.0f);

@@ -118,6 +118,16 @@ thunderstorm on jpn2".
   frame, by a box trace. At rest it is settled three more times (up to 40 units) before the blood pool. Death choice
   (DeathFits) sweeps a 24-wide box at two heights along the fall: a sideways death needs room on both sides (56).
   Original: none of this; bodies fell and stayed half inside walls. Off in cinematics.
+- **Death waiting in the air** (ai_actions.cpp DyingAction, g3_human.cpp CorpseState): a death animation that reaches
+  its "in air" note pauses until the body lands; it now also resumes when the body has stopped falling without a ground
+  entity (0.5 s without height change, 2 s at most), and the 5 s corpse freeze (now 7 s) waits for it. A body whose box
+  touched a wall or a window sill never got a ground entity: it stood frozen on the death's first frames (owner's
+  jpn2 screenshot 2026-11-02, "NPCs often freeze in a pose and do not fall").
+- **MPG and flamethrower aim** (g_weapon.cpp WeaponFire): the stream goes from the muzzle to the point under the
+  crosshair, as the converging bullet weapons do. From the muzzle parallel to the view it passed 9 units beside the
+  centre, outside a character's +-8 box: neither weapon hurt anyone (owner 2026-11-02). The server's othermz beam and
+  world/fthrower stream no longer go to the shooting player, who draws its own playermz effect (the original's
+  behaviour, docs/impl/I5.md beams1).
 - **Severed limbs** (rg_special.cpp RgLimbAI, cvar g_limbtime, archived, menu Game > World): a limb fades after
   g_limbtime seconds (default 120) when nobody looks at it, or after twice that anyway; 0 = the original rule (30 s, or
   as soon as it is out of view). Original: a limb went as soon as it was unseen.

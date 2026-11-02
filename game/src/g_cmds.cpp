@@ -72,6 +72,47 @@ static void Cmd_Noclip_f(edict_t *ent)
 	}
 }
 
+/* omaim: the view turns to the chest of the nearest living character (a test aid for weapons) */
+static void Cmd_OmAim_f(edict_t *ent)
+{
+	if (!CheatsOK(ent) || !ent->client)
+		return;
+	edict_t *best = NULL;
+	float bd = 1e9f;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0)
+			continue;
+		vec3_t d;
+		VectorSubtract(e->s.origin, ent->s.origin, d);
+		if (VectorLength(d) < bd) {
+			bd = VectorLength(d);
+			best = e;
+		}
+	}
+	if (!best)
+		return;
+	vec3_t eye, to, ang;
+	VectorCopy(ent->s.origin, eye);
+	eye[2] += ent->viewheight;
+	VectorCopy(best->s.origin, to);
+	to[2] += (best->mins[2] + best->maxs[2]) * 0.5f + 8;
+	VectorSubtract(to, eye, to);
+	vectoangles(to, ang);
+	for (int k = 0; k < 2; k++) {
+		ent->client->ps.pmove.delta_angles[k] = (short)ANGLE2SHORT(ang[k] - ent->client->resp.cmd_angles[k]);
+		ent->client->ps.viewangles[k] = ang[k];
+	}
+	VectorCopy(ent->client->ps.viewangles, ent->client->v_angle);
+	vec3_t end;
+	VectorNormalize(to);
+	VectorMA(eye, 1024, to, end);
+	trace_t tr = gi.trace(eye, NULL, NULL, end, ent, 0x06000081);
+	gi.cprintf(ent, PRINT_HIGH, "omaim %s at %s dist %.0f solid %d svf 0x%x mins %s maxs %s linked %d area %d trace %s %.2f\n",
+		best->classname, vtos(best->s.origin), bd, best->solid, best->svflags, vtos(best->mins), vtos(best->maxs),
+		best->linkcount, best->areanum, tr.ent ? tr.ent->classname : "-", tr.fraction);
+}
+
 static void Cmd_OmSetPos_f(edict_t *ent)
 {
 	if (!CheatsOK(ent))
@@ -586,6 +627,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_Noclip_f(ent);
 	else if (Q_stricmp(cmd, "omsetpos") == 0)
 		Cmd_OmSetPos_f(ent);
+	else if (Q_stricmp(cmd, "omaim") == 0)
+		Cmd_OmAim_f(ent);
 	else if (Q_stricmp(cmd, "gimme") == 0)
 		Cmd_Gimme_f(ent);
 	else if (Q_stricmp(cmd, "omcorpse") == 0)
