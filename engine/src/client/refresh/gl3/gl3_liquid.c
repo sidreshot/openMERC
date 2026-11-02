@@ -197,6 +197,8 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 		{
 			st.depthwrite = true;
 		}
+
+		sphere = false; /* the traced reflection replaces the sphere-mapped second pass */
 	}
 
 	/* pass 0: the liquid; pass 1 (image with an environment second-pass texture): the base texture again,

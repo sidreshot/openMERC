@@ -241,6 +241,13 @@ GL3_Detail_DrawPass(void)
 			VectorNegate(n, n);
 		}
 
+		/* GFX-modern r_om_ssr: where the face reflects the scene for real, its environment map shine is replaced (the
+		   owner: "SSR replaces it"); faces it hardly reflects on (metal walls) keep the old shine */
+		if (env && GL3_Post_SSRActive() && (GL3_Mat_SurfReflect(surf, n) >= 0.045f))
+		{
+			continue;
+		}
+
 		if (env)
 		{
 			float cx = n[1], cy = -n[0]; /* n x (0, 0, 1) */

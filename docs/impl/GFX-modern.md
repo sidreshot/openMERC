@@ -876,6 +876,12 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   The apply pass blurs the reflections by as much as the trace resolution is reduced (owner: "50 % less resolution,
   50 % blur"): 3x3 depth-weighted taps one trace pixel apart at half size, none at full size; the stair edges of the
   upsampling are gone, nothing bleeds onto the objects standing on the floor.
+* SSR replaces the old shine (2026-11-02, owner): with r_om_ssr on, the environment-map detail pass is skipped on
+  world faces that SSR reflects (>= 0.045, gl3_detail.c via GL3_Mat_SurfReflect), and liquids lose their
+  sphere-mapped second pass. Faces with an environment detail texture reflect at least like gloss plastic (enamel
+  signs, news stands, jpn2 tech walls); screens and pictures (SoF materials 32/38/39/40) stay flat and keep the old
+  shine, and so do Ghoul models (no SSR on them). tsr1 omsetpos 960 832 -195 180 0: the poster's white env sheen gives
+  way to a faint reflection of the opposite wall.
 * Open: CPU hitches of 20-45 ms a few times a minute (sud1, arm1) inside the Ghoul library while it evaluates prop
   instances (SOF_RF_GHOUL without shadows) in Ghl_Bounds / DrawLevel / Shadow - not GL submission (0 ms), not chunk
   decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,

@@ -550,6 +550,7 @@ extern void GL3_Bump_Bind(GLuint texnum);
 extern void GL3_Bump_SetLights(const byte *lights, int len);
 extern void GL3_Bump_ViewLights(GLuint prog, const float *eye);
 extern float GL3_Bump_SurfClass(const msurface_t *surf); /* gl3_material.c */
+extern float GL3_Mat_SurfReflect(const msurface_t *surf, const vec3_t n); /* r_om_ssr reflectivity of a face */
 // gl3_material.c: material classes and material maps of the world textures (r_om_ssr)
 extern void GL3_Mat_Init(void);
 extern void GL3_Mat_Shutdown(void);

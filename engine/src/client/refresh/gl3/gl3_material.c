@@ -625,6 +625,14 @@ GL3_Bump_SurfClass(const msurface_t *surf)
 		c = MC_CHROME;
 	}
 
+	/* the artist's environment map shine (enamel signs, news stands, tech walls): with r_om_ssr it is replaced by the
+	   traced reflection (gl3_detail.c), so the face reflects at least like gloss plastic */
+	if (img->detail && (img->detail->softype == SOFIMG_ENV) && (c < MC_BUILTIN) &&
+		(((c < M.numcls) ? M.cls[c].a[0] : builtin[c].a[0]) < 0.1f))
+	{
+		c = MC_PLASTIC;
+	}
+
 	/* computers and screens, lit glass panels, vending machines, paintings: flat, no shine */
 	if (m == 32 || m == 38 || m == 39 || m == 40)
 	{
@@ -632,6 +640,29 @@ GL3_Bump_SurfClass(const msurface_t *surf)
 	}
 
 	return -(float)c;
+}
+
+/* the reflectivity r_om_ssr gives a face with world normal n: its class's floor value, scaled for walls and ceilings
+   as the world shaders do */
+float
+GL3_Mat_SurfReflect(const msurface_t *surf, const vec3_t n)
+{
+	int c = (int)(-GL3_Bump_SurfClass(surf) + 0.5f);
+	const matclass_t *mc;
+
+	if (c <= 0 || c >= MAT_MAXCLASS)
+	{
+		return 0.0f;
+	}
+
+	mc = (c < M.numcls) ? &M.cls[c] : (c < MC_BUILTIN) ? &builtin[c] : NULL;
+
+	if (!mc)
+	{
+		return 0.0f;
+	}
+
+	return mc->a[0] * ((n[2] > 0.7f) ? 1.0f : (n[2] < -0.7f) ? mc->a[3] : mc->a[2]);
 }
 
 /* ------------------------------------------------------------------
