@@ -50,6 +50,9 @@ list | r_om_csm | 0,1 | Off,On | Выкл,Вкл | World Shadows | Тени ми
 list | r_om_csm_size | 512,1024,2048,4096 | Low,Medium,High,Ultra | Низкое,Среднее,Высокое,Ультра | Shadow Resolution | Разрешение теней | requires=r_om_csm
 list | r_om_csm_cascades | 2,3,4 | 2,3,4 | 2,3,4 | Shadow Cascades | Каскады теней | requires=r_om_csm
 list | r_om_csm_soft | 0,1,2 | Hard,Soft,Softest | Жёсткие,Мягкие,Очень мягкие | Shadow Edges | Края теней | requires=r_om_csm
+list | r_om_lshadow | 0,1 | Off,On | Выкл,Вкл | Lamp Shadows | Тени от ламп | requires=r_om_lshadow | tip=Characters and props cast shadows from the map's lamps/Персонажи и предметы отбрасывают тени от ламп карты
+list | r_om_lshadow_lights | 2,4,6,8 | 2,4,6,8 | 2,4,6,8 | Shadowed Lamps | Ламп с тенями | requires=r_om_lshadow
+list | r_om_lshadow_size | 256,512,1024 | Low,Medium,High | Низкое,Среднее,Высокое | Lamp Shadow Resolution | Разрешение теней ламп | requires=r_om_lshadow
 list | r_om_softparticles | 0,1 | Off,On | Выкл,Вкл | Soft Particles | Мягкие частицы | requires=r_om_softparticles
 list | r_om_softparticles_dist | 6,12,24 | Short,Normal,Long | Короткое,Обычное,Длинное | Particle Fade Distance | Расстояние смягчения | requires=r_om_softparticles
 list | r_om_ppfog | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Fog | Попиксельный туман | requires=r_om_ppfog

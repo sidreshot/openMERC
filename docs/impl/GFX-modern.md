@@ -1046,3 +1046,31 @@ correction away and put ours in its place".
   0.66 of the non-HDR one everywhere. The overbright now enters the neutral exposure (the adaptation measures the
   brighter scene, the shoulder rolls off what passes white): the lobby 24.8 with HDR, 21.7 without.
 * Screenshots (gl3_sof2d.c): beside each sofNN.tga a sofNN.txt with the map and the omsetpos line of the view.
+
+## r_om_lshadow: lamp shadows of moving casters (owner: "at least dynamic shadows from the lights")
+
+* The lightmaps keep the static world's shadows; this adds those of characters and Ghoul props from the map's own
+  lamps (gl3_lshadow.c), on top of the lightmap as the sun's CSM does. A full move to dynamic lighting was weighed and
+  left: the lightmaps also hold the bounced light, hundreds of lamps per map, and the Android port.
+* Lamps: BSP lump 20 point lights and spotlights matched to their light entities (cone and axis as the compiler:
+  target, _mangle, angle; _fade; the style key, so a lamp switched off casts nothing), surface-light patches merged
+  into one emitter per panel (same face direction within 64 units, the cube 6 units off the face). jpn2: 821 lamps,
+  arm1: 504.
+* Each view the lamps with a caster in reach are ranked by their light on the nearest caster over the distance to the
+  eye (a lamp that has a slot keeps it at 1.5 x, no flicker). Up to r_om_lshadow_lights (4) get a cube of depth maps
+  (r_om_lshadow_size 512 a face, one 2D array on texture unit 16): six faces of the static world, drawn once when the
+  lamp gets its slot, and six of the casters - the Ghoul triangles of the previous frame the sun's CSM keeps, now also
+  without a sun, uploaded once a view; each face draws only the runs of primitives whose boxes reach into it.
+* World fragment: the lamp's light there by the compiler's falloff (linear for lamps, omlight's fitted 1/d for panels,
+  the spot cone), only where the static faces let the lamp through (the lightmap has its light there only), loses
+  strength x share x blocked. Share = the lamp's light x r_om_lshadow_gain (4) against the lightmap, never more than its
+  part of the lamps here - four panels over a floor a quarter each, a lone lamp all (the jpn2 lobby: omlight's fit
+  explains its lightmaps poorly, R2 0.2, the honest share of one panel was a tenth). Never below 0.2 of the light.
+  Fragments outside the cone from each lamp around its casters (box corners, a few degrees wider) or nearer than the
+  nearest caster take no texture reads.
+* Cost (arm1 shop, 1080p, 4 lamps): the cubes 0.1 ms GPU, the world shader +1.2 ms; 8 lamps about +3.5 ms. The first
+  version drew the casters six times per lamp from a fresh copy (98 000 tessellated vertices a view): 9.5 ms.
+* r_om_lshadow_debug 1: red the darkening, green a lamp's share, blue a caster blocks a lamp. r_om_lshadow_info: the
+  lamps in the slots, views, static cubes drawn and caster vertices since the last call. Menu: Video > Effects (Lamp
+  Shadows, Shadowed Lamps, Lamp Shadow Resolution).
+* Not yet: shadows on characters (models do not receive), the Ghoul blob under the feet stays.

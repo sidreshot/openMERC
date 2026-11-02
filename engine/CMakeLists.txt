@@ -635,6 +635,7 @@ set(GL3-Source
 	${REF_SRC_DIR}/gl3/gl3_ghoulemu.c
 	${REF_SRC_DIR}/gl3/gl3_post.c
 	${REF_SRC_DIR}/gl3/gl3_csm.c
+	${REF_SRC_DIR}/gl3/gl3_lshadow.c
 	${REF_SRC_DIR}/files/common.c
 	${REF_SRC_DIR}/files/models.c
 	${REF_SRC_DIR}/files/pcx.c

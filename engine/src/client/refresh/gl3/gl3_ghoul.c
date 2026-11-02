@@ -944,7 +944,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		qboolean viewer = (flags & SOF_RF_VIEWERMODEL) != 0;
 
 		/* (a mirror image adds no casters: they would be the mirrored bodies) */
-		GL3_GhoulEmu_SetCsm(GL3_CSM_Active() && !weapon && !viewer && !hack && !gl3_ghoul_mirror,
+		GL3_GhoulEmu_SetCsm((GL3_CSM_Active() || GL3_LShadow_Capturing()) && !weapon && !viewer && !hack && !gl3_ghoul_mirror,
 			GL3_CSM_ReplaceGhoul() && !viewer && !weapon);
 		GL3_GhoulEmu_SetCaster(!weapon && !viewer && !hack && !gl3_ghoul_mirror); /* shadows in light beams */
 		/* characters (the models that cast a ground shadow) only: vehicles and props carry flat decals

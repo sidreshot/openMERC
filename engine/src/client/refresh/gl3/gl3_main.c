@@ -713,6 +713,7 @@ GL3_Init(void)
 	GL3_Post_Init(); /* GFX-modern: bloom and soft particles */
 
 	GL3_CSM_Init(); /* GFX-modern: cascaded sun shadows */
+	GL3_LShadow_Init(); /* GFX-modern: lamp shadows of moving casters */
 	GL3_Mat_Init(); /* GFX-modern: material classes (r_om_ssr) */
 	GL3_Look_Init(); /* GFX-modern: colour grading (r_om_look) */
 
@@ -765,6 +766,7 @@ GL3_Shutdown(void)
 		GL3_FX_Shutdown();
 		GL3_Post_Shutdown();
 		GL3_CSM_Shutdown();
+		GL3_LShadow_Shutdown();
 		GL3_Mat_Shutdown();
 		GL3_Look_Shutdown();
 		GL3_ShutdownImages();
@@ -1926,7 +1928,10 @@ GL3_RenderView(refdef_t *fd)
 
 	GL3_Post_ProfMark("dlights");
 
-	/* GFX-modern: the sun shadow maps of this view (r_om_csm) */
+	/* GFX-modern: the lamp shadow cubes (r_om_lshadow, reads the casters before the sun's frame clears them)
+	   and the sun shadow maps of this view (r_om_csm) */
+	GL3_LShadow_Frame();
+	GL3_Post_ProfMark("lshadow");
 	GL3_CSM_Frame();
 	GL3_Post_ProfMark("csm");
 

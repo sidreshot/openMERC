@@ -29,6 +29,7 @@ extern vec3_t vup, vpn, vright; /* gl3_main.c, the view of this frame */
 #define CSM_BINDING 4       /* uniform block binding point (after uniLights) */
 #define CSM_UNIT 8          /* GL_TEXTURE8 */
 #define CSM_MAXDYN (3 * 1024 * 1024)   /* floats of captured caster triangles */
+#define CSM_MAXSEGS 2048               /* captured primitives (the lamp shadows pick theirs by box) */
 
 #ifndef GL_TEXTURE_2D_ARRAY
 #define GL_TEXTURE_2D_ARRAY 0x8C1A
@@ -75,6 +76,8 @@ static struct
 	float *dyn;
 	int numdyn, maxdyn;     /* floats, 3 per vertex */
 	int capframe;
+	csmseg_t segs[CSM_MAXSEGS];
+	int numsegs;
 	float invpv[16];
 	qboolean invvalid;
 	csmubo_t u;
@@ -92,7 +95,11 @@ typedef struct
 	qboolean hasorigin;
 } csment_t;
 
-static const char *
+#define Token GL3_CSM_Token
+#define Floats GL3_CSM_Floats
+
+/* entity text: the next token ({, }, a quoted or bare word) into out, NULL at the end (also gl3_lshadow.c) */
+const char *
 Token(const char **p, const char *end, char *out, int outsize)
 {
 	const char *s = *p;
@@ -154,7 +161,7 @@ Token(const char **p, const char *end, char *out, int outsize)
 	return out;
 }
 
-static int
+int
 Floats(const char *s, float *out, int max)
 {
 	int n = 0;
@@ -202,6 +209,7 @@ GL3_CSM_LoadSun(const char *ents, int len)
 	memset(&sun, 0, sizeof(sun));
 	C.built = NULL; /* the static casters of the new map */
 	C.numdyn = 0;
+	C.numsegs = 0;
 
 	if (!ents || (len <= 0))
 	{
@@ -550,23 +558,25 @@ GL3_CSM_Glsl(void)
 	return csm_glsl;
 }
 
-/* malloc'd: the receiver functions followed by src */
+/* malloc'd: the receiver functions (sun, then lamps: gl3_lshadow.c) followed by src */
 char *
 GL3_CSM_Prepend(const char *src)
 {
-	size_t a = strlen(csm_glsl), b = strlen(src);
-	char *s = malloc(a + b + 1);
+	const char *ls = GL3_LShadow_Glsl();
+	size_t a = strlen(csm_glsl), l = strlen(ls), b = strlen(src);
+	char *s = malloc(a + l + b + 1);
 
 	if (s)
 	{
 		memcpy(s, csm_glsl, a);
-		memcpy(s + a, src, b + 1);
+		memcpy(s + a, ls, l);
+		memcpy(s + a + l, src, b + 1);
 	}
 
 	return s;
 }
 
-/* with prog in use: the block binding and the sampler unit */
+/* with prog in use: the block bindings and the sampler units (sun and lamps) */
 void
 GL3_CSM_BindProgram(GLuint prog)
 {
@@ -582,6 +592,8 @@ GL3_CSM_BindProgram(GLuint prog)
 	{
 		glUniform1i(loc, CSM_UNIT);
 	}
+
+	GL3_LShadow_BindProgram(prog);
 }
 
 static GLuint
@@ -1003,6 +1015,7 @@ GL3_CSM_Frame(void)
 	if (!WantCsm())
 	{
 		C.numdyn = 0;
+		C.numsegs = 0;
 
 		if (C.uboenabled)
 		{
@@ -1166,6 +1179,7 @@ GL3_CSM_Frame(void)
 
 	BindMap();
 	C.numdyn = 0;
+	C.numsegs = 0;
 	C.active = true;
 }
 
@@ -1228,14 +1242,15 @@ GL3_CSM_InvPV(void)
 }
 
 /* Ghoul triangles as drawn (clip space, stride in floats): kept in world space for the next frame's
-   dynamic depth maps */
+   dynamic depth maps (the sun's and the lamps') */
 void
 GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride)
 {
 	const float *m;
+	csmseg_t *seg;
 	int i;
 
-	if (!C.active || (numverts < 3))
+	if (!(C.active || GL3_LShadow_Capturing()) || (numverts < 3) || (C.numsegs >= CSM_MAXSEGS))
 	{
 		return;
 	}
@@ -1269,6 +1284,11 @@ GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride)
 	}
 
 	m = GL3_CSM_InvPV();
+	seg = &C.segs[C.numsegs++];
+	seg->first = C.numdyn / 3;
+	seg->num = numverts;
+	VectorSet(seg->mins, 1e30f, 1e30f, 1e30f);
+	VectorSet(seg->maxs, -1e30f, -1e30f, -1e30f);
 
 	for (i = 0; i < numverts; i++, clip += stride)
 	{
@@ -1288,7 +1308,17 @@ GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride)
 		o[1] = oy / ow;
 		o[2] = oz / ow;
 		C.numdyn += 3;
+		AddPointToBounds(o, seg->mins, seg->maxs);
 	}
+}
+
+/* the casters kept from the previous frame (read before GL3_CSM_Frame clears them) */
+int
+GL3_CSM_Casters(const float **tris, const csmseg_t **segs)
+{
+	*tris = C.dyn;
+	*segs = C.segs;
+	return C.dyn ? C.numsegs : 0;
 }
 
 /* depth of the static world casters and the given world-space triangles (3 floats per vertex) with the

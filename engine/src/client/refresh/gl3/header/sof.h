@@ -385,6 +385,25 @@ void GL3_CSM_BindProgram(GLuint prog);
 const float *GL3_CSM_InvPV(void);
 void GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride);
 qboolean GL3_CSM_DrawDepth(const float *vp, const float *dyn, int numdynfloats, qboolean world);
+/* the casters of the previous frame: one segment per primitive drawn, vertices into tris (3 floats each) */
+typedef struct
+{
+	int first, num;      /* vertices */
+	vec3_t mins, maxs;
+} csmseg_t;
+int GL3_CSM_Casters(const float **tris, const csmseg_t **segs);
+const char *GL3_CSM_Token(const char **p, const char *end, char *out, int outsize);
+int GL3_CSM_Floats(const char *s, float *out, int max);
+
+/* GFX-modern: shadows of moving casters from the map's lamps (gl3_lshadow.c, r_om_lshadow) */
+void GL3_LShadow_Init(void);
+void GL3_LShadow_Shutdown(void);
+void GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const byte *lump, int len);
+void GL3_LShadow_Frame(void);
+qboolean GL3_LShadow_Capturing(void);
+const char *GL3_LShadow_Glsl(void);
+void GL3_LShadow_BindProgram(GLuint prog);
+void GL3_LShadow_Info(void);
 
 /* GFX-modern: volumetric light beams in place of the painted Ghoul light cones (gl3_post.c, r_om_beams).
    The Ghoul system marks a texture whose name ends in "/BEAM" with TexParameteri(OM_GHL_BEAM_HINT, 1). */
