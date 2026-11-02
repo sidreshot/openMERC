@@ -5200,6 +5200,8 @@ LightningThink(void)
 		VectorSubtract(WX.boltpos, r_newrefdef.vieworg, WX.ldir);
 		VectorNormalize(WX.ldir);
 		WX.shneed = true;
+		R_Printf(PRINT_DEVELOPER, "lightning: strike towards (%.2f %.2f %.2f) from (%.0f %.0f %.0f)\n", WX.ldir[0], WX.ldir[1],
+			WX.ldir[2], r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2]);
 
 		/* the client plays the thunder (cl_view.c): strike number and distance */
 		{
@@ -5341,6 +5343,20 @@ GL3_Post_WeatherFrame(void)
 
 		VectorCopy(WX.ldir, bolt);
 		bolt[3] = (WX.occvalid && WX.shvalid) ? LightningFlash() * (WX.rain ? 2.2f : 0.8f) : 0;
+		/* r_om_lightning_test 1 (a test aid): the last strike's light stays on at full strength */
+		{
+			static cvar_t *test;
+
+			if (!test)
+			{
+				test = ri.Cvar_Get("r_om_lightning_test", "0", 0);
+			}
+			if (test->value && WX.occvalid && WX.shvalid)
+			{
+				bolt[3] = WX.rain ? 2.2f : 0.8f;
+				col[3] = test->value; /* 2: the direct light only (red), 3: the light from above only (green) */
+			}
+		}
 		GL3_SoF_LightningUniforms(bolt, col, WX.occvalid ? WX.occvp : NULL, WX.occvalid ? WX.occtex : 0);
 		GL3_SoF_LightningShadow(WX.shvp, WX.shvalid ? WX.shtex : 0);
 	}

@@ -863,24 +863,46 @@ static const char* fragmentSrcOmBump =
 	"	float direct = 0.0, sky = 0.0;\n"
 	"	if (ndl > 0.0)\n"
 	"	{\n"
-	/* moved off the face along the normal (no acne on faces at grazing light), 3x3 taps one texel apart */
-	"		vec4 sc = omLtShVP * vec4(wp + N * 3.0, 1.0);\n"
+	/* moved off the face along the normal and biased in depth, both about a unit and more only where the light
+	   grazes the face (acne): 3 units of offset and 3.6 of bias lit every face within ~7 units under a ceiling - the
+	   ceiling slab has no upper face in the BSP, the moved point went through it (lit cornices and room corners).
+	   3x3 taps one texel (2 units) apart */
+	"		float tg = sqrt(max(1.0 - ndl * ndl, 0.0)) / max(ndl, 0.05);\n"
+	"		vec4 sc = omLtShVP * vec4(wp + N * (0.5 + 1.5 * (1.0 - ndl)), 1.0);\n"
 	"		vec3 su = sc.xyz * 0.5 + 0.5;\n"
 	"		if (all(greaterThan(su.xy, vec2(0.0))) && all(lessThan(su.xy, vec2(1.0))))\n"
 	"		{\n"
-	"			float vis = 0.0, t = 1.0 / 2048.0;\n"
+	/* lit only where all nine taps see the channel: behind the outer walls of a map there is no face at all, a tap that
+	   fell past the wall saw open sky and lit the joint of wall and ceiling */
+	"			float vis = 1.0, t = 1.0 / 2048.0, bias = 0.000111 * min(0.75 + tg, 1.5);\n"
 	"			for (int j = -1; j <= 1; j++)\n"
 	"				for (int i = -1; i <= 1; i++)\n"
-	"					vis += step(su.z - 0.0004, texture(omLtSh, su.xy + vec2(float(i), float(j)) * t).r);\n"
-	"			direct = ndl * vis / 9.0;\n"
+	"					vis = min(vis, step(su.z - bias, texture(omLtSh, su.xy + vec2(float(i), float(j)) * t).r));\n"
+	"			direct = ndl * vis;\n"
 	"		}\n"
 	"	}\n"
 	"	{\n"
-	"		vec4 oc = omLtOccVP * vec4(wp + N * 4.0, 1.0);\n"
+	/* the top-down map (3 units a texel, 1 unit = 0.0002 of its depth). The texel a wall runs through holds what is on
+	   its other side (an open street: lit): a wall point is moved a texel and a half into its own room, a unit up or
+	   down; the nearest occluder of the 3x3 texels around (a cornice by the wall sees the ceiling over it), a tolerance
+	   of 1.5 units, up to 4 on slopes. (It was 4 units along the normal and 7.5 of tolerance: every face within ~8
+	   units under a ceiling was lit - cornices, room corners) */
+	"		float ts = sqrt(max(1.0 - N.z * N.z, 0.0)) / max(abs(N.z), 0.05);\n"
+	"		vec4 oc = omLtOccVP * vec4(wp + vec3(N.xy * 4.5, N.z), 1.0);\n"
 	"		vec2 ou = oc.xy * 0.5 + 0.5;\n"
 	"		if (all(greaterThan(ou, vec2(0.0))) && all(lessThan(ou, vec2(1.0))))\n"
-	"			sky = (1.0 - smoothstep(0.0, 0.0015, oc.z * 0.5 + 0.5 - texture(omLtOcc, ou).r)) * (0.5 + 0.5 * N.z);\n"
+	"		{\n"
+	"			float od = 1.0, t = 1.0 / 1024.0;\n"
+	"			for (int j = -1; j <= 1; j++)\n"
+	"				for (int i = -1; i <= 1; i++)\n"
+	"					od = min(od, texture(omLtOcc, ou + vec2(float(i), float(j)) * t).r);\n"
+	/* the slope tolerance only for ground and roofs; a wall is lit from above only where nothing is over it at all
+	   (with the slope rule the top 4 units of every wall under a ceiling were lit) */
+	"			float e0 = N.z > 0.3 ? 0.0 : -1.0, e1 = N.z > 0.3 ? clamp(1.5 + 3.0 * ts, 1.5, 4.0) : -0.25;\n"
+	"			sky = (1.0 - smoothstep(0.0002 * e0, 0.0002 * e1, oc.z * 0.5 + 0.5 - od)) * (0.5 + 0.5 * N.z);\n"
+	"		}\n"
 	"	}\n"
+	"	if (omLtCol.a > 1.5) return omLtCol.a > 2.5 ? vec3(0.0, sky * 4.0, 0.0) : vec3(direct * 4.0, 0.0, 0.0);\n" /* r_om_lightning_test 2 / 3 */
 	"	return omLtCol.rgb * omLt.w * (direct + 0.22 * sky);\n"
 	"}\n"
 	/* GFX-modern r_om_ssr: what the reflection pass (gl3_post.c) gets from a face: reflectivity and roughness by the

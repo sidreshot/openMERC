@@ -882,6 +882,17 @@ dark parts of concrete and brick must not reflect, a flexible per-material setti
   signs, news stands, jpn2 tech walls); screens and pictures (SoF materials 32/38/39/40) stay flat and keep the old
   shine, and so do Ghoul models (no SSR on them). tsr1 omsetpos 960 832 -195 180 0: the poster's white env sheen gives
   way to a faint reflection of the opposite wall.
+* Lightning leaks closed (2026-11-02, owner: "lightning leaks in the corners"). r_om_lightning_test (test aid):
+  1 keeps the last strike's light on, 2 shows only the direct term (red), 3 only the light from above (green); with
+  r_om_lightning_rate 50 for a strike at once. Found on jpn2 (lobby -740 1678 -1115, conference room 323 968 -1131,
+  office -930 948 -1205): (a) direct: 3 units of normal offset + up to 5 units of depth bias lit every face within
+  ~7 units under a ceiling, and PCF taps that fell behind a map's outer wall (no face there) saw open sky - now about
+  a unit of offset and bias (1.5 at most) and lit only when all nine taps see the channel; (b) from above: the
+  top-down texel a wall runs through holds the street on its other side - wall points move 1.5 texels into their room,
+  the nearest occluder of 3x3 texels decides, walls only where nothing is over them (the slope tolerance is for ground
+  and roofs). Indoors nothing is lit now; arm1 omsetpos -288 -48 200 90 10 keeps the lit courtyard with its shadows.
+* Metal reflects visibly: class metal 0.14 on floors, walls x0.6 (was 0.07 and x0.3, about 0.02 on walls: nothing to
+  see, and the env shine stayed); rusty metal stays matte.
 * Open: CPU hitches of 20-45 ms a few times a minute (sud1, arm1) inside the Ghoul library while it evaluates prop
   instances (SOF_RF_GHOUL without shadows) in Ghl_Bounds / DrawLevel / Shadow - not GL submission (0 ms), not chunk
   decoding (never over 2 ms, a 64 MiB chunk cache changed nothing), not texture uploads, not CSM, tessellation,

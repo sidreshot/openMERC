@@ -59,7 +59,7 @@ static const matclass_t builtin[MC_BUILTIN] = {
 	{"unknown",   {0.00f, 0.70f, 0.30f, 0.15f}, {1.0f, 0.5f, 0.0f, 1.0f}},
 	{"stone",     {0.00f, 0.75f, 0.30f, 0.15f}, {1.0f, 0.5f, 0.0f, 1.0f}},
 	{"wood",      {0.00f, 0.65f, 0.30f, 0.15f}, {1.0f, 0.5f, 0.0f, 0.6f}},
-	{"metal",     {0.07f, 0.40f, 0.30f, 0.15f}, {1.0f, 1.0f, 0.0f, 0.8f}},
+	{"metal",     {0.14f, 0.35f, 0.60f, 0.30f}, {1.0f, 1.0f, 0.0f, 0.8f}}, /* visible on walls too: SSR replaces the env shine */
 	{"glass",     {0.45f, 0.03f, 1.00f, 1.00f}, {1.0f, 0.0f, 0.0f, 0.0f}},
 	{"picture",   {0.00f, 0.60f, 0.30f, 0.15f}, {0.0f, 0.0f, 0.0f, 0.0f}},
 	{"ground",    {0.00f, 0.85f, 0.30f, 0.15f}, {1.0f, 0.0f, 0.0f, 0.35f}},
