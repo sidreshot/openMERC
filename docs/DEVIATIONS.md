@@ -128,6 +128,10 @@ thunderstorm on jpn2".
   centre, outside a character's +-8 box: neither weapon hurt anyone (owner 2026-11-02). The server's othermz beam and
   world/fthrower stream no longer go to the shooting player, who draws its own playermz effect (the original's
   behaviour, docs/impl/I5.md beams1).
+- **Map fixes** (g_spawn.cpp G_MapFixes): a trigger that a player can walk around gets a larger touch box (its target
+  and once-only rule stay). jpn2: the office lights (`officelt`, style 33, start off) came on from a line across the
+  west corridor only; entered from the lift lobby the office stayed dark (owner 2026-11-02). The box now covers the
+  office's lamps (x -1040..-240, y 840..1600). Only a new start of the map has it (a save keeps the old box).
 - **Severed limbs** (rg_special.cpp RgLimbAI, cvar g_limbtime, archived, menu Game > World): a limb fades after
   g_limbtime seconds (default 120) when nobody looks at it, or after twice that anyway; 0 = the original rule (30 s, or
   as soon as it is out of view). Original: a limb went as soon as it was unseen.

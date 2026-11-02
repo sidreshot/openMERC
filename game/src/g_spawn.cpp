@@ -517,6 +517,34 @@ static void GameRulesLevelStart(void)
 	}
 }
 
+/* OpenMerc (DEVIATIONS "Map fixes"): triggers of the original maps that a player can walk around. The trigger
+   keeps its own target and once-only rule; only its touch box grows (G_TouchTriggers tests the box alone). */
+static void G_MapFixes(const char *mapname)
+{
+	static const struct {
+		const char *map, *target;
+		float mins[3], maxs[3];
+	} fixes[] = {
+		/* jpn2: the office lights (style 33, start off) come on from a line across the west corridor only; from the
+		   lift lobby the office was entered past it and stayed dark. The box covers the office's lamps. */
+		{"jpn2", "officelt", {-1040, 840, -1260}, {-240, 1600, -1080}},
+	};
+	for (const auto &f : fixes) {
+		if (Q_stricmp(mapname, f.map))
+			continue;
+		edict_t *e = NULL;
+		while ((e = G_Find(e, FOFS(target), f.target)) != NULL) {
+			if (!e->classname || Q_stricmp(e->classname, "trigger_once") || e->solid != SOLID_TRIGGER)
+				continue;
+			for (int k = 0; k < 3; k++) {
+				e->mins[k] = fminf(e->absmin[k], f.mins[k]) - e->s.origin[k];
+				e->maxs[k] = fmaxf(e->absmax[k], f.maxs[k]) - e->s.origin[k];
+			}
+			gi.linkentity(e);
+		}
+	}
+}
+
 /*
 ==============
 SpawnEntities
@@ -650,6 +678,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	gi.dprintf("%i entities inhibited\n", g_inhibit);
 
 	G_FindTeams();
+	G_MapFixes(mapname);
 	PlayerTrail_Init();
 	gix.loadingprogress(0.28f, 1);
 	G_MarkSurfaceSounds(); // material sounds of the map's surfaces (SPEC-760 B1.3 step 3, g_material.cpp)
