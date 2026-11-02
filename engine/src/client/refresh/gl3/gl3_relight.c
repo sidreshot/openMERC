@@ -23,6 +23,9 @@
  * The directions are uploaded as one texture per lightmap page (GL_TEXTURE10)
  * for the relief lighting of the world surfaces (r_om_bump, gl3_shaders.c).
  *
+ * A cache is checked against the map's own lighting before use (Relight_Guard):
+ * a bake that lost the lamps is not used, darker face blocks are lifted to 80%.
+ *
  * cvar r_om_relight: 0 original lighting, 1 use the cache and bake missing
  * maps (default), 2 use the cache only.
  */
@@ -352,8 +355,121 @@ Relight_Spawn(const char *mapname, const char *cachename)
 #endif
 }
 
+/* the bake is checked against the map's own lighting, per face lightmap block (faces: the v46 face lump).
+   A fit that lost a kind of light (jpn2, irq1a, sud1: the lamps came out at 0) leaves whole rooms dark:
+   a third of the lit texels below 45% and the map at 2/3 of its light -> the cache is not used. Otherwise
+   a block darker than 80% of the original is scaled back up to it: the bake keeps its shape (shadows), the
+   designer's light level stays. */
+static qboolean
+Relight_Guard(const char *mapname, const byte *orig, byte *lit, int size, const dface46_t *faces, int numfaces)
+{
+	double sumo = 0, sumn = 0, lit25 = 0, crushed = 0;
+	int f, s, i, lifted = 0;
+
+	for (f = 0; f < numfaces; f++)
+	{
+		const dface46_t *in = faces + f;
+		int ofs = LittleLong(in->lightofs), n = in->lm_width * in->lm_height * 3;
+
+		for (s = 0; (s < MAXLIGHTMAPS) && (in->styles[s] != 255); s++)
+		{
+			const byte *o;
+			double a = 0, c = 0;
+
+			if ((ofs < 0) || (n <= 0) || (ofs + (s + 1) * n > size))
+			{
+				break;
+			}
+
+			o = orig + ofs + s * n;
+
+			for (i = 0; i < n; i++)
+			{
+				a += o[i];
+				c += lit[ofs + s * n + i];
+			}
+
+			sumo += a;
+			sumn += c;
+			a /= n;
+			c /= n;
+
+			if (a > 25)
+			{
+				lit25 += n;
+				crushed += (c < 0.45 * a) ? n : 0;
+			}
+		}
+	}
+
+	if ((sumn < 0.7 * sumo) && (crushed > 0.3 * lit25))
+	{
+		R_Printf(PRINT_ALL, "relight: the re-bake of %s is broken (%.0f%% of the light, %.0f%% of the lit area crushed), "
+			"the map's own lighting is used\n", mapname, 100.0 * sumn / Q_max(sumo, 1), 100.0 * crushed / Q_max(lit25, 1));
+		return false;
+	}
+
+	for (f = 0; f < numfaces; f++)
+	{
+		const dface46_t *in = faces + f;
+		int ofs = LittleLong(in->lightofs), n = in->lm_width * in->lm_height * 3;
+
+		for (s = 0; (s < MAXLIGHTMAPS) && (in->styles[s] != 255); s++)
+		{
+			byte *b;
+			const byte *o;
+			double a = 0, c = 0, k;
+
+			if ((ofs < 0) || (n <= 0) || (ofs + (s + 1) * n > size))
+			{
+				break;
+			}
+
+			b = lit + ofs + s * n;
+			o = orig + ofs + s * n;
+
+			for (i = 0; i < n; i++)
+			{
+				a += o[i];
+				c += b[i];
+			}
+
+			if ((a < 8.0 * n) || (c >= 0.8 * a))
+			{
+				continue;
+			}
+
+			lifted++;
+
+			if (c < 0.2 * a)
+			{
+				/* nothing usable left: the original, as dim as the floor */
+				for (i = 0; i < n; i++)
+				{
+					b[i] = (byte)(o[i] * 0.8f);
+				}
+				continue;
+			}
+
+			k = 0.8 * a / c;
+
+			for (i = 0; i < n; i++)
+			{
+				b[i] = (byte)Q_min(b[i] * k + 0.5, 255.0);
+			}
+		}
+	}
+
+	if (lifted)
+	{
+		R_Printf(PRINT_DEVELOPER, "relight: %s: %d lightmap blocks lifted to 80%% of the original\n", mapname, lifted);
+	}
+
+	return true;
+}
+
 void
-GL3_Relight_Apply(const char *mapname, byte *lightdata, int size)
+GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *faces, int faceslen)
 {
 	char cachename[MAX_QPATH], path[MAX_QPATH];
 	unsigned long long hash, stored;
@@ -392,6 +508,14 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size)
 
 			if ((version == RELIGHT_VERSION) && (ll == size) && (stored == hash))
 			{
+				if (!Relight_Guard(mapname, lightdata, buf + RELIGHT_HEADER, size, (const dface46_t *)faces,
+					faceslen / (int)sizeof(dface46_t)))
+				{
+					/* kept on disk: the same broken bake is not started again */
+					ri.FS_FreeFile(buf);
+					return;
+				}
+
 				memcpy(lightdata, buf + RELIGHT_HEADER, size);
 				/* the light directions (deluxe map) follow, same layout */
 				deluxe = malloc(size);

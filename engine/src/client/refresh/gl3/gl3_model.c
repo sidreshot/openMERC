@@ -794,7 +794,8 @@ Mod_LoadBrushModel(gl3model_t *mod, void *buffer, int modfilelen)
 	mod->lightdatasize = mod->lightdata ? header->lumps[LUMP_LIGHTING].filelen : 0;
 	if ((mod->bspversion == BSPVERSION_SOF) && mod->lightdata)
 	{
-		GL3_Relight_Apply(mod->name, mod->lightdata, mod->lightdatasize);
+		GL3_Relight_Apply(mod->name, mod->lightdata, mod->lightdatasize,
+			mod_base + header->lumps[LUMP_FACES].fileofs, header->lumps[LUMP_FACES].filelen);
 	}
 	Mod_LoadPlanes (mod->name, &mod->planes, &mod->numplanes,
 		mod_base, &header->lumps[LUMP_PLANES], 0);
