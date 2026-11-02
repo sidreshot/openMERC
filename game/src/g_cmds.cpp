@@ -214,6 +214,32 @@ static void Cmd_Gimme_f(edict_t *ent)
 	ED_CallSpawn(e);
 }
 
+/* omkill: the nearest living character (not the player) dies of a shot from the player's position (a test aid) */
+static void Cmd_OmKill_f(edict_t *ent)
+{
+	if (!CheatsOK(ent))
+		return;
+	edict_t *best = NULL;
+	float bd = 1e9f;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0)
+			continue;
+		vec3_t d;
+		VectorSubtract(e->s.origin, ent->s.origin, d);
+		if (VectorLength(d) < bd) {
+			bd = VectorLength(d);
+			best = e;
+		}
+	}
+	if (!best)
+		return;
+	vec3_t dir;
+	VectorSubtract(best->s.origin, ent->s.origin, dir);
+	VectorNormalize(dir);
+	T_Damage(best, ent, ent, dir, best->s.origin, ent->s.origin, best->health + 20, 0, DAMAGE_NO_PROTECTION, MOD_SUICIDE);
+}
+
 static void Cmd_KillAllMonsters_f(edict_t *ent)
 {
 	if (!CheatsOK(ent))
@@ -572,6 +598,8 @@ void ClientCommand(edict_t *ent)
 		if (CheatsOK(ent))
 			GM_DefaultWeapons(ent); /* G9: SPEC-790 the level's default weapons */
 	}
+	else if (Q_stricmp(cmd, "omkill") == 0)
+		Cmd_OmKill_f(ent);
 	else if (Q_stricmp(cmd, "killallmonsters") == 0)
 		Cmd_KillAllMonsters_f(ent);
 	else if (Q_stricmp(cmd, "entlist") == 0)

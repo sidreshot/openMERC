@@ -345,6 +345,7 @@ void GL3_Post_Weather(void);
 void GL3_Post_WeatherFrame(void);
 void GL3_Weather_MapLoad(const char *ents, int len);
 void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const float *occvp, GLuint occtex);
+void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex);
 void GL3_Post_MarkWeapon(qboolean begin);
 char *GL3_Post_WrapFragment(const char *src, const char *src2);
 void GL3_Post_BindOutputs(GLuint prog);

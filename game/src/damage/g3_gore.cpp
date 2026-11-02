@@ -992,7 +992,7 @@ static edict_t *SpawnPiece(G3Gore *g, int zi, bool gibPiece, const vec3_t gibDir
 	p->nextthink = level.time + 0.1f;
 	p->think = PieceThink;
 	// lifetime: the type-13 limb AI (G4, SPEC-732 §9) decides; without it G3 removes the piece after 30 s
-	p->dietime = g3hooks.limbAI ? 0 : level.time + 30.0f;
+	p->dietime = g3hooks.limbAI ? 0 : level.time + 30.0f; /* (the limb AI follows g_limbtime) */
 	return p;
 }
 

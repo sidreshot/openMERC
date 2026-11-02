@@ -2,7 +2,7 @@ VERSION 1
 ID 197
 REFERENCE MENU_OMSET
 DESCRIPTION "OpenMerc audio, controls, gameplay and multiplayer pages"
-COUNT 124
+COUNT 126
 INDEX 0
 {
    REFERENCE OFFON
@@ -342,8 +342,8 @@ INDEX 55
 INDEX 56
 {
    REFERENCE CORPSE_OPTS
-   TEXT_ENGLISH "2,5,10,20"
-   TEXT_RUSSIAN "2,5,10,20"
+   TEXT_ENGLISH "2,5,10,24,40"
+   TEXT_RUSSIAN "2,5,10,24,40"
 }
 INDEX 57
 {
@@ -746,4 +746,16 @@ INDEX 123
    REFERENCE AUTOSAVE_OPTS
    TEXT_ENGLISH "Off,1 min,2 min,3 min,4 min,5 min"
    TEXT_RUSSIAN "Выкл,1 мин,2 мин,3 мин,4 мин,5 мин"
+}
+INDEX 124
+{
+   REFERENCE LIMBS
+   TEXT_ENGLISH "Severed Limbs Stay"
+   TEXT_RUSSIAN "Оторванные конечности лежат"
+}
+INDEX 125
+{
+   REFERENCE LIMB_OPTS
+   TEXT_ENGLISH "30 s,1 min,2 min,5 min,Always"
+   TEXT_RUSSIAN "30 с,1 мин,2 мин,5 мин,Всегда"
 }

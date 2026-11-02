@@ -314,7 +314,7 @@ static void InitGame(void)
 	                                {"ei_show", "0", "0"},        {"aipoints_show", "0", "0"},
 	                                {"ai_nonodes", "0", "0"},     {"aidec_show", "0", "0"},
 	                                {"ai_dumb", "0", "0"},        {"ai_editdir", "p:", "1"},
-	                                {"ai_maxcorpses", "5", "1"},  {"ai_corpselife", "5", "1"},
+	                                {"ai_maxcorpses", "24", "1"},  {"ai_corpselife", "5", "1"},
 	                                {"ai_spawnfrequency", "1.0", "2048"}};
 	for (auto &c : aicv)
 		gi.cvar(c[0], c[1], atoi(c[2]));

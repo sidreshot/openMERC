@@ -638,6 +638,7 @@ extern void GL3_SubdivideSurface(msurface_t *fa, gl3model_t* loadmodel);
 
 extern void GL3_SetSky(const char *name, float rotate, vec3_t axis);
 extern void GL3_DrawSkyBox(void);
+extern gl3image_t *GL3_SkyAt(const vec3_t dir, float *s, float *t);
 extern void GL3_ClearSkyBox(void);
 extern void GL3_AddSkySurface(msurface_t *fa);
 

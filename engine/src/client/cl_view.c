@@ -574,6 +574,24 @@ Thunder_Write(const char *path, int variant)
 			/* the crack: bright noise with a fast decay */
 			v += w * 0.9f * expf(-t / 0.07f) + b1 * 2.5f * expf(-t / 0.35f);
 		}
+		else if (variant == 6)
+		{
+			/* the downpour: hiss without the low end (a band of noise), countless drops patting near and far, and a
+			   faint roar; stationary, so clips laid over each other with soft edges join without a seam */
+			static float lp, hp, drop, dropk, roar;
+
+			lp += (w - lp) * 0.35f;
+			hp += (lp - hp) * 0.06f;
+			if ((Thunder_Rand(&seed) * 0.5f + 0.5f) < 0.006f)
+			{
+				drop = 0.3f + (Thunder_Rand(&seed) * 0.5f + 0.5f) * 0.9f;
+				dropk = 0.93f + (Thunder_Rand(&seed) * 0.5f + 0.5f) * 0.05f;
+			}
+			drop *= dropk;
+			roar = roar * 0.996f + w * 0.02f;
+			v = (lp - hp) * 0.9f + w * drop * 0.8f + roar * 0.6f;
+			v *= 1.0f + 0.12f * sinf(t * 1.7f) * sinf(t * 0.6f + 1.0f);
+		}
 		else if (variant >= 3)
 		{
 			/* a distant explosion (r_om_war): a low thump that sinks in pitch, then a short rumble */
@@ -596,6 +614,12 @@ Thunder_Write(const char *path, int variant)
 		if (i > n - THUNDER_RATE / 2)
 		{
 			s *= (float)(n - i) / (THUNDER_RATE / 2);
+		}
+
+		/* the downpour also fades in (its clips overlap by RAIN_FADE) */
+		if ((variant == 6) && (i < THUNDER_RATE / 2))
+		{
+			s *= (float)i / (THUNDER_RATE / 2);
 		}
 
 		pcm[i] = (short)(s * 32767.0f);
@@ -788,6 +812,89 @@ CL_WarBoom_Frame(void)
 	}
 }
 
+/* openMERC GFX-modern: the sound of the renderer's rain (r_om_rain_audible), synthesised once into
+   <gamedir>/sound/om/rain.wav and laid clip over clip (each fades in and out over half a second). Its loudness
+   follows how much sky is open around the player: rays up and slantwise that reach the sky; muffled indoors */
+#define RAIN_FADE 0.5f
+
+static void
+CL_Rain_Frame(void)
+{
+	static cvar_t *audible, *volume;
+	static float nextclip;
+	static qboolean made;
+	static const float rays[9][3] = {
+		{0, 0, 1}, {0.64f, 0, 0.77f}, {-0.64f, 0, 0.77f}, {0, 0.64f, 0.77f}, {0, -0.64f, 0.77f},
+		{0.45f, 0.45f, 0.77f}, {-0.45f, 0.45f, 0.77f}, {0.45f, -0.45f, 0.77f}, {-0.45f, -0.45f, 0.77f}};
+	float now = cls.realtime * 0.001f, open = 0, vol;
+	struct sfx_s *sfx;
+	int i;
+
+	if (!audible)
+	{
+		audible = Cvar_Get("r_om_rain_audible", "0", 0);
+		volume = Cvar_Get("s_om_rain_volume", "0.8", CVAR_ARCHIVE);
+	}
+
+	if (!audible->value || (volume->value <= 0))
+	{
+		nextclip = 0;
+		return;
+	}
+
+	if (now < nextclip)
+	{
+		return;
+	}
+
+	/* (a clip still playing from before a pause or a map change is let go) */
+	nextclip = now + THUNDER_SECONDS - RAIN_FADE;
+
+	if (!made)
+	{
+		char path[MAX_OSPATH];
+		FILE *t;
+
+		Com_sprintf(path, sizeof(path), "%s/sound/om/rain.wav", FS_Gamedir());
+		t = Q_fopen(path, "rb");
+
+		if (t)
+		{
+			fclose(t);
+		}
+		else
+		{
+			FS_CreatePath(path);
+			Thunder_Write(path, 6);
+		}
+
+		made = true;
+	}
+
+	for (i = 0; i < 9; i++)
+	{
+		vec3_t end;
+		trace_t tr;
+
+		VectorMA(cl.refdef.vieworg, 4000, rays[i], end);
+		tr = CM_BoxTrace(cl.refdef.vieworg, end, vec3_origin, vec3_origin, 0, MASK_SOLID);
+
+		if ((tr.fraction >= 1.0f) || (tr.surface && (tr.surface->flags & SURF_SKY)))
+		{
+			open += 1.0f / 9;
+		}
+	}
+
+	/* under the open sky the full downpour; beneath a roof only what comes in through the windows and doors */
+	vol = Q_clamp(volume->value * (0.12f + 0.88f * open), 0.0f, 1.0f);
+	sfx = S_RegisterSound("om/rain.wav");
+
+	if (sfx)
+	{
+		S_StartSound(NULL, cl.playernum + 1, 0, sfx, vol, 0, 0);
+	}
+}
+
 void
 V_RenderView(float stereo_separation)
 {
@@ -805,6 +912,7 @@ V_RenderView(float stereo_separation)
 
 	CL_Thunder_Frame();
 	CL_WarBoom_Frame();
+	CL_Rain_Frame();
 
 	if (cl_timedemo->value)
 	{

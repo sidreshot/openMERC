@@ -2158,18 +2158,84 @@ public:
 		/* the room check is OpenMerc's (falls into walls during play); a scripted scene keeps the original's choice:
 		   jpn2's kneeling hostage, a bench behind her, flew across the room in the blown-back death instead of
 		   sinking back from her knees */
-		if (t == 0 || G3_Cinematic())
+		if (G3_Cinematic())
 			return true;
-		vec3_t f, l, u, end, mins = {-12, -12, 0}, maxs = {12, 12, 8};
+		vec3_t f, l, u;
 		G3_EntityAxes(ent, f, l, u);
 		f[2] = 0;
+		l[2] = 0;
 		if (VectorNormalize(f) == 0)
 			return true;
-		mins[2] = ent->mins[2] + 18; // above steps and the floor
-		VectorMA(ent->s.origin, t, f, end);
+		VectorNormalize(l);
+		/* the whole lying body must have room, at knee and at chest height: a fall over to the side (`_2side`) needs it on
+		   both sides (which side the animation takes is not known here) */
+		if (strstr(n, "_2side"))
+			return Sweep(l, 56) && Sweep(l, -56);
+		if (t == 0)
+			return true;
+		return Sweep(f, t);
+	}
+
+	// a 24-unit wide box swept from the origin along dir for dist units, at knee and at chest height, clear of walls
+	bool Sweep(const vec3_t dir, float dist)
+	{
+		static const float heights[2] = {18, 34};
+		for (int k = 0; k < 2; k++) {
+			vec3_t end, mins = {-12, -12, 0}, maxs = {12, 12, 8};
+			mins[2] = ent->mins[2] + heights[k];
+			maxs[2] = mins[2] + 8;
+			VectorMA(ent->s.origin, dist, dir, end);
+			trace_t tr;
+			gix.trace(ent->s.origin, mins, maxs, end, ent, MASK_SOLID, &tr);
+			if (tr.startsolid || tr.fraction < 1.0f)
+				return false;
+		}
+		return true;
+	}
+
+	// OpenMerc (DEVIATIONS): the body pushed out of walls while it falls and once it rests. Every gore zone's bolt is a
+	// point of the drawn body (head, hands, feet, chest); a horizontal ray from the origin's column to it that ends in a
+	// wall gives the depth the body reaches into it. The deepest one moves the entity away from that wall, at most
+	// maxstep units per call, through a box trace (never into another wall). The corpse box is only +-8 wide, so the
+	// drawn head and legs of a body that fell or slid next to a wall went through it.
+	void SettleCorpse(float maxstep)
+	{
+		IGhoulInst *inst = Inst();
+		if (!gore || !inst || gibbed)
+			return;
+		vec3_t push = {0, 0, 0};
+		float worst = 0;
+		for (int i = 0; i < gore->numZones; i++) {
+			vec3_t bp, start, d;
+			if (!gore->zones[i].goreBolt || !G3G_BoltWorld(ent, inst, gore->zones[i].goreBolt, bp))
+				continue;
+			VectorCopy(ent->s.origin, start);
+			start[2] = bp[2];
+			VectorSubtract(bp, start, d);
+			float len = VectorNormalize(d);
+			if (len < 4 || len > 96)
+				continue;
+			trace_t tr;
+			gix.trace(start, NULL, NULL, bp, ent, MASK_SOLID, &tr);
+			if (tr.startsolid || tr.allsolid || tr.fraction >= 1.0f)
+				continue;
+			float depth = (1.0f - tr.fraction) * len + 2.0f;
+			if (depth > worst) {
+				worst = depth;
+				VectorScale(d, -1.0f, push);
+			}
+		}
+		if (worst <= 0.5f)
+			return;
+		float step = worst < maxstep ? worst : maxstep;
+		vec3_t end;
+		VectorMA(ent->s.origin, step, push, end);
 		trace_t tr;
-		gix.trace(ent->s.origin, mins, maxs, end, ent, MASK_SOLID, &tr);
-		return !tr.startsolid && tr.fraction >= 1.0f;
+		gix.trace(ent->s.origin, ent->mins, ent->maxs, end, ent, MASK_SOLID, &tr);
+		if (tr.startsolid || tr.fraction <= 0)
+			return;
+		VectorCopy(tr.endpos, ent->s.origin);
+		gix.linkentity(ent);
 	}
 
 	const G3Anim *Death(const char *n, const char *voice, int variants, bool commit, bool mute)
@@ -2472,7 +2538,13 @@ public:
 		}
 		if (AnimDone() && expr != EXPR_DEAD && (committed || now - playStart > 10.0f))
 			SetExpression(EXPR_DEAD, 999999.9f, false);
+		/* out of the walls: a little each think while falling, the rest when it has come to rest */
+		if (frozenAt == 0 && !G3_Cinematic())
+			SettleCorpse(6.0f);
 		if (frozenAt == 0 && (AnimDone() || now - deathTime > 5.0f)) {
+			if (!G3_Cinematic())
+				for (int k = 0; k < 3; k++)
+					SettleCorpse(40.0f);
 			IGhoulInst *inst = Inst();
 			if (inst) {
 				inst->Pause(now);

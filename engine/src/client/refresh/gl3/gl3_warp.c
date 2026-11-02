@@ -423,6 +423,56 @@ GL3_SetSky(const char *name, float rotate, vec3_t axis)
 	GL3_SoF_SetSky(name, rotate, axis);
 }
 
+/* GFX-modern (gl3_post.c, the lightning): the sky box image seen in direction dir and the texture coordinates
+   there (0..1, as MakeSkyVec gives them); NULL where that face is not drawn or the sky turns */
+gl3image_t *
+GL3_SkyAt(const vec3_t dir, float *s, float *t)
+{
+	vec3_t av;
+	float dv, st[2];
+	int axis, j, k;
+
+	if (skyrotate != 0.0f)
+	{
+		return NULL;
+	}
+
+	av[0] = fabs(dir[0]);
+	av[1] = fabs(dir[1]);
+	av[2] = fabs(dir[2]);
+
+	if ((av[0] > av[1]) && (av[0] > av[2]))
+	{
+		axis = (dir[0] < 0) ? 1 : 0;
+	}
+	else if ((av[1] > av[2]) && (av[1] > av[0]))
+	{
+		axis = (dir[1] < 0) ? 3 : 2;
+	}
+	else
+	{
+		axis = (dir[2] < 0) ? 5 : 4;
+	}
+
+	j = vec_to_st[axis][2];
+	dv = (j > 0) ? dir[j - 1] : -dir[-j - 1];
+
+	if (dv < 0.001f)
+	{
+		return NULL;
+	}
+
+	for (k = 0; k < 2; k++)
+	{
+		j = vec_to_st[axis][k];
+		st[k] = ((j < 0) ? -dir[-j - 1] : dir[j - 1]) / dv;
+	}
+
+	*s = Q_clamp((st[0] + 1) * 0.5f, 0.0f, 1.0f);
+	*t = 1.0f - Q_clamp((st[1] + 1) * 0.5f, 0.0f, 1.0f);
+	return sky_images[skytexorder[axis]];
+}
+
 static void
 DrawSkyPolygon(int nump, vec3_t vecs)
 {

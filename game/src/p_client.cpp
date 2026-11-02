@@ -1140,6 +1140,18 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 	gclient_t *client = ent->client;
 	level.current_entity = ent;
 
+	/* om_testmode 1 (a test aid, single player): the player is always invulnerable, unseen and flies through walls -
+	   no god / notarget / noclip to type after every map load */
+	{
+		static cvar_t *testmode;
+		if (!testmode)
+			testmode = gi.cvar("om_testmode", "0", 0);
+		if (testmode->value && !deathmatch->value && ent->health > 0) {
+			ent->flags |= FL_GODMODE | FL_NOTARGET;
+			ent->movetype = MOVETYPE_NOCLIP;
+		}
+	}
+
 	if (level.intermissiontime) {
 		client->ps.pmove.pm_type = client->resp.spectator ? PM_INTERMISSION_SPEC : PM_FREEZE;
 		if (level.time > level.intermissiontime + 10.0 && (ucmd->buttons & BUTTON_ATTACK))

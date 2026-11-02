@@ -1544,9 +1544,12 @@ CLFX_Init(void)
 	fx_inited = true;
 
 	fx_sim_time = Cvar_Get("fx_sim_time", "60", 0);
-	cl_max_quads = Cvar_Get("cl_max_quads", "256", CVAR_ARCHIVE);
+	cl_max_quads = Cvar_Get("cl_max_quads", "1024", CVAR_ARCHIVE); /* OpenMerc: 256 */
+	/* OpenMerc: how long severed limbs stay (the game reads it; registered here so the video menu shows it before a
+	   map is loaded) */
+	Cvar_Get("g_limbtime", "120", CVAR_ARCHIVE);
 	cl_max_debris = Cvar_Get("cl_max_debris", "128", CVAR_ARCHIVE);
-	fx_maxdebrisonscreen = Cvar_Get("fx_maxdebrisonscreen", "16", 0);
+	fx_maxdebrisonscreen = Cvar_Get("fx_maxdebrisonscreen", "64", 0); /* OpenMerc: 16 in 1999 */
 	cl_freezequads = Cvar_Get("cl_freezequads", "0", 0);
 	freezeworld = Cvar_Get("freezeworld", "0", 0);
 	fx_noflash = Cvar_Get("fx_noflash", "0", 0);

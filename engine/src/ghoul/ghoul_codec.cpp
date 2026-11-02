@@ -273,7 +273,7 @@ bool DecodeChunk(const GhbFile &f, uint32_t ci, DecodedChunk &out)
 // ---------------------------------------------------------------- decoded-chunk cache (SPEC-012)
 
 namespace {
-const size_t kChunkCacheBytes = 3u * 1024u * 1024u;
+const size_t kChunkCacheBytes = 64u * 1024u * 1024u; // OpenMerc (DEVIATIONS): 3 MiB in 1999
 struct ChunkCache
 {
 	typedef std::pair<uint32_t, uint32_t> Key; // file serial, chunk

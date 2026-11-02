@@ -22,7 +22,7 @@ void RegisterCvars(void)
 	cv.ai_pathtest = gi.cvar("ai_pathtest", "0", 0);
 	cv.ai_highpriority = gi.cvar("ai_highpriority", "0", 0);
 	cv.ai_nonodes = gi.cvar("ai_nonodes", "0", 0);
-	cv.ai_maxcorpses = gi.cvar("ai_maxcorpses", "5", CVAR_ARCHIVE);
+	cv.ai_maxcorpses = gi.cvar("ai_maxcorpses", "24", CVAR_ARCHIVE); /* OpenMerc: 5 in 1999 */
 	cv.ai_corpselife = gi.cvar("ai_corpselife", "5", CVAR_ARCHIVE);
 	cv.ai_editdir = gi.cvar("ai_editdir", "p:", 0);
 	cv.aidec_show = gi.cvar("aidec_show", "0", 0);

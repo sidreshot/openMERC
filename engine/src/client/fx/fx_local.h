@@ -17,10 +17,10 @@
 
 #define FX_MAX_DEFS 256       /* configstring effect table */
 #define FX_MAX_NAMED 256      /* by-name effect table */
-#define FX_MAX_RUNNING 256
-#define FX_MAX_PARTICLES 1024
-#define FX_MAX_DECALS 1024
-#define FX_MAX_DEBRIS 1024
+#define FX_MAX_RUNNING 1024 /* OpenMerc: 256 in 1999 */
+#define FX_MAX_PARTICLES 8192 /* OpenMerc: 1024 */
+#define FX_MAX_DECALS 4096 /* OpenMerc: 1024 (cl_max_quads may go up to this) */
+#define FX_MAX_DEBRIS 2048 /* OpenMerc: 1024 */
 
 #define FX_CS_EFFECTS 647     /* SPEC-203 */
 #define FX_CS_SCREEN5 5       /* style-13 colour (SPEC-400 Light styles) */

@@ -956,3 +956,34 @@ correction away and put ours in its place".
   them after distance / 1200 s from a queue (explosions come more often than the sound takes).
 * Cost: sib1 snow and kos2 war each under 0.3 ms (1080p, GTX 1050 Ti).
 * Snow follow-up (owner: "it hits you in the face, it must be fine particles", "and into the distance"): flakes are 0.5..1 units, kept between 0.8 and 1.6 pixels on the screen, none closer than ~45..110 units; three layers in depth, each fading in where the nearer one ends (box 700 / 1800 / 3600 units, 12000 / 16000 / 14000 flakes), so the fall reaches into the fog.
+
+## jpn2 thunderstorm, rain drops, lightning light (owner: "rain with a thunderstorm on jpn2, not over the skyscrapers, Crysis-3-like drops, no light leaks, strictly physical, remove the old flashes")
+
+* r_om_rain_maps ("jpn2"): rain and lightning on maps whose data has none (WX.forced). The sky is left as it is (no
+  darkening, no sky flash: the old whole-sky flash, the fullscreen flash pass and its uniforms are removed).
+* Drops: two layers around the eye (near and dense 40..500 units, far and thin 380..1200; nothing reaches the distant
+  towers). Each streak is round across (thick in the middle), with a head and a thinning tail, fades over 24 units
+  where it meets the world (depth copy), refracts the last frame's colour shifted across the streak and takes the
+  light of its surroundings from a blurred level of that colour (bright by the neon, nearly invisible in the dark).
+  Without r_om_ssr (no last-frame colour) the drops fall back to their tint.
+* Lightning light: the channel is kilometres away, so its light arrives in parallel. Per strike one orthographic
+  shadow map (2048², 4096 units around the eye, static world and brush entities, about 1 ms) along the direction to the
+  channel; the world shaders add N.L x a 3x3 PCF test of that map, plus 0.22 of a strictly top-down sky term (the
+  rain's occlusion map at the point; the old sideways openness walk leaked light under roofs). Unit 9 (shared with the
+  beam array, never at the same time).
+* Where the bolt is drawn: only over pixels of the sky box (linear depth beyond 30000; the box is at 37800), depth test
+  off, so no tower of the map is ever crossed. jpn2 paints the whole street beyond the map on its sky box (tok2, towers
+  up to 40..70 degrees), so a sky mask is built once per map from the sky images themselves (WXSkyMask): a direction is
+  open where its texel has the colour of the sky (mean of the up face, per channel within 4 + 0.6 x the reference) and
+  nothing painted lies above it up to the zenith; eroded by about 3 degrees aside and 1.4 up and down. 256 x 64 (yaw x
+  elevation), R8 texture; the bolt shader discards fragments whose direction is not open.
+* Where it strikes (rain maps of r_om_rain_maps): every yaw whose column fits is listed - top (32..52 degrees) open and
+  at least 5 of 13 samples down to the bottom (12..22 degrees) open; lower down the channel passes behind the painted
+  skyline. A column within 60 degrees of the view is preferred. r_om_lightning_zones ("map:yaw-yaw,yaw-yaw ...", world
+  yaw in degrees) overrides the search with stretches chosen by hand. No column: the strike stays in the clouds (light
+  and thunder only). Bolts 9000..11000 units out, width scaled with distance.
+* Sound: thunder as before (r_om_lightning_strike, cl_view.c). The downpour: r_om_rain_audible (set by the renderer
+  while it rains) makes the client synthesise sound/om/rain.wav once (band-limited hiss, drop patter, faint roar; 5 s,
+  half-second fades) and lay clip over clip every 4.5 s. Loudness s_om_rain_volume (0.8) x (0.12 + 0.88 x openness),
+  openness = the share of 9 rays (up and 50 degrees slantwise, 4000 units) that reach the sky or nothing: under a roof
+  only a murmur.

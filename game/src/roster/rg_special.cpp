@@ -258,7 +258,15 @@ void RgLimbAI::Think(edict_t *ent)
 		}
 		return;
 	}
-	if (now - start >= 30 || !rg_LimbWatched(ent)) {
+	/* OpenMerc (DEVIATIONS): the original faded a settled limb at once when nobody looked at it and after 30 s anyway;
+	   g_limbtime seconds (0 = the original) it stays, then fades when unseen (or at twice the time) */
+	static cvar_t *limbtime;
+	if (!limbtime)
+		limbtime = gi.cvar("g_limbtime", "120", CVAR_ARCHIVE);
+	float life = limbtime->value;
+	bool fade = life > 0 ? (now - start >= life && (!rg_LimbWatched(ent) || now - start >= 2 * life))
+	                     : (now - start >= 30 || !rg_LimbWatched(ent));
+	if (fade) {
 		fadestart = now;
 		fx::FadeOut(ent, 1.0f);
 	}

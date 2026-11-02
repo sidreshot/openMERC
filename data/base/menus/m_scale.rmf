@@ -18,7 +18,8 @@
 <text "^MENU_OMSET_SECTION_WORLD^">
 <hr width 460 tint gray>
 <font type title tint normaltext atint hilitetext>
-<list "^MENU_OMSET_CORPSE_OPTS^" match "2,5,10,20" atext "^MENU_OMSET_CORPSES^" split 230 cvar ai_maxcorpses><hbr>
+<list "^MENU_OMSET_CORPSE_OPTS^" match "2,5,10,24,40" atext "^MENU_OMSET_CORPSES^" split 230 cvar ai_maxcorpses><hbr>
+<list "^MENU_OMSET_LIMB_OPTS^" match "30,60,120,300,99999" atext "^MENU_OMSET_LIMBS^" split 230 cvar g_limbtime><hbr>
 <hbr>
 <font type title tint orange atint orange>
 <text "^MENU_OMSET_SECTION_SAVE^">

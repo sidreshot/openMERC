@@ -812,51 +812,44 @@ static const char* fragmentSrcOmBump =
 	"uniform vec4 omBL[8]; // lamps: xyz origin, w radius\n"
 	"uniform vec4 omBC[8]; // lamps: rgb colour\n"
 	"uniform int omBN;\n"
-	/* GFX-modern r_om_rain: the lightning lights what is open to the sky towards the bolt (gl3_post.c) */
-	"uniform vec4 omLt;\n"        /* bolt position, strength (0 = none) */
+	/* GFX-modern r_om_rain: the light of a lightning strike (gl3_post.c). The channel is kilometres away: its light
+	   comes in parallel along omLt.xyz and reaches only what sees it - a shadow map of the static world made along
+	   that direction once per strike decides, so nothing behind a wall or under a roof is lit. The lit cloud deck adds
+	   a little light from straight above where the sky is directly overhead (the top-down map, no sideways walk). */
+	"uniform vec4 omLt;\n"        /* unit direction towards the channel, strength (0 = none) */
 	"uniform vec4 omLtCol;\n"
-	"uniform mat4 omLtOccVP;\n"   /* top-down depth map of the static world */
+	"uniform mat4 omLtOccVP;\n"   /* top-down depth map of the static world (rain, wet ground, the cloud light) */
 	"uniform sampler2D omLtOcc;\n"
+	"uniform mat4 omLtShVP;\n"    /* the strike's shadow map */
+	"uniform sampler2D omLtSh;\n"
 	"vec3 omLightningLight(vec3 wp, vec3 nrm)\n"
 	"{\n"
 	"	if (omLt.w <= 0.0)\n"
 	"		return vec3(0.0);\n"
 	"	vec3 N = normalize(nrm);\n"
-	"	vec3 L = normalize(omLt.xyz - wp);\n"
-	"	float ndl = dot(N, L);\n"
-	"	if (ndl <= 0.0)\n"
-	"		return vec3(0.0);\n"
-	/* open: nothing of the world above the point moved off the surface and towards the bolt; two more samples
-	   further along the light soften the edge of what is lit */
-	/* lit only when every sample is open: straight above the point (moved off the surface) and two further along
-	   the light; each sample is a 4-tap average */
-	/* the walk goes on along the light (up to ~520 units) through the top-down map as a height field: a building
-	   between the face and the bolt is higher than the ray there (a wall in a narrow street was lit through the
-	   opposite house); past the map's edge the rest counts as open */
-	"	float open = 1.0;\n"
-	"	for (int k = 0; k < 6; k++)\n"
+	"	float ndl = dot(N, omLt.xyz);\n"
+	"	float direct = 0.0, sky = 0.0;\n"
+	"	if (ndl > 0.0)\n"
 	"	{\n"
-	"		float dk = k == 0 ? 0.0 : k == 1 ? 20.0 : k == 2 ? 40.0 : k == 3 ? 110.0 : k == 4 ? 260.0 : 520.0;\n"
-	"		vec3 p = wp + N * 10.0 + L * dk;\n"
-	"		float s = 0.0;\n"
-	"		vec4 oc = omLtOccVP * vec4(p, 1.0);\n"
-	"		vec2 ou = oc.xy * 0.5 + 0.5;\n"
-	"		if (any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))))\n"
+	/* moved off the face along the normal (no acne on faces at grazing light), 3x3 taps one texel apart */
+	"		vec4 sc = omLtShVP * vec4(wp + N * 3.0, 1.0);\n"
+	"		vec3 su = sc.xyz * 0.5 + 0.5;\n"
+	"		if (all(greaterThan(su.xy, vec2(0.0))) && all(lessThan(su.xy, vec2(1.0))))\n"
 	"		{\n"
-	"			if (k == 0)\n"
-	"				return vec3(0.0);\n"
-	"			break;\n"
+	"			float vis = 0.0, t = 1.0 / 2048.0;\n"
+	"			for (int j = -1; j <= 1; j++)\n"
+	"				for (int i = -1; i <= 1; i++)\n"
+	"					vis += step(su.z - 0.0004, texture(omLtSh, su.xy + vec2(float(i), float(j)) * t).r);\n"
+	"			direct = ndl * vis / 9.0;\n"
 	"		}\n"
-	/* four taps 1.5 texels apart: a soft edge instead of the map's texel steps */
-	"		float z = oc.z * 0.5 + 0.5, t = 1.5 / 1024.0;\n"
-	"		for (int j = 0; j < 4; j++)\n"
-	"		{\n"
-	"			vec2 o = vec2((j & 1) == 0 ? -t : t, (j & 2) == 0 ? -t : t);\n"
-	"			s += 1.0 - smoothstep(0.0, 0.0015, z - texture(omLtOcc, ou + o).r);\n"
-	"		}\n"
-	"		open = min(open, s * 0.25);\n"
 	"	}\n"
-	"	return omLtCol.rgb * omLt.w * (0.3 + 0.7 * ndl) * open;\n"
+	"	{\n"
+	"		vec4 oc = omLtOccVP * vec4(wp + N * 4.0, 1.0);\n"
+	"		vec2 ou = oc.xy * 0.5 + 0.5;\n"
+	"		if (all(greaterThan(ou, vec2(0.0))) && all(lessThan(ou, vec2(1.0))))\n"
+	"			sky = (1.0 - smoothstep(0.0, 0.0015, oc.z * 0.5 + 0.5 - texture(omLtOcc, ou).r)) * (0.5 + 0.5 * N.z);\n"
+	"	}\n"
+	"	return omLtCol.rgb * omLt.w * (direct + 0.22 * sky);\n"
 	"}\n"
 	/* GFX-modern r_om_ssr: what the reflection pass (gl3_post.c) gets from a face: reflectivity and roughness by the
 	   SoF material class and how smooth the texture is (little fine detail = polished), floors more than walls;
@@ -2227,8 +2220,36 @@ void GL3_UpdateUBOLights(void)
  * world shaders; r_fullbright and night vision use the colour-table path (no lightmaps). Called once per
  * 3D view (set every time: recreated programs start at 0).
  */
-/* GFX-modern r_om_rain (gl3_post.c): the lightning as a light of the world shaders - bolt position and
-   strength (w 0 = none), colour, the top-down depth map (texture unit 12) and its view-projection */
+/* GFX-modern r_om_rain (gl3_post.c): the strike's shadow map (texture unit 9) and its view-projection */
+void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
+{
+	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		GLint loc;
+
+		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omLtShVP")) == -1)
+		{
+			continue;
+		}
+
+		GL3_UseProgram(si[i]->shaderProgram);
+		glUniformMatrix4fv(loc, 1, GL_FALSE, shvp);
+		glUniform1i(glGetUniformLocation(si[i]->shaderProgram, "omLtSh"), 9);
+	}
+
+	if (shtex)
+	{
+		GL3_SelectTMU(GL_TEXTURE9);
+		glBindTexture(GL_TEXTURE_2D, shtex);
+		GL3_SelectTMU(GL_TEXTURE0);
+	}
+}
+
+/* GFX-modern r_om_rain (gl3_post.c): the lightning as a light of the world shaders - direction towards the channel
+   and strength (w 0 = none), colour, the top-down depth map (texture unit 12) and its view-projection */
 void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const float *occvp, GLuint occtex)
 {
 	gl3ShaderInfo_t *si[3] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans};

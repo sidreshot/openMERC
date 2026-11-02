@@ -4558,7 +4558,11 @@ SSAOShutdown(void)
 #define BOLT_MAXPTS 512
 
 static cvar_t *r_om_rain, *r_om_rain_density, *r_om_rain_sky, *r_om_lightning, *r_om_lightning_rate;
-static cvar_t *r_om_storm_maps, *r_om_aa, *r_om_aa_maps, *r_om_snow, *r_om_snow_maps, *r_om_war;
+static cvar_t *r_om_storm_maps, *r_om_aa, *r_om_aa_maps, *r_om_snow, *r_om_snow_maps, *r_om_war, *r_om_rain_maps;
+static cvar_t *r_om_lightning_zones;
+
+#define SKYM_W 256
+#define SKYM_H 64
 
 /* the loaded map's name ("trn1") is a word of the list */
 static qboolean
@@ -4599,6 +4603,81 @@ frand(void)
 	return (float)(rand() & 0x7fff) / 32768.0f;
 }
 
+/* r_om_lightning_zones "jpn2:200-250,290-330 trn1:...": the stretches of sky (world yaw, degrees) where the
+   lightning of a map strikes, chosen by eye where the sky is open; one of them at random into *yaw. false: the
+   map has none (the strikes follow the view) */
+static qboolean
+LightningZone(const char *list, float *yaw)
+{
+	char name[MAX_QPATH], *dot;
+	const char *base, *p;
+	float zones[8][2];
+	int nz = 0;
+	size_t n;
+
+	if (!gl3_worldmodel || !list || !list[0])
+	{
+		return false;
+	}
+
+	base = strrchr(gl3_worldmodel->name, '/');
+	Q_strlcpy(name, base ? base + 1 : gl3_worldmodel->name, sizeof(name));
+	dot = strrchr(name, '.');
+	if (dot)
+	{
+		*dot = 0;
+	}
+	n = strlen(name);
+
+	for (p = list; (p = Q_strcasestr(p, name)) != NULL; p += n)
+	{
+		if (((p == list) || (p[-1] == ' ')) && (p[n] == ':'))
+		{
+			break;
+		}
+	}
+
+	if (!p)
+	{
+		return false;
+	}
+
+	for (p += n + 1; nz < 8;)
+	{
+		float a, b;
+		int used = 0;
+
+		if (sscanf(p, "%f-%f%n", &a, &b, &used) != 2)
+		{
+			break;
+		}
+
+		zones[nz][0] = a;
+		zones[nz][1] = (b < a) ? b + 360 : b;
+		nz++;
+		p += used;
+
+		if (*p != ',')
+		{
+			break;
+		}
+		p++;
+	}
+
+	if (!nz)
+	{
+		return false;
+	}
+
+	{
+		int z = rand() % nz;
+
+		*yaw = zones[z][0] + frand() * (zones[z][1] - zones[z][0]);
+	}
+
+	return true;
+}
+
 static struct
 {
 	qboolean maprain, failed, active;
@@ -4619,10 +4698,9 @@ static struct
 	GLuint occtex, occfbo;
 	float occvp[16], occc[3];
 	const void *occmodel;
-	GLuint prograin, progsplash, progflash, progbolt, vao, bolt_vbo;
+	GLuint prograin, progsplash, progbolt, vao, bolt_vbo;
 	GLint r_vp, r_eye, r_time, r_params, r_occ, r_occvp, r_color;
 	GLint s_vp, s_eye, s_time, s_params, s_occ, s_occvp, s_color;
-	GLint f_depth, f_occ, f_occvp, f_proj, f_inv, f_rect, f_flash;
 	GLint b_vp, b_color;
 	/* lightning */
 	float next, start, flashk[3];
@@ -4630,6 +4708,15 @@ static struct
 	float bolt[BOLT_MAXPTS * 3];
 	int nbolt;  /* segment end points, pairs */
 	vec3_t boltpos;  /* where the light of the world shaders comes from */
+	vec3_t ldir;     /* unit direction from the eye at the strike towards the channel */
+	GLuint shtex, shfbo;  /* the strike's shadow map of the static world along ldir */
+	float shvp[16];
+	qboolean shneed, shvalid;
+	qboolean forced; /* rain asked for by r_om_rain_maps: the map's sky stays as it is */
+	/* the open sky by direction (WXSkyMask): yaw across (-180..180), elevation up (0..90) */
+	unsigned char skym[SKYM_H][SKYM_W];
+	GLuint skytex;
+	const void *skymodel;
 	qboolean occvalid;
 } WX;
 
@@ -4681,6 +4768,9 @@ WeatherWanted(void)
 		r_om_lightning_rate = ri.Cvar_Get("r_om_lightning_rate", "1", CVAR_ARCHIVE);
 		/* distant thunderstorm without rain (the train in the night); anti-aircraft fire in the sky of the war maps */
 		r_om_storm_maps = ri.Cvar_Get("r_om_storm_maps", "trn1", CVAR_ARCHIVE);
+		/* rain and thunderstorm on maps whose data has none (the night of the Tokyo towers) */
+		r_om_rain_maps = ri.Cvar_Get("r_om_rain_maps", "jpn2", CVAR_ARCHIVE);
+		r_om_lightning_zones = ri.Cvar_Get("r_om_lightning_zones", "", CVAR_ARCHIVE);
 		r_om_aa = ri.Cvar_Get("r_om_aa", "1", CVAR_ARCHIVE);
 		r_om_aa_maps = ri.Cvar_Get("r_om_aa_maps", "kos1 kos2 kos3", CVAR_ARCHIVE);
 		r_om_snow = ri.Cvar_Get("r_om_snow", "1", CVAR_ARCHIVE);
@@ -4699,10 +4789,23 @@ WeatherWanted(void)
 		return false;
 	}
 
-	WX.rain = (r_om_rain->value >= 2) || ((r_om_rain->value >= 1) && WX.maprain);
+	WX.forced = (r_om_rain->value >= 1) && !WX.maprain && MapListed(r_om_rain_maps->string);
+	WX.rain = (r_om_rain->value >= 2) || ((r_om_rain->value >= 1) && WX.maprain) || WX.forced;
 	WX.storm = !WX.rain && (r_om_rain->value >= 1) && MapListed(r_om_storm_maps->string);
 	WX.aa = (r_om_aa->value > 0) && MapListed(r_om_aa_maps->string);
 	WX.snow = !WX.rain && (r_om_snow->value > 0) && MapListed(r_om_snow_maps->string);
+
+	/* the client plays the downpour (cl_view.c) while it rains */
+	{
+		static int heard = -1;
+
+		if (heard != (int)WX.rain)
+		{
+			heard = (int)WX.rain;
+			ri.Cvar_Set("r_om_rain_audible", heard ? "1" : "0");
+		}
+	}
+
 	return WX.rain || WX.storm || WX.aa || WX.snow;
 #endif
 }
@@ -4768,6 +4871,196 @@ BoltSegment(const vec3_t a, const vec3_t b, float disp, int depth, int branch)
 	}
 }
 
+/* the open sky by direction, once per map, from the sky box images themselves: a texel is clear where its colour is
+   that of the sky (the mean of the up face) and nothing painted lies above it up to the zenith (jpn2 paints the
+   whole street beyond the map on its sky box, towers up to 40 degrees). Eroded a little: the bolt keeps clear of
+   the painted edges */
+static void
+WXSkyMask(void)
+{
+	static unsigned char col[SKYM_H][SKYM_W];
+	gl3image_t *imgs[6];
+	unsigned char *pix[6];
+	int iw[6], ih[6], nimg = 0, x, y, k;
+	float ref[3] = {0, 0, 0};
+	vec3_t up = {0, 0, 1};
+	qboolean haveref = false;
+
+	if ((WX.skymodel == gl3_worldmodel) && WX.skytex)
+	{
+		return;
+	}
+
+	WX.skymodel = gl3_worldmodel;
+
+	for (y = -1; y < SKYM_H; y++)
+	{
+		for (x = 0; x < SKYM_W; x++)
+		{
+			float az = ((x + 0.5f) / SKYM_W * 2 - 1) * (float)M_PI, el = (y + 0.5f) / SKYM_H * (float)M_PI * 0.5f, s, t;
+			vec3_t d;
+			gl3image_t *im;
+			unsigned char clear = 255;
+
+			if (y < 0)
+			{
+				VectorCopy(up, d);
+			}
+			else
+			{
+				VectorSet(d, cosf(el) * cosf(az), cosf(el) * sinf(az), sinf(el));
+			}
+
+			im = GL3_SkyAt(d, &s, &t);
+
+			if (im)
+			{
+				for (k = 0; (k < nimg) && (imgs[k] != im); k++)
+				{
+				}
+
+				if ((k == nimg) && (nimg < 6))
+				{
+					imgs[k] = im;
+					pix[k] = NULL;
+					GL3_SelectTMU(GL_TEXTURE0);
+					GL3_Bind(im->texnum);
+					glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &iw[k]);
+					glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ih[k]);
+					if ((iw[k] > 0) && (ih[k] > 0) && (iw[k] <= 4096) && (ih[k] <= 4096))
+					{
+						pix[k] = malloc((size_t)iw[k] * ih[k] * 4);
+						if (pix[k])
+						{
+							glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pix[k]);
+						}
+					}
+					nimg++;
+				}
+
+				if ((k < nimg) && pix[k])
+				{
+					if ((y < 0) && !haveref)
+					{
+						/* the sky colour: the mean of the up face */
+						size_t i, n = (size_t)iw[k] * ih[k];
+						double sum[3] = {0, 0, 0};
+
+						for (i = 0; i < n; i++)
+						{
+							sum[0] += pix[k][i * 4];
+							sum[1] += pix[k][i * 4 + 1];
+							sum[2] += pix[k][i * 4 + 2];
+						}
+						for (i = 0; i < 3; i++)
+						{
+							ref[i] = (float)(sum[i] / n);
+						}
+						haveref = true;
+					}
+					else if ((y >= 0) && haveref)
+					{
+						const unsigned char *p = pix[k] + 4 * (Q_min((int)(t * ih[k]), ih[k] - 1) * iw[k] +
+							Q_min((int)(s * iw[k]), iw[k] - 1));
+						int c;
+
+						for (c = 0; c < 3; c++)
+						{
+							if (fabsf(p[c] - ref[c]) > 4.0f + 0.6f * ref[c])
+							{
+								clear = 0;
+							}
+						}
+					}
+				}
+			}
+
+			if (y >= 0)
+			{
+				col[y][x] = clear;
+			}
+		}
+
+		if ((y < 0) && !haveref)
+		{
+			break; /* no up face to judge the sky by: all of it counts as open */
+		}
+	}
+
+	for (k = 0; k < nimg; k++)
+	{
+		free(pix[k]);
+	}
+
+	if (!haveref)
+	{
+		memset(col, 255, sizeof(col));
+	}
+
+	/* open only below open sky: from the zenith down to the first painted thing */
+	for (x = 0; x < SKYM_W; x++)
+	{
+		qboolean open = true;
+
+		for (y = SKYM_H - 1; y >= 0; y--)
+		{
+			open = open && col[y][x];
+			col[y][x] = open ? 255 : 0;
+		}
+	}
+
+	/* eroded: two columns (about 3 degrees) aside, one row (1.4 degrees) up and down */
+	for (y = 0; y < SKYM_H; y++)
+	{
+		for (x = 0; x < SKYM_W; x++)
+		{
+			unsigned char m = 255;
+			int dx, dy;
+
+			for (dy = -1; dy <= 1; dy++)
+			{
+				for (dx = -2; dx <= 2; dx++)
+				{
+					int yy = Q_clamp(y + dy, 0, SKYM_H - 1), xx = (x + dx + SKYM_W) % SKYM_W;
+
+					m = Q_min(m, col[yy][xx]);
+				}
+			}
+
+			WX.skym[y][x] = m;
+		}
+	}
+
+	if (!WX.skytex)
+	{
+		glGenTextures(1, &WX.skytex);
+	}
+
+	GL3_SelectTMU(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, WX.skytex);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, SKYM_W, SKYM_H, 0, GL_RED, GL_UNSIGNED_BYTE, WX.skym);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	gl3state.currenttexture = WX.skytex;
+}
+
+/* is the sky open at world yaw / elevation (degrees)? */
+static qboolean
+SkyClear(float yaw, float el)
+{
+	float u = (yaw + 180.0f) / 360.0f;
+	int x, y;
+
+	u -= floorf(u);
+	x = Q_min((int)(u * SKYM_W), SKYM_W - 1);
+	y = Q_clamp((int)(el / 90.0f * SKYM_H), 0, SKYM_H - 1);
+	return WX.skym[y][x] > 127;
+}
+
 static void
 LightningThink(void)
 {
@@ -4789,9 +5082,65 @@ LightningThink(void)
 		/* far out in the sky, high above the horizon, roughly where the player looks (seen through the gaps
 		   between the buildings; the world in front hides it by depth) */
 		float az = (r_newrefdef.viewangles[YAW] + (frand() * 2 - 1) * 55.0f) * (float)M_PI / 180.0f;
-		float dist = WX.storm ? 6500 + frand() * 1500 : 5500 + frand() * 1500;
+		float dist = WX.storm ? 6500 + frand() * 1500 : 5500 + frand() * 1500, zyaw;
+		qboolean zoned = false;
+		float te = 0, be = 0, drift = 0;
 		vec3_t top, bottom;
 		int i;
+
+		/* where the rain was added (jpn2): a column of open sky whose upper end is clear and at least a third of it
+		   seen; lower down the channel passes behind the towers painted on the sky. A stretch of r_om_lightning_zones
+		   if the map has one, else near the view (then anywhere) */
+		if (WX.forced)
+		{
+			static float cand[2][SKYM_W];
+			int nc[2] = {0, 0}, x, side;
+
+			WXSkyMask();
+			te = 32.0f + frand() * 20.0f;
+			be = 12.0f + frand() * 10.0f;
+			drift = (frand() * 2 - 1) * 4.0f;
+
+			if (LightningZone(r_om_lightning_zones->string, &zyaw))
+			{
+				zoned = true;
+			}
+			else
+			{
+				/* every yaw whose column fits; those within 60 degrees of the view first */
+				for (x = 0; x < SKYM_W; x++)
+				{
+					float yaw = (x + 0.5f) / SKYM_W * 360.0f - 180.0f, off;
+					int k, seen = 0;
+
+					if (!SkyClear(yaw, te))
+					{
+						continue;
+					}
+					for (k = 0; k <= 12; k++)
+					{
+						float f = k / 12.0f;
+
+						seen += SkyClear(yaw + drift * f, te + (be - te) * f);
+					}
+					if (seen < 5)
+					{
+						continue;
+					}
+					off = (yaw - r_newrefdef.viewangles[YAW]) / 360.0f;
+					off = fabsf(off - floorf(off + 0.5f)) * 360.0f;
+					side = (off <= 60.0f) ? 0 : 1;
+					cand[side][nc[side]++] = yaw;
+				}
+
+				side = nc[0] ? 0 : 1;
+				if (nc[side])
+				{
+					zyaw = cand[side][rand() % nc[side]];
+					zoned = true;
+				}
+			}
+		}
 
 		WX.start = now;
 		WX.nflicker = 2 + (frand() < 0.5f ? 1 : 0);
@@ -4808,14 +5157,41 @@ LightningThink(void)
 		VectorCopy(top, bottom);
 		bottom[0] += (frand() * 2 - 1) * 900;
 		bottom[1] += (frand() * 2 - 1) * 900;
+		/* down to the horizon on a map's own rain; high in the clouds where the rain was added (jpn2: the towers
+		   painted on the sky stay clear) */
 		bottom[2] = r_newrefdef.vieworg[2] + 300 + frand() * 400;
+
+		if (zoned)
+		{
+			/* far out, from high in the clouds down behind the skyline (the bolt shader keeps it on the open sky) */
+			te *= (float)M_PI / 180.0f;
+			be *= (float)M_PI / 180.0f;
+			dist = 9000 + frand() * 2000;
+			az = zyaw * (float)M_PI / 180.0f;
+			top[0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
+			top[1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
+			top[2] = r_newrefdef.vieworg[2] + tanf(te) * dist;
+			az += drift * (float)M_PI / 180.0f;
+			bottom[0] = r_newrefdef.vieworg[0] + cosf(az) * dist;
+			bottom[1] = r_newrefdef.vieworg[1] + sinf(az) * dist;
+			bottom[2] = r_newrefdef.vieworg[2] + tanf(be) * dist;
+		}
+
 		WX.nbolt = 0;
-		BoltSegment(top, bottom, 700, 8, 3);
-		/* the light of the world shaders comes from the upper part of the bolt */
+		/* (no open column found: the strike stays in the clouds, only its light and thunder come) */
+		if (zoned || !WX.forced)
+		{
+			BoltSegment(top, bottom, zoned ? 700.0f * dist / 6000.0f : 700.0f, 8, 3);
+		}
+		/* the light of the world shaders comes from the upper part of the bolt; kilometres away it arrives in
+		   parallel: one direction and one shadow map for the whole strike */
 		for (i = 0; i < 3; i++)
 		{
 			WX.boltpos[i] = top[i] * 0.6f + bottom[i] * 0.4f;
 		}
+		VectorSubtract(WX.boltpos, r_newrefdef.vieworg, WX.ldir);
+		VectorNormalize(WX.ldir);
+		WX.shneed = true;
 
 		/* the client plays the thunder (cl_view.c): strike number and distance */
 		{
@@ -4828,7 +5204,108 @@ LightningThink(void)
 	}
 }
 
+static void WXExtraGeometry(void);
+static float *wxextra; /* (defined with WXExtraGeometry below) */
+static int wxnextra;
+
+/* the strike's shadow map: the static world (and the brush entities, glass) seen along the direction towards the
+   channel, orthographic over 4096 units around the eye; made once per strike (about a millisecond) */
+static void
+WXLightningShadow(void)
+{
+	static const GLenum none[1] = {GL_NONE};
+	const float half = 2048.0f;
+	float *m = WX.shvp, k, zmin, zmax, cx, cy, oldrange[2];
+	vec3_t X, Y, Z, ref = {0, 0, 1};
+	GLint fbo = 0, vp[4], oldfunc;
+
+	WX.shneed = false;
+
+	if (!WX.shtex)
+	{
+		glGenTextures(1, &WX.shtex);
+		GL3_SelectTMU(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, WX.shtex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 2048, 2048, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl3state.currenttexture = WX.shtex;
+		glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+		glGenFramebuffers(1, &WX.shfbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, WX.shfbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, WX.shtex, 0);
+		glDrawBuffers(1, none);
+		glReadBuffer(GL_NONE);
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+			glDeleteFramebuffers(1, &WX.shfbo);
+			glDeleteTextures(1, &WX.shtex);
+			WX.shfbo = WX.shtex = 0;
+			return;
+		}
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	}
+
+	/* light space: Z towards the channel */
+	VectorCopy(WX.ldir, Z);
+	if (fabsf(Z[2]) > 0.99f)
+	{
+		VectorSet(ref, 1, 0, 0);
+	}
+	CrossProduct(ref, Z, X);
+	VectorNormalize(X);
+	CrossProduct(Z, X, Y);
+	cx = DotProduct(r_newrefdef.vieworg, X);
+	cy = DotProduct(r_newrefdef.vieworg, Y);
+	zmax = DotProduct(r_newrefdef.vieworg, Z) + 6000.0f;
+	zmin = DotProduct(r_newrefdef.vieworg, Z) - 3000.0f;
+	k = -2.0f / (zmax - zmin);
+	memset(m, 0, 16 * sizeof(float));
+	m[0] = X[0] / half;
+	m[4] = X[1] / half;
+	m[8] = X[2] / half;
+	m[12] = -cx / half;
+	m[1] = Y[0] / half;
+	m[5] = Y[1] / half;
+	m[9] = Y[2] / half;
+	m[13] = -cy / half;
+	m[2] = Z[0] * k;
+	m[6] = Z[1] * k;
+	m[10] = Z[2] * k;
+	m[14] = 2.0f * zmax / (zmax - zmin) - 1.0f;
+	m[15] = 1;
+
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+	glGetIntegerv(GL_VIEWPORT, vp);
+	glGetIntegerv(GL_DEPTH_FUNC, &oldfunc);
+	glGetFloatv(GL_DEPTH_RANGE, oldrange);
+	glBindFramebuffer(GL_FRAMEBUFFER, WX.shfbo);
+	glViewport(0, 0, 2048, 2048);
+	glDepthRange(0, 1);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	{
+		float one = 1.0f;
+
+		glClearBufferfv(GL_DEPTH, 0, &one);
+	}
+	WXExtraGeometry();
+	GL3_CSM_DrawDepth(m, wxextra, wxnextra, true);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glViewport(vp[0], vp[1], vp[2], vp[3]);
+	glDepthFunc(oldfunc);
+	glDepthRange(oldrange[0], oldrange[1]);
+	WX.shvalid = true;
+}
+
 /* every frame before the world: lightning timeline, the sky tint */
+
 void
 GL3_Post_WeatherFrame(void)
 {
@@ -4843,14 +5320,21 @@ GL3_Post_WeatherFrame(void)
 		float bolt[4], col[4] = {0.72f, 0.8f, 1.0f, 0};
 
 		LightningThink();
-		/* a distant storm leaves the sky as it is and lights the world less */
-		tint = WX.rain ? Q_max(0.05f, Q_min(r_om_rain_sky->value, 1.0f)) : 1.0f;
-		add = LightningFlash() * (WX.rain ? 1.2f : 0.6f);
+		/* the sky of a rainy map is darker; a distant storm and rain added to a map (r_om_rain_maps) leave it as it
+		   is. The lightning no longer flashes the whole sky (it washed out the painted towers of jpn2's sky): its
+		   light falls only where the channel is seen (the strike's shadow map, world shaders) */
+		tint = (WX.rain && !WX.forced) ? Q_max(0.05f, Q_min(r_om_rain_sky->value, 1.0f)) : 1.0f;
+		add = 0;
 
-		/* the lightning lights the open world through the world shaders */
-		VectorCopy(WX.boltpos, bolt);
-		bolt[3] = WX.occvalid ? LightningFlash() * (WX.rain ? 1.4f : 0.5f) : 0;
+		if (WX.shneed)
+		{
+			WXLightningShadow();
+		}
+
+		VectorCopy(WX.ldir, bolt);
+		bolt[3] = (WX.occvalid && WX.shvalid) ? LightningFlash() * (WX.rain ? 2.2f : 0.8f) : 0;
 		GL3_SoF_LightningUniforms(bolt, col, WX.occvalid ? WX.occvp : NULL, WX.occvalid ? WX.occtex : 0);
+		GL3_SoF_LightningShadow(WX.shvp, WX.shvalid ? WX.shtex : 0);
 	}
 	else
 	{
@@ -4929,15 +5413,22 @@ GL3_Post_WeatherFrame(void)
 	}
 }
 
+/* r_om_rain drops: streaks that fall through two layers around the eye (near and dense, far and thin, ending well
+   before the distant towers). Each refracts what lies behind it (the last frame's colour, shifted across the streak),
+   takes the light of its surroundings (a blurred level of that colour: bright drops by the lamps, nearly invisible in
+   the dark) and fades softly where it meets the world (depth) */
 static const char *wx_rain_vs =
 	"uniform mat4 vp;\n"
 	"uniform vec3 eye;\n"
 	"uniform float time;\n"
 	"uniform vec4 params;\n"   /* box size, box height, fall speed, streak length (s) */
+	"uniform vec4 layer;\n"    /* near fade from, to; far fade from, to (units) */
 	"uniform sampler2D occ;\n"
 	"uniform mat4 occvp;\n"
 	"out float vA;\n"
 	"out float vT;\n"
+	"out float vS;\n"
+	"out float vD;\n"
 	"float H(float n) { return fract(sin(n) * 43758.5453); }\n"
 	"void main()\n"
 	"{\n"
@@ -4956,25 +5447,51 @@ static const char *wx_rain_vs =
 	"	float od = texture(occ, ou).r;\n"
 	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0002);\n"
 	"	float dist = length(p - eye);\n"
-	"	vA = open ? clamp(1.0 - dist / (B * 0.5), 0.0, 1.0) * smoothstep(60.0, 260.0, dist) : 0.0;\n"
+	"	vA = open ? smoothstep(layer.x, layer.y, dist) * (1.0 - smoothstep(layer.z, layer.w, dist)) : 0.0;\n"
 	"	vec3 a = (c == 0 || c == 1 || c == 4) ? q : p;\n"
-	"	vec3 side = normalize(cross(p - q, a - eye)) * (0.22 + dist * 0.0009);\n"
-	"	a += (c == 1 || c == 2 || c == 5) ? side : -side;\n"
+	"	vec3 side = normalize(cross(p - q, a - eye)) * (0.18 + dist * 0.0011);\n"
+	"	bool right = (c == 1 || c == 2 || c == 5);\n"
+	"	a += right ? side : -side;\n"
 	"	vT = (c == 0 || c == 1 || c == 4) ? 0.0 : 1.0;\n"
+	"	vS = right ? 1.0 : -1.0;\n"
 	"	gl_Position = vA > 0.0 ? vp * vec4(a, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);\n"
+	"	vD = gl_Position.w;\n"
 	"}\n";
 
 static const char *wx_rain_fs =
-	"uniform vec4 color;\n"
+	"uniform vec4 color;\n"      /* tint (+ the lightning), opacity */
+	"uniform sampler2D scenecol;\n" /* the last frame, half size, mipmapped (r_om_ssr keeps it) */
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 rect;\n"       /* the view in the depth texture */
+	"uniform vec4 proj;\n"       /* projection C, D; depth range min, max */
+	"uniform vec4 view;\n"       /* viewport x, y, w, h (pixels) */
+	"uniform float refr;\n"      /* 1: the last frame's colour is there (refraction and the light around) */
 	"in float vA;\n"
 	"in float vT;\n"
+	"in float vS;\n"
+	"in float vD;\n"
 	"out vec4 outColor;\n"
 	"void main()\n"
 	"{\n"
-	"	float a = vA * color.a * smoothstep(0.0, 0.6, vT);\n"
+	"	vec2 vuv = (gl_FragCoord.xy - view.xy) / view.zw;\n"
+	"	float z = texture(depthtex, rect.xy + vuv * rect.zw).r;\n"
+	"	float sd = proj.y / ((z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0 + proj.x);\n"
+	"	float soft = clamp((sd - vD) / 24.0, 0.0, 1.0);\n"
+	/* a round streak: thick in the middle, a bright head, a long thinning tail */
+	"	float edge = 1.0 - vS * vS;\n"
+	"	float body = smoothstep(0.0, 0.45, vT) * (1.0 - smoothstep(0.9, 1.0, vT));\n"
+	"	float a = vA * edge * body * soft * color.a;\n"
 	"	if (a <= 0.003) discard;\n"
-	"	outColor = vec4(color.rgb, a);\n"
+	"	vec3 c = color.rgb;\n"
+	"	if (refr > 0.5)\n"
+	"	{\n"
+	"		vec3 behind = textureLod(scenecol, clamp(vuv + vec2(vS * 0.0045, -0.002), 0.0, 1.0), 0.5).rgb;\n"
+	"		vec3 amb = textureLod(scenecol, vuv, 4.5).rgb;\n"
+	"		c = behind * 1.3 + amb * 1.1 + c * 0.08;\n"
+	"	}\n"
+	"	outColor = vec4(c, a);\n"
 	"}\n";
+
 
 static const char *wx_splash_vs =
 	"uniform mat4 vp;\n"
@@ -5029,58 +5546,48 @@ static const char *wx_splash_fs =
 	"	outColor = vec4(color.rgb, a);\n"
 	"}\n";
 
-/* lightning on the open surfaces: depth -> world, open if it is the top surface */
-static const char *wx_flash_fs =
-	"uniform sampler2D depthtex;\n"
-	"uniform sampler2D occ;\n"
-	"uniform mat4 occvp;\n"
-	"uniform vec4 proj;\n"     /* C, D, depth min, max */
-	"uniform mat4 inv;\n"      /* view space -> world */
-	"uniform vec4 flash;\n"    /* rgb, 1/P00, ... in two parts */
-	"uniform vec4 rect2;\n"    /* 1/P00, 1/P11, -, - */
-	"in vec2 uv;\n"
-	"in vec2 vuv;\n"
-	"out vec4 outColor;\n"
-	"void main()\n"
-	"{\n"
-	"	float z = texture(depthtex, uv).r;\n"
-	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
-	"	float d = proj.y / (ndc + proj.x);\n"
-	"	vec2 v = vuv * 2.0 - 1.0;\n"
-	"	vec4 w = inv * vec4(v.x * d * rect2.x, v.y * d * rect2.y, -d, 1.0);\n"
-	/* the surface normal (facing the eye); the point is moved 12 units off the surface along it and is open
-	   when nothing of the world lies above the moved point: an open floor or an outside wall is lit, the
-	   underside of a roof or anything indoors is not */
-	"	vec3 wp = w.xyz;\n"
-	"	vec3 n = normalize(cross(dFdx(wp), dFdy(wp)));\n"
-	"	vec3 eye = (inv * vec4(0.0, 0.0, 0.0, 1.0)).xyz;\n"
-	"	if (dot(n, eye - wp) < 0.0) n = -n;\n"
-	"	vec4 oc = occvp * vec4(wp + n * 12.0, 1.0);\n"
-	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
-	"	float od = texture(occ, ou).r;\n"
-	"	float open = (all(greaterThan(ou, vec2(0.0))) && all(lessThan(ou, vec2(1.0)))) ? 1.0 - smoothstep(0.0, 0.0012, (oc.z * 0.5 + 0.5) - od) : 0.0;\n"
-	"	if (d > 60000.0) open = 0.0;\n"
-	"	outColor = vec4(flash.rgb * open, 1.0);\n"
-	"}\n";
-
 static const char *wx_bolt_vs =
 	"uniform mat4 vp;\n"
 	"in vec3 position;\n"
 	"in vec2 texCoord;\n"
 	"out float vE;\n"
+	"out vec3 vW;\n"
 	"void main()\n"
 	"{\n"
 	"	vE = texCoord.x;\n"
+	"	vW = position;\n"
 	"	gl_Position = vp * vec4(position, 1.0);\n"
 	"}\n";
 
+/* the channel only over the open sky: wherever the view shows anything of the world (a tower, a sign, the edge of a
+   roof) it stays behind it, however far the world reaches; and the towers painted on the sky box (jpn2: the whole
+   street beyond the map) hide it as well (WXSkyMask) */
 static const char *wx_bolt_fs =
 	"uniform vec4 color;\n"
+	"uniform sampler2D depthtex;\n"
+	"uniform sampler2D skymask;\n" /* clear sky by direction: yaw across, elevation 0..90 up */
+	"uniform vec3 eye;\n"
+	"uniform vec4 rect;\n"     /* the view in the depth texture */
+	"uniform vec4 view;\n"     /* viewport x, y, w, h (pixels) */
+	"uniform vec4 proj;\n"     /* projection C, D; depth range min, max */
 	"in float vE;\n"
+	"in vec3 vW;\n"
 	"out vec4 outColor;\n"
 	"out vec4 outEmis;\n"
 	"void main()\n"
 	"{\n"
+	"	vec2 vuv = (gl_FragCoord.xy - view.xy) / view.zw;\n"
+	"	float z = texture(depthtex, rect.xy + vuv * rect.zw).r;\n"
+	/* the sky box lies 37800 units out (gl3_warp.c), the world well inside it */
+	"	float d = proj.y / ((z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0 + proj.x);\n"
+	"	if (d < 30000.0)\n"
+	"		discard;\n"
+	"	vec3 dir = normalize(vW - eye);\n"
+	"	if (dir.z <= 0.0)\n"
+	"		discard;\n"
+	"	float clear = texture(skymask, vec2(atan(dir.y, dir.x) * 0.15915494 + 0.5, asin(dir.z) * 0.63661977)).r;\n"
+	"	if (clear < 0.5)\n"
+	"		discard;\n"
 	"	float core = 1.0 - abs(vE);\n"
 	"	float a = pow(core, 2.0) * color.a;\n"
 	"	outColor = vec4(color.rgb * a, 1.0);\n"
@@ -5407,14 +5914,13 @@ WXCreate(void)
 
 	WX.prograin = WXLink(wx_rain_vs, wx_rain_fs, false);
 	WX.progsplash = WXLink(wx_splash_vs, wx_splash_fs, false);
-	WX.progflash = WXLink(NULL, wx_flash_fs, false);
 	WX.progbolt = WXLink(wx_bolt_vs, wx_bolt_fs, true);
 	WX.progaa = WXLink(wx_aa_vs, wx_aa_fs, true);
 	WX.progsnow = WXLink(wx_snow_vs, wx_snow_fs, false);
 	WX.progwar = WXLink(wx_war_vs, wx_war_fs, true);
 	WX.progsmoke = WXLink(wx_smoke_vs, wx_smoke_fs, false);
 
-	if (!WX.prograin || !WX.progsplash || !WX.progflash || !WX.progbolt || !WX.progaa || !WX.progsnow ||
+	if (!WX.prograin || !WX.progsplash || !WX.progbolt || !WX.progaa || !WX.progsnow ||
 		!WX.progwar || !WX.progsmoke)
 	{
 		return false;
@@ -5462,13 +5968,6 @@ WXCreate(void)
 	WX.s_occ = glGetUniformLocation(WX.progsplash, "occ");
 	WX.s_occvp = glGetUniformLocation(WX.progsplash, "occvp");
 	WX.s_color = glGetUniformLocation(WX.progsplash, "color");
-	WX.f_depth = glGetUniformLocation(WX.progflash, "depthtex");
-	WX.f_occ = glGetUniformLocation(WX.progflash, "occ");
-	WX.f_occvp = glGetUniformLocation(WX.progflash, "occvp");
-	WX.f_proj = glGetUniformLocation(WX.progflash, "proj");
-	WX.f_inv = glGetUniformLocation(WX.progflash, "inv");
-	WX.f_rect = glGetUniformLocation(WX.progflash, "rect");
-	WX.f_flash = glGetUniformLocation(WX.progflash, "flash");
 	WX.b_vp = glGetUniformLocation(WX.progbolt, "vp");
 	WX.b_color = glGetUniformLocation(WX.progbolt, "color");
 
@@ -5655,6 +6154,8 @@ WXInverse4(const float *m, float *o)
 		o[i] = inv[i] * det;
 	}
 }
+
+static GLuint SSRSceneColour(void);
 
 /* after the opaque view (and its occlusion): rain, splashes, lightning */
 void
@@ -5846,17 +6347,42 @@ GL3_Post_Weather(void)
 		goto nodrops;
 	}
 
-	/* drops */
-	GL3_UseProgram(WX.prograin);
-	glUniformMatrix4fv(WX.r_vp, 1, GL_FALSE, &pv.Elements[0][0]);
-	glUniform3fv(WX.r_eye, 1, r_newrefdef.vieworg);
-	glUniform1f(WX.r_time, r_newrefdef.time);
-	glUniform4f(WX.r_params, 1400.0f, 1000.0f, 700.0f, 0.028f);
-	glUniform1i(WX.r_occ, 0);
-	glUniformMatrix4fv(WX.r_occvp, 1, GL_FALSE, WX.occvp);
-	glUniform4f(WX.r_color, 0.58f + flash * 0.5f, 0.62f + flash * 0.5f, 0.70f + flash * 0.5f, 0.15f + flash * 0.1f);
-	BindTex(GL_TEXTURE0, WX.occtex);
-	glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(9000 * dens));
+	/* drops: a near dense layer and a far thin one (ending at 1200 units: the distant towers stay clear) */
+	{
+		GLuint col = SSRSceneColour();
+		static const float lay[2][8] = {
+			/* box, height, near fade from, to, far fade from, to, drops, opacity */
+			{1000.0f, 900.0f, 40.0f, 140.0f, 380.0f, 500.0f, 9000.0f, 0.55f},
+			{2600.0f, 1700.0f, 380.0f, 500.0f, 1000.0f, 1200.0f, 9000.0f, 0.38f},
+		};
+		int l;
+
+		GL3_UseProgram(WX.prograin);
+		glUniformMatrix4fv(WX.r_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+		glUniform3fv(WX.r_eye, 1, r_newrefdef.vieworg);
+		glUniform1f(WX.r_time, r_newrefdef.time);
+		glUniform1i(WX.r_occ, 0);
+		glUniformMatrix4fv(WX.r_occvp, 1, GL_FALSE, WX.occvp);
+		glUniform1i(glGetUniformLocation(WX.prograin, "scenecol"), 1);
+		glUniform1i(glGetUniformLocation(WX.prograin, "depthtex"), 2);
+		glUniform4f(glGetUniformLocation(WX.prograin, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(glGetUniformLocation(WX.prograin, "proj"), gl3state.projMat3D.Elements[2][2],
+			gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+		glUniform4f(glGetUniformLocation(WX.prograin, "view"), (float)P.vx, (float)P.vy, (float)P.vw, (float)P.vh);
+		glUniform1f(glGetUniformLocation(WX.prograin, "refr"), col ? 1.0f : 0.0f);
+		BindTex(GL_TEXTURE2, P.texdepthcopy);
+		BindTex(GL_TEXTURE1, col ? col : WX.occtex);
+		BindTex(GL_TEXTURE0, WX.occtex);
+
+		for (l = 0; l < 2; l++)
+		{
+			glUniform4f(WX.r_params, lay[l][0], lay[l][1], 750.0f, 0.032f);
+			glUniform4f(glGetUniformLocation(WX.prograin, "layer"), lay[l][2], lay[l][3], lay[l][4], lay[l][5]);
+			glUniform4f(WX.r_color, 0.55f + flash * 0.9f, 0.6f + flash * 0.9f, 0.68f + flash * 1.0f,
+				lay[l][7] + flash * 0.25f);
+			glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(lay[l][6] * dens));
+		}
+	}
 
 	/* splashes */
 	{
@@ -5884,11 +6410,22 @@ nodrops:
 		static float quads[BOLT_MAXPTS * 3 * 5 * 2];
 		int pass;
 
+		WXSkyMask();
 		glDrawBuffers(2, bufs);
-		glEnable(GL_DEPTH_TEST);
+		glDisable(GL_DEPTH_TEST);
 		glBlendFunc(GL_ONE, GL_ONE);
 		GL3_UseProgram(WX.progbolt);
+		glUniform1i(glGetUniformLocation(WX.progbolt, "skymask"), 3);
+		glUniform3fv(glGetUniformLocation(WX.progbolt, "eye"), 1, r_newrefdef.vieworg);
+		BindTex(GL_TEXTURE3, WX.skytex);
 		glUniformMatrix4fv(WX.b_vp, 1, GL_FALSE, &pv.Elements[0][0]);
+		glUniform1i(glGetUniformLocation(WX.progbolt, "depthtex"), 2);
+		glUniform4f(glGetUniformLocation(WX.progbolt, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(glGetUniformLocation(WX.progbolt, "view"), (float)P.vx, (float)P.vy, (float)P.vw, (float)P.vh);
+		glUniform4f(glGetUniformLocation(WX.progbolt, "proj"), gl3state.projMat3D.Elements[2][2],
+			gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+		BindTex(GL_TEXTURE2, P.texdepthcopy);
+
 		GL3_BindVAO(WX.vao);
 		GL3_BindVBO(WX.bolt_vbo);
 		glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
@@ -5913,7 +6450,8 @@ nodrops:
 				{
 					continue;
 				}
-				VectorScale(s, w, s);
+				/* the same apparent width however far the strike (sized for 6500 units) */
+				VectorScale(s, w * Q_max(VectorLength(to) / 6500.0f, 1.0f), s);
 
 				for (k = 0; k < 6; k++)
 				{
@@ -6837,8 +7375,16 @@ SSRKeepColour(void)
 	SR.havecol = true;
 }
 
+/* the last finished frame (half size, mipmapped) for the refraction of the rain drops; 0 without r_om_ssr */
+static GLuint
+SSRSceneColour(void)
+{
+	return (SR.havecol && SR.coltex && (SR.vw == P.vw) && (SR.vh == P.vh)) ? SR.coltex : 0;
+}
+
 static void
 SSRShutdown(void)
+
 {
 	SSRDeleteTargets();
 
@@ -6869,7 +7415,7 @@ SSRShutdown(void)
  * screen-space reflection. r_om_mirror 0 turns it off.
  * ------------------------------------------------------------------ */
 
-static cvar_t *r_om_mirror;
+static cvar_t *r_om_mirror, *r_om_mirror_scale;
 
 #define MIRROR_PLANES 2     /* planes drawn per frame (the tsr1 restroom: the wall over the sinks and a side wall) */
 #define MIRROR_CANDS 8
@@ -6988,15 +7534,18 @@ MirrorTargets(void)
 {
 	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
 	int k;
+	/* r_om_mirror_scale: the mirror images at a share of the window size (0.7: about half the pixels) */
+	float s = Q_clamp(r_om_mirror_scale->value, 0.25f, 1.0f);
+	int w = Q_max((int)(vid.width * s), 16), h = Q_max((int)(vid.height * s), 16);
 
-	if (MR.fbo[0] && (MR.w == vid.width) && (MR.h == vid.height))
+	if (MR.fbo[0] && (MR.w == w) && (MR.h == h))
 	{
 		return true;
 	}
 
 	MirrorDeleteTargets();
-	MR.w = vid.width;
-	MR.h = vid.height;
+	MR.w = w;
+	MR.h = h;
 	/* one depth buffer: the passes run one after the other */
 	MR.rbdepth = NewRenderbuffer(GL_DEPTH24_STENCIL8, MR.w, MR.h, 0);
 
@@ -7116,7 +7665,12 @@ MirrorPass(const float *n, float d, GLuint fbo)
 	GL3_UpdateUBO3D();
 
 	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-	glViewport(P.vx, P.vy, P.vw, P.vh);
+	/* the view's rectangle at the mirror texture's scale */
+	{
+		float sx = (float)MR.w / vid.width, sy = (float)MR.h / vid.height;
+
+		glViewport((int)(P.vx * sx), (int)(P.vy * sy), (int)(P.vw * sx), (int)(P.vh * sy));
+	}
 	{
 		float black[4] = {0, 0, 0, 1};
 
@@ -7202,6 +7756,7 @@ GL3_Mirror_Render(void)
 	if (!r_om_mirror)
 	{
 		r_om_mirror = ri.Cvar_Get("r_om_mirror", "1", CVAR_ARCHIVE);
+		r_om_mirror_scale = ri.Cvar_Get("r_om_mirror_scale", "0.7", CVAR_ARCHIVE);
 	}
 
 	memset(planes, 0, sizeof(planes));
@@ -7279,8 +7834,9 @@ GL3_Mirror_Render(void)
 	gl3state.currentlightmap = -1;
 	gl3state.currenttexture = -1;
 
-	rect[0] = 1.0f / MR.w;
-	rect[1] = 1.0f / MR.h;
+	/* sampled by window position: 1/window size covers the whole (smaller) texture */
+	rect[0] = 1.0f / vid.width;
+	rect[1] = 1.0f / vid.height;
 	rect[2] = Q_max(0.0f, Q_min(r_om_mirror->value, 1.0f));
 	GL3_SoF_MirrorUniforms(on, planes[0], planes[1], rect, MR.tex[0], MR.tex[1]);
 }

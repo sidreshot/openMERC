@@ -106,3 +106,27 @@ pistol, Sabre "shoots the hostage and hits nothing".
   room instead of sinking back from her knees.
   Verified against the original game module on the same engine (jpn2 intro) and on screenshots (tsr1 intro).
   77 lethal scripted shots in 37 scripts use these paths.
+
+## Bodies, limbs, limits, storm (2026-11-02)
+
+Owner: "a quality corpse falling algorithm, never into walls"; "severed limbs should not vanish quickly, settable";
+"raise all engine caches and draw distances, it is not 2000"; "mirrors at 70 % of the scene"; "rain with a
+thunderstorm on jpn2".
+
+- **Corpse settling** (g3_human.cpp SettleCorpse): while a body falls, each frame a horizontal ray runs from the body's
+  column to every gore-zone bolt; the deepest point inside a wall (plus 2 units) is pushed out, at most 6 units per
+  frame, by a box trace. At rest it is settled three more times (up to 40 units) before the blood pool. Death choice
+  (DeathFits) sweeps a 24-wide box at two heights along the fall: a sideways death needs room on both sides (56).
+  Original: none of this; bodies fell and stayed half inside walls. Off in cinematics.
+- **Severed limbs** (rg_special.cpp RgLimbAI, cvar g_limbtime, archived, menu Game > World): a limb fades after
+  g_limbtime seconds (default 120) when nobody looks at it, or after twice that anyway; 0 = the original rule (30 s, or
+  as soon as it is out of view). Original: a limb went as soon as it was unseen.
+- **Bodies kept** ai_maxcorpses default 24 (original 10), menu choices 2, 5, 10, 24, 40.
+- **Limits:** FX_MAX_RUNNING 1024, FX_MAX_PARTICLES 8192, FX_MAX_DECALS 4096, FX_MAX_DEBRIS 2048,
+  fx_maxdebrisonscreen 64, cl_max_debris 512, cl_max_quads 1024, the Ghoul chunk cache 64 MiB (original 3 MiB).
+- **Mirrors** render at r_om_mirror_scale (0.7) of the window per axis (about half the pixels).
+- **jpn2 thunderstorm** (r_om_rain_maps): rain, lightning and the sound of the downpour on a map that has none; the
+  bolt only over open sky, never over a tower of the map or of its painted sky box (GFX-modern.md "jpn2
+  thunderstorm").
+- **Test aids:** om_testmode 1 (single player): god mode, no target, noclip every frame; omkill kills the nearest
+  living monster. Not in the original.

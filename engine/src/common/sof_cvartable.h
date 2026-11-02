@@ -135,9 +135,9 @@ static const sofcvardef_t sof_engine_cvars[] = {
 	{"cl_testblend", "0", 0x0000, 1, 0x0000},
 	{"menu_notruecolour", "0", 0x0000, 1, 0x0000},
 	{"menu_nofullscreen", "0", 0x0000, 1, 0x0000},
-	{"fx_maxdebrisonscreen", "16", 0x0000, 1, 0x0000},
-	{"cl_max_debris", "128", 0x0001, 1, 0x0001},
-	{"cl_max_quads", "256", 0x0001, 1, 0x0001},
+	{"fx_maxdebrisonscreen", "64", 0x0000, 1, 0x0000}, /* OpenMerc: 16 in 1999 */
+	{"cl_max_debris", "512", 0x0001, 1, 0x0001}, /* OpenMerc: 128 */
+	{"cl_max_quads", "1024", 0x0001, 1, 0x0001}, /* OpenMerc: 256 marks on the walls */
 	{"r_lightlevel", "0", 0x0000, 1, 0x0000},
 	{"sc_framerate", "30", 0x0000, 1, 0x0000},
 	{"r_force_sgi_software", "0", 0x0028, 1, 0x0028},
@@ -217,7 +217,7 @@ static const sofcvardef_t sof_engine_cvars[] = {
 	{"ctf_loops", "3", 0x0005, 0, 0x0005},
 	{"sv_quicksave_index", "0", 0x0001, 0, 0x0001},
 	{"ai_corpselife", "5", 0x0001, 0, 0x0001},
-	{"ai_maxcorpses", "5", 0x0001, 0, 0x0001},
+	{"ai_maxcorpses", "24", 0x0001, 0, 0x0001}, /* OpenMerc: 5 (each stays maxcorpses x 15 s) */
 	{"g_movescale", "1", 0x0005, 0, 0x0005},
 	{"sv_suicidepenalty", "2", 0x0005, 0, 0x0005},
 	{"protocol", "33", 0x000c, 0, 0x000c},
