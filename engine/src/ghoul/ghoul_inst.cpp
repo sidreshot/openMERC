@@ -22,6 +22,8 @@ void RenderCache::Reset()
 	lightColor = lightDir = probeS = probeV = Vec3();
 	shadowDir = Vec3(0, 0, 1);
 	lights.clear();
+	occ.clear();
+	occTime = -1e30f;
 	for (auto &i : lastImage)
 		i = -1;
 }

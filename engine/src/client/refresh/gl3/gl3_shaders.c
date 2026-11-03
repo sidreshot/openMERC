@@ -591,6 +591,10 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 		uniform int omSeam;
 		uniform vec4 omSeamP;
 		uniform vec4 omSeamD;
+		// the face's own texture (GL_TEXTURE10) and its texture axes divided by the image size
+		uniform sampler2D omSeamOwn;
+		uniform vec4 omSeamS;
+		uniform vec4 omSeamT;
 
 		// OpenMerc: SPEC-410 lightmap colour correction (256 x 1, GL_TEXTURE5;
 		// all 255 for r_fullbright and night vision)
@@ -746,14 +750,18 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
 				}
 			}
-			// OpenMerc GFX-modern r_om_seams: the neighbour's texture fades in over the strip - half at the seam
-			// (both sides meet there), none at its inner end; in between its raised texels (brighter than the
-			// texture's mean) reach further and a world-space noise breaks the straight line
+			// OpenMerc GFX-modern r_om_seams: height blend of the two textures (Mishkinis, "Advanced Terrain Texture
+			// Splatting"; Unity "Material by Height"): each texture's height (texel brightness above its mean) plus
+			// its share - the neighbour's half at the seam, none at the strip's inner end, a world-space noise moving
+			// the line - and only the higher one shows, mixed within a narrow depth: stones of one side poke into
+			// the grout of the other instead of a straight cross-fade
 			if(omSeam != 0)
 			{
 				float omSb = clamp(1.0 - dot(passWorldCoord - omSeamP.xyz, omSeamD.xyz) / omSeamP.w, 0.0, 1.0);
 				vec3 omLw = vec3(0.3, 0.59, 0.11);
-				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw) * 2.0;
+				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw);
+				vec2 omOwnTc = vec2(dot(passWorldCoord, omSeamS.xyz) + omSeamS.w, dot(passWorldCoord, omSeamT.xyz) + omSeamT.w);
+				float omOh = dot(texture(omSeamOwn, omOwnTc).rgb - textureLod(omSeamOwn, omOwnTc, 12.0).rgb, omLw);
 				vec3 omQ = passWorldCoord * 0.11;
 				vec3 omQi = floor(omQ);
 				vec3 omQf = fract(omQ);
@@ -765,8 +773,11 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 				vec2 omNy = mix(omNz.xz, omNz.yw, omQf.x);
 				float omSn = mix(omNy.x, omNy.y, omQf.y);
 				float omSm = omSb * (1.0 - omSb) * 4.0;
-				float omSa = 0.5 * omSb + omSm * (0.4 * omSh + 0.35 * (omSn - 0.5));
-				outColor.a = smoothstep(0.05, 0.95, clamp(omSa, 0.0, 1.0));
+				float omA2 = clamp(0.5 * omSb + omSm * 0.35 * (omSn - 0.5), 0.0, 1.0);
+				float omH2 = omA2 + 1.5 * omSh * omSm, omH1 = (1.0 - omA2) + 1.5 * omOh * omSm;
+				float omHm = max(omH1, omH2) - 0.12;
+				float omW1 = max(omH1 - omHm, 0.0), omW2 = max(omH2 - omHm, 0.0);
+				outColor.a = omW2 / max(omW1 + omW2, 1e-4);
 				if(outColor.a < 0.004)
 					discard;
 				if(omSeam == 2)
@@ -1021,6 +1032,10 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 		uniform int omSeam;
 		uniform vec4 omSeamP;
 		uniform vec4 omSeamD;
+		// the face's own texture (GL_TEXTURE10) and its texture axes divided by the image size
+		uniform sampler2D omSeamOwn;
+		uniform vec4 omSeamS;
+		uniform vec4 omSeamT;
 
 		// OpenMerc: SPEC-410 lightmap colour correction (256 x 1, GL_TEXTURE5;
 		// all 255 for r_fullbright and night vision)
@@ -1179,14 +1194,18 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
 				}
 			}
-			// OpenMerc GFX-modern r_om_seams: the neighbour's texture fades in over the strip - half at the seam
-			// (both sides meet there), none at its inner end; in between its raised texels (brighter than the
-			// texture's mean) reach further and a world-space noise breaks the straight line
+			// OpenMerc GFX-modern r_om_seams: height blend of the two textures (Mishkinis, "Advanced Terrain Texture
+			// Splatting"; Unity "Material by Height"): each texture's height (texel brightness above its mean) plus
+			// its share - the neighbour's half at the seam, none at the strip's inner end, a world-space noise moving
+			// the line - and only the higher one shows, mixed within a narrow depth: stones of one side poke into
+			// the grout of the other instead of a straight cross-fade
 			if(omSeam != 0)
 			{
 				float omSb = clamp(1.0 - dot(passWorldCoord - omSeamP.xyz, omSeamD.xyz) / omSeamP.w, 0.0, 1.0);
 				vec3 omLw = vec3(0.3, 0.59, 0.11);
-				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw) * 2.0;
+				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw);
+				vec2 omOwnTc = vec2(dot(passWorldCoord, omSeamS.xyz) + omSeamS.w, dot(passWorldCoord, omSeamT.xyz) + omSeamT.w);
+				float omOh = dot(texture(omSeamOwn, omOwnTc).rgb - textureLod(omSeamOwn, omOwnTc, 12.0).rgb, omLw);
 				vec3 omQ = passWorldCoord * 0.11;
 				vec3 omQi = floor(omQ);
 				vec3 omQf = fract(omQ);
@@ -1198,8 +1217,11 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 				vec2 omNy = mix(omNz.xz, omNz.yw, omQf.x);
 				float omSn = mix(omNy.x, omNy.y, omQf.y);
 				float omSm = omSb * (1.0 - omSb) * 4.0;
-				float omSa = 0.5 * omSb + omSm * (0.4 * omSh + 0.35 * (omSn - 0.5));
-				outColor.a = smoothstep(0.05, 0.95, clamp(omSa, 0.0, 1.0));
+				float omA2 = clamp(0.5 * omSb + omSm * 0.35 * (omSn - 0.5), 0.0, 1.0);
+				float omH2 = omA2 + 1.5 * omSh * omSm, omH1 = (1.0 - omA2) + 1.5 * omOh * omSm;
+				float omHm = max(omH1, omH2) - 0.12;
+				float omW1 = max(omH1 - omHm, 0.0), omW2 = max(omH2 - omHm, 0.0);
+				outColor.a = omW2 / max(omW1 + omW2, 1e-4);
 				if(outColor.a < 0.004)
 					discard;
 				if(omSeam == 2)
@@ -1842,6 +1864,12 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 	if(mmLoc != -1)
 	{
 		glUniform1i(mmLoc, 14);
+	}
+
+	GLint soLoc = glGetUniformLocation(prog, "omSeamOwn"); /* r_om_seams: the face's own texture (gl3_surf.c SeamDraw) */
+	if(soLoc != -1)
+	{
+		glUniform1i(soLoc, 10);
 	}
 
 	/* OpenMerc (I4c): dynamic light layer of the lightmap page on GL_TEXTURE6 (gl3_dynlight.c) */

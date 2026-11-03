@@ -248,6 +248,8 @@ CreateGLWindow(int width, int height, qboolean fullscreen)
 		}
 	}
 
+	gl3_contextgen++; /* a new context: the Ghoul emulation's objects of the old one are gone */
+
 	if (!opengl32)
 	{
 		opengl32 = LoadLibraryA("opengl32.dll");

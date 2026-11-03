@@ -131,6 +131,52 @@ static void GatherWorldLights(Inst *in, DrawCtx &c, const Vec3 &entityOrigin, in
 	in->sys->world.Query(entityOrigin, cand);
 	RenderCache &rc = in->rc;
 	float now = c.time, T = G().gs.lightSmooth;
+	// OpenMerc: the lights are found by distance only and lit a model through walls. With a world trace in the
+	// render parameters, a light reaches the model only when the ray from just off the lamp to the model's middle
+	// or a point 36 units above it is clear; the answers are kept until the model moves 8 units or half a second
+	// passes (doors). A light that stops reaching fades out as one out of range does.
+	if (c.P->worldTrace && !cand.empty())
+	{
+		if (Length(entityOrigin - rc.occOrigin) > 8.0f || now - rc.occTime > 0.5f || now < rc.occTime)
+		{
+			rc.occ.clear();
+			rc.occOrigin = entityOrigin;
+			rc.occTime = now;
+		}
+		std::vector<const LightRecord *> reach;
+		for (size_t i = 0; i < cand.size() && (int)reach.size() < 2 * maxL; i++)
+		{
+			int known = -1;
+			for (auto &o : rc.occ)
+				if (o.first == cand[i])
+					known = o.second ? 1 : 0;
+			if (known < 0)
+			{
+				known = 0;
+				for (int k = 0; k < 2 && !known; k++)
+				{
+					Vec3 to = entityOrigin + Vec3(0, 0, k ? 40.0f : 4.0f), lo(cand[i]->origin);
+					Vec3 d = to - lo;
+					float len = Length(d);
+					if (len < 8.0f)
+					{
+						known = 1;
+						break;
+					}
+					float s[3], e[3];
+					(lo + d * (4.0f / len)).Store(s);
+					to.Store(e);
+					float f = c.P->worldTrace(s, e);
+					// starting in solid (a lamp inside its fixture) counts as reaching: the original rule
+					known = (f < 0.0f || f >= 0.97f || (1.0f - f) * len < 8.0f) ? 1 : 0;
+				}
+				rc.occ.push_back(std::make_pair(cand[i], known != 0));
+			}
+			if (known)
+				reach.push_back(cand[i]);
+		}
+		cand.swap(reach);
+	}
 	auto contribute = [&](const LightRecord &l, float level) {
 		ActiveLight a;
 		Vec3 col = Vec3(l.color) * level;

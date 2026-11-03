@@ -588,19 +588,17 @@ SeamClip(float in[][3], int n, float out[][3], const vec3_t nrm, float dist)
 	return m;
 }
 
-/* the strip on face a showing the texture of face b across their shared edge e */
+/* the strip on face a showing the texture of face b across the stretch e0 e1 of their common border */
 static void
-SeamStrip(const gl3model_t *mod, msurface_t *a, const msurface_t *b, int e)
+SeamStrip(msurface_t *a, const msurface_t *b, const vec3_t e0, const vec3_t e1)
 {
 	static float pa[SEAM_MAXPOLY][3], pb[SEAM_MAXPOLY][3];
 	const glpoly_t *poly = a->polys;
 	const mtexinfo_t *tb = b->texinfo;
-	vec3_t e0, e1, t, n, d, w2, c = {0, 0, 0};
+	vec3_t t, n, d, w2, c = {0, 0, 0};
 	float len, maxd = 0, width, m[3][3] = {{0}}, rs[3] = {0}, rt[3] = {0}, cs[3], ct[3], det;
 	int i, k, nv;
 
-	VectorCopy(mod->vertexes[mod->edges[e].v[0]].position, e0);
-	VectorCopy(mod->vertexes[mod->edges[e].v[1]].position, e1);
 	VectorSubtract(e1, e0, t);
 	len = VectorNormalize(t);
 
@@ -856,14 +854,12 @@ SeamFamily(const char *x, const char *y)
 /* does the seam show? The two textures sampled just either side of it, every 4 units: their colours differ there
    by more than a quarter of their brightness */
 static qboolean
-SeamVisible(const gl3model_t *mod, const msurface_t *a, const msurface_t *b, int e)
+SeamVisible(const msurface_t *a, const msurface_t *b, const vec3_t e0, const vec3_t e1)
 {
-	vec3_t e0, e1, t, d;
+	vec3_t t, d;
 	float len, diff = 0, lum = 0;
 	int i, steps;
 
-	VectorCopy(mod->vertexes[mod->edges[e].v[0]].position, e0);
-	VectorCopy(mod->vertexes[mod->edges[e].v[1]].position, e1);
 	VectorSubtract(e1, e0, t);
 	len = VectorNormalize(t);
 
@@ -923,6 +919,28 @@ SeamVisible(const gl3model_t *mod, const msurface_t *a, const msurface_t *b, int
 	return (diff / steps) > 0.25f * Q_max(lum / steps, 0.08f);
 }
 
+/* one side of a world face, for matching the borders of coplanar faces */
+typedef struct
+{
+	const cplane_t *plane;
+	int back;
+	int face;
+	vec3_t a, b;
+} seamedge_t;
+
+static int
+SeamEdgeCmp(const void *x, const void *y)
+{
+	const seamedge_t *p = x, *q = y;
+
+	if (p->plane != q->plane)
+	{
+		return (p->plane < q->plane) ? -1 : 1;
+	}
+
+	return p->back - q->back;
+}
+
 static void
 SeamBuild(void)
 {
@@ -930,28 +948,37 @@ SeamBuild(void)
 	/* the faces of the world itself (submodel 0), not of its doors and lifts */
 	int first = mod->numsubmodels ? mod->submodels[0].firstmodelsurface : 0;
 	int count = mod->numsubmodels ? mod->submodels[0].nummodelsurfaces : mod->numsurfaces;
-	int *owner, i, j;
+	seamedge_t *ed;
+	vec3_t d;
+	int numed = 0, maxed = 0, i, j, g0, g1;
 
 	numseams = numseamverts = 0;
 	free(seamdrawn);
 	seamdrawn = calloc(mod->numsurfaces, sizeof(int));
 	seamsurfaces = mod->surfaces;
-	owner = malloc(mod->numedges * 2 * sizeof(int));
 	seamtex = calloc(MAX_GL3TEXTURES, sizeof(*seamtex));
 
-	if (!seamdrawn || !owner || !seamtex)
+	for (i = first; i < first + count; i++)
 	{
-		free(owner);
+		if (SeamFace(&mod->surfaces[i]))
+		{
+			maxed += mod->surfaces[i].polys->numverts;
+		}
+	}
+
+	ed = malloc((maxed + 1) * sizeof(*ed));
+
+	if (!seamdrawn || !ed || !seamtex)
+	{
+		free(ed);
 		free(seamtex);
 		seamtex = NULL;
 		return;
 	}
 
-	for (i = 0; i < mod->numedges * 2; i++)
-	{
-		owner[i] = -1;
-	}
-
+	/* the sides of the faces as drawn. The BSP shares an edge between two faces only where their corners agree;
+	   a face beside a split one (a T-junction, the usual case along a long seam) has its own edge there, so the
+	   borders are matched by position: collinear sides of two faces on one plane that overlap */
 	for (i = first; i < first + count; i++)
 	{
 		const msurface_t *s = &mod->surfaces[i];
@@ -961,60 +988,98 @@ SeamBuild(void)
 			continue;
 		}
 
-		for (j = 0; j < s->numedges; j++)
+		for (j = 0; j < s->polys->numverts; j++)
 		{
-			int e = abs(mod->surfedges[s->firstedge + j]);
+			seamedge_t *e = &ed[numed];
 
-			if ((e <= 0) || (e >= mod->numedges))
-			{
-				continue;
-			}
+			e->plane = s->plane;
+			e->back = (s->flags & SURF_PLANEBACK) ? 1 : 0;
+			e->face = i;
+			VectorCopy(s->polys->vertices[j].pos, e->a);
+			VectorCopy(s->polys->vertices[(j + 1) % s->polys->numverts].pos, e->b);
+			VectorSubtract(e->b, e->a, d);
 
-			if (owner[e * 2] == -1)
+			if (DotProduct(d, d) >= 1.0f)
 			{
-				owner[e * 2] = i;
-			}
-			else if (owner[e * 2 + 1] == -1)
-			{
-				owner[e * 2 + 1] = i;
-			}
-			else
-			{
-				owner[e * 2 + 1] = -2; /* three faces on one edge: no seam */
+				numed++;
 			}
 		}
 	}
 
-	for (i = 1; i < mod->numedges; i++)
+	qsort(ed, numed, sizeof(*ed), SeamEdgeCmp);
+
+	for (g0 = 0; g0 < numed; g0 = g1)
 	{
-		msurface_t *a, *b;
-
-		if ((owner[i * 2] < 0) || (owner[i * 2 + 1] < 0))
+		for (g1 = g0 + 1; (g1 < numed) && !SeamEdgeCmp(&ed[g0], &ed[g1]); g1++)
 		{
-			continue;
 		}
 
-		a = &mod->surfaces[owner[i * 2]];
-		b = &mod->surfaces[owner[i * 2 + 1]];
-
-		if ((a->plane != b->plane) || ((a->flags ^ b->flags) & SURF_PLANEBACK))
+		for (i = g0; i < g1; i++)
 		{
-			continue;
-		}
+			vec3_t t, off;
+			float len;
 
-		/* only a seam that shows: the variants of one surface (dirty tiles, tiles with graffiti, a frieze) were
-		   fitted to each other at their seams by the artist */
-		if ((a->texinfo->image == b->texinfo->image) || SeamFamily(a->texinfo->image->name, b->texinfo->image->name) ||
-			((int)(-GL3_Mat_SurfClass(a) + 0.5f) == (int)(-GL3_Mat_SurfClass(b) + 0.5f)) || !SeamVisible(mod, a, b, i))
-		{
-			continue;
-		}
+			VectorSubtract(ed[i].b, ed[i].a, t);
+			len = VectorNormalize(t);
 
-		SeamStrip(mod, a, b, i);
-		SeamStrip(mod, b, a, i);
+			for (j = i + 1; j < g1; j++)
+			{
+				msurface_t *a = &mod->surfaces[ed[i].face], *b = &mod->surfaces[ed[j].face];
+				vec3_t r0, r1, p0, p1;
+				float s0, s1, lo, hi;
+
+				if ((ed[i].face == ed[j].face) || (a->texinfo->image == b->texinfo->image))
+				{
+					continue;
+				}
+
+				/* on the line of side i, within a tenth of a unit */
+				VectorSubtract(ed[j].a, ed[i].a, r0);
+				VectorSubtract(ed[j].b, ed[i].a, r1);
+				s0 = DotProduct(r0, t);
+				s1 = DotProduct(r1, t);
+				VectorMA(r0, -s0, t, off);
+				if (DotProduct(off, off) > 0.01f)
+				{
+					continue;
+				}
+				VectorMA(r1, -s1, t, off);
+				if (DotProduct(off, off) > 0.01f)
+				{
+					continue;
+				}
+
+				lo = Q_max(0.0f, Q_min(s0, s1));
+				hi = Q_min(len, Q_max(s0, s1));
+
+				if (hi - lo < 1.0f)
+				{
+					continue;
+				}
+
+				/* only a seam that shows: the variants of one surface (dirty tiles, tiles with graffiti, a frieze)
+				   were fitted to each other at their seams by the artist */
+				if (SeamFamily(a->texinfo->image->name, b->texinfo->image->name) ||
+					((int)(-GL3_Mat_SurfClass(a) + 0.5f) == (int)(-GL3_Mat_SurfClass(b) + 0.5f)))
+				{
+					continue;
+				}
+
+				VectorMA(ed[i].a, lo, t, p0);
+				VectorMA(ed[i].a, hi, t, p1);
+
+				if (!SeamVisible(a, b, p0, p1))
+				{
+					continue;
+				}
+
+				SeamStrip(a, b, p0, p1);
+				SeamStrip(b, a, p0, p1);
+			}
+		}
 	}
 
-	free(owner);
+	free(ed);
 	for (i = 0; i < MAX_GL3TEXTURES; i++)
 	{
 		free(seamtex[i].rgba);
@@ -1029,7 +1094,7 @@ static void
 SeamDraw(void)
 {
 	gl3ShaderInfo_t *si = &gl3state.si3DlmSeam;
-	GLint locp, locd;
+	GLint locp, locd, locs, loct;
 	float w;
 	int i;
 
@@ -1056,6 +1121,8 @@ SeamDraw(void)
 	GL3_UseProgram(si->shaderProgram);
 	locp = glGetUniformLocation(si->shaderProgram, "omSeamP");
 	locd = glGetUniformLocation(si->shaderProgram, "omSeamD");
+	locs = glGetUniformLocation(si->shaderProgram, "omSeamS");
+	loct = glGetUniformLocation(si->shaderProgram, "omSeamT");
 	glUniform1i(glGetUniformLocation(si->shaderProgram, "omSeam"), (r_om_seams->value >= 2) ? 2 : 1);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glPolygonOffset(-1.0f, -2.0f);
@@ -1086,6 +1153,17 @@ SeamDraw(void)
 		GL3_UseProgram(si->shaderProgram);
 		glUniform4f(locp, s->p[0], s->p[1], s->p[2], s->width);
 		glUniform4f(locd, s->d[0], s->d[1], s->d[2], 0.0f);
+		{
+			/* the face's own texture for the height blend: its texture axes, its image on unit 10 */
+			const mtexinfo_t *ti = f->texinfo;
+			float iw = 1.0f / ti->image->width, ih = 1.0f / ti->image->height;
+
+			glUniform4f(locs, ti->vecs[0][0] * iw, ti->vecs[0][1] * iw, ti->vecs[0][2] * iw, ti->vecs[0][3] * iw);
+			glUniform4f(loct, ti->vecs[1][0] * ih, ti->vecs[1][1] * ih, ti->vecs[1][2] * ih, ti->vecs[1][3] * ih);
+			GL3_SelectTMU(GL_TEXTURE10);
+			glBindTexture(GL_TEXTURE_2D, ti->image->texnum);
+			GL3_SelectTMU(GL_TEXTURE0);
+		}
 
 		cmd = GL3_CreateDrawCmd();
 		memcpy(cmd.styles, f->styles, sizeof(f->styles));

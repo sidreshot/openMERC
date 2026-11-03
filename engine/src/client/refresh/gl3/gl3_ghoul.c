@@ -141,7 +141,7 @@ static cvar_t *ghl_max_lights, *ghl_fast_lights, *ghl_light_multiply, *ghl_gllig
 static cvar_t *ghl_gllight_directional, *ghl_gllight_attenuation, *ghl_gllight_max_lights;
 static cvar_t *ghl_shadows, *ghl_player_shadow, *ghl_shadow_darkness, *ghl_shadow_dist, *ghl_obj_fog;
 static cvar_t *ghl_no_render, *ghl_wireframe, *ghl_no_cull, *ghl_pre_cull, *ghl_no_texture_stack;
-static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess, *r_om_tess_weapon, *r_om_tess_models, *r_om_ppl_models;
+static cvar_t *r_om_ghlemu, *r_om_ghldebug, *r_om_tess, *r_om_tess_weapon, *r_om_tess_models, *r_om_ppl_models, *r_om_lightocc;
 static cvar_t *r_om_tess_round;
 static byte roundinst[65536]; /* per instance handle: it drew a round model's texture (r_om_tess) */
 
@@ -185,6 +185,7 @@ GetCvars(void)
 	r_om_tess_round = ri.Cvar_Get("r_om_tess_round", "1", CVAR_ARCHIVE);
 	/* GFX-modern: the GL lighting of Ghoul models (ghl_light_method 3) per pixel instead of per vertex */
 	r_om_ppl_models = ri.Cvar_Get("r_om_ppl_models", "1", CVAR_ARCHIVE);
+	r_om_lightocc = ri.Cvar_Get("r_om_lightocc", "1", CVAR_ARCHIVE);
 }
 
 /* ⌊v + 0.5⌋ clamped to lo..hi (SPEC-411 "rounded") */
@@ -689,6 +690,13 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 	P.shadowMode = mode;
 
+	/* GFX-modern r_om_lightocc: with the world trace set the Ghoul system lets a map light reach the model only when
+	   nothing solid lies between them (GatherWorldLights); the ground shadow still runs on shadowMode alone */
+	if (r_om_lightocc->value != 0)
+	{
+		P.worldTrace = gl3_ghoul_trace ? gl3_ghoul_trace : WorldTrace;
+	}
+
 	/* step 6: the player's own model is drawn shadow-only, or not at all; a mirror shows all of it */
 	if ((flags & SOF_RF_VIEWERMODEL) && !gl3_ghoul_mirror)
 	{
@@ -971,9 +979,10 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			int level = (k <= 0) ? 0 : weapon ? (int)r_om_tess_weapon->value :
 				(((flags & SOF_RF_CASTSHADOW) || round) ? (int)Q_clamp(r_om_tess_models->value, 0.0f, 3.0f) : 0);
 
-			/* by size on the screen (the subdivision runs on the CPU, 9 triangles each at level 3): a man-high model
-			   taller than 240 pixels keeps the level, from 100 pixels one less, smaller ones none - their facets
-			   are a pixel or two */
+			/* by size on the screen: the small triangles cost the GPU (MSAA shades the pixels along every edge
+			   twice; three characters close by at level 3 took 4.8 ms on a GTX 1050 Ti, at level 2 2.4). A man-high
+			   model taller than 600 pixels (an arm's length) keeps the level, from 100 pixels at most 2, smaller
+			   ones none - their facets are a pixel or two */
 			if ((level > 1) && !weapon)
 			{
 				vec3_t d;
@@ -982,7 +991,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 				VectorSubtract(e->origin, r_newrefdef.vieworg, d);
 				dist = Q_max(VectorLength(d), 1.0f);
 				px = 64.0f / dist * (r_newrefdef.height * 0.5f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f);
-				level = (px > 240.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
+				level = (px > 600.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
 			}
 
 			GL3_GhoulEmu_SetTess(level, k);

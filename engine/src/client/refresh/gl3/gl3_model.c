@@ -419,6 +419,7 @@ Mod_LoadFaces(gl3model_t *loadmodel, byte *mod_base, lump_t *l)
 	int i, count, surfnum;
 	int planenum, side;
 	int ti;
+	byte *stored;
 	size_t face_size = Mod_FaceSize(loadmodel->bspversion);
 
 	in = (void *)(mod_base + l->fileofs);
@@ -434,6 +435,7 @@ Mod_LoadFaces(gl3model_t *loadmodel, byte *mod_base, lump_t *l)
 
 	loadmodel->surfaces = out;
 	loadmodel->numsurfaces = count;
+	stored = malloc(count ? count : 1); /* whether each face has its lightmap stored (v46), for the second pass */
 
 	GL3_LM_BeginBuildingLightmaps(loadmodel);
 
@@ -554,6 +556,19 @@ Mod_LoadFaces(gl3model_t *loadmodel, byte *mod_base, lump_t *l)
 			}
 		}
 
+		if (stored)
+		{
+			stored[surfnum] = stored_lightmap;
+		}
+	}
+
+	/* OpenMerc GFX-modern r_om_lmstitch: the borders of coplanar faces' lightmaps made to agree first */
+	GL3_LM_StitchSeams(loadmodel);
+
+	for (surfnum = 0, out = loadmodel->surfaces; surfnum < count; surfnum++, out++)
+	{
+		qboolean stored_lightmap = stored ? stored[surfnum] : (loadmodel->bspversion == BSPVERSION_SOF);
+
 		/* create lightmaps and polygons */
 		out->lightmaptexturenum = -1;
 
@@ -579,6 +594,7 @@ Mod_LoadFaces(gl3model_t *loadmodel, byte *mod_base, lump_t *l)
 		}
 	}
 
+	free(stored);
 	GL3_LM_EndBuildingLightmaps();
 }
 

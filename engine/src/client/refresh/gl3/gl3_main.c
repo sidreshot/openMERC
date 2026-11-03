@@ -71,6 +71,7 @@ vec3_t gl3_origin;
 
 int gl3_visframecount; /* bumped when going to a new PVS */
 int gl3_framecount; /* used for dlight push checking */
+int gl3_contextgen = 1; /* OpenMerc: GL contexts made (header/local.h) */
 
 int c_brush_polys, c_alias_polys;
 

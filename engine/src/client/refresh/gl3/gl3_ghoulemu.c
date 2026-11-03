@@ -140,7 +140,14 @@ static struct
 	GLenum depthfunc;
 	emuvtx_t *tessbuf;
 	int maxtess;
+	/* the same on the GPU: the corners in a texture buffer, a vertex array without attributes */
+	GLuint tessvao, tbo, tbotex;
+	GLint u_tessL, u_tessK, u_tessProj, u_tessTab;
+	int tesstabL;
+	int context; /* gl3_contextgen the GL objects were made in */
 } E;
+
+#define EMU_TBO_UNIT 20 /* GL_TEXTURE20: the texture buffer of the tessellated triangles */
 
 static ghlff_t emuff;
 static cvar_t *r_om_tessdebug; /* print what the weapon tessellation does (test aid) */
@@ -599,6 +606,9 @@ Emit(float x, float y, float z)
  * ------------------------------------------------------------------ */
 
 static const char *emu_vs =
+#ifndef YQ2_GL3_GLES3
+	"#define OM_TESS 1\n"
+#endif
 	"in vec4 position;\n"
 	"in vec2 texCoord;\n"
 	"in vec4 vertColor;\n"
@@ -611,8 +621,52 @@ static const char *emu_vs =
 	"out vec4 vPos;\n"
 	"out vec3 vEN;\n"
 	"out vec3 vEP;\n"
+	/* GFX-modern tessellation on the GPU: with omTessL > 1 the draw has no attributes; vertex k of the
+	   triangle list is corner omTessTab[k % (3 L^2)] of a sub-triangle of original triangle k / (3 L^2), whose
+	   three corners (emuvtx_t, 17 floats each) are read from omTessBuf; the point on the curved PN triangle
+	   (Vlachos et al.) of their eye-space positions and normals, omTessK of the way from the flat one */
+	"#ifdef OM_TESS\n"
+	"uniform int omTessL;\n"
+	"uniform float omTessK;\n"
+	"uniform mat4 omTessProj;\n"
+	"uniform ivec2 omTessTab[48];\n"
+	"uniform samplerBuffer omTessBuf;\n"
+	"float omTF(int i) { return texelFetch(omTessBuf, i).r; }\n"
+	"vec3 omT3(int i) { return vec3(omTF(i), omTF(i + 1), omTF(i + 2)); }\n"
+	"vec3 omPNc(vec3 Pi, vec3 Pj, vec3 Ni) { return (2.0 * Pi + Pj - dot(Pj - Pi, Ni) * Ni) / 3.0; }\n"
+	"#endif\n"
 	"void main()\n"
 	"{\n"
+	"#ifdef OM_TESS\n"
+	"	if (omTessL > 1)\n"
+	"	{\n"
+	"		int per = omTessL * omTessL * 3, t = gl_VertexID / per;\n"
+	"		ivec2 ij = omTessTab[gl_VertexID - t * per];\n"
+	"		float u = float(ij.x) / float(omTessL), v = float(ij.y) / float(omTessL), w = 1.0 - u - v;\n"
+	"		int a = t * 51, b = a + 17, c = b + 17;\n"
+	"		vec3 P1 = omT3(a + 11), P2 = omT3(b + 11), P3 = omT3(c + 11);\n"
+	"		vec3 N1 = omT3(a + 14), N2 = omT3(b + 14), N3 = omT3(c + 14);\n"
+	"		vec3 b210 = omPNc(P1, P2, N1), b120 = omPNc(P2, P1, N2), b021 = omPNc(P2, P3, N2);\n"
+	"		vec3 b012 = omPNc(P3, P2, N3), b102 = omPNc(P3, P1, N3), b201 = omPNc(P1, P3, N1);\n"
+	"		vec3 Ev = (b210 + b120 + b021 + b012 + b102 + b201) / 6.0, V = (P1 + P2 + P3) / 3.0;\n"
+	"		vec3 b111 = Ev + (Ev - V) / 2.0;\n"
+	"		vec3 lin = P1 * u + P2 * v + P3 * w;\n"
+	"		vec3 pn = P1 * u * u * u + P2 * v * v * v + P3 * w * w * w + 3.0 * (b210 * u * u * v + b120 * u * v * v +\n"
+	"			b201 * u * u * w + b021 * v * v * w + b102 * u * w * w + b012 * v * w * w) + 6.0 * b111 * u * v * w;\n"
+	"		vec3 p = lin + omTessK * (pn - lin);\n"
+	"		vColor = vec4(omTF(a + 4), omTF(a + 5), omTF(a + 6), omTF(a + 7)) * u +\n"
+	"			vec4(omTF(b + 4), omTF(b + 5), omTF(b + 6), omTF(b + 7)) * v +\n"
+	"			vec4(omTF(c + 4), omTF(c + 5), omTF(c + 6), omTF(c + 7)) * w;\n"
+	"		vTex = vec2(omTF(a + 8), omTF(a + 9)) * u + vec2(omTF(b + 8), omTF(b + 9)) * v + vec2(omTF(c + 8), omTF(c + 9)) * w;\n"
+	"		vFog = omTF(a + 10) * u + omTF(b + 10) * v + omTF(c + 10) * w;\n"
+	"		vec3 n = N1 * u + N2 * v + N3 * w;\n"
+	"		vEN = dot(n, n) > 0.0 ? normalize(n) : n;\n"
+	"		vEP = p;\n"
+	"		gl_Position = omTessProj * vec4(p, 1.0);\n"
+	"		vPos = gl_Position;\n"
+	"		return;\n"
+	"	}\n"
+	"#endif\n"
 	"	vPos = position;\n"
 	"	vColor = vertColor;\n"
 	"	vTex = texCoord;\n"
@@ -899,8 +953,30 @@ CreateObjects(void)
 	E.u_e2w = glGetUniformLocation(E.prog, "omE2W");
 	E.u_beamn = glGetUniformLocation(E.prog, "omBeamN");
 	E.u_beam = glGetUniformLocation(E.prog, "omBeam");
+	E.u_tessL = glGetUniformLocation(E.prog, "omTessL");
+	E.u_tessK = glGetUniformLocation(E.prog, "omTessK");
+	E.u_tessProj = glGetUniformLocation(E.prog, "omTessProj");
+	E.u_tessTab = glGetUniformLocation(E.prog, "omTessTab");
+	E.tesstabL = 0;
+	E.context = gl3_contextgen;
 	GL3_UseProgram(E.prog);
 	GL3_CSM_BindProgram(E.prog);
+#ifndef YQ2_GL3_GLES3
+	if (E.u_tessL != -1)
+	{
+		glUniform1i(glGetUniformLocation(E.prog, "omTessBuf"), EMU_TBO_UNIT);
+		glGenVertexArrays(1, &E.tessvao);
+		glGenBuffers(1, &E.tbo);
+		glBindBuffer(GL_TEXTURE_BUFFER, E.tbo);
+		glBufferData(GL_TEXTURE_BUFFER, 4096, NULL, GL_STREAM_DRAW);
+		glGenTextures(1, &E.tbotex);
+		GL3_SelectTMU(GL_TEXTURE0 + EMU_TBO_UNIT);
+		glBindTexture(GL_TEXTURE_BUFFER, E.tbotex);
+		glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, E.tbo);
+		glBindBuffer(GL_TEXTURE_BUFFER, 0);
+		GL3_SelectTMU(GL_TEXTURE0);
+	}
+#endif
 
 	glGenVertexArrays(1, &E.vao);
 	GL3_BindVAO(E.vao);
@@ -1243,7 +1319,7 @@ Flush(void)
 {
 	GLenum mode = GL_TRIANGLES;
 	emuvtx_t *out, *flat;
-	int n = 0, nflat, i, count = E.numverts;
+	int n = 0, nflat, i, count = E.numverts, gputess = 0;
 	qboolean halo;
 
 	if (!count || !CreateObjects())
@@ -1369,7 +1445,25 @@ Flush(void)
 	if ((mode == GL_TRIANGLES) && (E.tess > 1) &&
 		!(E.blendon && (E.bsrc == GL_ZERO) && (E.bdst == GL_ONE_MINUS_SRC_ALPHA)) && !GL3_Beam_IsBeam(E.boundtex))
 	{
-		out = Tessellate(out, &n);
+#ifndef YQ2_GL3_GLES3
+		/* on the GPU (the vertex shader): only the original triangles are uploaded (r_om_tess_cpu 1: the CPU
+		   path, a test aid for comparing) */
+		static cvar_t *r_om_tess_cpu;
+
+		if (!r_om_tess_cpu)
+		{
+			r_om_tess_cpu = ri.Cvar_Get("r_om_tess_cpu", "0", 0);
+		}
+
+		if (E.tbotex && (E.u_tessL != -1) && !r_om_tess_cpu->value)
+		{
+			gputess = E.tess;
+		}
+		else
+#endif
+		{
+			out = Tessellate(out, &n);
+		}
 	}
 
 	/* a painted light cone in a mirror image: the beam pass draws the real one only (no second beam) */
@@ -1410,9 +1504,62 @@ Flush(void)
 #endif
 
 	GL3_UseProgram(E.prog);
-	GL3_BindVAO(E.vao);
-	GL3_BindVBO(E.vbo);
-	glBufferData(GL_ARRAY_BUFFER, n * sizeof(emuvtx_t), out, GL_STREAM_DRAW);
+#ifndef YQ2_GL3_GLES3
+	if (gputess)
+	{
+		/* the corners into the texture buffer, the draw without attributes: 3 L^2 vertices per triangle */
+		glBindBuffer(GL_TEXTURE_BUFFER, E.tbo);
+		glBufferData(GL_TEXTURE_BUFFER, n * sizeof(emuvtx_t), out, GL_STREAM_DRAW);
+		glBindBuffer(GL_TEXTURE_BUFFER, 0);
+		GL3_SelectTMU(GL_TEXTURE0 + EMU_TBO_UNIT);
+		glBindTexture(GL_TEXTURE_BUFFER, E.tbotex);
+		GL3_BindVAO(E.tessvao);
+
+		if (E.tesstabL != gputess)
+		{
+			int tab[48 * 2], i, j, k = 0;
+
+			memset(tab, 0, sizeof(tab));
+			/* the same sub-triangles and winding as Tessellate */
+			for (i = 0; i < gputess; i++)
+			{
+				for (j = 0; i + j < gputess; j++)
+				{
+					int tri[2][3][2] = {{{i, j}, {i + 1, j}, {i, j + 1}}, {{i + 1, j}, {i + 1, j + 1}, {i, j + 1}}};
+					int q, m, nq = (i + j < gputess - 1) ? 2 : 1;
+
+					for (q = 0; q < nq; q++)
+					{
+						for (m = 0; m < 3; m++, k++)
+						{
+							tab[k * 2] = tri[q][m][0];
+							tab[k * 2 + 1] = tri[q][m][1];
+						}
+					}
+				}
+			}
+
+			glUniform2iv(E.u_tessTab, 48, tab);
+			E.tesstabL = gputess;
+		}
+
+		glUniform1i(E.u_tessL, gputess);
+		glUniform1f(E.u_tessK, E.tessk);
+		glUniformMatrix4fv(E.u_tessProj, 1, GL_FALSE, E.proj[E.projdepth]);
+		n = (n / 3) * gputess * gputess * 3;
+	}
+	else
+#endif
+	{
+		if (E.u_tessL != -1)
+		{
+			glUniform1i(E.u_tessL, 0);
+		}
+
+		GL3_BindVAO(E.vao);
+		GL3_BindVBO(E.vbo);
+		glBufferData(GL_ARRAY_BUFFER, n * sizeof(emuvtx_t), out, GL_STREAM_DRAW);
+	}
 
 	GL3_SelectTMU(GL_TEXTURE0);
 
@@ -2769,10 +2916,12 @@ GL3_GhoulEmu_Begin(void)
 {
 	Ready();
 
-	/* a renderer restart without GL3_GhoulEmu_Shutdown left names of the old context behind */
-	if (E.prog && !glIsProgram(E.prog))
+	/* a renderer restart without GL3_GhoulEmu_Shutdown left names of the old context behind. Known by the context's
+	   number (glIsProgram for every model waited for the driver to finish all queued work: milliseconds a frame) */
+	if (E.prog && (E.context != gl3_contextgen))
 	{
 		E.prog = E.vao = E.vbo = 0;
+		E.tessvao = E.tbo = E.tbotex = 0;
 	}
 
 	GL3_SoF2D_Flush();
@@ -2896,6 +3045,18 @@ GL3_GhoulEmu_Shutdown(void)
 		glDeleteVertexArrays(1, &E.vao);
 	}
 
+	if (E.tessvao)
+	{
+		glDeleteVertexArrays(1, &E.tessvao);
+		glDeleteBuffers(1, &E.tbo);
+		glDeleteTextures(1, &E.tbotex);
+	}
+
+	if (gl3state.currentVAO == E.tessvao)
+	{
+		gl3state.currentVAO = 0;
+	}
+
 	if (gl3state.currentShaderProgram == E.prog)
 	{
 		gl3state.currentShaderProgram = 0;
@@ -2912,6 +3073,7 @@ GL3_GhoulEmu_Shutdown(void)
 	}
 
 	E.prog = E.vao = E.vbo = 0;
+	E.tessvao = E.tbo = E.tbotex = 0;
 	free(E.texswz);
 	E.texswz = NULL;
 	E.numtexswz = 0;

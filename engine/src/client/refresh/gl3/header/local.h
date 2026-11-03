@@ -62,6 +62,10 @@
 
 #endif
 
+/* gl3_sdl.c / gl3_win32.c: counts the GL contexts made - GL objects of an older one are gone (a glIsProgram
+   to find that out waits for the driver to finish all queued work) */
+extern int gl3_contextgen;
+
 #include "../../ref_shared.h"
 
 #include <stddef.h> // offsetof()
@@ -626,6 +630,7 @@ extern void GL3_LM_BuildPolygonFromSurface(gl3model_t *currentmodel, msurface_t 
 extern void GL3_LM_CreateSurfaceLightmap(msurface_t *surf);
 extern void GL3_LM_BeginBuildingLightmaps(gl3model_t *m);
 extern void GL3_LM_EndBuildingLightmaps(void);
+extern void GL3_LM_StitchSeams(gl3model_t *m); /* GFX-modern r_om_lmstitch */
 
 // gl3_warp.c
 extern void GL3_EmitWaterPolys(msurface_t *fa, gl3drawCmd_t drawCmd);

@@ -344,6 +344,8 @@ int GL3_InitContext(void* win)
 		return false;
 	}
 
+	gl3_contextgen++; /* a new context: the Ghoul emulation's objects of the old one are gone */
+
 	// Check if we've got the requested MSAA.
 	int msaa_samples = 0;
 

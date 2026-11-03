@@ -332,6 +332,10 @@ struct RenderCache
 	Vec3 probeS, probeV;
 	Vec3 shadowDir = Vec3(0, 0, 1);
 	std::vector<LightState> lights;
+	// OpenMerc: which world lights reach the instance (world trace), measured at occOrigin
+	std::vector<std::pair<const LightRecord *, bool>> occ;
+	Vec3 occOrigin;
+	float occTime = -1e30f;
 	int lastImage[64];
 	void Reset();
 	RenderCache() { Reset(); }

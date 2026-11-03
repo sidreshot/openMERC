@@ -1208,7 +1208,8 @@ correction away and put ours in its place".
   the view's eye-to-world rotation; all lit Ghoul draws on arm1, jpn2, kos1 go through it.
 * `r_om_ambcube_debug 1`: +x red, +y green, +z blue (checked: the side facing +x is red); 2 prints the factors
   (OMAMB). arm1 shop: the sides differ by about 15 %, at a doorway or window up to 2 : 0.25.
-* Not done: the map lights still reach a model through walls (no occlusion test in GatherWorldLights).
+* Not done: the map lights still reach a model through walls (no occlusion test in GatherWorldLights). Done later:
+  r_om_lightocc.
 ## r_om_fxlight: lit smoke and dust (owner: "lit smoke and particles")
 
 * SoF alpha quads carry a lit flag (SPEC-412); the effects that set it already take the light point below them.
@@ -1221,3 +1222,61 @@ correction away and put ours in its place".
 * Checked: the debug mode paints the flamethrower smoke on arm1. The flamethrower's smoke is nearly black
   (colour 4,0,5, alpha 0.2..0.4), so it changes little; an A/B in one run was dominated by the flicker of the fire
   and gave no clean number. Light-coloured unlit smoke in dark places is where the change shows.
+
+## r_om_lightocc: map lamps no longer light models through walls (owner: "make the lamps not shine on characters through walls")
+
+* The Ghoul system picks a model's GL lights (BSP lump 20) by distance only (WorldLightGrid::Query). With
+  `r_om_lightocc 1` (default) the renderer always hands it the world trace (render parameters 0x44; before only with
+  ground shadows on) and GatherWorldLights keeps a light only when the ray from 4 units off the lamp to the model's
+  origin + 4 or + 40 units is clear (fraction >= 0.97, or less than 8 units short; a lamp starting inside its fixture
+  counts as reaching). The answers are kept per instance until it moves 8 units or half a second passes (doors); the
+  next lights in range fill the freed slots, a light that stops reaching fades out with the usual light smoothing.
+  The ground shadow still depends on shadowMode only (Shadow is called only for casters). Cost: not measurable (arm1
+  fire and three NPCs, A/B in one run).
+
+## FPS drops with characters close by (owner: "I see FPS drops")
+
+* Perf tour A/B in one run (nyc1, kos1, arm1, 28 spots, user's config): r_om_a2c, r_om_ambcube, r_om_fxlight cost
+  nothing measurable (+-0.1 ms), no hitches. The drops were characters: three NPCs at arm's length on arm1 took the
+  frame from 9 to 16.7 ms.
+* Found (QueryPerformanceCounter around the Ghoul draw): GL3_GhoulEmu_Begin asked glIsProgram for every model - a
+  query that waits for NVIDIA's threaded driver to finish everything queued - 3..5 ms a frame with characters in
+  view. Now a context counter (gl3_contextgen, counted where the context is made) tells a restarted renderer.
+* PN tessellation moved to the vertex shader (desktop GL): the original triangles go to a texture buffer (R32F, the
+  17 floats of emuvtx_t, GL_TEXTURE20), the draw has no attributes and 3 L^2 vertices per triangle; corner table
+  omTessTab (the same sub-triangles and winding as before). CPU: Ghoul drawing 4.2 -> 1.7 ms a frame (= without
+  tessellation). GLES keeps the CPU path; `r_om_tess_cpu 1` forces it (test aid).
+* The rest is GPU: 19 000 tessellated triangles of three close characters cost 4.8 ms more at level 3, 2.4 at level
+  2 (small triangles: MSAA shades the pixels along every edge twice). Level 3 now only above 600 pixels of model
+  height (arm's length), from 100 pixels at most 2.
+* Measured end state (arm1): firing the flamethrower 9.2 ms a frame, no hitches; three NPCs at arm's length 17 ms
+  (GPU, level 3 by choice).
+
+## Texture seams found by position, height blend of both textures (owner: "smoothing of texture transitions is not done - find best practice and implement")
+
+* r_om_seams matched only BSP edges two faces share by index; along a T-junction each face has its own edge. Now
+  the sides of the faces are matched by position (collinear, overlapping, on one plane), the strip has caps at the
+  overlap. tsr1: 86 -> 96 strips; most borders of different textures there are artist-fitted variants (1_tile,
+  1_tile_middle, 1_tile_bottom - 3456 of 3727), correctly left alone.
+* Blend as the height-based splatting of terrain shaders (Mishkinis, "Advanced Terrain Texture Splatting";
+  Unity "Material by Height"): both textures' heights (texel brightness above the texture's mean; the face's own
+  texture now on GL_TEXTURE10 with its texture axes as uniforms omSeamS / omSeamT) plus their shares; only the
+  higher shows, mixed within 0.12.
+
+## r_om_lmstitch: lightmap seam stitching (owner's screenshot: hard steps of light across a shop shutter)
+
+* The visible "transitions" on walls are mostly not textures but lightmaps: every BSP face has its own, lit on its
+  own grid, and where a plane is cut into several faces they disagree along the border - straight steps of light
+  across a wall (jpn1 corridor: rectangles on the wall). As the bakers do it (Unity / Bakery "stitch seams",
+  Sylvan's lightmap seam stitching): at map load (Mod_LoadFaces, before the lightmaps are uploaded) every border of
+  two coplanar lit faces is read every half sample, bilinearly as drawn, per light style present on both sides; the
+  samples of each reading move toward the mean of the two (three rounds), the correction fades into the face over
+  `r_om_lmstitch_width` (3) samples. Faces of any texture, not sky, warp, translucent, alpha-tested. jpn1: 11 144
+  faces, 75 000 border points; the corridor rectangles are gone. `r_om_lmstitch 0` off (takes effect at the next
+  map load of another map).
+
+## "Relief" still visible (owner: "we removed the relief, it is still there")
+
+* r_om_bump is gone from the code (9af6286). SSR on / off at the arm1 shop changes only the floor's sheen. The
+  embossed look of bricks with bright joints is in the HD pack's textures themselves (sofhd2024, ESRGAN upscale):
+  arm1 shop with om_hdtextures 1 / 0 in one run shows it with the pack only.
