@@ -1196,6 +1196,340 @@ UseOriginalSize(gl3image_t *image, const char *path)
 	}
 }
 
+/*
+ * r_om_hdseam: the sofhd2024 pack was upscaled tile by tile without wrapping,
+ * so its tiling textures no longer tile - every repeat shows a line (border
+ * texels of the network, broken mortar). The retail original still tiles, so
+ * near the tile edges (band 1/8) the low frequencies of the HD image (box blur
+ * radius = scale) are replaced by those of the bilinearly upsampled original,
+ * the HD detail stays; then the wrap jump beyond the original's own texel jump
+ * is split between both sides and faded out over 2*scale texels.
+ * r_om_hdseam 2 takes the low frequencies from the original over the whole
+ * texture (tone of the retail art, detail of the HD pack): no banding on large
+ * walls and the network's exaggerated relief is calmed.
+ */
+
+/* clamp-to-edge box blur of a w x h RGB float image along x (step 3) or y */
+static void
+HDSeamBox(const float *src, float *dst, int w, int h, int r, qboolean alongx)
+{
+	int n = alongx ? w : h, lines = alongx ? h : w, step = alongx ? 3 : 3 * w, lstep = alongx ? 3 * w : 3;
+	int j, i, c;
+
+	for (j = 0; j < lines; j++)
+	{
+		const float *l = src + j * lstep;
+		float *o = dst + j * lstep;
+
+		for (c = 0; c < 3; c++)
+		{
+			float s = 0;
+
+			for (i = -r; i <= r; i++)
+			{
+				s += l[((i < 0) ? 0 : (i >= n) ? n - 1 : i) * step + c];
+			}
+
+			for (i = 0; i < n; i++)
+			{
+				int add = i + r + 1, sub = i - r;
+
+				o[i * step + c] = s / (2 * r + 1);
+				s += l[((add >= n) ? n - 1 : add) * step + c] - l[((sub < 0) ? 0 : sub) * step + c];
+			}
+		}
+	}
+}
+
+static float
+HDSeamWeight(int x, int n, int full, int band)
+{
+	int e = (x < n - 1 - x) ? x : n - 1 - x;
+
+	return (e <= full) ? 1.0f : (e >= band) ? 0.0f : 1.0f - (float)(e - full) / (float)(band - full);
+}
+
+/* level 0 of the HD image p (w x h RGBA), retail original o (ow x oh RGBA), integer scale s */
+static void
+HDSeamFix(byte *p, int w, int h, const byte *o, int ow, int oh, int s, qboolean tx, qboolean ty)
+{
+	float *f = malloc(sizeof(float) * 3 * w * h * 3), *u, *t;
+	int x, y, c, ax;
+
+	if (!f)
+	{
+		return;
+	}
+
+	u = f + 3 * w * h;
+	t = u + 3 * w * h;
+
+	for (y = 0; y < h; y++)
+	{
+		float v = (y + 0.5f) / s - 0.5f;
+		int y0 = (int)floorf(v), y1;
+		float fy = v - y0;
+
+		y1 = (y0 + 1 + oh) % oh;
+		y0 = (y0 + oh) % oh;
+
+		for (x = 0; x < w; x++)
+		{
+			float uu = (x + 0.5f) / s - 0.5f;
+			int x0 = (int)floorf(uu), x1;
+			float fx = uu - x0;
+
+			x1 = (x0 + 1 + ow) % ow;
+			x0 = (x0 + ow) % ow;
+
+			for (c = 0; c < 3; c++)
+			{
+				float a = o[(y0 * ow + x0) * 4 + c], b = o[(y0 * ow + x1) * 4 + c];
+				float d = o[(y1 * ow + x0) * 4 + c], e = o[(y1 * ow + x1) * 4 + c];
+
+				f[(y * w + x) * 3 + c] = p[(y * w + x) * 4 + c];
+				u[(y * w + x) * 3 + c] = (a + (b - a) * fx) * (1 - fy) + (d + (e - d) * fx) * fy;
+			}
+		}
+	}
+
+	/* u = blur(upsampled original) - blur(HD) */
+	HDSeamBox(u, t, w, h, s, true);
+	HDSeamBox(t, u, w, h, s, false);
+	HDSeamBox(f, t, w, h, s, true);
+
+	{
+		float *b = malloc(sizeof(float) * 3 * w * h);
+
+		if (!b)
+		{
+			free(f);
+			return;
+		}
+
+		HDSeamBox(t, b, w, h, s, false);
+
+		for (y = 0; y < h; y++)
+		{
+			float wy = ty ? HDSeamWeight(y, h, s, (h / 8 > 3 * s) ? h / 8 : 3 * s) : 0;
+
+			for (x = 0; x < w; x++)
+			{
+				float wx = tx ? HDSeamWeight(x, w, s, (w / 8 > 3 * s) ? w / 8 : 3 * s) : 0;
+				float k = (r_om_hdseam->value >= 2) ? 1.0f : (wx > wy) ? wx : wy;
+
+				for (c = 0; c < 3; c++)
+				{
+					int i = (y * w + x) * 3 + c;
+
+					f[i] += k * (u[i] - b[i]);
+				}
+			}
+		}
+
+		free(b);
+	}
+
+	/* remaining wrap jump beyond the retail texels' own jump */
+	for (ax = 0; ax < 2; ax++)
+	{
+		int n = ax ? h : w, lines = ax ? w : h, step = ax ? 3 * w : 3, lstep = ax ? 3 : 3 * w;
+		int on = ax ? oh : ow, ostep = ax ? 4 * ow : 4, olstep = ax ? 4 : 4 * ow;
+		int band = 2 * s, j, i;
+		float *d = t;
+
+		if (!(ax ? ty : tx))
+		{
+			continue;
+		}
+
+		for (j = 0; j < lines; j++)
+		{
+			const byte *ol = o + (j / s) * olstep;
+
+			for (c = 0; c < 3; c++)
+			{
+				d[j * 3 + c] = (f[j * lstep + c] - f[j * lstep + (n - 1) * step + c]) -
+					((float)ol[c] - (float)ol[(on - 1) * ostep + c]);
+			}
+		}
+
+		for (j = 0; j < lines; j++)
+		{
+			for (c = 0; c < 3; c++)
+			{
+				float dj = (d[((j + lines - 1) % lines) * 3 + c] + d[j * 3 + c] + d[((j + 1) % lines) * 3 + c]) / 3;
+
+				for (i = 0; i < band && i < n / 2; i++)
+				{
+					float k = 0.5f * (1.0f - (float)i / band) * dj;
+
+					f[j * lstep + i * step + c] -= k;
+					f[j * lstep + (n - 1 - i) * step + c] += k;
+				}
+			}
+		}
+	}
+
+	for (y = 0; y < w * h; y++)
+	{
+		for (c = 0; c < 3; c++)
+		{
+			float v = f[y * 3 + c];
+
+			p[y * 4 + c] = (byte)((v < 0) ? 0 : (v > 255) ? 255 : v + 0.5f);
+		}
+	}
+
+	free(f);
+}
+
+/* does the retail texture tile along x (dx 1) or y? wrap jump against the busiest columns */
+static qboolean
+HDSeamTiles(const byte *o, int w, int h, qboolean alongx)
+{
+	int n = alongx ? w : h, lines = alongx ? h : w, i, j;
+	int step = alongx ? 4 : 4 * w, lstep = alongx ? 4 * w : 4;
+	float *col, edge = 0, p90;
+
+	if ((n < 4) || (lines < 1) || !(col = malloc(sizeof(float) * n)))
+	{
+		return false;
+	}
+
+	for (i = 0; i < n - 1; i++)
+	{
+		float s = 0;
+
+		for (j = 0; j < lines; j++)
+		{
+			const byte *a = o + j * lstep + i * step, *b = a + step;
+
+			s += fabsf((a[0] + a[1] + a[2] - b[0] - b[1] - b[2]) / 3.0f);
+		}
+
+		col[i] = s / lines;
+	}
+
+	for (j = 0; j < lines; j++)
+	{
+		const byte *a = o + j * lstep, *b = a + (n - 1) * step;
+
+		edge += fabsf((a[0] + a[1] + a[2] - b[0] - b[1] - b[2]) / 3.0f);
+	}
+
+	edge /= lines;
+
+	/* 90th percentile of the n-1 column steps (structure lines are normal steps) */
+	for (i = 0; i < n - 1; i++)
+	{
+		for (j = i + 1; j < n - 1; j++)
+		{
+			if (col[j] < col[i])
+			{
+				float t = col[i];
+				col[i] = col[j];
+				col[j] = t;
+			}
+		}
+	}
+
+	p90 = col[(int)((n - 2) * 0.9f)];
+	free(col);
+
+	return edge < 1.6f * (p90 + 0.5f);
+}
+
+static void
+HDSeamRepair(byte *m, int size, const char *path)
+{
+	byte head[M32_HEADER_SIZE], *o;
+	int ow, oh, oofs, w0, h0, scale, level, got;
+	qboolean tx, ty;
+
+	if (!r_om_hdseam || !r_om_hdseam->value || !ri.FS_ReadOriginalHead)
+	{
+		return;
+	}
+
+	w0 = M32Int(m, M32_OFS_WIDTHS);
+	h0 = M32Int(m, M32_OFS_HEIGHTS);
+
+	if ((ri.FS_ReadOriginalHead(path, head, sizeof(head)) < (int)sizeof(head)) || (M32Int(head, 0) != M32_VERSION))
+	{
+		return;
+	}
+
+	ow = M32Int(head, M32_OFS_WIDTHS);
+	oh = M32Int(head, M32_OFS_HEIGHTS);
+	oofs = M32Int(head, M32_OFS_OFFSETS);
+
+	if ((ow < 4) || (oh < 4) || (ow > 4096) || (oh > 4096) || (oofs < M32_HEADER_SIZE) || (oofs > 65536) ||
+		(w0 < 2 * ow) || (w0 % ow) || (h0 * ow != w0 * oh))
+	{
+		return; /* not an upscaled replacement */
+	}
+
+	scale = w0 / ow;
+	got = oofs + ow * oh * 4;
+	o = malloc(got);
+
+	if (!o)
+	{
+		return;
+	}
+
+	if (ri.FS_ReadOriginalHead(path, o, got) < got)
+	{
+		free(o);
+		return;
+	}
+
+	tx = HDSeamTiles(o + oofs, ow, oh, true);
+	ty = HDSeamTiles(o + oofs, ow, oh, false);
+
+	R_Printf(PRINT_DEVELOPER, "hdseam %s x%d tiles %s%s\n", path, scale, tx ? "s" : "", ty ? "t" : "");
+
+	if ((!tx && !ty) || (M32Int(m, M32_OFS_OFFSETS) <= 0) ||
+		((size_t)M32Int(m, M32_OFS_OFFSETS) + (size_t)w0 * h0 * 4 > (size_t)size))
+	{
+		free(o);
+		return;
+	}
+
+	HDSeamFix(m + M32Int(m, M32_OFS_OFFSETS), w0, h0, o + oofs, ow, oh, scale, tx, ty);
+	free(o);
+
+	/* colour of the mip chain rebuilt from the repaired level 0 (2x2 box), alpha kept */
+	for (level = 1; level < M32_MIP_LEVELS; level++)
+	{
+		int pw = M32Int(m, M32_OFS_WIDTHS + 4 * (level - 1)), ph = M32Int(m, M32_OFS_HEIGHTS + 4 * (level - 1));
+		int w = M32Int(m, M32_OFS_WIDTHS + 4 * level), h = M32Int(m, M32_OFS_HEIGHTS + 4 * level);
+		int ofs = M32Int(m, M32_OFS_OFFSETS + 4 * level), pofs = M32Int(m, M32_OFS_OFFSETS + 4 * (level - 1));
+		int x, y, c;
+
+		if ((w <= 0) || (h <= 0) || (ofs <= 0) || ((size_t)ofs + (size_t)w * h * 4 > (size_t)size) ||
+			(pw != 2 * w) || (ph != 2 * h))
+		{
+			break;
+		}
+
+		for (y = 0; y < h; y++)
+		{
+			for (x = 0; x < w; x++)
+			{
+				const byte *a = m + pofs + ((2 * y) * pw + 2 * x) * 4, *b = a + pw * 4;
+				byte *d = m + ofs + (y * w + x) * 4;
+
+				for (c = 0; c < 3; c++)
+				{
+					d[c] = (byte)((a[c] + a[4 + c] + b[c] + b[4 + c] + 2) >> 2);
+				}
+			}
+		}
+	}
+}
+
 static gl3image_t *
 LoadSoFImage(const char *name, int softype, qboolean substitute)
 {
@@ -1274,6 +1608,11 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 		}
 
 		return alt;
+	}
+
+	if (softype == SOFIMG_WALL)
+	{
+		HDSeamRepair(m, size, path);
 	}
 
 	CorrectColours(m, size, softype);

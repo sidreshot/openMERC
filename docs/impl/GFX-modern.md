@@ -1280,3 +1280,21 @@ correction away and put ours in its place".
 * r_om_bump is gone from the code (9af6286). SSR on / off at the arm1 shop changes only the floor's sheen. The
   embossed look of bricks with bright joints is in the HD pack's textures themselves (sofhd2024, ESRGAN upscale):
   arm1 shop with om_hdtextures 1 / 0 in one run shows it with the pack only.
+## r_om_hdseam: tile seams of the HD pack (owner: "texture transitions are visible")
+
+* Cause: sofhd2024 was upscaled tile by tile without wrapping the borders, so its tiling textures no longer tile.
+  Wrap-edge jump against the mean texel step (tilecheck.py over 452 sampled textures): HD median 5.1, retail 2.05;
+  2.5x worse in the median, up to 12x (subway/3_sweatwall_top). In game every repeat of a wall texture shows a
+  line or a band (jpn1 corridor stucco: hard-edged vertical bands; arm1 bricks: broken mortar on the wrap).
+* Fix at load (gl3_image.c HDSeamRepair, only SOFIMG_WALL replacements at least 2x the retail size): the retail
+  original is read through FS_ReadOriginalHead. Per axis, only if the original tiles there (wrap jump < 1.6 x the
+  90th percentile of column steps, so posters and signs are left alone). Low frequencies (box radius = scale) of
+  the HD level 0 are replaced by those of the bilinearly upsampled original, near the edges (1/8 band) for
+  r_om_hdseam 1, over the whole texture for 2 (default). Then the wrap jump beyond the retail texels' own jump is
+  split and faded over 2*scale texels. The colour of the mip chain is rebuilt from level 0, alpha kept.
+* A first version (rebuild the outer texels across the wrap) erased thin features lying on the tile edge (mortar
+  lines, trims) and was dropped. Mode 2 also calms the network's exaggerated relief (white mortar, blobs on
+  stucco) because the tone comes from the retail art, while the sharpness stays HD.
+* A/B/C within one run (vid_restart): jpn1 corridor and arm1 shop, the bands are gone with 2. jpn1 load is about
+  the same (20 s, within 1 s). The proper cure is re-upscaling the pack with wrapped borders (hdtex.py already
+  does that, it needs Real-ESRGAN to be allowed to run).

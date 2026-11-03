@@ -89,6 +89,7 @@ const hmm_mat4 gl3_identityMat4 = {{
 cvar_t *gl_msaa_samples;
 cvar_t *r_vsync;
 cvar_t *r_retexturing;
+cvar_t *r_om_hdseam;
 cvar_t *r_scale8bittextures;
 cvar_t *vid_fullscreen;
 cvar_t *r_mode;
@@ -301,6 +302,7 @@ GL3_Register(void)
 	r_farsee = GL3_LocalCvar("r_farsee", "1", CVAR_LATCH | CVAR_ARCHIVE); /* OpenMerc: max draw distance by default */
 	gl_msaa_samples = GL3_LocalCvar("r_msaa_samples", "8", CVAR_ARCHIVE); /* OpenMerc: max MSAA default; driver may clamp */
 	r_retexturing = GL3_LocalCvar("r_retexturing", "1", CVAR_ARCHIVE);
+	r_om_hdseam = GL3_LocalCvar("r_om_hdseam", "2", 0); /* upscaled textures: 1 repair tile borders, 2 + retail tone everywhere */
 	r_scale8bittextures = GL3_LocalCvar("r_scale8bittextures", "0", CVAR_ARCHIVE);
 	gl3_debugcontext = GL3_LocalCvar("gl3_debugcontext", "0", 0);
 	r_customwidth = GL3_LocalCvar("r_customwidth", "1024", CVAR_ARCHIVE);
