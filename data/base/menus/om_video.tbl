@@ -29,6 +29,7 @@ list | menu_fov | 75,80,85,90,95,100,105,110 | 75,80,85,90,95,100,105,110 | 75,8
 list | horplus | 0,1 | Off,On | Выкл,Вкл | Widescreen View (Hor+) | Широкий обзор (Hor+)
 
 section | PICTURE QUALITY | КАЧЕСТВО ИЗОБРАЖЕНИЯ
+list | menu_hdtextures | 0,1 | Off,On | Выкл,Вкл | HD Textures | HD-текстуры | stage | requires=om_hdpack | tip=The texture pack in openmerc/hd; applied with the Apply button/Пак текстур из папки openmerc/hd; применяется кнопкой Применить
 list | menu_anisotropic | 1,2,4,8,16 | Off,2x,4x,8x,16x | Выкл,2x,4x,8x,16x | Anisotropic Filtering | Анизотропная фильтрация | stage
 list | menu_msaa | 0,2,4,8 | Off,2x,4x,8x | Выкл,2x,4x,8x | Antialiasing (MSAA) | Сглаживание (MSAA) | stage
 list | gl_texturemode | GL_LINEAR_MIPMAP_NEAREST,GL_LINEAR_MIPMAP_LINEAR,GL_LINEAR,GL_NEAREST | Bilinear,Trilinear,Linear without mipmaps,Nearest | Билинейная,Трилинейная,Линейная без MIP-уровней,Без фильтрации | Texture Filtering | Фильтрация текстур

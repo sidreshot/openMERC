@@ -13,6 +13,8 @@ below it). It never replaces or writes a file of the game.
                                  (gamex86.so, player.so on Linux)
         zz_openmerc.pak          openMERC's data
         openmerc-portable.txt    portable mode marker
+        hd/                      optional HD texture packs (*.pak), e.g.
+                                 sofhd2024.pak from sof1.org
         user/                    openMERC's user folder (config, saves,
                                  screenshots, logs), created on first start
 ```
@@ -33,6 +35,14 @@ The same archive can be unpacked into a subfolder, e.g.
 - `<exe dir>/openmerc`, when it exists, is mounted above `base` (still in the
   base layer), so the game and player modules in it are found before the
   original ones in `base/`.
+- `<exe dir>/openmerc/hd` and every `*.pak` in it are mounted above
+  `openmerc` (base layer). An HD pack replaces textures by name with larger
+  images; the renderer keeps texture coordinates on the size of the original
+  (`r_retexturing`, `FS_ReadOriginalHead`). `om_hdtextures 0` passes the
+  folder over without remounting, `vid_restart` reloads the images; the video
+  menu shows the switch (Picture Quality, HD Textures) only when `om_hdpack`
+  exists, i.e. the folder holds a pack. Installing a pack is copying its
+  `.pak` there; nothing of the pack's own `autoexec.cfg` is needed.
 - Without `-user`, the user folder is `<exe dir>/openmerc/user`, whatever the
   current directory is. Portable-mode logs (stdout, stderr, console history,
   crash dumps) go there as well.

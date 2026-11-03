@@ -77,6 +77,7 @@ typedef struct fsSearchPath_s
 {
 	char dirname[MAX_OSPATH];     /* directory mount, or "" */
 	fsPack_t *pack;               /* archive mount, or NULL */
+	qboolean hd;                  /* openmerc/hd mount, passed over while om_hdtextures is 0 */
 	struct fsSearchPath_s *next;  /* lower priority */
 } fsSearchPath_t;
 
@@ -124,6 +125,10 @@ cvar_t *fs_gamedirvar;
 cvar_t *fs_userdirvar;
 cvar_t *fs_gamedircvar;
 cvar_t *fs_createpak;
+static cvar_t *om_hdtextures;
+
+/* OpenMerc: HD texture packs in openmerc/hd are switched off without remounting (vid_restart reloads the images) */
+#define FS_HDOFF(s) ((s)->hd && om_hdtextures && !om_hdtextures->value)
 
 /* ---------------------------------------------------------------------
  * names (SPEC-300 Behaviour 3)
@@ -645,7 +650,7 @@ FS_OpenFileEx(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 
 	for (search = fs_searchpaths; search; search = search->next)
 	{
-		if (gamedir_only && (search->pack || strcmp(search->dirname, fs_gamedir)))
+		if ((gamedir_only && (search->pack || strcmp(search->dirname, fs_gamedir))) || FS_HDOFF(search))
 		{
 			continue;
 		}
@@ -1029,6 +1034,11 @@ FS_ReadOriginalHead(const char *rawname, void *buf, int len)
 
 	for (search = fs_searchpaths; search; search = search->next)
 	{
+		if (FS_HDOFF(search))
+		{
+			continue;
+		}
+
 		if (search->pack)
 		{
 			int i = FS_PackFind(search->pack, upper);
@@ -1791,6 +1801,11 @@ FS_ListFiles2(const char *findname,
 		size_t splen;
 		int i;
 
+		if (FS_HDOFF(search))
+		{
+			continue;
+		}
+
 		if (search->pack)
 		{
 			if (canthave & SFF_INPACK)
@@ -2150,6 +2165,35 @@ FS_InitFilesystem(void)
 	if (fs_omdir[0])
 	{
 		FS_AddGameDirectory(fs_omdir);
+	}
+
+	/* 2c. HD texture packs: <exe dir>/openmerc/hd and its *.pak over the game's files (same names,
+	   larger images; the renderers keep texture coordinates on the original size). om_hdpack (the
+	   number of packs) exists only when there is one: the video menu shows the switch for it. */
+	om_hdtextures = Cvar_Get("om_hdtextures", "1", CVAR_ARCHIVE);
+
+	if (fs_omdir[0])
+	{
+		fsSearchPath_t *top = fs_searchpaths, *s;
+		int packs = 0;
+
+		Com_sprintf(path, sizeof(path), "%s/hd", fs_omdir);
+
+		if (Sys_IsDir(path))
+		{
+			FS_AddGameDirectory(path);
+
+			for (s = fs_searchpaths; s != top; s = s->next)
+			{
+				s->hd = true;
+				packs += (s->pack != NULL);
+			}
+
+			if (packs)
+			{
+				Cvar_Get("om_hdpack", va("%i", packs), CVAR_NOSET);
+			}
+		}
 	}
 
 	/* 3. the base layer */

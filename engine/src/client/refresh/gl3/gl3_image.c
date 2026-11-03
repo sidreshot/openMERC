@@ -1826,4 +1826,22 @@ GL3_ImageList_f(void)
 
 	Com_Printf("Total texel count   : %i\n", texels);
 	Com_Printf("Total image count   : %i\n", count);
+
+	/* OpenMerc: video memory left and driver evictions (NVIDIA GL_NVX_gpu_memory_info; nothing elsewhere) */
+	{
+		GLint total = 0, avail = 0, evicted = 0;
+
+		glGetIntegerv(0x9048, &total);
+		glGetIntegerv(0x9049, &avail);
+		glGetIntegerv(0x904A, &evicted);
+
+		while (glGetError() != GL_NO_ERROR)
+		{
+		}
+
+		if (total > 0)
+		{
+			Com_Printf("Video memory        : %i of %i MB free, %i evictions\n", avail / 1024, total / 1024, evicted);
+		}
+	}
 }

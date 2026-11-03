@@ -40,6 +40,8 @@ for r in ref_gl3.so ref_gles3.so; do [ -f "$REL/$r" ] && cp "$REL/$r" "$P/"; don
 cp "$REL/base/gamex86.so" "$REL/base/player.so" "$REL/base/zz_openmerc.pak" "$D/"
 cp "$REPO/LICENSE" "$REPO/THIRD_PARTY.md" "$D/"
 cp "$REPO/dist/README-linux.txt" "$D/README.txt"
+mkdir -p "$D/hd"
+cp "$REPO/dist/README-hd.txt" "$D/hd/README.txt"
 install -m 755 "$REPO/dist/openMERC.sh" "$P/openMERC.sh"
 strip --strip-unneeded "$P/openMerc" "$P/openMerc-ded" "$P"/*.so "$D"/*.so
 
