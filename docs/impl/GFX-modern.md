@@ -1209,3 +1209,15 @@ correction away and put ours in its place".
 * `r_om_ambcube_debug 1`: +x red, +y green, +z blue (checked: the side facing +x is red); 2 prints the factors
   (OMAMB). arm1 shop: the sides differ by about 15 %, at a doorway or window up to 2 : 0.25.
 * Not done: the map lights still reach a model through walls (no occlusion test in GatherWorldLights).
+## r_om_fxlight: lit smoke and dust (owner: "lit smoke and particles")
+
+* SoF alpha quads carry a lit flag (SPEC-412); the effects that set it already take the light point below them.
+  The others drawn with normal alpha blending (smoke `gb_smoke01`, `smoke2` - the survey while firing on arm1 found
+  only smoke there) kept their own colour wherever they were. With `r_om_fxlight 1` (default) such quads, unless
+  decals, take the light at their own position (GL3_SoF_LightPoint: the lightmap below plus the dynamic lights -
+  muzzle flashes, fire), turned into brightness like the world's lightmaps (SoF colour table, then overbright), so
+  smoke is as bright as a white wall beside it. Additive quads (fire, sparks) and darkening ones are left alone;
+  r_fullbright and night vision keep the old look. 0..1 blends, `r_om_fxlight 2` paints the quads it lights red.
+* Checked: the debug mode paints the flamethrower smoke on arm1. The flamethrower's smoke is nearly black
+  (colour 4,0,5, alpha 0.2..0.4), so it changes little; an A/B in one run was dominated by the flicker of the fire
+  and gave no clean number. Light-coloured unlit smoke in dark places is where the change shows.

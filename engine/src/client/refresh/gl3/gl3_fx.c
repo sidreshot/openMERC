@@ -875,6 +875,54 @@ QuadColor(const sofalphaquad_t *q, int blend, const vec3_t light, qboolean lit, 
 	}
 }
 
+/* GFX-modern r_om_fxlight: smoke, dust and other alpha-blended quads the effect left unlit (SPEC-412 lit flag clear)
+   take the light at their own position - the lightmap below and the dynamic lights (muzzle flashes, fire) - turned
+   into brightness like the world's lightmaps (colour table, overbright), so they are as bright as a white wall
+   beside them; they glowed light
+   grey in dark rooms. Additive (fire, sparks) and darkening quads emit or absorb, they stay as they are; quads the
+   effect lights keep the original rule. r_om_fxlight 0..1 blends from unlit to lit (2: test aid, see below). */
+static void
+FxLight(const sofalphaquad_t *q, int blend, qboolean lit, float *rgba)
+{
+	static cvar_t *r_om_fxlight;
+	vec3_t light;
+	float s, ob;
+	int k;
+
+	if (!r_om_fxlight)
+	{
+		r_om_fxlight = ri.Cvar_Get("r_om_fxlight", "1", CVAR_ARCHIVE);
+	}
+
+	s = Q_clamp(r_om_fxlight->value, 0.0f, 1.0f);
+
+	if ((blend != 1) || lit || (s <= 0) || (q->flags & SOF_AQ_DECAL) || (r_newrefdef.rdflags & RDF_IRGOGGLES) ||
+		(r_fullbright->value != 0))
+	{
+		return;
+	}
+
+	/* test aid: r_om_fxlight 2 paints the quads this lights red */
+	if (r_om_fxlight->value == 2)
+	{
+		rgba[0] = 1;
+		rgba[1] = rgba[2] = 0;
+		return;
+	}
+
+	GL3_SoF_LightPoint(q->origin, light, 255);
+	ob = gl3state.uni3DData.overbrightbits;
+
+	/* as the world shader: the lightmap value through the SoF colour table, then the overbright scale */
+	for (k = 0; k < 3; k++)
+	{
+		int idx = (int)Q_clamp(light[k] * 255.0f + 0.5f, 0.0f, 255.0f);
+		float l = Q_clamp(gl3_colortable[idx] / 255.0f * ob, 0.06f, 1.0f);
+
+		rgba[k] *= 1 + s * (l - 1);
+	}
+}
+
 /* fog settings for drawing a point p of region r with a given blend mode */
 static void
 SetPointFog(gl3fxstate_t *st, int region, const vec3_t p, int blend)
@@ -1033,6 +1081,7 @@ DrawAlphaQuad(sofalphaquad_t *q)
 	}
 
 	QuadColor(q, blend, light, lit, rgba);
+	FxLight(q, blend, lit, rgba);
 
 	GL3_FX_DefaultState(&st);
 	st.texnum = image ? image->texnum : 0;
@@ -1194,6 +1243,8 @@ DrawQuadChain(sofquadchain_t *chain)
 			QuadColor(q, QuadBlend(q->flags) == blend ? blend : QuadBlend(q->flags), light,
 				(q->flags & SOF_AQ_LIT) != 0, rgba);
 		}
+
+		FxLight(q, blend, batched ? lit : ((q->flags & SOF_AQ_LIT) != 0), rgba);
 
 		if (billboard)
 		{
