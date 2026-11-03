@@ -155,6 +155,7 @@ void GL3_FX_SortedPass(void);
 void GL3_FX_ScreenOverlays(void);
 void GL3_FX_AddAlphaSurface(msurface_t *surf, entity_t *ent);
 void GL3_SoF_LightPoint(const vec3_t p, vec3_t color, int dir);
+qboolean GL3_SoF_AmbientCube(const vec3_t p, float *out); /* GFX-modern r_om_ambcube */
 void GL3_SoF_ClearLightCache(void);
 void GL3_SoF_SetDirTable(const float (*table)[3], int count);
 

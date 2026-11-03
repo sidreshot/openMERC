@@ -1194,3 +1194,18 @@ correction away and put ours in its place".
 * Ghoul: the same for opaque alpha-tested primitives with GL_GREATER / GL_GEQUAL (gl3_ghoulemu.c).
 * arm1 chainlink (alphaspot.py finds 0x800 faces and a view of them), one run: wire edges at a grazing angle get
   intermediate tones instead of steps; the mesh does not thin out with distance. Cost not measurable.
+## r_om_ambcube: directional ambient light of models (owner: "lighting of characters and weapon from the baked light")
+
+* Ghoul models (ghl_light_method 3) are lit by up to 6 map lights (BSP lump 20, GL lights) plus an ambient term,
+  0.6 x the lightmap under the feet: one colour for the whole body. Now the ambient term follows the surroundings:
+  probes on a 32-unit grid look along +x -x +y -y +z -z (LightTrace, the lightmap of the first face within 1024
+  units, the sky / nothing = the mean of the hits), a model blends the eight probes around its origin (the view
+  weapon: the eye), probes in solid weigh nothing; cached per map (4096 slots). Only the shape is used: the six
+  colours divided by the mean brightness of the four horizontal ones, pulled toward 1 by `r_om_ambcube` (0 off,
+  default 0.7), clamped 0.25..2 - the sides keep their brightness on average (normalising by all six darkened the
+  sides under a bright floor and a lamp-lit ceiling, jpn2), the side facing the lit part of the room is lighter,
+  coloured walls tint. Applied in the emulator's ambient term, vertex (Lighting) and per-pixel (omLit) paths, with
+  the view's eye-to-world rotation; all lit Ghoul draws on arm1, jpn2, kos1 go through it.
+* `r_om_ambcube_debug 1`: +x red, +y green, +z blue (checked: the side facing +x is red); 2 prints the factors
+  (OMAMB). arm1 shop: the sides differ by about 15 %, at a doorway or window up to 2 : 0.25.
+* Not done: the map lights still reach a model through walls (no occlusion test in GatherWorldLights).

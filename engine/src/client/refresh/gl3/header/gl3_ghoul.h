@@ -181,6 +181,7 @@ void GL3_GhoulEmu_SetCaster(qboolean casts);
 void GL3_GhoulEmu_SetTess(int level, float strength);
 qboolean GL3_GhoulEmu_TakeRound(void); /* the entity just drawn drew a round model's texture (r_om_tess) */
 void GL3_GhoulEmu_SetPPL(qboolean on);
+void GL3_GhoulEmu_SetAmbientCube(const float *cube); /* GFX-modern r_om_ambcube */
 void GL3_GhoulEmu_End(void);
 void GL3_GhoulEmu_Shutdown(void);
 

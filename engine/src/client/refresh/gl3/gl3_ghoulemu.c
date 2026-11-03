@@ -131,6 +131,12 @@ static struct
 	int tess;
 	float tessk;    /* how far toward the PN surface (r_om_tess / 10) */
 	qboolean ppl;   /* per-pixel lighting of the entity being drawn (r_om_ppl_models) */
+	/* GFX-modern r_om_ambcube: the ambient factors of the entity along +x -x +y -y +z -z (world), on; the eye to
+	   world rotation of the view (column-major 3x3) */
+	float amb[18];
+	qboolean ambon;
+	float e2w[9];
+	GLint u_ambon, u_amb, u_e2w;
 	GLenum depthfunc;
 	emuvtx_t *tessbuf;
 	int maxtess;
@@ -280,6 +286,29 @@ Clamp01(float v)
 	return (v < 0) ? 0 : ((v > 1) ? 1 : v);
 }
 
+/* GFX-modern r_om_ambcube: the ambient factor for an eye-space normal (squared world components weigh the axes) */
+static void
+AmbFactor(const float *n, float *af)
+{
+	float w[3];
+	int i, k;
+
+	for (i = 0; i < 3; i++)
+	{
+		w[i] = E.e2w[i] * n[0] + E.e2w[3 + i] * n[1] + E.e2w[6 + i] * n[2];
+	}
+
+	for (k = 0; k < 3; k++)
+	{
+		af[k] = 0;
+
+		for (i = 0; i < 3; i++)
+		{
+			af[k] += w[i] * w[i] * E.amb[(i * 2 + (w[i] < 0)) * 3 + k];
+		}
+	}
+}
+
 static void
 Lighting(const float *eye, float *rgba)
 {
@@ -299,9 +328,18 @@ Lighting(const float *eye, float *rgba)
 		memcpy(md, E.mat.diffuse, sizeof(md));
 	}
 
-	for (k = 0; k < 3; k++)
 	{
-		c[k] = E.mat.emission[k] + ma[k] * E.lmambient[k];
+		float af[3] = {1, 1, 1};
+
+		if (E.ambon)
+		{
+			AmbFactor(n, af);
+		}
+
+		for (k = 0; k < 3; k++)
+		{
+			c[k] = E.mat.emission[k] + ma[k] * E.lmambient[k] * af[k];
+		}
 	}
 
 	for (i = 0; i < NUM_LIGHTS; i++)
@@ -609,13 +647,25 @@ static const char *emu_fs =
 	"uniform int omPPL;\n"
 	"uniform vec4 omL[48];\n"
 	"uniform vec4 omM[6];\n"
+	/* r_om_ambcube: the ambient factors along +x -x +y -y +z -z of the world and the eye to world rotation */
+	"uniform int omAmbOn;\n"
+	"uniform vec3 omAmb[6];\n"
+	"uniform mat3 omE2W;\n"
+	"vec3 omAmbK(vec3 n)\n"
+	"{\n"
+	"	if (omAmbOn == 0) return vec3(1.0);\n"
+	"	vec3 w = omE2W * n;\n"
+	"	vec3 q = w * w;\n"
+	"	return q.x * (w.x >= 0.0 ? omAmb[0] : omAmb[1]) + q.y * (w.y >= 0.0 ? omAmb[2] : omAmb[3]) +\n"
+	"		q.z * (w.z >= 0.0 ? omAmb[4] : omAmb[5]);\n"
+	"}\n"
 	"vec4 omLit(vec4 vc)\n"
 	"{\n"
 	"	vec3 n = normalize(vEN);\n"
 	"	bool cm = omM[4].y > 0.5;\n"
 	"	vec4 ma = cm ? vc : omM[0];\n"
 	"	vec4 md = cm ? vc : omM[1];\n"
-	"	vec3 c = omM[3].rgb + ma.rgb * omM[5].rgb;\n"
+	"	vec3 c = omM[3].rgb + ma.rgb * omM[5].rgb * omAmbK(n);\n"
 	"	for (int i = 0; i < 8; i++)\n"
 	"	{\n"
 	"		if (omL[i * 6 + 1].w < 0.5) continue;\n"
@@ -844,6 +894,9 @@ CreateObjects(void)
 	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
 	E.u_pplL = glGetUniformLocation(E.prog, "omL");
 	E.u_pplM = glGetUniformLocation(E.prog, "omM");
+	E.u_ambon = glGetUniformLocation(E.prog, "omAmbOn");
+	E.u_amb = glGetUniformLocation(E.prog, "omAmb");
+	E.u_e2w = glGetUniformLocation(E.prog, "omE2W");
 	E.u_beamn = glGetUniformLocation(E.prog, "omBeamN");
 	E.u_beam = glGetUniformLocation(E.prog, "omBeam");
 	GL3_UseProgram(E.prog);
@@ -1485,6 +1538,13 @@ Flush(void)
 			memcpy(M + 20, E.lmambient, 4 * sizeof(float));
 			glUniform4fv(E.u_pplL, NUM_LIGHTS * 6, L);
 			glUniform4fv(E.u_pplM, 6, M);
+			glUniform1i(E.u_ambon, E.ambon ? 1 : 0);
+
+			if (E.ambon)
+			{
+				glUniform3fv(E.u_amb, 6, E.amb);
+				glUniformMatrix3fv(E.u_e2w, 1, GL_FALSE, E.e2w);
+			}
 		}
 	}
 
@@ -2754,6 +2814,32 @@ void
 GL3_GhoulEmu_SetPPL(qboolean on)
 {
 	E.ppl = on;
+}
+
+/* GFX-modern r_om_ambcube: the ambient factors of the entity being drawn (18 floats, +x -x +y -y +z -z), NULL off;
+   the eye space is the 3D view's (gl3state.viewMat3D, the modelview the Ghoul call starts from) */
+void
+GL3_GhoulEmu_SetAmbientCube(const float *cube)
+{
+	int i, j;
+
+	E.ambon = (cube != NULL);
+
+	if (!cube)
+	{
+		return;
+	}
+
+	memcpy(E.amb, cube, sizeof(E.amb));
+
+	/* eye = R world, so world = R^T eye: the matrix that maps eye to world has R's rows as its columns */
+	for (j = 0; j < 3; j++)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			E.e2w[j * 3 + i] = gl3state.viewMat3D.Elements[i][j];
+		}
+	}
 }
 
 /* GFX-modern: PN tessellation of the entity being drawn - subdivision level (0 or 1 off) and how far the

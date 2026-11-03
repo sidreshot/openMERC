@@ -585,6 +585,196 @@ GL3_SoF_LightPoint(const vec3_t p, vec3_t color, int dir)
 }
 
 /* ------------------------------------------------------------------
+ * GFX-modern r_om_ambcube: directional ambient light of models
+ *
+ * The ambient part of a model's light is one colour, the lightmap under its feet. Here the surroundings
+ * are seen along the six axes (+x -x +y -y +z -z): the lightmap of the first face hit up to 1024 units away,
+ * the light those faces send back. Probes stand on a 32-unit grid (cached), a point blends the eight around
+ * it (a probe in solid weighs nothing). Only the shape is kept: the six values divided by the mean
+ * brightness of the four horizontal ones, pulled toward 1 by r_om_ambcube (0 off .. 1 full), so the model's
+ * sides are as bright as before on average and lighter on the side its surroundings are lit from.
+ * ------------------------------------------------------------------ */
+
+#define AMBCACHE_SIZE 4096
+
+typedef struct
+{
+	int x, y, z;
+	int state; /* 0 empty, 1 probed, 2 in solid */
+	float rgb[6][3];
+} ambprobe_t;
+
+static ambprobe_t ambcache[AMBCACHE_SIZE];
+static gl3model_t *ambcacheworld;
+static cvar_t *r_om_ambcube, *r_om_ambcube_debug;
+
+static const float ambdirs[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+
+static const ambprobe_t *
+AmbProbe(int x, int y, int z)
+{
+	unsigned int h = ((unsigned int)x * 73856093u) ^ ((unsigned int)y * 19349663u) ^ ((unsigned int)z * 83492791u);
+	ambprobe_t *a = &ambcache[h & (AMBCACHE_SIZE - 1)];
+	vec3_t p, end, c;
+	float sum[3] = {0, 0, 0};
+	int hit[6], nhit = 0, d, k;
+	mleaf_t *leaf;
+
+	if (a->state && (a->x == x) && (a->y == y) && (a->z == z))
+	{
+		return a;
+	}
+
+	a->x = x;
+	a->y = y;
+	a->z = z;
+	VectorSet(p, x * 32.0f - 4096, y * 32.0f - 4096, z * 32.0f - 4096);
+	leaf = Mod_PointInLeaf(p, gl3_worldmodel->nodes);
+
+	if (!leaf || (leaf->contents & CONTENTS_SOLID))
+	{
+		a->state = 2;
+		return a;
+	}
+
+	for (d = 0; d < 6; d++)
+	{
+		VectorMA(p, 1024, ambdirs[d], end);
+		hit[d] = (LightTrace(gl3_worldmodel->nodes, p, end, c) >= 0);
+
+		if (hit[d])
+		{
+			VectorCopy(c, a->rgb[d]);
+
+			for (k = 0; k < 3; k++)
+			{
+				sum[k] += c[k];
+			}
+
+			nhit++;
+		}
+	}
+
+	/* the sky, or nothing within reach: neutral, the mean of what was hit */
+	for (d = 0; d < 6; d++)
+	{
+		if (!hit[d])
+		{
+			for (k = 0; k < 3; k++)
+			{
+				a->rgb[d][k] = nhit ? sum[k] / nhit : 1.0f;
+			}
+		}
+	}
+
+	a->state = 1;
+	return a;
+}
+
+/* the factors for the six axes at p (18 floats, mean brightness 1); false when off or nothing usable */
+qboolean
+GL3_SoF_AmbientCube(const vec3_t p, float *out)
+{
+	float s, w, wsum = 0, lum = 0, f[3];
+	int cx, cy, cz, i, d, k;
+
+	if (!r_om_ambcube)
+	{
+		r_om_ambcube = ri.Cvar_Get("r_om_ambcube", "0.7", CVAR_ARCHIVE);
+		r_om_ambcube_debug = ri.Cvar_Get("r_om_ambcube_debug", "0", 0);
+	}
+
+	/* test aid: +x red, +y green, +z blue, the negative axes dark (2: print the factors of every model instead) */
+	if (r_om_ambcube_debug->value == 1)
+	{
+		static const float dbg[18] = {2, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 2, 0.2f, 0.2f, 0.2f, 0.2f,
+			0.2f, 0.2f, 2, 0.2f, 0.2f, 0.2f};
+
+		memcpy(out, dbg, sizeof(dbg));
+		return true;
+	}
+
+	s = Q_clamp(r_om_ambcube->value, 0.0f, 1.0f);
+
+	if ((s <= 0) || !gl3_worldmodel || !gl3_worldmodel->lightdata || !gl3_worldmodel->nodes)
+	{
+		return false;
+	}
+
+	if (ambcacheworld != gl3_worldmodel)
+	{
+		ambcacheworld = gl3_worldmodel;
+		memset(ambcache, 0, sizeof(ambcache));
+	}
+
+	f[0] = (p[0] + 4096) / 32;
+	f[1] = (p[1] + 4096) / 32;
+	f[2] = (p[2] + 4096) / 32;
+	cx = (int)floorf(f[0]);
+	cy = (int)floorf(f[1]);
+	cz = (int)floorf(f[2]);
+	f[0] -= cx;
+	f[1] -= cy;
+	f[2] -= cz;
+	memset(out, 0, 18 * sizeof(float));
+
+	for (i = 0; i < 8; i++)
+	{
+		const ambprobe_t *a = AmbProbe(cx + (i & 1), cy + ((i >> 1) & 1), cz + (i >> 2));
+
+		if (a->state != 1)
+		{
+			continue;
+		}
+
+		w = ((i & 1) ? f[0] : 1 - f[0]) * ((i & 2) ? f[1] : 1 - f[1]) * ((i & 4) ? f[2] : 1 - f[2]);
+		w = Q_max(w, 0.0001f);
+		wsum += w;
+
+		for (d = 0; d < 6; d++)
+		{
+			for (k = 0; k < 3; k++)
+			{
+				out[d * 3 + k] += w * a->rgb[d][k];
+			}
+		}
+	}
+
+	if (wsum <= 0)
+	{
+		return false;
+	}
+
+	/* the mean of the four horizontal axes: a model is mostly seen from the side, its sides keep their brightness
+	   on average (with all six, a bright floor and lamp-lit ceiling darkened the sides one sees) */
+	for (d = 0; d < 4; d++)
+	{
+		lum += (0.3f * out[d * 3] + 0.59f * out[d * 3 + 1] + 0.11f * out[d * 3 + 2]) / wsum;
+	}
+
+	lum /= 4;
+
+	if (lum < 0.004f)
+	{
+		return false;
+	}
+
+	for (i = 0; i < 18; i++)
+	{
+		out[i] = 1 + s * (out[i] / wsum / lum - 1);
+		out[i] = Q_clamp(out[i], 0.25f, 2.0f);
+	}
+
+	if (r_om_ambcube_debug->value == 2)
+	{
+		R_Printf(PRINT_ALL, "OMAMB %.0f %.0f %.0f lum %.3f wsum %.3f  +x %.2f -x %.2f +y %.2f -y %.2f +z %.2f -z %.2f\n",
+			p[0], p[1], p[2], lum, wsum, out[1], out[4], out[7], out[10], out[13], out[16]);
+	}
+
+	return true;
+}
+
+/* ------------------------------------------------------------------
  * alpha quads (SPEC-412 §8) and quad chains (§9)
  * ------------------------------------------------------------------ */
 

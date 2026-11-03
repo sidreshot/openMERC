@@ -988,6 +988,15 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			GL3_GhoulEmu_SetTess(level, k);
 		}
 		GL3_GhoulEmu_SetPPL(r_om_ppl_models->value != 0);
+
+		/* r_om_ambcube: the ambient light from the side the surroundings are lit from (the view weapon: at the eye) */
+		{
+			float cube[18];
+			qboolean lit = !((flags & SOF_RF_FULLBRIGHT) || fullbright);
+
+			GL3_GhoulEmu_SetAmbientCube((lit && GL3_SoF_AmbientCube((weapon || (flags & SOF_RF_VIEWERMODEL)) ?
+				r_newrefdef.vieworg : e->origin, cube)) ? cube : NULL);
+		}
 	}
 
 	GL3_GhoulEmu_TakeRound();
@@ -1004,6 +1013,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		GL3_GhoulEmu_SetCaster(false);
 		GL3_GhoulEmu_SetTess(0, 0.0f);
 		GL3_GhoulEmu_SetPPL(false);
+		GL3_GhoulEmu_SetAmbientCube(NULL);
 	}
 
 	/* step 12: restore */
