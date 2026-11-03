@@ -1181,3 +1181,16 @@ correction away and put ours in its place".
   light-direction pages (the .oml cache keeps the directions, the renderer no longer reads them), GL_TEXTURE10
   and 11, the omBump* uniforms and the r_om_bump_* cvars. Kept and renamed: the map's lamps for the SSR lamp
   glints (gl3_lamps.c, GL3_Lamps_Set / GL3_Lamps_View), the material class (GL3_Mat_SurfClass).
+
+## r_om_a2c: alpha-to-coverage for grates, fences, wires (owner: "alpha-to-coverage")
+
+* MSAA smooths geometry edges only; the alpha test of world faces (texinfo 0x800, texel alpha <= 0.05 discarded) kept
+  stair-stepped wire edges, more visible with the HD pack. With `r_om_a2c 1` (default) and a multisampled target, the
+  opaque lightmapped faces (si3Dlm, si3DlmFlow, not blended) draw with GL_SAMPLE_ALPHA_TO_COVERAGE and
+  GL_SAMPLE_ALPHA_TO_ONE; the shader (omCoverage) widens the 0.05 threshold to about one pixel by fwidth(alpha) and
+  outputs it as coverage, so the edge falls between samples like a geometry edge. The threshold position is the same,
+  so the wires keep their thickness. Without MSAA (mirror and other single-sample targets, r_msaa_samples 0) the plain
+  test runs: Draw3DBatchesNow checks GL_SAMPLE_BUFFERS when the program or blending changes and sets omA2C.
+* Ghoul: the same for opaque alpha-tested primitives with GL_GREATER / GL_GEQUAL (gl3_ghoulemu.c).
+* arm1 chainlink (alphaspot.py finds 0x800 faces and a view of them), one run: wire edges at a grazing angle get
+  intermediate tones instead of steps; the mesh does not thin out with distance. Cost not measurable.

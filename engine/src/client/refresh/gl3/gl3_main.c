@@ -845,6 +845,63 @@ UpdateLMscales(const hmm_vec4 lmScales[MAX_LIGHTMAPS_PER_SURFACE], gl3ShaderInfo
 	}
 }
 
+/* GFX-modern r_om_a2c: opaque lightmapped faces drawn into a multisampled target resolve their alpha test as sample
+   coverage (omCoverage in the world shader); GL_SAMPLE_ALPHA_TO_ONE keeps the stored alpha 1 */
+static int a2con;
+
+static void
+A2CForDraw(const gl3ShaderInfo_t *shader, int flags)
+{
+	static cvar_t *r_om_a2c;
+	static GLuint prog[2];
+	static GLint loc[2];
+	int k = (shader == &gl3state.si3Dlm) ? 0 : (shader == &gl3state.si3DlmFlow) ? 1 : -1;
+	int on = 0;
+
+	if (!r_om_a2c)
+	{
+		r_om_a2c = ri.Cvar_Get("r_om_a2c", "1", CVAR_ARCHIVE);
+	}
+
+	if (k >= 0 && !(flags & DCFlag_Blend) && r_om_a2c->value)
+	{
+		GLint sb = 0;
+
+		glGetIntegerv(GL_SAMPLE_BUFFERS, &sb);
+		on = (sb > 0);
+	}
+
+	if (k >= 0)
+	{
+		if (prog[k] != shader->shaderProgram)
+		{
+			prog[k] = shader->shaderProgram;
+			loc[k] = glGetUniformLocation(prog[k], "omA2C");
+		}
+
+		if (loc[k] != -1)
+		{
+			glUniform1i(loc[k], on); /* the program is current */
+		}
+	}
+
+	if (on != a2con)
+	{
+		if (on)
+		{
+			glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+			glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+		}
+		else
+		{
+			glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+			glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+		}
+
+		a2con = on;
+	}
+}
+
 void GL3_Draw3DBatchesNow()
 {
 	if(da_count(drawCmds) == 0)
@@ -908,6 +965,9 @@ void GL3_Draw3DBatchesNow()
 			else
 				glDisable(GL_BLEND);
 		}
+
+		if(cmd->shaderIdx != curState.shaderIdx || ((flags ^ curFlags) & DCFlag_Blend))
+			A2CForDraw(shader, flags); /* GFX-modern r_om_a2c */
 
 		if((flags & DCFlag_PolyOffsetFill) != (curFlags & DCFlag_PolyOffsetFill))
 		{
@@ -1039,6 +1099,8 @@ void GL3_Draw3DBatchesNow()
 
 	if(curFlags & DCFlag_PolyOffsetFill)
 		glDisable(GL_POLYGON_OFFSET_FILL);
+
+	A2CForDraw(NULL, 0); /* GFX-modern r_om_a2c: off for the other draw paths */
 }
 
 static qboolean drawStateEqual(const gl3drawCmd_t* a, const gl3drawCmd_t* b)

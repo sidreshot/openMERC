@@ -109,7 +109,7 @@ static struct
 
 	/* GL objects */
 	GLuint prog, vao, vbo;
-	GLint u_tex, u_texenv, u_texswz, u_alphafunc, u_alpharef, u_fog, u_fogcolor;
+	GLint u_tex, u_texenv, u_texswz, u_alphafunc, u_alpharef, u_fog, u_fogcolor, u_a2c;
 
 	/* GFX-modern bloom (gl3_post.c): blending as set, the Ghoul system's source weight of the next
 	   primitive and the glow of the entity being drawn */
@@ -590,6 +590,7 @@ static const char *emu_fs =
 	"uniform int texswz;\n"
 	"uniform int alphafunc;\n" /* 0 never ... 7 always */
 	"uniform float alpharef;\n"
+	"uniform int omA2C;\n"
 	"uniform int fogon;\n"
 	"uniform vec4 fogcolor;\n"
 	"uniform vec4 omEmis;\n"   /* GFX-modern: (x, y, z, mode) as in the effect shader */
@@ -728,6 +729,13 @@ static const char *emu_fs =
 	"	else if (alphafunc == 4) pass = c.a > alpharef;\n"
 	"	else if (alphafunc == 5) pass = c.a != alpharef;\n"
 	"	else if (alphafunc == 6) pass = c.a >= alpharef;\n"
+	"	float omW = fwidth(c.a);\n"
+	"	if (omA2C != 0)\n" /* r_om_a2c: greater / greater-or-equal widened to about a pixel, as coverage */
+	"	{\n"
+	"		pass = true;\n"
+	"		c.a = clamp((c.a - alpharef) / max(omW, 0.0001) + 0.5, 0.0, 1.0);\n"
+	"		if (c.a <= 0.0) discard;\n"
+	"	}\n"
 	"	if (!pass) discard;\n"
 	"	outColor = c;\n"
 	"	if (omEmis.w > 1.5) outEmissive = vec4(omEmis.xyz, c.a);\n"
@@ -827,6 +835,7 @@ CreateObjects(void)
 	E.u_texswz = glGetUniformLocation(E.prog, "texswz");
 	E.u_alphafunc = glGetUniformLocation(E.prog, "alphafunc");
 	E.u_alpharef = glGetUniformLocation(E.prog, "alpharef");
+	E.u_a2c = glGetUniformLocation(E.prog, "omA2C");
 	E.u_fog = glGetUniformLocation(E.prog, "fogon");
 	E.u_fogcolor = glGetUniformLocation(E.prog, "fogcolor");
 	E.u_emis = glGetUniformLocation(E.prog, "omEmis");
@@ -1491,6 +1500,42 @@ Flush(void)
 		return;
 	}
 #endif
+
+	/* GFX-modern r_om_a2c: an opaque alpha-tested primitive (greater / greater-or-equal) in a multisampled target
+	   resolves its edge as sample coverage, as the world faces do (gl3_main.c) */
+	{
+		static cvar_t *r_om_a2c;
+		int a2c = 0;
+
+		if (!r_om_a2c)
+		{
+			r_om_a2c = ri.Cvar_Get("r_om_a2c", "1", CVAR_ARCHIVE);
+		}
+
+		if (E.alphatest && !E.blendon && r_om_a2c->value)
+		{
+			int f = AlphaFuncIndex(E.alphafunc);
+			GLint sb = 0;
+
+			if (f == 4 || f == 6)
+			{
+				glGetIntegerv(GL_SAMPLE_BUFFERS, &sb);
+				a2c = (sb > 0);
+			}
+		}
+
+		glUniform1i(E.u_a2c, a2c);
+
+		if (a2c)
+		{
+			glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+			glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+			glDrawArrays(mode, 0, n);
+			glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+			glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+			return;
+		}
+	}
 
 	glDrawArrays(mode, 0, n);
 }

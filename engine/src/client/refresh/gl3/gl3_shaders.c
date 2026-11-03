@@ -612,8 +612,9 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			vec4 texel = texture(tex, passTexCoord);
 
 			// OpenMerc: alpha-tested world textures (SoF .m32 flag 0x800,
-			// grates, fences; also Quake II palette index 255)
-			if(omTranslucent == 0 && texel.a <= 0.05)
+			// grates, fences; also Quake II palette index 255); GFX-modern r_om_a2c: sample coverage under MSAA
+			float omCov = omCoverage(texel.a);
+			if(omTranslucent == 0 && omCov <= 0.0)
 				discard;
 
 			// apply intensity
@@ -707,7 +708,7 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 				lmTex.rgb = vec3(0.0);
 				omLmAlpha = (omMono == 4) ? (255.0 - omA) / 255.0 : 1.0;
 			}
-			if(omTranslucent == 0 && texel.a * omLmAlpha <= 0.05)
+			if(omTranslucent == 0 && omLmAlpha < 1.0 && texel.a * omLmAlpha <= 0.05) // (omLmAlpha 1: tested above)
 				discard;
 
 			lmTex.rgb *= overbrightbits;
@@ -729,7 +730,7 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			}
 			outColor.rgb = pow(outColor.rgb, vec3(gamma)); // apply gamma correction to result
 
-			outColor.a = (omTranslucent != 0) ? texel.a*alpha : 1.0; // OpenMerc: SoF translucent surfaces have lightmaps
+			outColor.a = (omTranslucent != 0) ? texel.a*alpha : omCov; // OpenMerc: SoF translucent surfaces have lightmaps (opaque: 1, or the r_om_a2c coverage)
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
@@ -828,6 +829,18 @@ static const char* fragmentSrcOmPdl =
 
 /* GFX-modern: functions of the world shaders - lightning light, reflection material, mirrors */
 static const char* fragmentSrcOmWorld =
+	/* GFX-modern r_om_a2c: the alpha test of opaque faces (grates, fences, wires). omA2C 1 (MSAA target, the draw has
+	   GL_SAMPLE_ALPHA_TO_COVERAGE on, gl3_main.c): the 0.05 threshold is widened to about one pixel by the alpha's
+	   screen derivative and the result becomes the share of covered samples, so the edge is antialiased like a
+	   geometry edge; 0: the plain test */
+	"uniform int omA2C;\n"
+	"float omCoverage(float a)\n"
+	"{\n"
+	"	float w = fwidth(a);\n"
+	"	if (omA2C == 0)\n"
+	"		return (a <= 0.05) ? 0.0 : 1.0;\n"
+	"	return clamp((a - 0.05) / max(w, 0.0001) + 0.5, 0.0, 1.0);\n"
+	"}\n"
 	/* GFX-modern r_om_rain: the light of a lightning strike (gl3_post.c). The channel is kilometres away: its light
 	   comes in parallel along omLt.xyz and reaches only what sees it - a shadow map of the static world made along
 	   that direction once per strike decides, so nothing behind a wall or under a roof is lit. The lit cloud deck adds
@@ -1029,8 +1042,9 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			vec4 texel = texture(tex, passTexCoord);
 
 			// OpenMerc: alpha-tested world textures (SoF .m32 flag 0x800,
-			// grates, fences; also Quake II palette index 255)
-			if(omTranslucent == 0 && texel.a <= 0.05)
+			// grates, fences; also Quake II palette index 255); GFX-modern r_om_a2c: sample coverage under MSAA
+			float omCov = omCoverage(texel.a);
+			if(omTranslucent == 0 && omCov <= 0.0)
 				discard;
 
 			// apply intensity
@@ -1127,7 +1141,7 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 				lmTex.rgb = vec3(0.0);
 				omLmAlpha = (omMono == 4) ? (255.0 - omA) / 255.0 : 1.0;
 			}
-			if(omTranslucent == 0 && texel.a * omLmAlpha <= 0.05)
+			if(omTranslucent == 0 && omLmAlpha < 1.0 && texel.a * omLmAlpha <= 0.05) // (omLmAlpha 1: tested above)
 				discard;
 
 			lmTex.rgb *= overbrightbits;
@@ -1149,7 +1163,7 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			}
 			outColor.rgb = pow(outColor.rgb, vec3(gamma)); // apply gamma correction to result
 
-			outColor.a = (omTranslucent != 0) ? texel.a*alpha : 1.0; // OpenMerc: SoF translucent surfaces have lightmaps
+			outColor.a = (omTranslucent != 0) ? texel.a*alpha : omCov; // OpenMerc: SoF translucent surfaces have lightmaps (opaque: 1, or the r_om_a2c coverage)
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
 			if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
