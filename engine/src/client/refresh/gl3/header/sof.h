@@ -390,8 +390,13 @@ typedef struct
 {
 	int first, num;      /* vertices */
 	vec3_t mins, maxs;
+	int key;             /* Ghoul instance handle of the entity drawn (0 none) */
+	vec3_t org;          /* its origin when drawn */
 } csmseg_t;
 int GL3_CSM_Casters(const float **tris, const csmseg_t **segs);
+void GL3_CSM_SetCasterKey(int key, const vec3_t org);
+void GL3_CSM_SetSunWeight(float w);
+void GL3_CSM_Advance(void);
 const char *GL3_CSM_Token(const char **p, const char *end, char *out, int outsize);
 int GL3_CSM_Floats(const char *s, float *out, int max);
 

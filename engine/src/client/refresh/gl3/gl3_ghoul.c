@@ -971,7 +971,9 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 	}
 
 	GL3_GhoulEmu_TakeRound();
+	GL3_CSM_SetCasterKey((short)(e->frame & 0xFFFF), e->origin);
 	Ghl_Draw(inst, &P);
+	GL3_CSM_SetCasterKey(0, NULL);
 
 	if (ff_emulated)
 	{

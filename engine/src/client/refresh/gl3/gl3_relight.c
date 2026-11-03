@@ -664,3 +664,51 @@ GL3_Deluxe_BindPage(int page)
 	GL3_SelectTMU(GL_TEXTURE10);
 	glBindTexture(GL_TEXTURE_2D, ((page >= 0) && (page < MAX_LIGHTMAPS) && dxtex[page]) ? dxtex[page] : dxneutral);
 }
+
+/* the light model weights omlight fitted to the map's own lightmaps (the "fit 2" line of its log: point, surface,
+   sun, sky, spot, in lightmap units), false without a bake log. A shadow takes away a lamp's light at the
+   weight the map was lit with (gl3_lshadow.c, gl3_csm.c) */
+qboolean
+GL3_Relight_Fit(const char *mapname, float *point, float *surf, float *sun, float *spot, float *r2)
+{
+	char cachename[MAX_QPATH], path[MAX_OSPATH], line[512];
+	qboolean found = false;
+	FILE *f;
+
+	if (!mapname || !Relight_CacheName(mapname, cachename, sizeof(cachename)))
+	{
+		return false;
+	}
+
+	Com_sprintf(path, sizeof(path), "%s/lightmaps/%s.log", ri.FS_Gamedir(), cachename);
+	f = fopen(path, "r");
+
+	if (!f)
+	{
+		return false;
+	}
+
+	while (fgets(line, sizeof(line), f))
+	{
+		float w[6], q;
+
+		if (strncmp(line, "fit 2", 5))
+		{
+			continue;
+		}
+
+		if (sscanf(line, "fit 2 point %f surf %f sun %f sky %f spot %f bounce %f R2 %f", &w[0], &w[1], &w[2],
+			&w[3], &w[4], &w[5], &q) == 7)
+		{
+			*point = w[0];
+			*surf = w[1];
+			*sun = w[2];
+			*spot = w[4];
+			*r2 = q;
+			found = true;
+		}
+	}
+
+	fclose(f);
+	return found;
+}

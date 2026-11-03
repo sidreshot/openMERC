@@ -1100,3 +1100,33 @@ correction away and put ours in its place".
   too - and panels filter over twice the texels (an area light, a wider penumbra). The floor counts from the lightmap
   before the sun's shadow, so sun and lamp shadows on one spot do not stack below it; the CSM stays (it is the sun's
   light, which the lamps do not replace).
+* Physically based rework (owner: "between lamps the shadow would hardly show in reality; on the ceiling the shadows
+  look like garbage and are very sharp; when a man runs the shadow jumps across objects; the shadow's darkness must
+  follow the strength of the source and its neighbours; take a proven algorithm; indoors there can be no sun or moon
+  shadow"):
+  - Darkness: the subtractive shadow of baked lighting (as Unity's Subtractive mixed mode) - a shadow takes away the
+    lamp's own light there and no more. r_om_lshadow_gain (4x) is gone; the lamp's light is reckoned at the weights
+    omlight fitted to the map (log "fit 2": point, surface, spot; used when R2 >= 0.5 and each within 0.4..2.5 x the
+    usual 1.2 / 0.85 / 0.6, else those). A second cap: the lamp's part of the light of all lamps that reach the
+    caster's feet (each lamp traced for the world in between, CPU, measured again when the caster moves 12 units).
+    arm1 shop, NPC between two lamps: 0.47 and 0.49 - two faint half shadows; under one lamp about a third darker.
+  - Edge: percentage-closer soft shadows (Fernando, NVIDIA 2005). A blocker search (half the taps, a sampler object
+    reading the depth on unit 17) gives the casters' distance halfway between their mean and the nearest to the
+    receiver (the feet keep a contact), penumbra = lamp size x (receiver - blocker) / blocker; lamps
+    r_om_lshadow_lightsize (16), panels the span of their patches + 32. Rotated Poisson taps (r_om_lshadow_taps 8,
+    r_om_lshadow_softmax 24 texels); every search tap blocked skips the filter. The receivers are never in the casters'
+    maps, so the wide filter brings no acne.
+  - Ceiling: a caster within 16 units of its lamp (the fixture, its chain) casts nothing for it; faces the lamp grazes
+    fade their shadow out (ndl 0.02..0.25).
+  - Motion: a lamp that gets or loses a slot fades over 0.35 s (a dropped lamp keeps its slot till then). The casters
+    of the previous frame are moved to their entities' origins of this one before the maps are drawn
+    (GL3_CSM_Advance, by Ghoul instance handle; sun and lamps) - the shadow no longer trails a runner by a frame.
+  - Blob: half of it stays under a lamp shadow (it stands for the bounced light the body hides around its feet), and
+    less goes when the lamp's share is small.
+  - Sun / moon (gl3_csm.c): a receiver loses only the sun's part of its light, sun weight x ndl against the lightmap
+    (the fit's sun weight, else _sun_light). A window's sun patch in a lamp-lit room or a moon a street lamp outshines
+    loses little; a map whose lightmaps hold no sun (omlight: "no directional sun explains the lightmap", arm1) casts
+    no sun shadow at all. Indoors the static depth of the roof already blocks it. The beam pools' refill of the sun
+    shadow (gl3_post.c) went with it.
+  - Cost (arm1 shop, NPC under the lamps, 1080p): frame GPU 13.2 ms without lamp shadows, about 16 with (16 taps 16.5);
+    the earlier version about 14.6. Cheaper: r_om_lshadow_taps 4, r_om_lshadow_search 0, r_om_lshadow_lights 2.

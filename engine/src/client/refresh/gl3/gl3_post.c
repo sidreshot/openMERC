@@ -2403,22 +2403,9 @@ static const char *beamshade_fs =
 	"		outEmissive = vec4(1.0);\n"
 	"		return;\n"
 	"	}\n"
-	/* where the lamp reaches, it fills most of the sun's (moon's) character shadow that the world shaders
-	   took from the lightmap (gl3_csm.c omCsmApply), so a character does not throw two hard shadows */
-	"	float g = 0.0;\n"
-	"	if (fill > 0.0 && omCsmSun.w > 0.5)\n"
-	"	{\n"
-	"		vec3 nr = normalize(cross(dFdx(p), dFdy(p)));\n"
-	"		if (dot(nr, eye.xyz - p) < 0.0) nr = -nr;\n"
-	"		float ndl = dot(nr, omCsmSun.xyz), fade;\n"
-	"		int c = omCsmCascade(p, fade);\n"
-	"		if (c >= 0 && ndl > 0.0)\n"
-	"		{\n"
-	"			float k = omCsmParams.x * omCsmStatic(c, p, nr) * omCsmDynamic(c, p, nr) * fade * smoothstep(0.0, 0.3, ndl);\n"
-	"			g = (1.0 / max(1.0 - k, 0.5) - 1.0) * 0.85 * fill;\n"
-	"		}\n"
-	"	}\n"
-	"	outColor = vec4(g, g, g, 0.0);\n"
+	/* (the sun's character shadow in a lamp's pool is faint by itself now: the world shaders take away only the
+	   sun's part of the light, gl3_csm.c omCsmApply) */
+	"	outColor = vec4(0.0);\n"
 	"	outEmissive = vec4(0.0);\n"
 	"}\n";
 

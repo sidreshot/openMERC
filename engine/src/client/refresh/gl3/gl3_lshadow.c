@@ -10,24 +10,54 @@
  * patches merged into one emitter per panel. Each frame the few lamps with a moving caster in reach, nearest the
  * eye first, get a cube of depth maps (six faces): the static world (made once when the lamp gets its slot) and the
  * Ghoul models as drawn in the previous frame (gl3_csm.c keeps them). A world fragment the lamp lights in the
- * lightmap (the static faces let it through) and a caster blocks loses that lamp's share of its light: the lamp's
- * light at the point after the compiler's own falloff (linear for lamps, 1/d for panels) against the lightmap.
+ * lightmap (the static faces let it through) and a caster blocks loses that lamp's light there and no more (the
+ * subtractive shadow of baked lighting): the lamp's light after the compiler's own falloff (linear for lamps, 1/d
+ * for panels) at the weights omlight fitted to the map, never more than the lamp's part of the light of all the
+ * lamps that reach the caster. Between two lamps each shadow takes half; under many panels it is faint.
+ *
+ * The edge is percentage-closer soft shadows (Fernando, NVIDIA 2005): a blocker search around the point gives the
+ * mean distance of the casters, the penumbra is the lamp's size x (receiver - blocker) / blocker, filtered at that
+ * width - hard where the feet touch the floor, wide and faint away from the caster. The receivers are never in the
+ * casters' maps, so a wide filter costs no acne. A lamp that gets or loses a slot fades in and out.
  */
 
 #include "header/local.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #define LS_MAXSLOTS 8
 #define LS_BINDING 5        /* uniform block binding point (after uniOMcsm) */
-#define LS_UNIT 16          /* GL_TEXTURE16 */
+#define LS_UNIT 16          /* GL_TEXTURE16: the depth cubes with compare (filter taps) */
+#define LS_RAWUNIT 17       /* GL_TEXTURE17: the same with a sampler that reads the depth (blocker search) */
 #define LS_TAN 1.08f        /* tan of half the face field of view: a little over 90 degrees for the filter taps */
 #define LS_NEAR 2.0f
+#define LS_FIXTURE 16.0f    /* a caster this close to its lamp is the lamp's own fixture or chain: no shadow */
+#define LS_FADETIME 0.35f   /* seconds a lamp's shadow takes to come and go */
 
 #ifndef GL_TEXTURE_2D_ARRAY
 #define GL_TEXTURE_2D_ARRAY 0x8C1A
 #endif
 
 static cvar_t *r_om_lshadow, *r_om_lshadow_lights, *r_om_lshadow_size, *r_om_lshadow_strength;
-static cvar_t *r_om_lshadow_debug, *r_om_lshadow_range, *r_om_lshadow_gain, *r_om_lshadow_floor;
+static cvar_t *r_om_lshadow_debug, *r_om_lshadow_range, *r_om_lshadow_floor, *r_om_lshadow_lightsize;
+static cvar_t *r_om_lshadow_softmax, *r_om_lshadow_taps, *r_om_lshadow_search;
+
+/* the light model weights of the map (omlight's fit, else typical ones): lightmap units per unit of the model */
+static float wpoint = 1.2f, wsurf = 0.85f, wspot = 0.6f;
+
+/* sampler objects (GL 3.3, not in the loader): the depth read without compare on LS_RAWUNIT */
+#ifdef _WIN32
+typedef void (APIENTRY *pfnGenSamplers)(GLsizei n, GLuint *s);
+typedef void (APIENTRY *pfnDeleteSamplers)(GLsizei n, const GLuint *s);
+typedef void (APIENTRY *pfnBindSampler)(GLuint unit, GLuint s);
+typedef void (APIENTRY *pfnSamplerParameteri)(GLuint s, GLenum p, GLint v);
+static pfnGenSamplers qglGenSamplers;
+static pfnDeleteSamplers qglDeleteSamplers;
+static pfnBindSampler qglBindSampler;
+static pfnSamplerParameteri qglSamplerParameteri;
+#endif
 
 enum { LS_POINT, LS_SPOT, LS_SURF };
 
@@ -39,6 +69,8 @@ typedef struct
 	vec3_t dir;          /* spotlight axis */
 	float stopdot, focus;
 	vec3_t n;            /* panel normal */
+	vec3_t pmins, pmaxs; /* panel: the patches it is made of (its size) */
+	float size;          /* across the emitter: the penumbra */
 } lslight_t;
 
 /* std140 block uniOMls */
@@ -50,19 +82,23 @@ typedef struct
 	float a[LS_MAXSLOTS][4];     /* lamp: intensity, fade, focus, cone cosine; panel: normal, intensity x k */
 	float dir[LS_MAXSLOTS][4];   /* spotlight axis, nearest caster distance */
 	float cone[LS_MAXSLOTS][4];  /* the cone from the lamp around its casters: axis, cosine (-1 all around) */
-	float soft[LS_MAXSLOTS][4];  /* filter tap spacing in texels (a panel is no point: a wider penumbra) */
+	float soft[LS_MAXSLOTS][4];  /* lamp size, fade in/out, its part of the light at the caster, - */
 	float params[4];             /* slots, strength, darkest fraction, texel size per unit of distance */
-	float params2[4];            /* 1 / size, debug view, -, - */
+	float params2[4];            /* 1 / size, debug view, blocker search (sampler objects), widest filter radius (uv) */
 } lsubo_t;
 
 static struct
 {
 	qboolean failed, active, capturing;
 	int size, nslots;
-	GLuint tex, dummy, fbo, ubo, prog, vao, vbo;
+	GLuint tex, dummy, fbo, ubo, prog, vao, vbo, sampler;
 	GLint u_vp;
 	int slot[LS_MAXSLOTS];          /* light index, -1 free */
 	qboolean dirty[LS_MAXSLOTS];    /* the static faces need drawing */
+	float fade[LS_MAXSLOTS];        /* 0..1: the shadow coming (picked) or going (dropped, the slot kept till 0) */
+	float share[LS_MAXSLOTS];       /* the lamp's part of the light of all lamps at its caster */
+	vec3_t shareref[LS_MAXSLOTS];   /* where that was measured */
+	float lasttime;
 	const gl3model_t *built;
 	lsubo_t u;
 	qboolean uboenabled;
@@ -72,6 +108,8 @@ static struct
 
 static lslight_t *lights;
 static int numlights;
+
+extern float (*gl3_ghoul_trace)(const float *start, const float *end);   /* gl3_ghoul.c: the engine's trace */
 
 /* ------------------------------------------------------------------
  * the lamps of a map
@@ -361,11 +399,14 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 				}
 
 				c->intensity += lt.intensity;
+				AddPointToBounds(lt.o, c->pmins, c->pmaxs);
 			}
 			else
 			{
 				lt.kind = LS_SURF;
 				VectorCopy(pn, lt.n);
+				VectorCopy(lt.o, lt.pmins);
+				VectorCopy(lt.o, lt.pmaxs);
 				lights[numlights++] = lt;
 			}
 
@@ -373,10 +414,12 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 		}
 	}
 
-	/* panels: the shadow cube a little off the face; reach where 1/d light falls below a few lightmap units */
+	/* panels: the shadow cube a little off the face; reach where 1/d light falls below a few lightmap units; as
+	   wide as its patches plus the one patch's own piece of face */
 	for (i = 0; i < numlights; i++)
 	{
 		lslight_t *l = &lights[i];
+		vec3_t ext;
 
 		if (l->kind != LS_SURF)
 		{
@@ -385,9 +428,41 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 
 		VectorMA(l->o, 6, l->n, l->o);
 		l->radius = Q_clamp(sqrtf(l->intensity) * 3.0f, 96.0f, 900.0f);
+		VectorSubtract(l->pmaxs, l->pmins, ext);
+		l->size = Q_clamp(VectorLength(ext) + 32.0f, 32.0f, 160.0f);
 	}
 
 	free(e);
+
+	for (i = 0; i < LS_MAXSLOTS; i++)
+	{
+		L.fade[i] = 0;
+		L.share[i] = 1;
+	}
+
+	/* the weights the map was lit with: omlight's fit when it explains the lightmaps and stays near the usual
+	   values (a fit that put all the light on one kind of lamp is no measure of the others) */
+	wpoint = 1.2f;
+	wsurf = 0.85f;
+	wspot = 0.6f;
+
+	{
+		float fp, fs, fsun, fspot, r2;
+		float sunw = -1;   /* the sun's weight for gl3_csm.c, -1 none known */
+
+		if (mod && GL3_Relight_Fit(mod->name, &fp, &fs, &fsun, &fspot, &r2) && (r2 >= 0.5f))
+		{
+			if ((fp >= wpoint * 0.4f) && (fp <= wpoint * 2.5f)) wpoint = fp;
+			if ((fs >= wsurf * 0.4f) && (fs <= wsurf * 2.5f)) wsurf = fs;
+			if ((fspot >= wspot * 0.4f) && (fspot <= wspot * 2.5f)) wspot = fspot;
+			sunw = Q_max(fsun, 0.0f);
+			R_Printf(PRINT_DEVELOPER, "lamp shadows: fitted weights point %.2f surface %.2f spot %.2f sun %.0f (R2 %.2f)\n",
+				wpoint, wsurf, wspot, sunw, r2);
+		}
+
+		GL3_CSM_SetSunWeight(sunw);
+	}
+
 	R_Printf(PRINT_DEVELOPER, "lamp shadows: %d lamps (%d surface patches merged)\n", numlights, npatch);
 }
 
@@ -409,6 +484,11 @@ static const char *ls_glsl =
 	"	vec4 omLsP2;\n"
 	"};\n"
 	"uniform highp sampler2DArrayShadow omLsMap;\n"
+	"uniform highp sampler2DArray omLsRaw;\n"
+	"const vec2 omLsDisk[16] = vec2[16](vec2(-0.942, -0.399), vec2(0.946, -0.769), vec2(-0.094, -0.929), vec2(0.345, 0.294),\n"
+	"	vec2(-0.916, 0.458), vec2(-0.815, -0.879), vec2(-0.383, 0.277), vec2(0.975, 0.756), vec2(0.443, -0.975),\n"
+	"	vec2(0.537, -0.474), vec2(-0.265, -0.419), vec2(0.792, 0.191), vec2(-0.242, 0.997), vec2(-0.814, 0.914),\n"
+	"	vec2(0.200, 0.786), vec2(0.144, -0.141));\n"
 	/* lm0: the lightmap before the sun's shadow too - together they never go below the floor of it */
 	"void omLsApply(inout vec3 lm, vec3 lm0, vec3 wp, vec3 nrm)\n"
 	"{\n"
@@ -419,7 +499,6 @@ static const char *ls_glsl =
 	"	float keep = 1.0, total = 0.0;\n"
 	"	vec3 dbg = vec3(0.0);\n"
 	"	float cl[8];\n"
-	"	vec4 uv[8];\n"   /* face texture position, layer, depth */
 	"	for (int i = 0; i < 8; i++)\n"
 	"	{\n"
 	"		cl[i] = 0.0;\n"
@@ -454,15 +533,22 @@ static const char *ls_glsl =
 	"		total += ci;\n"
 	/* only inside the cone from the lamp around its casters and past the nearest of them can it be shadowed */
 	"		if (dot(-l, omLsCone[i].xyz) < omLsCone[i].w || d < omLsDir[i].w) continue;\n"
-	"		cl[i] = ci;\n"
+	/* a face the lamp grazes holds a shadow stretched over texels: it fades out there */
+	"		cl[i] = ci * smoothstep(0.02, 0.25, ndl);\n"
 	"	}\n"
 	"	if (total <= 0.0) return;\n"
-	/* a lamp's share: its light against the lightmap (r_om_lshadow_gain over), never more than its part of the
-	   lamps here - four panels over a floor give a quarter each, a lone lamp all */
+	/* the filter taps turn per pixel (interleaved gradient noise): no banding of a wide penumbra */
+	"	float K = omLsP.w / omLsP2.x;\n"   /* 2 tan: width of a face per unit of distance */
+	"	float ang = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
+	"	mat2 rot = mat2(cos(ang), sin(ang), -sin(ang), cos(ang));\n"
 	"	for (int i = 0; i < 8; i++)\n"
 	"	{\n"
 	"		if (i >= n) break;\n"
 	"		if (cl[i] <= 0.0) continue;\n"
+	/* the lamp's light against all the light here (the lightmap), never more than its part of the lamps that
+	   reach the caster: between two lamps half, under many panels little - too little to see, no taps */
+	"		float share = min(min(cl[i] / max(lum, 0.004), cl[i] / total), omLsSoft[i].z);\n"
+	"		if (omLsP.y * share * omLsSoft[i].y < 0.03) continue;\n"
 	/* a texel and a half off the face and toward the lamp (the static faces hold this face too) */
 	"		vec3 L = omLsPos[i].xyz - wp;\n"
 	"		float d = length(L);\n"
@@ -471,54 +557,94 @@ static const char *ls_glsl =
 	"		vec3 a = abs(v);\n"
 	"		int f = (a.x >= a.y && a.x >= a.z) ? (v.x < 0.0 ? 1 : 0) : ((a.y >= a.z) ? (v.y < 0.0 ? 3 : 2) : (v.z < 0.0 ? 5 : 4));\n"
 	"		vec4 sc = omLsVP[i * 6 + f] * vec4(p, 1.0);\n"
-	"		uv[i] = vec4(sc.xyz / sc.w * 0.5 + 0.5, float(i * 12 + f)).xywz;\n"
+	"		vec3 uvz = sc.xyz / sc.w * 0.5 + 0.5;\n"
+	"		float layer = float(i * 12 + f);\n"
 	/* the lightmap has this lamp's light only where the static world lets it through */
-	"		if (texture(omLsMap, uv[i]) < 0.5) continue;\n"
-	"		float share = min(cl[i] / max(lum, 0.004), cl[i] / total);\n"
-	/* four bilinear compare taps a texel apart: a 4 x 4 texel filter */
-	"		vec2 t = vec2(omLsP2.x * omLsSoft[i].x);\n"
-	"		float s = texture(omLsMap, vec4(uv[i].xy + vec2(-t.x, -t.y), uv[i].z + 6.0, uv[i].w))\n"
-	"			+ texture(omLsMap, vec4(uv[i].xy + vec2(t.x, -t.y), uv[i].z + 6.0, uv[i].w))\n"
-	"			+ texture(omLsMap, vec4(uv[i].xy + vec2(-t.x, t.y), uv[i].z + 6.0, uv[i].w))\n"
-	"			+ texture(omLsMap, vec4(uv[i].xy + vec2(t.x, t.y), uv[i].z + 6.0, uv[i].w));\n"
-	"		float sh = 1.0 - s * 0.25;\n"
-	"		dbg = max(dbg, vec3(sh * share, share, sh) * vec3(1.0, 0.5, 0.25));\n"
-	"		keep *= 1.0 - omLsP.y * share * sh;\n"
+	"		if (texture(omLsMap, vec4(uvz.xy, layer, uvz.z)) < 0.5) continue;\n"
+	"		layer += 6.0;\n"
+	"		float sh = 1.0;\n"
+	"		int nt = int(omLsSoft[i].w + 0.5);\n"
+	"		float zr = max(a.x, max(a.y, a.z));\n"   /* the receiver's distance along the face axis */
+	"		float W = omLsSoft[i].x;\n"
+	"		float zb = max(omLsDir[i].w, 4.0);\n"   /* the nearest caster, until the search finds the real ones */
+	"		if (omLsP2.z > 0.5)\n"
+	"		{\n"
+	/* blocker search: where a caster could hide part of the lamp from here, out to the nearest caster */
+	"			float fz = omLsPos[i].w + 16.0;\n"
+	"			float sr = clamp(0.5 * W * max(zr - zb, 0.0) / (zr * K * zb), omLsP2.x, omLsP2.w);\n"
+	"			float sum = 0.0, cnt = 0.0, zmax = 0.0;\n"
+	"			for (int k = 0; k < nt; k += 2)\n"
+	"			{\n"
+	"				float dz = texture(omLsRaw, vec3(uvz.xy + rot * omLsDisk[k] * sr, layer)).r;\n"
+	"				if (dz < uvz.z)\n"
+	"				{\n"
+	"					float z = 4.0 * fz / (fz + 2.0 - (2.0 * dz - 1.0) * (fz - 2.0));\n"   /* 2 n f / ..., near 2 */
+	"					sum += z;\n"
+	"					zmax = max(zmax, z);\n"
+	"					cnt += 1.0;\n"
+	"				}\n"
+	"			}\n"
+	"			if (cnt < 0.5) continue;\n"
+	/* halfway to the caster nearest the receiver: the feet keep a hard contact though the body is in the search */
+	"			zb = 0.5 * (sum / cnt + zmax);\n"
+	/* every search tap blocked: inside the umbra (the filter would lie within the search), no filter */
+	"			if (cnt > float(nt / 2) - 0.5) sh = 2.0;\n"
+	"		}\n"
+	/* the penumbra: lamp size x (receiver - blocker) / blocker, in the face's texture at the receiver */
+	"		if (sh < 1.5)\n"
+	"		{\n"
+	"			float pr = clamp(0.5 * W * max(zr - zb, 0.0) / (zr * K * max(zb, 1.0)), omLsP2.x, omLsP2.w);\n"
+	"			float s = 0.0;\n"
+	"			for (int k = 0; k < nt; k++)\n"
+	"				s += texture(omLsMap, vec4(uvz.xy + rot * omLsDisk[k] * pr, layer, uvz.z));\n"
+	"			sh = 1.0 - s / float(nt);\n"
+	"		}\n"
+	"		else sh = 1.0;\n"
+	"		float dk = omLsP.y * share * sh * omLsSoft[i].y;\n"
+	"		dbg = max(dbg, vec3(dk, share, sh) * vec3(1.0, 0.5, 0.25));\n"
+	"		keep *= 1.0 - dk;\n"
 	"	}\n"
-	/* r_om_lshadow_debug: red = the darkening (share x blocked), green = a lamp's share of the light, blue = a
-	   caster blocks a lamp */
+	/* r_om_lshadow_debug: red = the darkening, green = a lamp's share of the light, blue = a caster blocks a lamp */
 	"	if (omLsP2.y > 0.5) { lm = dbg; return; }\n"
 	"	if (keep < 1.0) lm = max(lm * keep, min(lm, lm0 * omLsP.z));\n"
 	"}\n";
 
+/* a GPU without the two texture units: the world shaders get an empty function */
+static const char *ls_glsl_none =
+	"void omLsApply(inout vec3 lm, vec3 lm0, vec3 wp, vec3 nrm) {}\n";
+
 const char *
 GL3_LShadow_Glsl(void)
 {
-	return ls_glsl;
-}
-
-/* with prog in use: the block binding and the sampler unit */
-void
-GL3_LShadow_BindProgram(GLuint prog)
-{
-	GLuint bi = glGetUniformBlockIndex(prog, "uniOMls");
-	GLint loc = glGetUniformLocation(prog, "omLsMap");
-
-	if (bi != GL_INVALID_INDEX)
-	{
-		glUniformBlockBinding(prog, bi, LS_BINDING);
-	}
-
 	/* the world shaders are made before GL3_LShadow_Init */
 	if (!L.maxunits)
 	{
 		glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &L.maxunits);
 	}
 
-	/* without a 17th unit the sampler shares the sun's array type on its unit (never read: no slots) */
+	return (L.maxunits > LS_RAWUNIT) ? ls_glsl : ls_glsl_none;
+}
+
+/* with prog in use: the block binding and the sampler units */
+void
+GL3_LShadow_BindProgram(GLuint prog)
+{
+	GLuint bi = glGetUniformBlockIndex(prog, "uniOMls");
+	GLint loc = glGetUniformLocation(prog, "omLsMap"), raw = glGetUniformLocation(prog, "omLsRaw");
+
+	if (bi != GL_INVALID_INDEX)
+	{
+		glUniformBlockBinding(prog, bi, LS_BINDING);
+	}
+
 	if (loc != -1)
 	{
-		glUniform1i(loc, L.maxunits > LS_UNIT ? LS_UNIT : 8);
+		glUniform1i(loc, LS_UNIT);
+	}
+
+	if (raw != -1)
+	{
+		glUniform1i(raw, LS_RAWUNIT);
 	}
 }
 
@@ -548,17 +674,61 @@ DepthArray(GLuint tex, int size, int layers)
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 }
 
+/* the cubes on their units for the world shaders; none while they are drawn (no texture bound while it is the
+   target) */
 static void
-BindMap(void)
+BindMap(qboolean on)
 {
-	if (L.maxunits <= LS_UNIT)
+	GLuint t = (on && L.tex) ? L.tex : L.dummy;
+
+	if (L.maxunits <= LS_RAWUNIT)
 	{
 		return;
 	}
 
 	GL3_SelectTMU(GL_TEXTURE0 + LS_UNIT);
-	glBindTexture(GL_TEXTURE_2D_ARRAY, L.tex ? L.tex : L.dummy);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, t);
+	GL3_SelectTMU(GL_TEXTURE0 + LS_RAWUNIT);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, (L.sampler && r_om_lshadow_search->value) ? t : L.dummy);
 	GL3_SelectTMU(GL_TEXTURE0);
+}
+
+/* the sampler that reads depth on LS_RAWUNIT (no compare, nearest), 0 when the driver has none */
+static void
+CreateSampler(void)
+{
+#ifdef _WIN32
+	typedef PROC (WINAPI *pfnWglGetProcAddress)(LPCSTR);
+	HMODULE gl = GetModuleHandleA("opengl32.dll");
+	pfnWglGetProcAddress wgp = gl ? (pfnWglGetProcAddress)(void *)GetProcAddress(gl, "wglGetProcAddress") : NULL;
+
+	L.sampler = 0;
+
+	if (!wgp)
+	{
+		return;
+	}
+
+	qglGenSamplers = (pfnGenSamplers)(void *)wgp("glGenSamplers");
+	qglDeleteSamplers = (pfnDeleteSamplers)(void *)wgp("glDeleteSamplers");
+	qglBindSampler = (pfnBindSampler)(void *)wgp("glBindSampler");
+	qglSamplerParameteri = (pfnSamplerParameteri)(void *)wgp("glSamplerParameteri");
+
+	if (!qglGenSamplers || !qglDeleteSamplers || !qglBindSampler || !qglSamplerParameteri)
+	{
+		return;
+	}
+
+	qglGenSamplers(1, &L.sampler);
+	qglSamplerParameteri(L.sampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	qglSamplerParameteri(L.sampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	qglSamplerParameteri(L.sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	qglSamplerParameteri(L.sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	qglSamplerParameteri(L.sampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	qglBindSampler(LS_RAWUNIT, L.sampler);
+#else
+	L.sampler = 0;
+#endif
 }
 
 void
@@ -572,8 +742,11 @@ GL3_LShadow_Init(void)
 	r_om_lshadow_strength = ri.Cvar_Get("r_om_lshadow_strength", "0.85", CVAR_ARCHIVE);
 	r_om_lshadow_range = ri.Cvar_Get("r_om_lshadow_range", "1500", CVAR_ARCHIVE);
 	r_om_lshadow_debug = ri.Cvar_Get("r_om_lshadow_debug", "0", 0);
-	r_om_lshadow_gain = ri.Cvar_Get("r_om_lshadow_gain", "4", CVAR_ARCHIVE);
 	r_om_lshadow_floor = ri.Cvar_Get("r_om_lshadow_floor", "0.4", CVAR_ARCHIVE);
+	r_om_lshadow_lightsize = ri.Cvar_Get("r_om_lshadow_lightsize", "16", CVAR_ARCHIVE);
+	r_om_lshadow_softmax = ri.Cvar_Get("r_om_lshadow_softmax", "24", CVAR_ARCHIVE);
+	r_om_lshadow_taps = ri.Cvar_Get("r_om_lshadow_taps", "8", CVAR_ARCHIVE);
+	r_om_lshadow_search = ri.Cvar_Get("r_om_lshadow_search", "1", CVAR_ARCHIVE);
 
 	memset(&L.u, 0, sizeof(L.u));
 	L.failed = L.active = L.capturing = false;
@@ -584,6 +757,8 @@ GL3_LShadow_Init(void)
 	for (i = 0; i < LS_MAXSLOTS; i++)
 	{
 		L.slot[i] = -1;
+		L.fade[i] = 0;
+		L.share[i] = 1;
 	}
 
 	glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &L.maxunits);
@@ -594,17 +769,23 @@ GL3_LShadow_Init(void)
 	glBindBufferBase(GL_UNIFORM_BUFFER, LS_BINDING, L.ubo);
 	L.uboenabled = false;
 
-	if (L.maxunits > LS_UNIT)
+	if (L.maxunits > LS_RAWUNIT)
 	{
 		glGenTextures(1, &L.dummy);
 		GL3_SelectTMU(GL_TEXTURE0 + LS_UNIT);
 		DepthArray(L.dummy, 1, LS_MAXSLOTS * 12);
 		GL3_SelectTMU(GL_TEXTURE0);
-		BindMap();
+		CreateSampler();
+		BindMap(true);
+
+		if (!L.sampler)
+		{
+			R_Printf(PRINT_ALL, "lamp shadows: no sampler objects, the penumbra is not searched\n");
+		}
 	}
 	else
 	{
-		R_Printf(PRINT_ALL, "lamp shadows: %d texture units, need %d - off\n", L.maxunits, LS_UNIT + 1);
+		R_Printf(PRINT_ALL, "lamp shadows: %d texture units, need %d - off\n", L.maxunits, LS_RAWUNIT + 1);
 		L.failed = true;
 	}
 }
@@ -612,6 +793,14 @@ GL3_LShadow_Init(void)
 void
 GL3_LShadow_Shutdown(void)
 {
+#ifdef _WIN32
+	if (L.sampler && qglDeleteSamplers)
+	{
+		qglBindSampler(LS_RAWUNIT, 0);
+		qglDeleteSamplers(1, &L.sampler);
+	}
+#endif
+
 	if (L.tex) glDeleteTextures(1, &L.tex);
 	if (L.dummy) glDeleteTextures(1, &L.dummy);
 	if (L.fbo) glDeleteFramebuffers(1, &L.fbo);
@@ -857,7 +1046,7 @@ SegNear(const csmseg_t *s, const vec3_t o, float r)
 {
 	float d = SegDist(s, o);
 
-	return (d >= 0) && (d < r);
+	return (d >= LS_FIXTURE) && (d < r);
 }
 
 /* whether a caster's box reaches into face f of the cube around o (the face sees |minor| <= LS_TAN x major) */
@@ -886,16 +1075,141 @@ SegInFace(const csmseg_t *s, const vec3_t o, int f)
 	return !(out0 || out1 || out2 || out3);
 }
 
-/* a lamp's light at distance d in lightmap units (the compiler's falloff, no angles) */
+/* a lamp's light at distance d in lightmap units (the compiler's falloff at the map's weights, no angles) */
 static float
 LampLight(const lslight_t *l, float d)
 {
 	if (l->kind == LS_SURF)
 	{
-		return l->intensity * 0.012f / Q_max(d, 16.0f);
+		return l->intensity * 0.01f * wsurf / Q_max(d, 16.0f);
 	}
 
-	return Q_max(l->intensity - d * l->fade, 0.0f);
+	return Q_max(l->intensity - d * l->fade, 0.0f) * ((l->kind == LS_SPOT) ? wspot : wpoint);
+}
+
+/* a lamp's light on a face at p turned to n (lightmap units, its colour's brightest channel and style), as the
+   world shader reckons it, 0 where the world hides the lamp */
+static float
+LampAt(const lslight_t *l, const vec3_t p, const vec3_t n)
+{
+	vec3_t d;
+	float dist, ndl, c;
+
+	VectorSubtract(l->o, p, d);
+	dist = VectorLength(d);
+
+	if ((dist >= l->radius) || (dist < 1))
+	{
+		return 0;
+	}
+
+	VectorScale(d, 1.0f / dist, d);
+	ndl = DotProduct(n, d);
+
+	if (ndl <= 0)
+	{
+		return 0;
+	}
+
+	c = LampLight(l, dist) * ndl;
+
+	if (l->kind == LS_SURF)
+	{
+		c *= Q_max(-DotProduct(d, l->n), 0.0f);
+	}
+	else if (l->kind == LS_SPOT)
+	{
+		float ca = -DotProduct(d, l->dir);
+
+		c = ((ca < l->stopdot) || (ca <= 0)) ? 0 : c * powf(ca, l->focus);
+	}
+
+	c *= Q_max(l->color[0], Q_max(l->color[1], l->color[2])) * StyleScale(l);
+
+	if ((c > 0) && gl3_ghoul_trace)
+	{
+		vec3_t a;
+
+		/* from just off the lamp toward p */
+		a[0] = l->o[0] - d[0] * 4;
+		a[1] = l->o[1] - d[1] * 4;
+		a[2] = l->o[2] - d[2] * 4;
+
+		if (gl3_ghoul_trace(a, p) < 0.97f)
+		{
+			return 0;
+		}
+	}
+
+	return c;
+}
+
+/* slot j: its lamp's part of the light all the lamps give where its nearest caster stands (on the floor there).
+   A shadow takes away no more than that: two lamps of a kind over a floor cast half shadows each */
+static float
+SlotShare(int j, const csmseg_t *segs, int nsegs)
+{
+	const lslight_t *l = &lights[L.slot[j]];
+	static const vec3_t up = {0, 0, 1};
+	vec3_t r, d;
+	float best = 1e30f, mine, all = 0;
+	int i, ni = -1;
+
+	for (i = 0; i < nsegs; i++)
+	{
+		float sd = SegDist(&segs[i], l->o);
+
+		if ((sd >= LS_FIXTURE) && (sd < l->radius) && (sd < best))
+		{
+			best = sd;
+			ni = i;
+		}
+	}
+
+	if (ni < 0)
+	{
+		return L.share[j];
+	}
+
+	r[0] = (segs[ni].mins[0] + segs[ni].maxs[0]) * 0.5f;
+	r[1] = (segs[ni].mins[1] + segs[ni].maxs[1]) * 0.5f;
+	r[2] = segs[ni].mins[2] + 2;
+	VectorSubtract(r, L.shareref[j], d);
+
+	/* measured again when the caster has moved a little */
+	if ((DotProduct(d, d) < 12 * 12) && (L.share[j] < 1.5f))
+	{
+		return L.share[j];
+	}
+
+	VectorCopy(r, L.shareref[j]);
+	mine = LampAt(l, r, up);
+
+	if (mine <= 0)
+	{
+		/* the floor below the caster is out of this lamp: measure at its middle, facing the lamp */
+		vec3_t n;
+
+		r[2] = (segs[ni].mins[2] + segs[ni].maxs[2]) * 0.5f;
+		VectorSubtract(l->o, r, n);
+		VectorNormalize(n);
+
+		for (i = 0; i < numlights; i++)
+		{
+			all += LampAt(&lights[i], r, n);
+		}
+
+		mine = LampAt(l, r, n);
+	}
+	else
+	{
+		for (i = 0; i < numlights; i++)
+		{
+			all += (&lights[i] == l) ? mine : LampAt(&lights[i], r, up);
+		}
+	}
+
+	return (all > 0) ? Q_clamp(mine / all, 0.0f, 1.0f) : 1.0f;
 }
 
 /* before SetupGL of a world view: which lamps cast, their depth cubes */
@@ -972,7 +1286,7 @@ GL3_LShadow_Frame(void)
 		{
 			float sd = SegDist(&segs[j], l->o);
 
-			if ((sd >= 0) && (sd < l->radius))
+			if ((sd >= LS_FIXTURE) && (sd < l->radius))
 			{
 				cd = Q_min(cd, sd);
 			}
@@ -1018,19 +1332,33 @@ GL3_LShadow_Frame(void)
 		}
 	}
 
-	/* slots: kept lamps stay where they are, new ones take the free slots */
-	for (j = 0; j < nslots; j++)
+	/* slots: kept lamps stay where they are and fade in; a dropped lamp fades out and keeps its slot till then;
+	   new ones take the free slots */
 	{
-		qboolean keep = false;
+		float dt = Q_clamp(r_newrefdef.time - L.lasttime, 0.0f, 0.1f);
 
-		for (k = 0; k < top; k++)
-		{
-			keep |= (pick[k] == L.slot[j]);
-		}
+		L.lasttime = r_newrefdef.time;
 
-		if (!keep)
+		for (j = 0; j < nslots; j++)
 		{
-			L.slot[j] = -1;
+			qboolean keep = false;
+
+			if (L.slot[j] < 0)
+			{
+				continue;
+			}
+
+			for (k = 0; k < top; k++)
+			{
+				keep |= (pick[k] == L.slot[j]);
+			}
+
+			L.fade[j] = Q_clamp(L.fade[j] + (keep ? dt : -dt) / LS_FADETIME, 0.0f, 1.0f);
+
+			if (!keep && (L.fade[j] <= 0))
+			{
+				L.slot[j] = -1;
+			}
 		}
 	}
 
@@ -1049,6 +1377,8 @@ GL3_LShadow_Frame(void)
 			{
 				L.slot[j] = pick[k];
 				L.dirty[j] = true;
+				L.fade[j] = 0;
+				L.share[j] = 2;   /* measured at once */
 				has = true;
 			}
 		}
@@ -1074,11 +1404,10 @@ GL3_LShadow_Frame(void)
 		}
 
 		l = &lights[L.slot[j]];
-		/* r_om_lshadow_gain: a room lit by many panels gives each a tenth of the light, a true shadow of one
-		   would not show; a lamp's share counts that many times over (a lamp that lights the place alone is
-		   at full share already) */
-		sc = StyleScale(l) / 255.0f * Q_clamp(r_om_lshadow_gain->value, 1.0f, 10.0f);
+		/* lightmap units to the shader's 0..1 */
+		sc = StyleScale(l) / 255.0f;
 		top = j + 1;
+		L.share[j] = SlotShare(j, segs, nsegs);
 
 		for (k = 0; k < 6; k++)
 		{
@@ -1096,24 +1425,31 @@ GL3_LShadow_Frame(void)
 
 		if (l->kind == LS_SURF)
 		{
-			/* omlight's inverse-linear patch light (intensity x cos x cos / d x 0.01) at its fitted weight (~1.2) */
+			/* omlight's inverse-linear patch light (intensity x cos x cos / d x 0.01) at its fitted weight */
 			L.u.a[j][0] = l->n[0];
 			L.u.a[j][1] = l->n[1];
 			L.u.a[j][2] = l->n[2];
-			L.u.a[j][3] = l->intensity * 0.012f;
-			L.u.soft[j][0] = 2.0f;
+			L.u.a[j][3] = l->intensity * 0.01f * wsurf;
+			L.u.soft[j][0] = l->size;
 		}
 		else
 		{
-			L.u.a[j][0] = l->intensity;
-			L.u.a[j][1] = l->fade;
+			float w = (l->kind == LS_SPOT) ? wspot : wpoint;
+
+			/* the linear falloff at its fitted weight: (intensity - d x fade) x w */
+			L.u.a[j][0] = l->intensity * w;
+			L.u.a[j][1] = l->fade * w;
 			L.u.a[j][2] = l->focus;
 			L.u.a[j][3] = l->stopdot;
 			L.u.dir[j][0] = l->dir[0];
 			L.u.dir[j][1] = l->dir[1];
 			L.u.dir[j][2] = l->dir[2];
-			L.u.soft[j][0] = 1.0f;
+			L.u.soft[j][0] = Q_clamp(r_om_lshadow_lightsize->value, 1.0f, 64.0f);
 		}
+
+		L.u.soft[j][1] = L.fade[j];
+		L.u.soft[j][3] = (float)Q_clamp(((int)r_om_lshadow_taps->value + 3) & ~3, 4, 16);   /* filter taps (a blocker search of half) */
+		L.u.soft[j][2] = L.share[j];
 
 		/* the cone around the casters in reach (their box corners), a few degrees wider for the filter; past
 		   a right angle it covers everything */
@@ -1190,6 +1526,8 @@ GL3_LShadow_Frame(void)
 	L.u.params[3] = 2.0f * LS_TAN / size;
 	L.u.params2[0] = 1.0f / size;
 	L.u.params2[1] = r_om_lshadow_debug->value ? 1.0f : 0.0f;
+	L.u.params2[2] = (L.sampler && r_om_lshadow_search->value) ? 1.0f : 0.0f;
+	L.u.params2[3] = Q_clamp(r_om_lshadow_softmax->value, 1.0f, 64.0f) / size;
 	UploadUBO();
 	L.uboenabled = true;
 
@@ -1205,6 +1543,7 @@ GL3_LShadow_Frame(void)
 	wascull = glIsEnabled(GL_CULL_FACE);
 	wasoffset = glIsEnabled(GL_POLYGON_OFFSET_FILL);
 
+	BindMap(false);
 	glBindFramebuffer(GL_FRAMEBUFFER, L.fbo);
 	glViewport(0, 0, size, size);
 	glDisable(GL_BLEND);
@@ -1298,7 +1637,7 @@ GL3_LShadow_Frame(void)
 	if (wasblend) glEnable(GL_BLEND);
 	if (wascull) glEnable(GL_CULL_FACE);
 
-	BindMap();
+	BindMap(true);
 	L.active = true;
 }
 
@@ -1347,11 +1686,13 @@ GL3_LShadow_BlobKeep(const vec3_t origin)
 			continue;
 		}
 
+		/* a faint shadow (a lamp among many) leaves part of the blob */
 		c = LampLight(l, dist) * StyleScale(l);
-		best = Q_max(best, c);
+		best = Q_max(best, Q_clamp((c - 4.0f) / 12.0f, 0.0f, 1.0f) * L.fade[j] * Q_clamp(L.share[j] * 2.0f, 0.0f, 1.0f));
 	}
 
-	return 1.0f - Q_clamp((best - 4.0f) / 12.0f, 0.0f, 1.0f);
+	/* half stays: the blob is the bounced light the body keeps from the floor around its feet, no lamp's shadow */
+	return 1.0f - 0.5f * best;
 }
 
 /* r_om_lshadow_info: the lamps in the slots */
@@ -1376,8 +1717,9 @@ GL3_LShadow_Info(void)
 		}
 
 		l = &lights[L.slot[j]];
-		R_Printf(PRINT_ALL, "  slot %d: %s %d at (%.0f %.0f %.0f) intensity %g radius %.0f style %d (%.2f)\n", j,
-			kinds[l->kind], L.slot[j], l->o[0], l->o[1], l->o[2], l->intensity, l->radius, l->style, StyleScale(l));
+		R_Printf(PRINT_ALL, "  slot %d: %s %d at (%.0f %.0f %.0f) intensity %g radius %.0f style %d (%.2f) "
+			"share %.2f fade %.2f\n", j, kinds[l->kind], L.slot[j], l->o[0], l->o[1], l->o[2], l->intensity, l->radius,
+			l->style, StyleScale(l), L.share[j], L.fade[j]);
 		n++;
 	}
 

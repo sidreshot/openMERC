@@ -50,6 +50,10 @@ static struct
 	char how[48];
 } sun;
 
+/* the sun's light in the map's lightmaps at full incidence (lightmap units, omlight's fit; -1 not known: the
+   _sun_light key). A sun the lightmaps do not hold casts no shadow (gl3_lshadow.c at map load) */
+static float sunweight = -1;
+
 /* std140 block uniOMcsm */
 typedef struct
 {
@@ -78,6 +82,8 @@ static struct
 	int capframe;
 	csmseg_t segs[CSM_MAXSEGS];
 	int numsegs;
+	int capkey;             /* the entity being drawn (GL3_CSM_SetCasterKey) */
+	vec3_t caporg;
 	float invpv[16];
 	qboolean invvalid;
 	csmubo_t u;
@@ -207,6 +213,7 @@ GL3_CSM_LoadSun(const char *ents, int len)
 	qboolean ws_surface = false, first = true;
 
 	memset(&sun, 0, sizeof(sun));
+	sunweight = -1;
 	C.built = NULL; /* the static casters of the new map */
 	C.numdyn = 0;
 	C.numsegs = 0;
@@ -528,7 +535,11 @@ static const char *csm_glsl =
 	"	if (lit <= 0.01) return;\n"
 	"	float sh = omCsmDynamic(c, wp, n);\n"
 	"	if (sh <= 0.0) return;\n"
-	"	float k = omCsmParams.x * lit * sh * fade * smoothstep(0.0, 0.3, ndl);\n"
+	/* the sun's part of the light here: a window's patch of sun in a lamp-lit room loses little, a moon a lamp
+	   outshines next to nothing, a sun the lightmaps do not hold (omlight's fit) none */
+	"	float lum = max(max(lm.r, lm.g), lm.b);\n"
+	"	float share = clamp(omCsmAmb.w * ndl / max(lum, 0.004), 0.0, 1.0);\n"
+	"	float k = omCsmParams.y * share * lit * sh * fade * smoothstep(0.0, 0.3, ndl);\n"
 	"	lm = max(lm * (1.0 - k), min(lm, omCsmAmb.rgb));\n"
 	"}\n"
 	/* how much of a Ghoul ground shadow is left: 0 where the ground is in the sun */
@@ -1093,6 +1104,9 @@ GL3_CSM_Frame(void)
 	C.u.sun[3] = 1;
 	/* a weak (night) sun casts lighter shadows: _sun_light 100 and more is full strength */
 	C.u.params[0] = Q_clamp(r_om_csm_strength->value, 0.0f, 1.0f) * Q_clamp(sun.light / 100.0f, 0.25f, 1.0f);
+	/* the receivers take away the sun's own light only, as much as the lightmap holds of it */
+	C.u.params[1] = Q_clamp(r_om_csm_strength->value, 0.0f, 1.0f);
+	C.u.amb[3] = ((sunweight >= 0) ? sunweight : sun.light) / 255.0f * Q_max(sun.color[0], Q_max(sun.color[1], sun.color[2]));
 	C.u.params[2] = Q_max(r_om_csm_normalbias->value, 0.0f) * 100.0f; /* 0.02 = 2 texels */
 	C.u.params[3] = Q_clamp(r_om_csm_soft->value, 0.0f, 2.0f);
 	C.u.params2[0] = (float)ncasc;
@@ -1287,6 +1301,8 @@ GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride)
 	seg = &C.segs[C.numsegs++];
 	seg->first = C.numdyn / 3;
 	seg->num = numverts;
+	seg->key = C.capkey;
+	VectorCopy(C.caporg, seg->org);
 	VectorSet(seg->mins, 1e30f, 1e30f, 1e30f);
 	VectorSet(seg->maxs, -1e30f, -1e30f, -1e30f);
 
@@ -1319,6 +1335,81 @@ GL3_CSM_Casters(const float **tris, const csmseg_t **segs)
 	*tris = C.dyn;
 	*segs = C.segs;
 	return C.dyn ? C.numsegs : 0;
+}
+
+void
+GL3_CSM_SetSunWeight(float w)
+{
+	sunweight = w;
+}
+
+/* the Ghoul entity whose triangles follow (gl3_ghoul.c, around its draw; 0 after it) */
+void
+GL3_CSM_SetCasterKey(int key, const vec3_t org)
+{
+	C.capkey = key;
+
+	if (org)
+	{
+		VectorCopy(org, C.caporg);
+	}
+}
+
+/* before the shadow maps of a view: the casters kept from the previous frame moved to where their entities are
+   in this one. They are drawn after the world, so the shadows would trail a running character by a frame */
+void
+GL3_CSM_Advance(void)
+{
+	int i, j;
+
+	if (!C.dyn || !C.numsegs || !r_newrefdef.entities)
+	{
+		return;
+	}
+
+	for (i = 0; i < C.numsegs; i++)
+	{
+		csmseg_t *s = &C.segs[i];
+		vec3_t d;
+		float *v;
+
+		if (!s->key)
+		{
+			continue;
+		}
+
+		for (j = 0; j < r_newrefdef.num_entities; j++)
+		{
+			const entity_t *e = &r_newrefdef.entities[j];
+
+			if ((e->flags & 0x400000) && ((short)(e->frame & 0xFFFF) == s->key))
+			{
+				break;
+			}
+		}
+
+		if (j == r_newrefdef.num_entities)
+		{
+			continue;
+		}
+
+		VectorSubtract(r_newrefdef.entities[j].origin, s->org, d);
+
+		/* a teleport or a respawn is no motion */
+		if ((DotProduct(d, d) < 0.0001f) || (DotProduct(d, d) > 96 * 96))
+		{
+			continue;
+		}
+
+		for (j = 0, v = C.dyn + 3 * s->first; j < s->num; j++, v += 3)
+		{
+			VectorAdd(v, d, v);
+		}
+
+		VectorAdd(s->mins, d, s->mins);
+		VectorAdd(s->maxs, d, s->maxs);
+		VectorAdd(s->org, d, s->org);
+	}
 }
 
 /* depth of the static world casters and the given world-space triangles (3 floats per vertex) with the

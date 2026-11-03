@@ -1930,6 +1930,7 @@ GL3_RenderView(refdef_t *fd)
 
 	/* GFX-modern: the lamp shadow cubes (r_om_lshadow, reads the casters before the sun's frame clears them)
 	   and the sun shadow maps of this view (r_om_csm) */
+	GL3_CSM_Advance();
 	GL3_LShadow_Frame();
 	GL3_Post_ProfMark("lshadow");
 	GL3_CSM_Frame();
