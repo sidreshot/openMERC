@@ -180,7 +180,7 @@ GL3_SoF_RegisterCvars(void)
 	Get("r_om_bloom_fx", "1", CVAR_ARCHIVE);
 	Get("r_om_bloom_fromscene", "0", CVAR_ARCHIVE);
 	Get("r_om_volfog", "1", CVAR_ARCHIVE);
-	Get("r_om_volfog_quality", "2", CVAR_ARCHIVE); /* high */
+	Get("r_om_volfog_quality", "1", CVAR_ARCHIVE); /* 2 looked the same */
 	Get("r_om_volfog_intensity", "0.4", CVAR_ARCHIVE);
 	Get("r_om_volfog_overlaydim", "0.85", CVAR_ARCHIVE);
 	Get("r_om_volfog_shafts", "1", CVAR_ARCHIVE);

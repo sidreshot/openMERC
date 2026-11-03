@@ -902,6 +902,12 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 	P.shadowDarkness = darkness;
 
+	/* a blob wholly replaced (lamp shadow + r_om_ssao) is not built at all: no second pose walk for its mask */
+	if ((darkness <= 0.01f) && !P.shadowOnly)
+	{
+		P.shadowMode = 0;
+	}
+
 	/* step 11: draw */
 	ff.ShadeModel(GHL_GL_SMOOTH);
 	ff.CullFace(GL_BACK);
@@ -964,6 +970,20 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			qboolean round = roundinst[(unsigned short)(e->frame & 0xFFFF)] && (r_om_tess_round->value != 0);
 			int level = (k <= 0) ? 0 : weapon ? (int)r_om_tess_weapon->value :
 				(((flags & SOF_RF_CASTSHADOW) || round) ? (int)Q_clamp(r_om_tess_models->value, 0.0f, 3.0f) : 0);
+
+			/* by size on the screen (the subdivision runs on the CPU, 9 triangles each at level 3): a man-high model
+			   taller than 240 pixels keeps the level, from 100 pixels one less, smaller ones none - their facets
+			   are a pixel or two */
+			if ((level > 1) && !weapon)
+			{
+				vec3_t d;
+				float dist, px;
+
+				VectorSubtract(e->origin, r_newrefdef.vieworg, d);
+				dist = Q_max(VectorLength(d), 1.0f);
+				px = 64.0f / dist * (r_newrefdef.height * 0.5f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f);
+				level = (px > 240.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
+			}
 
 			GL3_GhoulEmu_SetTess(level, k);
 		}

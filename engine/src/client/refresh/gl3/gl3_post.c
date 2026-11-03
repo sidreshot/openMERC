@@ -216,6 +216,45 @@ static struct
 	LARGE_INTEGER freq;
 } PR;
 
+/* perf tour: every change of r_om_prof_tag prints "OMSPOT <old tag>" with the frames timed since the last change -
+   whole frame (wall) and GPU mean/worst and each part's GPU mean(worst) summed by name, so parts that come and go
+   (mirrors, lightning) do not restart the sums */
+static cvar_t *r_om_prof_tag;
+
+static struct
+{
+	const char *name[PROFMARKS * 2];
+	double sum[PROFMARKS * 2], worst[PROFMARKS * 2];
+	int nn, frames, walls, age;
+	double gsum, gworst, wsum, wworst, settle;
+	char tag[64];
+} SP;
+
+static void
+SpotFlush(void)
+{
+	char line[1400];
+	size_t len = 0;
+	int i;
+
+	if (SP.frames > 0 && SP.walls > 0)
+	{
+		len += snprintf(line + len, sizeof(line) - len, "OMSPOT %s frames %d wall %.2f(%.1f) settle %.1f gpu %.2f(%.1f) |", SP.tag,
+			SP.frames, SP.wsum / SP.walls, SP.wworst, SP.settle, SP.gsum / SP.frames, SP.gworst);
+
+		for (i = 0; i < SP.nn && len < sizeof(line) - 40; i++)
+		{
+			len += snprintf(line + len, sizeof(line) - len, " %s %.2f(%.1f)", SP.name[i], SP.sum[i] / SP.frames,
+				SP.worst[i]);
+		}
+
+		R_Printf(PRINT_ALL, "%s\n", line);
+	}
+
+	memset(&SP, 0, sizeof(SP));
+	Q_strlcpy(SP.tag, r_om_prof_tag->string, sizeof(SP.tag));
+}
+
 static void
 ProfCollect(int f)
 {
@@ -256,6 +295,33 @@ ProfCollect(int f)
 		PR.csum[i - 1] += c;
 		PR.worst[i - 1] = fmax(PR.worst[i - 1], g);
 		PR.cworst[i - 1] = fmax(PR.cworst[i - 1], c);
+
+		if (SP.tag[0])
+		{
+			int k;
+
+			for (k = 0; k < SP.nn && strcmp(SP.name[k], PR.name[f][i]); k++)
+			{
+			}
+
+			if (k == SP.nn && SP.nn < PROFMARKS * 2)
+			{
+				SP.name[SP.nn++] = PR.name[f][i];
+			}
+
+			if (k < SP.nn)
+			{
+				SP.sum[k] += g;
+				SP.worst[k] = fmax(SP.worst[k], g);
+			}
+		}
+	}
+
+	if (SP.tag[0])
+	{
+		SP.frames++;
+		SP.gsum += gpu;
+		SP.gworst = fmax(SP.gworst, gpu);
 	}
 
 	if (PR.mean > 0 && (gpu > PR.mean * 2.0 + 1.0 || cpu > PR.cmean * 2.0 + 1.0))
@@ -347,9 +413,26 @@ GL3_Post_ProfMark(const char *name)
 			}
 
 			fmean = fmean > 0 ? fmean * 0.95 + dt * 0.05 : dt;
+
+			if (SP.tag[0] && ++SP.age <= 30)
+			{
+				SP.settle = fmax(SP.settle, dt); /* the first frames at a new place (uploads, first sight) */
+			}
+			else if (SP.tag[0])
+			{
+				SP.walls++;
+				SP.wsum += dt;
+				SP.wworst = fmax(SP.wworst, dt);
+			}
 		}
 
 		last = t;
+
+		if (r_om_prof_tag->modified)
+		{
+			r_om_prof_tag->modified = false;
+			SpotFlush();
+		}
 		PR.cur = (PR.cur + 1) % GPUQ;
 
 		if (PR.n[PR.cur])
@@ -1121,6 +1204,13 @@ GL3_Post_SSRActive(void)
 	return P.bound && P.mat;
 }
 
+/* r_om_ssao runs this view: it darkens the floor at a character's feet, the Ghoul ground blob's contact part goes */
+qboolean
+GL3_Post_SSAOActive(void)
+{
+	return P.bound && ssaomark;
+}
+
 /* r_om_ssr: off while a pass modulates faces already drawn (their reflectivity stays) */
 void
 GL3_Post_MaterialWrites(qboolean on)
@@ -1364,6 +1454,9 @@ GL3_Post_Init(void)
 	r_om_softparticles_add = ri.Cvar_Get("r_om_softparticles_add", "1", CVAR_ARCHIVE);
 	r_om_post_debug = ri.Cvar_Get("r_om_post_debug", "0", 0);
 	r_om_gputime = ri.Cvar_Get("r_om_gputime", "0", 0);
+#if defined(_WIN32) && !defined(YQ2_GL3_GLES3)
+	r_om_prof_tag = ri.Cvar_Get("r_om_prof_tag", "", 0);
+#endif
 	r_om_overbright = ri.Cvar_Get("r_om_overbright", "0", CVAR_ARCHIVE);
 	r_om_overbright_scale = ri.Cvar_Get("r_om_overbright_scale", "2", CVAR_ARCHIVE);
 	r_om_overbright_models = ri.Cvar_Get("r_om_overbright_models", "1", CVAR_ARCHIVE);
@@ -1983,7 +2076,7 @@ VolFogCvars(void)
 	if (!r_om_volfog)
 	{
 		r_om_volfog = ri.Cvar_Get("r_om_volfog", "1", CVAR_ARCHIVE);
-		r_om_volfog_quality = ri.Cvar_Get("r_om_volfog_quality", "2", CVAR_ARCHIVE);
+		r_om_volfog_quality = ri.Cvar_Get("r_om_volfog_quality", "1", CVAR_ARCHIVE); /* 2 looked the same on the tour views */
 		r_om_volfog_intensity = ri.Cvar_Get("r_om_volfog_intensity", "0.4", CVAR_ARCHIVE);
 		r_om_volfog_overlaydim = ri.Cvar_Get("r_om_volfog_overlaydim", "0.85", CVAR_ARCHIVE);
 		r_om_volfog_shafts = ri.Cvar_Get("r_om_volfog_shafts", "1", CVAR_ARCHIVE);
@@ -3513,7 +3606,7 @@ GL3_Post_Beams(void)
 	float b0[BEAM_DRAW * 4], b1[BEAM_DRAW * 4], b2[BEAM_DRAW * 4], b3[BEAM_DRAW * 4], vps[BEAM_DRAW * 16];
 	int nb = 0, i, j;
 	qboolean shadows = false;
-	float fw, fh;
+	float fw, fh, gshadow;
 
 	B.npools = 0;
 
@@ -3614,7 +3707,9 @@ GL3_Post_Beams(void)
 		memcpy(B.pools + i * 16 + 12, b3 + i * 4, 4 * sizeof(float));
 	}
 
-	B.npools = (r_om_beams_groundshadow->value > 0) ? nb : 0;
+	/* the characters' shadows in the pools: replaced by r_om_lshadow (the lamps' real shadows) when that is on */
+	gshadow = GL3_LShadow_On() ? 0.0f : Q_clamp(r_om_beams_groundshadow->value, 0.0f, 1.0f);
+	B.npools = (gshadow > 0) ? nb : 0;
 
 	/* shadow maps: static world + this view's Ghoul casters, seen from each beam's lamp. The array exists
 	   even without shadows: the shader's shadow sampler must always have a depth texture behind it. */
@@ -3658,7 +3753,7 @@ GL3_Post_Beams(void)
 				shadows = false;
 			}
 
-			if (r_om_beams_groundshadow->value > 0)
+			if (gshadow > 0)
 			{
 				glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, BEAM_DRAW + i);
 				glClearBufferfv(GL_DEPTH, 0, &one);
@@ -3710,12 +3805,12 @@ GL3_Post_Beams(void)
 	glEnable(GL_BLEND);
 
 	/* the characters' shadows in the lamps' pools first (multiplied), then the light of the beams */
-	if (shadows && (r_om_beams_groundshadow->value > 0) && ShadeProgram())
+	if (shadows && (gshadow > 0) && ShadeProgram())
 	{
 		GL3_UseProgram(B.sprog);
 		glUniform4f(B.s_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 		glUniformMatrix4fv(B.s_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
-		glUniform4f(B.s_prm, gl3depthmin, gl3depthmax, Q_clamp(r_om_beams_groundshadow->value, 0.0f, 1.0f), (float)nb);
+		glUniform4f(B.s_prm, gl3depthmin, gl3depthmax, gshadow, (float)nb);
 		glUniform4fv(B.s_b0, nb, b0);
 		glUniform4fv(B.s_b1, nb, b1);
 		glUniform4fv(B.s_b2, nb, b2);
@@ -4074,7 +4169,7 @@ SSAOWanted(void)
 		r_om_ssao_radius = ri.Cvar_Get("r_om_ssao_radius", "48", CVAR_ARCHIVE);
 		r_om_ssao_debug = ri.Cvar_Get("r_om_ssao_debug", "0", 0);
 		r_om_ssao_full = ri.Cvar_Get("r_om_ssao_full", "0", CVAR_ARCHIVE);
-		r_om_ssao_quality = ri.Cvar_Get("r_om_ssao_quality", "3", CVAR_ARCHIVE);
+		r_om_ssao_quality = ri.Cvar_Get("r_om_ssao_quality", "1", CVAR_ARCHIVE); /* the temporal pass evens 2x4 out: 3 looked the same, 0.5 ms more */
 		r_om_ssao_temporal = ri.Cvar_Get("r_om_ssao_temporal", "0.85", CVAR_ARCHIVE);
 		r_om_ssao_bounce = ri.Cvar_Get("r_om_ssao_bounce", "0.6", CVAR_ARCHIVE);
 	}
@@ -7023,7 +7118,7 @@ SSRWanted(void)
 		r_om_ssr = ri.Cvar_Get("r_om_ssr", "1", CVAR_ARCHIVE);
 		r_om_ssr_wet = ri.Cvar_Get("r_om_ssr_wet", "1", CVAR_ARCHIVE);
 		r_om_ssr_dist = ri.Cvar_Get("r_om_ssr_dist", "1500", CVAR_ARCHIVE);
-		r_om_ssr_quality = ri.Cvar_Get("r_om_ssr_quality", "2", CVAR_ARCHIVE);
+		r_om_ssr_quality = ri.Cvar_Get("r_om_ssr_quality", "1", CVAR_ARCHIVE); /* 2 looked the same on the tour views */
 		r_om_ssr_debug = ri.Cvar_Get("r_om_ssr_debug", "0", 0);
 		r_om_ssr_glint = ri.Cvar_Get("r_om_ssr_glint", "1", CVAR_ARCHIVE);
 		r_om_ssr_damp = ri.Cvar_Get("r_om_ssr_damp", "1", CVAR_ARCHIVE);

@@ -629,7 +629,8 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
 			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
-			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
+			if(omPdl.x < 0.5) // r_om_pdlight replaces the CPU dlight layer (it stays black then)
+				lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
 			if(passLightFlags != 0u && omPdl.x > 0.5)
 			{
@@ -1153,7 +1154,8 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
 			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
-			lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
+			if(omPdl.x < 0.5) // r_om_pdlight replaces the CPU dlight layer (it stays black then)
+				lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
 			if(passLightFlags != 0u && omPdl.x > 0.5)
 			{

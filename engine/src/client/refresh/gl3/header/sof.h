@@ -190,6 +190,8 @@ typedef struct
 	float matrefl, matrough; /* GFX-modern r_om_ssr: material of liquids (0 = default) */
 } gl3fxstate_t;
 qboolean GL3_Post_SSRActive(void);
+qboolean GL3_Post_SSAOActive(void);
+qboolean GL3_LShadow_On(void);
 
 void GL3_FX_SetState(const gl3fxstate_t *st);
 void GL3_FX_DefaultState(gl3fxstate_t *st);
@@ -396,6 +398,7 @@ typedef struct
 int GL3_CSM_Casters(const float **tris, const csmseg_t **segs);
 void GL3_CSM_SetCasterKey(int key, const vec3_t org);
 void GL3_CSM_SetSunWeight(float w);
+extern qboolean gl3_pvssky; /* gl3_surf.c: a sky face lies in the view's PVS */
 void GL3_CSM_Advance(void);
 const char *GL3_CSM_Token(const char **p, const char *end, char *out, int outsize);
 int GL3_CSM_Floats(const char *s, float *out, int max);

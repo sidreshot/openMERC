@@ -1130,3 +1130,41 @@ correction away and put ours in its place".
     shadow (gl3_post.c) went with it.
   - Cost (arm1 shop, NPC under the lamps, 1080p): frame GPU 13.2 ms without lamp shadows, about 16 with (16 taps 16.5);
     the earlier version about 14.6. Cheaper: r_om_lshadow_taps 4, r_om_lshadow_search 0, r_om_lshadow_lights 2.
+
+## Optimisation pass: old off where the new runs, perf tour (owner: "cascades off where the lamps work; FPS drops in random places - run through the levels; the old must switch off when the new is on, e.g. SSR on - all old reflections off; civil graphics cards")
+
+* Perf tour (test aid): r_om_prof_tag - every change prints "OMSPOT <old tag>" for the frames since: whole frame
+  (wall) and GPU mean(worst), the first 30 frames at a place apart ("settle": uploads, first sight), each part's GPU
+  summed by name (parts that come and go do not restart it). Scratchpad tooling took 2..12 spots per map from its
+  entities (player start, monsters, items, farthest-point sampled) and turned the view in place at each: 28 single
+  player maps, 1080p, MSAA 2x, GTX 1050 Ti. Mean frame 8..12 ms everywhere; GPU parts over all spots: world 2.2,
+  r_om_ssao 2.05 (steady), composite 1.4, Ghoul models 1.15 (6 at most), volfog 0.5 (3), SSR 1.2 in all, CSM 0.35.
+* Found and closed:
+  - PN tessellation runs on the CPU (9 triangles each at level 3) and the shadow passes took the tessellated
+    triangles: sib2 1120 664 -432 16.4 -> 11.9 ms. The casters (sun, lamps, beams) are the triangles as modelled; the
+    level follows the model's size on the screen (man-high model over 240 pixels keeps it, from 100 one less, smaller
+    none).
+  - CSM (owner: off where the lamps do the work): nothing is drawn when the map's lightmaps hold no sun (fit weight
+    under 1) or when no sky face lies in the view's PVS (gl3_pvssky, set when the PVS is marked: deep indoors no place
+    the sun reaches can be seen). sib2 indoors 0.97 -> 0 ms.
+* Old next to new (code audit), now gated:
+  - environment-map shine: off on every face SSR traces (reflectivity >= 0.015; was >= 0.045, ceilings and slopes
+    between got both);
+  - Ghoul ground blob: with r_om_ssao on it goes wholly under a lamp shadow (lshadow) and in the sun (CSM uniform
+    params2.z 2) - SSAO darkens the feet itself; a blob wholly replaced is not built (no second pose walk for its mask);
+  - light beam pools: their own character shadows (r_om_beams_groundshadow, and the extra depth layer per beam) give
+    way while r_om_lshadow is on - the lamp's real shadow, not a second one;
+  - the CPU dynamic light layer is not sampled while r_om_pdlight runs.
+  Checked and already right: liquids' sphere pass under SSR, mirror faces, dynamic lights, painted light cones under
+  r_om_beams, coronas into bloom, colour table under r_om_look, overbright under HDR, ppfog over the vertex overlay,
+  the maps' own rain, the old lightning flashes, Q2 stencil shadows (r_shadows 0).
+* Quality against cost (scratchpad study: 11 still views on tsr1, kos1, jpn2, sud2, nyc1, arm1; every setting changed
+  alone, timed and shot after the picture settled, compared at quarter size against a repeat of the base shot - noise
+  floor 2.5 % of pixels changed by more than 6/255):
+  r_om_ssao_quality 3 -> 1 saves 0.54 ms (0.87 at most) at 3.0 % changed, by eye the same (the temporal pass evens
+  the 2x4 pattern out); r_om_ssr_quality 2 -> 1 0.14 ms, r_om_volfog_quality 2 -> 1 0.18 ms, both at the noise floor.
+  Those are the defaults now. Worth their cost: r_om_ssao (2.2 ms, 16 % of the picture), r_om_ssr (2.4 ms, 18 %;
+  most of it the fixed passes, not the trace), bloom (0.3 ms). No visible gain from CSM 1024 / 2 cascades or lamp maps
+  256 on these views (casters were frozen NPCs off screen), so they stay.
+* Result, same tour on tsr1, kos1, nyc1, sib2, sud2, jpn2: mean frame 11.3 -> 9.4 ms, heaviest spot 18.0 -> 13.7 ms,
+  worst frame 282 -> 20 ms, hitches 31 -> 0.

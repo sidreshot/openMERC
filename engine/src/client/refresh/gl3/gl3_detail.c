@@ -242,8 +242,8 @@ GL3_Detail_DrawPass(void)
 		}
 
 		/* GFX-modern r_om_ssr: where the face reflects the scene for real, its environment map shine is replaced (the
-		   owner: "SSR replaces it"); faces it hardly reflects on (metal walls) keep the old shine */
-		if (env && GL3_Post_SSRActive() && (GL3_Mat_SurfReflect(surf, n) >= 0.045f))
+		   owner: "SSR replaces it", never both): every face the SSR trace takes (from 0.015, gl3_post.c) loses it */
+		if (env && GL3_Post_SSRActive() && (GL3_Mat_SurfReflect(surf, n) >= 0.015f))
 		{
 			continue;
 		}

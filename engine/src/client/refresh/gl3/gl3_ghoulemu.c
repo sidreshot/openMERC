@@ -1180,8 +1180,8 @@ static void
 Flush(void)
 {
 	GLenum mode = GL_TRIANGLES;
-	emuvtx_t *out;
-	int n = 0, i, count = E.numverts;
+	emuvtx_t *out, *flat;
+	int n = 0, nflat, i, count = E.numverts;
 	qboolean halo;
 
 	if (!count || !CreateObjects())
@@ -1295,6 +1295,11 @@ Flush(void)
 	}
 
 	sawround |= E.texture2d && IsRound(E.boundtex);
+
+	/* the shadow passes take the triangles as modelled: curved silhouettes are lost in a shadow map's texels,
+	   the tessellated ones cost the cube and cascade passes many times over */
+	flat = out;
+	nflat = n;
 
 	/* GFX-modern tessellation of the entity being drawn: every pass over its surfaces gets the same curved
 	   triangles (a decal or glass pass drawn over a tessellated body must not z-fight with it), but not the
@@ -1424,12 +1429,12 @@ Flush(void)
 
 		if (E.csmcapture && (mode == GL_TRIANGLES) && E.depthmask && !E.blendon && !E.alphatest)
 		{
-			GL3_CSM_AddCasterTris(out[0].pos, n, sizeof(emuvtx_t) / sizeof(float));
+			GL3_CSM_AddCasterTris(flat[0].pos, nflat, sizeof(emuvtx_t) / sizeof(float));
 		}
 
 		if (E.casts && (mode == GL_TRIANGLES) && E.depthmask && !E.blendon && !E.alphatest)
 		{
-			GL3_Beam_AddCasterTris(out[0].pos, n, sizeof(emuvtx_t) / sizeof(float));
+			GL3_Beam_AddCasterTris(flat[0].pos, nflat, sizeof(emuvtx_t) / sizeof(float));
 		}
 	}
 

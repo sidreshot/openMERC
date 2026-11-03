@@ -1743,6 +1743,26 @@ GL3_DrawWorld(void)
  * Mark the leaves and nodes that are
  * in the PVS for the current cluster
  */
+/* GFX-modern r_om_csm: some face of the sky lies in the view's PVS (set when the PVS is marked) - without it no
+   outdoor place can be seen and the sun shadows are not drawn */
+qboolean gl3_pvssky = true;
+
+static qboolean
+LeafHasSky(const mleaf_t *leaf)
+{
+	int c;
+
+	for (c = 0; c < leaf->nummarksurfaces; c++)
+	{
+		if (leaf->firstmarksurface[c]->texinfo->flags & SOFSURF_SKY)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void
 GL3_MarkLeaves(void)
 {
@@ -1771,6 +1791,7 @@ GL3_MarkLeaves(void)
 	gl3_visframecount++;
 	gl3_oldviewcluster = gl3_viewcluster;
 	gl3_oldviewcluster2 = gl3_viewcluster2;
+	gl3_pvssky = true;
 
 	if (r_novis->value || (gl3_viewcluster == -1) || !gl3_worldmodel->vis)
 	{
@@ -1805,6 +1826,8 @@ GL3_MarkLeaves(void)
 		vis = fatvis;
 	}
 
+	gl3_pvssky = false;
+
 	for (i = 0, leaf = gl3_worldmodel->leafs;
 		 i < gl3_worldmodel->numleafs;
 		 i++, leaf++)
@@ -1818,6 +1841,11 @@ GL3_MarkLeaves(void)
 
 		if (vis[cluster >> 3] & (1 << (cluster & 7)))
 		{
+			if (!gl3_pvssky && LeafHasSky(leaf))
+			{
+				gl3_pvssky = true;
+			}
+
 			node = (mnode_t *)leaf;
 
 			do

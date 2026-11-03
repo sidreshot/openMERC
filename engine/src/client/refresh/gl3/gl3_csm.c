@@ -558,6 +558,8 @@ static const char *csm_glsl =
 	"			s += texture(omCsmMap, vec4(p.xy + vec2(float(x), float(y)) * 2.0 * omCsmParams2.y, float(c), p.z - 4.0 * omCsmBias[c]));\n"
 	/* a contact shadow stays even in full sun (the sun shadow leaves the feet at a low sun); a weak (night)
 	   sun, whose CSM shadow is faint (omCsmParams.x = strength x light / 100), keeps more of it (fb3) */
+	/* ... unless r_om_ssao darkens the feet itself (omCsmParams2.z 2): then the sun shadow replaces it all */
+	"	if (omCsmParams2.z > 1.5) return 1.0 - (s / 9.0) * fade * clamp(omCsmParams.x / 0.65, 0.0, 1.0);\n"
 	"	return 1.0 - (s / 9.0) * fade * 0.7 * clamp(omCsmParams.x / 0.65, 0.0, 1.0);\n"
 	"}\n";
 
@@ -1000,6 +1002,19 @@ WantCsm(void)
 		return false;
 	}
 
+	/* the lightmaps hold no sunlight (omlight's fit): the shadow would take nothing away, nothing is drawn */
+	if ((sunweight >= 0) && (sunweight < 1))
+	{
+		return false;
+	}
+
+	/* deep indoors: no sky face in the PVS, no place the sun reaches can be seen - the lamp shadows (r_om_lshadow)
+	   do the work there, the cascades cost nothing */
+	if (!gl3_pvssky)
+	{
+		return false;
+	}
+
 	return true;
 }
 
@@ -1111,7 +1126,12 @@ GL3_CSM_Frame(void)
 	C.u.params[3] = Q_clamp(r_om_csm_soft->value, 0.0f, 2.0f);
 	C.u.params2[0] = (float)ncasc;
 	C.u.params2[1] = 1.0f / size;
-	C.u.params2[2] = r_om_csm_replace_ghl->value ? 1.0f : 0.0f;
+	{
+		/* 2: r_om_ssao takes the contact darkening, the blob goes wholly in the sun */
+		cvar_t *ssao = ri.Cvar_Get("r_om_ssao", "1.5", CVAR_ARCHIVE);
+
+		C.u.params2[2] = !r_om_csm_replace_ghl->value ? 0.0f : (ssao->value > 0) ? 2.0f : 1.0f;
+	}
 	C.u.params2[3] = r_om_csm_debug->value ? 1.0f : 0.0f;
 	C.u.view[0] = vpn[0];
 	C.u.view[1] = vpn[1];

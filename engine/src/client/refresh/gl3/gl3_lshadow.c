@@ -1641,6 +1641,13 @@ GL3_LShadow_Frame(void)
 	L.active = true;
 }
 
+/* lamp shadows are on this frame: the light beams' own character shadows in their pools give way (gl3_post.c) */
+qboolean
+GL3_LShadow_On(void)
+{
+	return L.capturing;
+}
+
 /* how much of a character's ground blob is left: none where a lamp with a shadow cube lights it well (its own
    shadow grounds it), faded over a few lightmap units so a lamp taking or leaving a slot does not pop */
 float
@@ -1691,8 +1698,9 @@ GL3_LShadow_BlobKeep(const vec3_t origin)
 		best = Q_max(best, Q_clamp((c - 4.0f) / 12.0f, 0.0f, 1.0f) * L.fade[j] * Q_clamp(L.share[j] * 2.0f, 0.0f, 1.0f));
 	}
 
-	/* half stays: the blob is the bounced light the body keeps from the floor around its feet, no lamp's shadow */
-	return 1.0f - 0.5f * best;
+	/* half stays: the blob is the bounced light the body keeps from the floor around its feet, no lamp's shadow -
+	   unless r_om_ssao darkens the feet itself (the owner: the old must go where the new does its job) */
+	return 1.0f - (GL3_Post_SSAOActive() ? 1.0f : 0.5f) * best;
 }
 
 /* r_om_lshadow_info: the lamps in the slots */
