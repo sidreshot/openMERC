@@ -345,7 +345,6 @@ GL3_BindLightmap(int lightmapnum)
 	}
 
 	GL3_DynLight_BindPage(lightmapnum); /* OpenMerc (I4c): dynamic light layer on GL_TEXTURE6 */
-	GL3_Deluxe_BindPage(lightmapnum); /* GFX-modern r_om_bump: light directions on GL_TEXTURE10 */
 }
 
 /*
@@ -588,10 +587,9 @@ GL3_LoadPic(char *name, byte *pic, int width, int realwidth,
 			image->has_alpha = GL3_Upload32((unsigned *)pic, width, height,
 						(image->type != it_pic && image->type != it_sky));
 
-			if (image->type == it_wall) /* GFX-modern r_om_bump: replacement wall textures too */
+			if (image->type == it_wall) /* r_om_ssr material map, replacement wall textures too */
 			{
-				GL3_Bump_Make(texNum, image->name, pic, width, height);
-				GL3_Mat_Make(texNum, image->name, pic, width, height); /* r_om_ssr material map */
+				GL3_Mat_Make(texNum, image->name, pic, width, height);
 			}
 		}
 
@@ -876,7 +874,6 @@ FreeImage(gl3image_t *image)
 
 	if (image->texnum && !image->scrap)
 	{
-		GL3_Bump_Free(image->texnum); /* GFX-modern r_om_bump */
 		GL3_Mat_Free(image->texnum); /* r_om_ssr */
 		glDeleteTextures(1, &image->texnum);
 	}
@@ -1310,15 +1307,14 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 	GL3_Bind(image->texnum);
 	UploadM32(image, m, size, kind, pictipskip);
 	SetImageFilter(image);
-	/* GFX-modern r_om_bump: normal map of a world texture, from its level-0 texels */
+	/* r_om_ssr material map of a world texture, from its level-0 texels */
 	if (image->type == it_wall)
 	{
 		int ofs0 = M32Int(m, M32_OFS_OFFSETS), w0 = M32Int(m, M32_OFS_WIDTHS), h0 = M32Int(m, M32_OFS_HEIGHTS);
 
 		if ((ofs0 > 0) && (w0 > 0) && (h0 > 0) && (ofs0 + w0 * h0 * 4 <= size))
 		{
-			GL3_Bump_Make(image->texnum, image->name, m + ofs0, w0, h0);
-			GL3_Mat_Make(image->texnum, image->name, m + ofs0, w0, h0); /* r_om_ssr material map */
+			GL3_Mat_Make(image->texnum, image->name, m + ofs0, w0, h0);
 		}
 	}
 
@@ -1776,9 +1772,8 @@ GL3_ShutdownImages(void)
 		/* free it */
 		if (image->texnum && !image->scrap)
 		{
-			GL3_Bump_Free(image->texnum); /* GFX-modern r_om_bump */
-		GL3_Mat_Free(image->texnum); /* r_om_ssr */
-		glDeleteTextures(1, &image->texnum);
+			GL3_Mat_Free(image->texnum); /* r_om_ssr */
+			glDeleteTextures(1, &image->texnum);
 		}
 
 		memset(image, 0, sizeof(*image));

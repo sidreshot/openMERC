@@ -764,7 +764,7 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   models clear it, translucent surfaces and fog fade it with their alpha. The opaque lightmapped faces write
   reflectivity and roughness x reflectivity (premultiplied, so blending keeps the ratio). Passes that modulate faces
   already drawn (FX blends DST_COLOR: detail/environment textures, marks) are masked off with glColorMaski.
-* Reflectivity by GL3_Bump_SurfClass, which now has two more classes: 6 loose ground (sand, dirt, gravel, snow,
+* Reflectivity by GL3_Mat_SurfClass, which now has two more classes: 6 loose ground (sand, dirt, gravel, snow,
   grass, hay, mud: none), 7 liquids (water, slime, blood, tar: 0.4 on floors). Stone/unknown floors 0.13, wood floors
   0.1, scaled 0.3..1 by how smooth the texture is (difference of the texel and the texture at LOD bias 3); metal
   0.16 everywhere, glass 0.45; walls and ceilings of stone and wood none.
@@ -789,12 +789,12 @@ world shaders). Called from GL3_RenderView after r_om_ssao, before the rain and 
   0.6 the world shaders and the extra target, 0.6 tracing, the rest resolves, apply and the colour of the frame.
 * Screen-space limits: what is not on screen is not reflected; Ghoul models (cars) write no reflectivity.
 * Follow-up (owner: "floors differ: wet catacombs in kos1, metal, mirrors"; "sort the textures that can shine on the
-  fly"): GL3_Bump_SurfClass first looks at the texture's file name once per image (gl3image_t.omgloss) - SoF names
+  fly"): GL3_Mat_SurfClass first looks at the texture's file name once per image (gl3image_t.omgloss) - SoF names
   are telling - and adds classes 8 polished stone (marbl, bathroom, pooltile, lobby_floor, _tile ...), 9 polished metal
   (brushed, chrome, metal_clean, metal_smooth, _sink), 10 rusty/dirty metal, 11 mirror (with material 37), 12 damp
   stone (sewer, mildew, gutter, wet, drain); "water" overrides the material (kos1 water4b is "mud"). Damp faces are
   wet without rain (r_om_ssr_damp 1): floors with puddles, walls glisten.
-* Lamp glints (r_om_ssr_glint 1): the four nearest map lights (lump 20, gl3_bump.c) give a normalised Blinn-Phong
+* Lamp glints (r_om_ssr_glint 1): the four nearest map lights (lump 20, gl3_lamps.c) give a normalised Blinn-Phong
   highlight on reflective faces, sharpness from the roughness, Fresnel from the reflectivity, gated by the lightmap
   (no shadows). Cost on kos1 (almost everything damp): +0.36 ms; r_om_ssr total there about 2.1 ms.
 * Rain detection fix: "rain" must start a word ("gb_rain", "CityTrafficRainy"); "train"/"drain" had switched the rain
@@ -1168,3 +1168,16 @@ correction away and put ours in its place".
   256 on these views (casters were frozen NPCs off screen), so they stay.
 * Result, same tour on tsr1, kos1, nyc1, sib2, sud2, jpn2: mean frame 11.3 -> 9.4 ms, heaviest spot 18.0 -> 13.7 ms,
   worst frame 282 -> 20 ms, hitches 31 -> 0.
+
+## HD texture packs and the removal of r_om_bump (owner: "a texture pack exists online - make installing it very simple, a folder of its own, switched in the menu"; "the old relief is rubbish, remove it")
+
+* HD packs: `<exe dir>/openmerc/hd/*.pak` (docs/impl/INSTALL-LAYOUT.md), switch `om_hdtextures`, menu row Picture
+  Quality / HD Textures (shown only when `om_hdpack` exists). sofhd2024.pak (sof1.org, 4x ESRGAN, 3159 world
+  .m32 of 256..1024 and 1157 Ghoul .tga) works as it is: the original size for texture coordinates and the Ghoul
+  skin cap were already in place (fb5). GTX 1050 Ti, nyc1, A/B/A in one run: +0.2..0.4 ms, no hitches, ~150 MB
+  of video memory. Separate tour runs drift by up to 25% (clocks): compare within one run only.
+* r_om_bump removed: normal maps made from the colour of the textures, lit by the omlight light directions. Off
+  by default (stains and seams became bumps) and still built for every wall texture at load. Gone with it: the
+  light-direction pages (the .oml cache keeps the directions, the renderer no longer reads them), GL_TEXTURE10
+  and 11, the omBump* uniforms and the r_om_bump_* cvars. Kept and renamed: the map's lamps for the SSR lamp
+  glints (gl3_lamps.c, GL3_Lamps_Set / GL3_Lamps_View), the material class (GL3_Mat_SurfClass).

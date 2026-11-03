@@ -893,7 +893,6 @@ void GL3_Draw3DBatchesNow()
 		if(cmd->texnum != gl3state.currenttexture)
 		{
 			GL3_Bind(cmd->texnum);
-			GL3_Bump_Bind(cmd->texnum); /* GFX-modern r_om_bump: its normal map on GL_TEXTURE11 */
 			GL3_Mat_Bind(cmd->texnum); /* r_om_ssr: its material map on GL_TEXTURE14 */
 		}
 		if(cmd->lmtexnum >= 0)

@@ -6996,7 +6996,7 @@ static const char *ssr_temporal_fs =
 
 /* over the scene at full size: the half-size reflections and smoothed material, upsampled where the depth agrees
    (no halo on a character in front of a shiny floor); the wet darkening; the glints of the eight nearest map lamps
-   (lump 20, gl3_bump.c), gated by the light the face receives (no shadows here) */
+   (lump 20, gl3_lamps.c), gated by the light the face receives (no shadows here) */
 static const char *ssr_apply_fs =
 	"uniform sampler2D reftex;\n"
 	"uniform sampler2D smtex;\n"
@@ -7485,7 +7485,7 @@ GL3_Post_SSR(void)
 	}
 	glUniform4f(SR.a_glint, Q_max(0.0f, r_om_ssr_glint->value), 0.3f,
 		(float)dbg, 0);
-	GL3_Bump_ViewLights(SR.progapply, r_newrefdef.vieworg);
+	GL3_Lamps_View(SR.progapply, r_newrefdef.vieworg);
 	BindTex(GL_TEXTURE2, P.texdepthcopy);
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
 	BindTex(GL_TEXTURE0, SR.histtex[SR.histcur]);
@@ -7560,7 +7560,7 @@ SSRShutdown(void)
 }
 /* ------------------------------------------------------------------
  * GFX-modern r_om_mirror: planar mirrors. The world faces of class 11
- * (texture name "mirror" with the glass material, gl3_bump.c) note
+ * (texture name "mirror" with the glass material, gl3_material.c) note
  * themselves while drawn; of those facing the eye the nearest gives the
  * plane of the next frame. Before the world of a view is drawn, it is
  * drawn once more from the eye mirrored in that plane (view matrix x

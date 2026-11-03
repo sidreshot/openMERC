@@ -210,7 +210,7 @@ GL3_DrawGLPoly(msurface_t *fa, gl3drawCmd_t drawCmd)
 	drawCmd.emissive = GL3_Post_SurfEmissive(fa); /* GFX-modern bloom source */
 	if (drawCmd.emissive == 0.0f)
 	{
-		drawCmd.emissive = GL3_Bump_SurfClass(fa); /* GFX-modern r_om_bump: gloss class as a negative value */
+		drawCmd.emissive = GL3_Mat_SurfClass(fa); /* GFX-modern: material class as a negative value (r_om_ssr) */
 	}
 	if (drawCmd.emissive == -11.0f)
 	{
@@ -235,7 +235,7 @@ GL3_DrawGLFlowingPoly(msurface_t *fa, gl3drawCmd_t drawCmd)
 	drawCmd.emissive = GL3_Post_SurfEmissive(fa); /* GFX-modern bloom source */
 	if (drawCmd.emissive == 0.0f)
 	{
-		drawCmd.emissive = GL3_Bump_SurfClass(fa); /* GFX-modern r_om_bump: gloss class as a negative value */
+		drawCmd.emissive = GL3_Mat_SurfClass(fa); /* GFX-modern: material class as a negative value (r_om_ssr) */
 	}
 	if (GL3_DynLight_PerPixel() && fa->texinfo && fa->texinfo->image)
 	{
@@ -535,7 +535,7 @@ SeamFace(const msurface_t *s)
 		return false;
 	}
 
-	c = (int)(-GL3_Bump_SurfClass(s) + 0.5f);
+	c = (int)(-GL3_Mat_SurfClass(s) + 0.5f);
 
 	if ((c != 1) && (c != 6) && (c != 12) && (c != 13) && (c != 15))
 	{
@@ -1005,7 +1005,7 @@ SeamBuild(void)
 		/* only a seam that shows: the variants of one surface (dirty tiles, tiles with graffiti, a frieze) were
 		   fitted to each other at their seams by the artist */
 		if ((a->texinfo->image == b->texinfo->image) || SeamFamily(a->texinfo->image->name, b->texinfo->image->name) ||
-			((int)(-GL3_Bump_SurfClass(a) + 0.5f) == (int)(-GL3_Bump_SurfClass(b) + 0.5f)) || !SeamVisible(mod, a, b, i))
+			((int)(-GL3_Mat_SurfClass(a) + 0.5f) == (int)(-GL3_Mat_SurfClass(b) + 0.5f)) || !SeamVisible(mod, a, b, i))
 		{
 			continue;
 		}
@@ -1092,7 +1092,7 @@ SeamDraw(void)
 		cmd.flags |= DCFlag_UseLmStyles | DCFlag_Blend | DCFlag_DisableDepthMask | DCFlag_PolyOffsetFill;
 		cmd.texnum = s->image->texnum;
 		cmd.lmtexnum = f->lightmaptexturenum;
-		cmd.emissive = GL3_Bump_SurfClass(f);
+		cmd.emissive = GL3_Mat_SurfClass(f);
 		cmd.fogregion = GL3_Fog_HardwareRegion(f);
 		if (cmd.fogregion >= 0)
 		{

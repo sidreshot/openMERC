@@ -627,7 +627,6 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			vec3 omLm0 = lmTex.rgb; // the lightmap before the shadows of moving casters (their common floor)
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
 			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
-			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
 			if(omPdl.x < 0.5) // r_om_pdlight replaces the CPU dlight layer (it stays black then)
 				lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
@@ -827,26 +826,8 @@ static const char* fragmentSrcOmPdl =
 	"}\n"
 	;
 
-/*
- * GFX-modern r_om_bump: relief lighting of the world walls from the game's own textures. The normal map of the
- * face texture is made when the texture loads (gl3_bump.c: detail height -> normals, height in alpha). The tangent
- * frame comes from the screen derivatives of position and texture coordinates. The static light keeps its
- * brightness; its directional share (the omlight deluxe map, gl3_relight.c; without one a light from above) is
- * scaled by how much the bumped normal faces that direction compared with the flat face, and the height darkens
- * grooves and lifts ridges a little (cavity), which gives volume under even, undirected light too.
- * omBump: x normal strength (0 = off), y cavity amount, z directional contrast, w directional share without a
- * deluxe map.
- */
-static const char* fragmentSrcOmBump =
-	"uniform vec4 omBump;\n"
-	"uniform float omBumpWalls; // 1: walls and floors only, ceilings (normal z <= -0.7) stay flat\n"
-	"uniform sampler2D omDeluxe;\n"
-	"uniform sampler2D omNormalMap;\n"
-	"uniform vec4 omBumpView; // xyz eye position, w specular strength (0 = no highlights)\n"
-	"uniform vec4 omBumpLights; // x lamp relief strength, y lamp glint strength (x 0 = lamps off)\n"
-	"uniform vec4 omBL[8]; // lamps: xyz origin, w radius\n"
-	"uniform vec4 omBC[8]; // lamps: rgb colour\n"
-	"uniform int omBN;\n"
+/* GFX-modern: functions of the world shaders - lightning light, reflection material, mirrors */
+static const char* fragmentSrcOmWorld =
 	/* GFX-modern r_om_rain: the light of a lightning strike (gl3_post.c). The channel is kilometres away: its light
 	   comes in parallel along omLt.xyz and reaches only what sees it - a shadow map of the static world made along
 	   that direction once per strike decides, so nothing behind a wall or under a roof is lit. The lit cloud deck adds
@@ -989,95 +970,6 @@ static const char* fragmentSrcOmBump =
 	"	}\n"
 	"	return vec4(r, r * clamp(rough, 0.0, 1.0), 0.0, 1.0);\n"
 	"}\n"
-	"vec3 omBumpLight(vec3 lm)\n"
-	"{\n"
-	"	if(omBump.x <= 0.0 || omEmissive > 0.0)\n"
-	"		return lm;\n"
-	"	vec3 N = normalize(passNormal);\n"
-	"	if(omBumpWalls > 0.5 && N.z <= -0.7)\n"
-	"		return lm;\n"
-	"	int mc = omEmissive < 0.0 ? int(-omEmissive + 0.5) : 0;\n"
-	"	if(mc == 5)\n"
-	"		return lm;\n"
-	"	vec4 nm = texture(omNormalMap, passTexCoord);\n"
-	"	vec3 dp1 = dFdx(passWorldCoord);\n"
-	"	vec3 dp2 = dFdy(passWorldCoord);\n"
-	"	vec2 duv1 = dFdx(passTexCoord);\n"
-	"	vec2 duv2 = dFdy(passTexCoord);\n"
-	"	// world directions of increasing s and t on the face (cotangent frame)\n"
-	"	vec3 dp2perp = cross(dp2, N);\n"
-	"	vec3 dp1perp = cross(N, dp1);\n"
-	"	vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;\n"
-	"	vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;\n"
-	"	if(dot(T, T) < 1.0e-12 || dot(B, B) < 1.0e-12)\n"
-	"		return lm;\n"
-	"	T = normalize(T);\n"
-	"	B = normalize(B);\n"
-	"	vec3 nt = nm.xyz * 2.0 - 1.0;\n"
-	"	// relief lives in the grooves: the raised faces of tiles and bricks stay nearly flat (their stains are not bumps)\n"
-	"	float h = nm.a * 2.0 - 1.0;\n"
-	"	nt.xy *= omBump.x * mix(1.0, 0.6, smoothstep(0.1, 0.7, h));\n"
-	"	// surface material (gl3_surf.c: -class in omEmissive): 1 stone, 2 wood, 3 metal, 4 glass, 5 pictures (flat);\n"
-	"	// x gloss, y sharpness, z reflectance seen head-on\n"
-	"	vec3 mat = mc == 1 ? vec3(0.6, 12.0, 0.25) : mc == 2 ? vec3(0.45, 16.0, 0.18) :\n"
-	"		mc == 3 ? vec3(1.3, 48.0, 0.6) : mc == 4 ? vec3(1.6, 90.0, 0.25) : vec3(0.6, 24.0, 0.2);\n"
-	"	vec3 Nb = normalize(T * nt.x + B * nt.y + N * max(nt.z, 0.05));\n"
-	"	// light direction and its share: the baked deluxe map, else light from above the face\n"
-	"	vec3 dv = texture(omDeluxe, passLMcoord).rgb * 2.0 - 1.0;\n"
-	"	float k = length(dv);\n"
-	"	vec3 Ld;\n"
-	"	if(k > 0.02)\n"
-	"	{\n"
-	"		Ld = dv / k;\n"
-	"		k = clamp(k * omBump.z, 0.0, 1.0);\n"
-	"	}\n"
-	"	else\n"
-	"	{\n"
-	"		Ld = normalize(N + vec3(0.0, 0.0, 1.2));\n"
-	"		k = omBump.w;\n"
-	"	}\n"
-	"	float fl = max(dot(N, Ld), 0.25);\n"
-	"	float ratio = clamp(max(dot(Nb, Ld), 0.0) / fl, 0.0, 2.0);\n"
-	"	float cav = 1.0 + omBump.y * (h < 0.0 ? 1.6 * h : 0.4 * h);\n"
-	"	vec3 V = normalize(omBumpView.xyz - passWorldCoord);\n"
-	"	// glints grow towards grazing view (Fresnel) instead of a plastic sheen seen head-on\n"
-	"	float fr = mat.z + (1.0 - mat.z) * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);\n"
-	"	float gloss = smoothstep(-0.6, 0.2, h) * mat.x * fr * 2.0;\n"
-	"	vec3 res = lm * ((1.0 - k) + k * ratio) * cav;\n"
-	"	// view-dependent highlight (Blinn-Phong) on the bumped normal: it slides over the relief as the view moves.\n"
-	"	// Flat raised parts (tile and brick faces) are glossier than grooves; it scales with the light reaching the face.\n"
-	"	if(omBumpView.w > 0.0)\n"
-	"	{\n"
-	"		vec3 Hh = normalize(Ld + V);\n"
-	"		float sp = pow(max(dot(Nb, Hh), 0.0), mat.y) * omBumpView.w * gloss * (0.4 + 0.6 * k);\n"
-	"		res += lm * sp;\n"
-	"	}\n"
-	"	// the map's lamps near the eye (lump 20, gl3_bump.c): each one shades the relief from its real position and\n"
-	"	// leaves a soft glint on it. Only the bumped-minus-flat part of the diffuse is added, so the baked brightness\n"
-	"	// stays; both scale with the lightmap, so lamps behind walls (no shadows here) don't light dark places.\n"
-	"	if(omBumpLights.x > 0.0)\n"
-	"	{\n"
-	"		vec3 acc = vec3(0.0);\n"
-	"		for(int i = 0; i < omBN; i++)\n"
-	"		{\n"
-	"			vec3 Lp = omBL[i].xyz - passWorldCoord;\n"
-	"			float d = length(Lp);\n"
-	"			float att = 1.0 - d / omBL[i].w;\n"
-	"			if(att <= 0.0)\n"
-	"				continue;\n"
-	"			vec3 L = Lp / d;\n"
-	"			float nf = dot(N, L);\n"
-	"			if(nf <= 0.0)\n"
-	"				continue;\n"
-	"			att *= att * smoothstep(0.0, 0.2, nf);\n"
-	"			float dif = max(dot(Nb, L), 0.0) - nf;\n"
-	"			float sp = pow(max(dot(Nb, normalize(L + V)), 0.0), mat.y) * gloss;\n"
-	"			acc += omBC[i].rgb * att * (dif * omBumpLights.x + sp * omBumpLights.y);\n"
-	"		}\n"
-	"		res += lm * acc;\n"
-	"	}\n"
-	"	return max(res, vec3(0.0));\n"
-	"}\n"
 	;
 static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 
@@ -1152,7 +1044,6 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			vec3 omLm0 = lmTex.rgb; // the lightmap before the shadows of moving casters (their common floor)
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
 			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
-			lmTex.rgb = omBumpLight(lmTex.rgb); // GFX-modern r_om_bump: relief of the static light
 			lmTex.rgb += omLightningLight(passWorldCoord, passNormal); // GFX-modern r_om_rain: lightning
 			if(omPdl.x < 0.5) // r_om_pdlight replaces the CPU dlight layer (it stays black then)
 				lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
@@ -1933,26 +1824,13 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 		glUniform1i(ctLoc, 5);
 	}
 
-	/* OpenMerc (I4c): dynamic light layer of the lightmap page on GL_TEXTURE6 (gl3_dynlight.c) */
-	/* GFX-modern r_om_bump: light directions of the lightmap page on GL_TEXTURE10 (gl3_relight.c) */
-	GLint nmLoc = glGetUniformLocation(prog, "omNormalMap"); /* r_om_bump: normal map of the texture (gl3_bump.c) */
-	if(nmLoc != -1)
-	{
-		glUniform1i(nmLoc, 11);
-	}
-
 	GLint mmLoc = glGetUniformLocation(prog, "omMatMap"); /* r_om_ssr: material map of the texture (gl3_material.c) */
 	if(mmLoc != -1)
 	{
 		glUniform1i(mmLoc, 14);
 	}
 
-	GLint dxLoc = glGetUniformLocation(prog, "omDeluxe");
-	if(dxLoc != -1)
-	{
-		glUniform1i(dxLoc, 10);
-	}
-
+	/* OpenMerc (I4c): dynamic light layer of the lightmap page on GL_TEXTURE6 (gl3_dynlight.c) */
 	GLint dlLoc = glGetUniformLocation(prog, "omDynLight");
 	if(dlLoc != -1)
 	{
@@ -2077,7 +1955,7 @@ static qboolean createShaders(void)
 		const char *lmsrc = (gl3_colorlight->value == 0.0f) ? fragmentSrc3DlmNoColor : fragmentSrc3Dlm;
 		const char *m = strstr(lmsrc, "void main()");
 		size_t pre = m ? (size_t)(m - lmsrc) : strlen(lmsrc);
-		size_t ins = strlen(fragmentSrcOmPdl), insb = strlen(fragmentSrcOmBump);
+		size_t ins = strlen(fragmentSrcOmPdl), insb = strlen(fragmentSrcOmWorld);
 		char *joined = malloc(strlen(lmsrc) + ins + insb + 1);
 		if(joined == NULL)
 		{
@@ -2085,7 +1963,7 @@ static qboolean createShaders(void)
 		}
 		memcpy(joined, lmsrc, pre);
 		memcpy(joined + pre, fragmentSrcOmPdl, ins);
-		memcpy(joined + pre + ins, fragmentSrcOmBump, insb); /* GFX-modern r_om_bump */
+		memcpy(joined + pre + ins, fragmentSrcOmWorld, insb); /* GFX-modern: lightning, reflection material, mirrors */
 		strcpy(joined + pre + ins + insb, lmsrc + pre);
 		lmFragCsm = GL3_CSM_Prepend(joined);
 		free(joined);
@@ -2495,46 +2373,6 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 		{
 			GL3_UseProgram(si[i]->shaderProgram);
 			glUniform1i(loc, mode);
-		}
-
-		/* GFX-modern r_om_bump: relief lighting of the world surfaces (off with r_fullbright / night vision) */
-		loc = glGetUniformLocation(si[i]->shaderProgram, "omBump");
-
-		if (loc != -1)
-		{
-			static cvar_t *bump, *bumpcavity, *bumpcontrast, *bumpshare, *bumpwalls, *bumpspec, *bumplights, *bumpglint;
-
-			if (!bump)
-			{
-				bump = ri.Cvar_Get("r_om_bump", "0", CVAR_ARCHIVE);
-				bumpcavity = ri.Cvar_Get("r_om_bump_cavity", "0.25", CVAR_ARCHIVE);
-				bumpcontrast = ri.Cvar_Get("r_om_bump_contrast", "2", CVAR_ARCHIVE);
-				bumpshare = ri.Cvar_Get("r_om_bump_share", "0.6", CVAR_ARCHIVE);
-				bumpwalls = ri.Cvar_Get("r_om_bump_walls", "1", CVAR_ARCHIVE);
-				bumpspec = ri.Cvar_Get("r_om_bump_spec", "0.3", CVAR_ARCHIVE);
-				bumplights = ri.Cvar_Get("r_om_bump_lights", "1", CVAR_ARCHIVE);
-				bumpglint = ri.Cvar_Get("r_om_bump_glint", "0.8", CVAR_ARCHIVE);
-			}
-
-			GL3_UseProgram(si[i]->shaderProgram);
-			glUniform4f(loc, fullbright ? 0.0f : bump->value, bumpcavity->value, bumpcontrast->value, bumpshare->value);
-			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpView");
-			if (loc != -1)
-			{
-				glUniform4f(loc, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2],
-						fullbright ? 0.0f : bumpspec->value);
-			}
-			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpWalls");
-			if (loc != -1)
-			{
-				glUniform1f(loc, bumpwalls->value);
-			}
-			loc = glGetUniformLocation(si[i]->shaderProgram, "omBumpLights");
-			if (loc != -1)
-			{
-				glUniform4f(loc, fullbright ? 0.0f : bumplights->value, bumpglint->value, 0.0f, 0.0f);
-				GL3_Bump_ViewLights(si[i]->shaderProgram, r_newrefdef.vieworg);
-			}
 		}
 	}
 }

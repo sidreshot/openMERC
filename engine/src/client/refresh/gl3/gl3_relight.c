@@ -20,8 +20,8 @@
  * the one baked from (another version of the map) is re-baked, and so is a
  * version-1 cache without directions.
  *
- * The directions are uploaded as one texture per lightmap page (GL_TEXTURE10)
- * for the relief lighting of the world surfaces (r_om_bump, gl3_shaders.c).
+ * The renderer does not use the directions (they lit the removed r_om_bump
+ * relief); the format keeps them so existing caches stay valid.
  *
  * A cache is checked against the map's own lighting before use (Relight_Guard):
  * a bake that lost the lamps is not used, darker face blocks are lifted to 80%.
@@ -45,13 +45,6 @@
 #include "header/local.h"
 
 enum { RELIGHT_VERSION = 2, RELIGHT_HEADER = 20, RELIGHT_MAXSPAWN = 64 };
-
-/* light directions of the current world (same layout as its lighting lump), NULL without a cache */
-static byte *deluxe;
-static int deluxesize;
-static const byte *deluxebase; /* the world's lighting data the surfaces' samples point into */
-static GLuint dxtex[MAX_LIGHTMAPS], dxneutral;
-static byte *dxbuf; /* the page being built, BLOCK_WIDTH x BLOCK_HEIGHT RGBA */
 
 /* a running bake is not started again before this many seconds (its log file is fresh) */
 #define RELIGHT_BUSY_SECONDS (20 * 60)
@@ -481,12 +474,6 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *fa
 		r_om_relight = ri.Cvar_Get("r_om_relight", "1", CVAR_ARCHIVE);
 	}
 
-	/* a new world: the light directions of the previous one are gone */
-	free(deluxe);
-	deluxe = NULL;
-	deluxesize = 0;
-	deluxebase = NULL;
-
 	if (!r_om_relight->value || !Relight_CacheName(mapname, cachename, sizeof(cachename)))
 	{
 		return;
@@ -517,14 +504,6 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *fa
 				}
 
 				memcpy(lightdata, buf + RELIGHT_HEADER, size);
-				/* the light directions (deluxe map) follow, same layout */
-				deluxe = malloc(size);
-				if (deluxe)
-				{
-					memcpy(deluxe, buf + RELIGHT_HEADER + size, size);
-					deluxesize = size;
-					deluxebase = lightdata;
-				}
 				ri.FS_FreeFile(buf);
 				R_Printf(PRINT_ALL, "relight: %s uses the re-baked lightmaps\n", mapname);
 				return;
@@ -539,130 +518,6 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *fa
 	{
 		Relight_Spawn(mapname, cachename);
 	}
-}
-
-/* ---------------------------------------------------------------------
- * light-direction pages (r_om_bump): built beside the lightmap pages
- * --------------------------------------------------------------------- */
-
-static void
-Deluxe_ClearBuffer(void)
-{
-	int i;
-
-	for (i = 0; i < BLOCK_WIDTH * BLOCK_HEIGHT; i++)
-	{
-		dxbuf[i * 4 + 0] = dxbuf[i * 4 + 1] = dxbuf[i * 4 + 2] = 128; /* no direction */
-		dxbuf[i * 4 + 3] = 255;
-	}
-}
-
-/* lightmap building starts: the old pages are freed */
-void
-GL3_Deluxe_BeginBuild(void)
-{
-	int i;
-
-	for (i = 0; i < MAX_LIGHTMAPS; i++)
-	{
-		if (dxtex[i])
-		{
-			glDeleteTextures(1, &dxtex[i]);
-			dxtex[i] = 0;
-		}
-	}
-
-	if (!deluxe)
-	{
-		free(dxbuf);
-		dxbuf = NULL;
-		return;
-	}
-
-	if (!dxbuf)
-	{
-		dxbuf = malloc((size_t)BLOCK_WIDTH * BLOCK_HEIGHT * 4);
-	}
-
-	if (dxbuf)
-	{
-		Deluxe_ClearBuffer();
-	}
-}
-
-/* a surface got its place on the current page: its style-0 directions go to the same place */
-void
-GL3_Deluxe_Surface(const msurface_t *surf)
-{
-	int smax = surf->lmsize[0], tmax = surf->lmsize[1], i, j;
-	ptrdiff_t ofs;
-	const byte *src;
-
-	if (!dxbuf || !deluxe || !surf->samples || !deluxebase)
-	{
-		return;
-	}
-
-	ofs = surf->samples - deluxebase;
-
-	if ((ofs < 0) || (ofs + (ptrdiff_t)smax * tmax * 3 > deluxesize))
-	{
-		return;
-	}
-
-	src = deluxe + ofs;
-
-	for (j = 0; j < tmax; j++)
-	{
-		byte *dst = dxbuf + ((size_t)(surf->light_t + j) * BLOCK_WIDTH + surf->light_s) * 4;
-
-		for (i = 0; i < smax; i++, src += 3, dst += 4)
-		{
-			dst[0] = src[0];
-			dst[1] = src[1];
-			dst[2] = src[2];
-		}
-	}
-}
-
-/* the current page is complete */
-void
-GL3_Deluxe_UploadPage(int page)
-{
-	if (!dxbuf || (page < 0) || (page >= MAX_LIGHTMAPS))
-	{
-		return;
-	}
-
-	glGenTextures(1, &dxtex[page]);
-	GL3_SelectTMU(GL_TEXTURE10);
-	glBindTexture(GL_TEXTURE_2D, dxtex[page]);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, BLOCK_WIDTH, BLOCK_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, dxbuf);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	Deluxe_ClearBuffer();
-}
-
-/* binds the directions of a lightmap page (or "no direction") to texture unit 10 */
-void
-GL3_Deluxe_BindPage(int page)
-{
-	if (!dxneutral)
-	{
-		static const byte none[4] = {128, 128, 128, 255};
-
-		glGenTextures(1, &dxneutral);
-		GL3_SelectTMU(GL_TEXTURE10);
-		glBindTexture(GL_TEXTURE_2D, dxneutral);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, none);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	}
-
-	GL3_SelectTMU(GL_TEXTURE10);
-	glBindTexture(GL_TEXTURE_2D, ((page >= 0) && (page < MAX_LIGHTMAPS) && dxtex[page]) ? dxtex[page] : dxneutral);
 }
 
 /* the light model weights omlight fitted to the map's own lightmaps (the "fit 2" line of its log: point, surface,

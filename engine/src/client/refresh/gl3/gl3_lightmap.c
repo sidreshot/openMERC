@@ -69,9 +69,6 @@ GL3_LM_UploadBlock(void)
 		             GL_UNSIGNED_BYTE, gl3_lms.lightmap_buffers[map]);
 	}
 
-	GL3_Deluxe_UploadPage(gl3_lms.current_lightmap_texture); /* GFX-modern r_om_bump: the page's light directions */
-	gl3state.currentlightmap = -1; /* rebind with the directions */
-
 	if (++gl3_lms.current_lightmap_texture == MAX_LIGHTMAPS)
 	{
 		Com_Error(ERR_DROP, "LM_UploadBlock() - MAX_LIGHTMAPS exceeded\n");
@@ -250,7 +247,6 @@ GL3_LM_CreateSurfaceLightmap(msurface_t *surf)
 	surf->lightmaptexturenum = gl3_lms.current_lightmap_texture;
 
 	GL3_BuildLightMap(surf, (surf->light_t * BLOCK_WIDTH + surf->light_s) * LIGHTMAP_BYTES, BLOCK_WIDTH * LIGHTMAP_BYTES);
-	GL3_Deluxe_Surface(surf); /* GFX-modern r_om_bump */
 }
 
 void
@@ -261,7 +257,6 @@ GL3_LM_BeginBuildingLightmaps(gl3model_t *m)
 	int i;
 
 	GL3_DynLight_Free(); /* OpenMerc (I4c): new lightmap pages, the dynamic layers start again */
-	GL3_Deluxe_BeginBuild(); /* GFX-modern r_om_bump: and the light-direction pages */
 
 	memset(gl3_lms.allocated, 0, sizeof(gl3_lms.allocated));
 

@@ -577,7 +577,7 @@ MatFallback(const gl3image_t *img, const char *key, int m)
 /* the class of a face (texture + SoF surface material, high byte of the texinfo flags, SPEC-401) as the negative
    value the world shader takes in the emissive slot of non-light faces; 0 = unknown */
 float
-GL3_Bump_SurfClass(const msurface_t *surf)
+GL3_Mat_SurfClass(const msurface_t *surf)
 {
 	gl3image_t *img;
 	int m, c;
@@ -647,7 +647,7 @@ GL3_Bump_SurfClass(const msurface_t *surf)
 float
 GL3_Mat_SurfReflect(const msurface_t *surf, const vec3_t n)
 {
-	int c = (int)(-GL3_Bump_SurfClass(surf) + 0.5f);
+	int c = (int)(-GL3_Mat_SurfClass(surf) + 0.5f);
 	const matclass_t *mc;
 
 	if (c <= 0 || c >= MAT_MAXCLASS)
@@ -1216,7 +1216,7 @@ MatProbe_f(void)
 
 	MatKey(s->texinfo->image->name, key, sizeof(key));
 	listed = MatLookup(key);
-	c = (int)(-GL3_Bump_SurfClass(s) + 0.5f);
+	c = (int)(-GL3_Mat_SurfClass(s) + 0.5f);
 	c = c < 0 ? 0 : (c >= M.numcls ? 0 : c);
 	R_Printf(PRINT_ALL, "%s  material %d  detail %s  rust %.2f\n  class %s (%s): refl %.2f rough %.2f walls %.2f "
 		"ceil %.2f detail %.2f stain %.2f damp %.2f soak %.2f\n", key, (s->texinfo->flags >> 24) & 0xff,

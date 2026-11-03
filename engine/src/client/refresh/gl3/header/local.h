@@ -539,18 +539,10 @@ extern const byte* GL3_Mod_ClusterPVS(int cluster, const gl3model_t *model);
 // gl3_relight.c: the local lightmap re-bake cache (omlight)
 extern void GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *faces, int faceslen);
 extern qboolean GL3_Relight_Fit(const char *mapname, float *point, float *surf, float *sun, float *spot, float *r2);
-// light-direction pages beside the lightmap pages (r_om_bump)
-extern void GL3_Deluxe_BeginBuild(void);
-extern void GL3_Deluxe_Surface(const msurface_t *surf);
-extern void GL3_Deluxe_UploadPage(int page);
-extern void GL3_Deluxe_BindPage(int page);
-// gl3_bump.c: normal maps of the world textures made from the textures (r_om_bump)
-extern void GL3_Bump_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h);
-extern void GL3_Bump_Free(GLuint texnum);
-extern void GL3_Bump_Bind(GLuint texnum);
-extern void GL3_Bump_SetLights(const byte *lights, int len);
-extern void GL3_Bump_ViewLights(GLuint prog, const float *eye);
-extern float GL3_Bump_SurfClass(const msurface_t *surf); /* gl3_material.c */
+// gl3_lamps.c: the map's lamps for the lamp glints of r_om_ssr
+extern void GL3_Lamps_Set(const byte *lights, int len);
+extern void GL3_Lamps_View(GLuint prog, const float *eye);
+extern float GL3_Mat_SurfClass(const msurface_t *surf); /* gl3_material.c: material class, negative */
 extern float GL3_Mat_SurfReflect(const msurface_t *surf, const vec3_t n); /* r_om_ssr reflectivity of a face */
 // gl3_material.c: material classes and material maps of the world textures (r_om_ssr)
 extern void GL3_Mat_Init(void);
