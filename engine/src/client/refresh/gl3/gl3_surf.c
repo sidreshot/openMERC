@@ -1592,6 +1592,12 @@ GL3_DrawBrushModel(entity_t *e, gl3model_t *currentmodel)
 		return;
 	}
 
+	/* GFX-modern r_om_fogcull: the whole model lies in the opaque fog of the eye's region */
+	if (GL3_Fog_CullModel(currentmodel, mins, maxs))
+	{
+		return;
+	}
+
 	if (gl_zfix->value)
 	{
 		drawCmd.flags |= DCFlag_PolyOffsetFill;
@@ -1748,6 +1754,12 @@ RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 		{
 			/* OpenMerc: SPEC-410 Surface classification during the walk */
 			int flags = surf->texinfo->flags;
+
+			/* GFX-modern r_om_fogcull: hidden in the opaque fog of the eye's region, with its overlay */
+			if (GL3_Fog_CullSurface(surf))
+			{
+				continue;
+			}
 			qboolean fog = (GL3_Fog_SurfaceRegion(surf) >= 0);
 
 			if (flags & SOFSURF_FOGBOUNDARY)

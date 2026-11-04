@@ -650,7 +650,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 	/* step 4: pre-cull with the instance's box at the frame's game clock */
 	if ((ghl_pre_cull->value > 0.5f) && !weapon && !nocull)
 	{
-		vec3_t mins = {0, 0, 0}, maxs = {0, 0, 0};
+		vec3_t mins = {0, 0, 0}, maxs = {0, 0, 0}, c;
 		float corners[8][3];
 
 		Ghl_Bounds(inst, GL3_GameTime(), &P.entityToWorld, mins, maxs);
@@ -660,6 +660,20 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		{
 			return;
 		}
+
+		/* GFX-modern r_om_fogcull: wholly inside the opaque fog of the eye's region */
+		VectorAdd(mins, maxs, c);
+		VectorScale(c, 0.5f, c);
+		VectorSubtract(maxs, mins, corners[0]);
+
+		if ((maxs[0] >= mins[0]) && GL3_Fog_CullPoint(c, 0.5f * VectorLength(corners[0])))
+		{
+			return;
+		}
+	}
+	else if (!weapon && !nocull && GL3_Fog_CullPoint(e->origin, 128))
+	{
+		return; /* r_om_fogcull without the instance box: a generous radius */
 	}
 
 	/* step 5: shadow mode */

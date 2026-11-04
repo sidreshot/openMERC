@@ -217,6 +217,10 @@ int GL3_Fog_RegionOfPoint(const vec3_t p);
 float GL3_Fog_PointFactor(int region, const vec3_t p, float fogcolor_out[4]);
 int GL3_Fog_NumRegions(void);
 qboolean GL3_Fog_ViewFog(float out[7]); /* fog of the eye's region for post passes (SSAO, SSR) */
+qboolean GL3_Fog_CullSurface(msurface_t *surf); /* r_om_fogcull: face hidden in opaque fog */
+qboolean GL3_Fog_CullPoint(const vec3_t p, float rad);
+float GL3_Fog_CullDistance(void);
+qboolean GL3_Fog_CullModel(const gl3model_t *model, const vec3_t mins, const vec3_t maxs);
 void GL3_Fog_Regions_f(void);
 void GL3_Fog_ViewTest(refdef_t *rd);
 int GL3_Fog_VolumeRegions(float *out, int max);

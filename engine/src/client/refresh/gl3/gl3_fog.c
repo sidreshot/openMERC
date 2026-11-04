@@ -51,6 +51,9 @@ typedef struct
 	short region;        /* -1 none */
 	short numpolys;
 	fogpoly_t *polys;
+	/* r_om_fogcull: the face's box, and whether its region polygons cover all of it */
+	float mins[3], maxs[3];
+	qboolean covered;
 } fogsurf_t;
 
 static fogregion_t regions[MAX_FOG_REGIONS];
@@ -100,6 +103,11 @@ FogQueueRoom(void)
 }
 
 static int viewregion = -1;
+static float cutdist2 = -1; /* r_om_fogcull: squared distance beyond which the eye's region is opaque, -1 off */
+static void FogCullFrame(void);
+static void Params(const fogregion_t *r, float *start, float *range, float *maxalpha, float color[4]);
+static int cullseen, cullfaces, cullents; /* r_om_fogcull 2: faces walked / skipped, entities skipped */
+static float lastcut = -1; /* cutdist2 of the frame the statistics count */
 static byte regionseen[MAX_FOG_REGIONS]; /* GFX-modern volumetric fog: regions with faces walked this frame */
 static int lastregion = -1;      /* region most recently processed by an overlay pass */
 
@@ -303,6 +311,57 @@ GL3_Fog_LoadRegions(gl3model_t *mod, const byte *mod_base, const lump_t *lfaces,
 				}
 			}
 		}
+
+		/* r_om_fogcull: box of the face, and its region polygons covering it (area within 1%) */
+		{
+			float facearea = 0, polyarea = 0;
+			vec3_t v0, va, vb, e1, e2, c;
+
+			fogsurfs[i].mins[0] = fogsurfs[i].mins[1] = fogsurfs[i].mins[2] = 1e30f;
+			fogsurfs[i].maxs[0] = fogsurfs[i].maxs[1] = fogsurfs[i].maxs[2] = -1e30f;
+
+			for (k = 0; k < surf->numedges; k++)
+			{
+				int a;
+
+				EdgeVertex(mod, surf->firstedge + k, va);
+
+				for (a = 0; a < 3; a++)
+				{
+					fogsurfs[i].mins[a] = Q_min(fogsurfs[i].mins[a], va[a]);
+					fogsurfs[i].maxs[a] = Q_max(fogsurfs[i].maxs[a], va[a]);
+				}
+
+				if (k == 0)
+				{
+					VectorCopy(va, v0);
+				}
+				else if (k >= 2)
+				{
+					VectorSubtract(vb, v0, e1);
+					VectorSubtract(va, v0, e2);
+					CrossProduct(e1, e2, c);
+					facearea += 0.5f * VectorLength(c);
+				}
+
+				VectorCopy(va, vb);
+			}
+
+			for (j = 0; j < n; j++)
+			{
+				const fogpoly_t *p = &fogsurfs[i].polys[j];
+
+				for (k = 2; k < p->numverts; k++)
+				{
+					VectorSubtract(p->verts[k - 1], p->verts[0], e1);
+					VectorSubtract(p->verts[k], p->verts[0], e2);
+					CrossProduct(e1, e2, c);
+					polyarea += 0.5f * VectorLength(c);
+				}
+			}
+
+			fogsurfs[i].covered = (surf->numedges >= 3) && (polyarea >= 0.99f * facearea);
+		}
 	}
 
 	for (i = 0; i < numregions; i++)
@@ -370,6 +429,7 @@ GL3_Fog_BeginFrame(void)
 
 	numqueued = 0;
 	viewregion = -1;
+	cutdist2 = -1;
 	memset(regionseen, 0, sizeof(regionseen));
 
 	if (!fogworld || (fogworld != gl3_worldmodel) || !numregions)
@@ -396,6 +456,173 @@ GL3_Fog_BeginFrame(void)
 	}
 
 	viewregion = LeafRegion(leaf);
+	FogCullFrame();
+}
+
+/*
+ * GFX-modern r_om_fogcull (roadmap phase 1.2): a face of the eye's region whose
+ * region polygons cover it gets an overlay alpha from its squared distance to
+ * the eye alone (no plane shortening with the eye inside). Where the region
+ * reaches full opacity (opacity 1, no height falloff, gl_fogmode 0) a face lying
+ * entirely beyond that distance - plus the largest shimmer offset - is drawn as
+ * plain fog colour: it is skipped together with its overlay. Entities of that
+ * region beyond it likewise. Sky faces and fog boundary faces are never skipped
+ * (the sky box and the curtains in front of other regions need them).
+ */
+static void
+FogCullFrame(void)
+{
+	static cvar_t *fogcull;
+	const fogregion_t *r;
+	float start, range, maxalpha, color[4], amp;
+
+	cutdist2 = -1;
+
+	if (!fogcull)
+	{
+		fogcull = ri.Cvar_Get("r_om_fogcull", "0", CVAR_ARCHIVE); /* off: see GFX-modern.md, no gain on the shipped maps */
+	}
+
+	if ((fogcull->value == 2) && ((gl3_framecount % 60) == 0))
+	{
+		R_Printf(PRINT_ALL, "OMFOGCULL region %d cut %.0f faces %d skipped %d ents %d\n", viewregion,
+			(lastcut > 0) ? sqrtf(lastcut) : 0.0f, cullseen, cullfaces, cullents);
+	}
+
+	cullseen = cullfaces = cullents = 0;
+	lastcut = -1;
+
+	/* not with the night-vision goggles (their own look of the scene) */
+	if (!fogcull->value || (viewregion < 0) || (viewregion >= numregions) || (int)gl_fogmode->value != 0 ||
+		(r_newrefdef.rdflags & SOF_RDF_IRGOGGLES))
+	{
+		return;
+	}
+
+	r = &regions[viewregion];
+	Params(r, &start, &range, &maxalpha, color);
+
+	if ((maxalpha < 255.0f) || (range <= 0) || ((r->flags & 2) && (r->size[2] > 0)))
+	{
+		return;
+	}
+
+	amp = (gl_fogdensityrange->value >= 0) ? gl_fogdensityrange->value : r->amplitude;
+	/* full alpha at D = start + range * 255 (the overlay floors a, so 256 steps); shimmer lowers D by up to amp^2 */
+	cutdist2 = (start + range * 256.0f + ((r->flags & 1) ? amp * amp : 0)) * 1.02f + 16.0f;
+	lastcut = cutdist2;
+}
+
+static float
+BoxDist2(const float *mins, const float *maxs, const float *p)
+{
+	float d2 = 0;
+	int a;
+
+	for (a = 0; a < 3; a++)
+	{
+		float o = (p[a] < mins[a]) ? mins[a] - p[a] : ((p[a] > maxs[a]) ? p[a] - maxs[a] : 0);
+
+		d2 += o * o;
+	}
+
+	return d2;
+}
+
+/* true: the world face is hidden in opaque fog of the eye's region (skip it and its overlay) */
+qboolean
+GL3_Fog_CullSurface(msurface_t *surf)
+{
+	int idx;
+	const fogsurf_t *fs;
+
+	if ((cutdist2 < 0) || !fogsurfs || (fogworld != gl3_worldmodel))
+	{
+		return false;
+	}
+
+	idx = (int)(surf - fogworld->surfaces);
+
+	if ((idx < 0) || (idx >= numfogsurfs))
+	{
+		return false;
+	}
+
+	fs = &fogsurfs[idx];
+
+	if ((fs->region != viewregion) || !fs->covered || (surf->texinfo->flags & (SOFSURF_SKY | SOFSURF_FOGBOUNDARY)))
+	{
+		return false;
+	}
+
+	cullseen++;
+
+	if (BoxDist2(fs->mins, fs->maxs, r_newrefdef.vieworg) > cutdist2)
+	{
+		cullfaces++;
+		return true;
+	}
+
+	return false;
+}
+
+/* true: an entity at p (radius rad) in the eye's region lies wholly in its opaque fog */
+qboolean
+GL3_Fog_CullPoint(const vec3_t p, float rad)
+{
+	vec3_t d;
+	float dist;
+
+	if ((cutdist2 < 0) || (GL3_Fog_RegionOfPoint(p) != viewregion))
+	{
+		return false;
+	}
+
+	VectorSubtract(p, r_newrefdef.vieworg, d);
+	dist = VectorLength(d) - rad;
+	if ((dist > 0) && (dist * dist > cutdist2))
+	{
+		cullents++;
+		return true;
+	}
+
+	return false;
+}
+
+/* true: an inline model (box mins/maxs in world space) lies in the opaque fog and every face of it carries the
+   overlay (faces without region polygons are drawn unfogged, so such a model is kept) */
+qboolean
+GL3_Fog_CullModel(const gl3model_t *model, const vec3_t mins, const vec3_t maxs)
+{
+	vec3_t c, s;
+	int i;
+
+	if ((cutdist2 < 0) || !fogsurfs || (fogworld != gl3_worldmodel))
+	{
+		return false;
+	}
+
+	for (i = 0; i < model->nummodelsurfaces; i++)
+	{
+		int idx = model->firstmodelsurface + i;
+
+		if ((idx < 0) || (idx >= numfogsurfs) || !fogsurfs[idx].covered)
+		{
+			return false;
+		}
+	}
+
+	VectorAdd(mins, maxs, c);
+	VectorScale(c, 0.5f, c);
+	VectorSubtract(maxs, mins, s);
+	return GL3_Fog_CullPoint(c, 0.5f * VectorLength(s));
+}
+
+/* the distance at which the eye's fog is opaque, 0 = none (r_om_fogcull statistics) */
+float
+GL3_Fog_CullDistance(void)
+{
+	return (cutdist2 > 0) ? sqrtf(cutdist2) : 0;
 }
 
 /* a boundary face walked this frame marks its plane */

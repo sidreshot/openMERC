@@ -1329,3 +1329,18 @@ correction away and put ours in its place".
   settings compare frame by frame; `om_testmode 2` (game) is god + notarget with walking collision. A synthetic
   pan path (six 360 degree turns + a walk) on sib1 shows no localized pops after the change; the remaining
   periodic change every 6 frames with a still camera is a 10 Hz light style.
+
+## r_om_fogcull: skip what lies in opaque fog (roadmap phase 1.2) - measured, off by default
+
+* A face of the eye's region whose region polygons cover it gets its overlay alpha from the squared distance
+  alone; where the region is opaque (opacity 1, no height falloff, gl_fogmode 0) faces wholly beyond
+  start + range * 256 (+ shimmer, + 2 %) are skipped with their overlay; Ghoul models (instance box) and inline
+  models (only when every face carries region polygons) in that region likewise. Sky and fog boundary faces are
+  kept; nothing with the night-vision goggles. `r_om_fogcull 2` prints OMFOGCULL once a second.
+* Measured on sib1 (the pan path, 1628 frames, 1080p, GTX 1050 Ti, on/off/on in one run): world GPU 1.41 -> 1.37 ms
+  of a 6.9 ms frame. The PVS already removes nearly everything behind the fog; at the six fixed views at most 82
+  of 312 candidate faces were skipped. Of the shipped single-player maps only sib1 has a large opaque region
+  (cut 678 units); the others are smoke and steam volumes in rooms (cut 94..320).
+* Image: identical except SSR on wet floors, which traced against the depth of the skipped distance and lost
+  part of a near reflection (sib1 walkway). Hence default 0; it is meant for the large maps of phase 2, together
+  with a depth-only stand-in for skipped faces.
