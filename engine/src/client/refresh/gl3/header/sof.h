@@ -230,6 +230,13 @@ void GL3_Seam_Invalidate(void);
 void GL3_BindUBO3D(void);
 void GL3_Ring3DReset(void);
 int GL3_CSM_StaticGen(void);
+void GL3_Image_LoadStats(void);
+void GL3_LoadMark(const char *stage);
+void GL3_Mat_BatchBegin(void);
+void GL3_Mat_BatchEnd(void);
+void GL3_Mat_Flush(void);
+void GL3_ParallelFor(int n, void (*fn)(int i, void *ctx), void *ctx); /* gl3_jobs.c */
+double GL3_LoadClockMs(void); /* r_om_loadtime (gl3_model.c) */
 qboolean GL3_RingsOn(void);
 void GL3_Ring3DShutdown(void);
 extern int gl3_drawsamples; /* samples of the framebuffer 3D draws go to (gl3_post.c) */

@@ -34,6 +34,9 @@
  */
 
 #include "header/local.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 typedef struct
 {
@@ -1065,6 +1068,48 @@ CorrectColours(byte *m, int size, int softype)
 static gl3image_t *LoadSoFImage(const char *name, int softype, qboolean substitute);
 
 /* SPEC-413 §8 lookup; create = load the file if it is not loaded yet */
+/* r_om_loadtime: where the image loads of a map go (file, seam repair, colours, upload, material map) */
+static double imgt[6];
+static int imgdepth;
+static int imgn;
+
+static double
+ImgClock(void)
+{
+#ifdef _WIN32
+	LARGE_INTEGER f, c;
+
+	QueryPerformanceFrequency(&f);
+	QueryPerformanceCounter(&c);
+	return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
+#else
+	return 0;
+#endif
+}
+
+void
+GL3_Image_LoadStats(void)
+{
+	R_Printf(PRINT_ALL, "OMLOAD images %d: total %.0f = file %.0f seams %.0f colours %.0f upload %.0f material %.0f ms\n",
+		imgn, imgt[5], imgt[0], imgt[1], imgt[2], imgt[3], imgt[4]);
+	{
+		extern double gl3_matt[5];
+
+		R_Printf(PRINT_ALL, "OMLOAD material maps: downsample %.0f blurs %.0f rest %.0f upload %.0f all %.0f ms\n",
+			gl3_matt[0], gl3_matt[1], gl3_matt[2], gl3_matt[3], gl3_matt[4]);
+		{
+			extern double gl3_matx[6];
+
+			R_Printf(PRINT_ALL, "OMLOAD material parts: blurs1 %.0f hf %.0f gloss %.0f panes %.0f ms\n", gl3_matx[0], gl3_matx[1], gl3_matx[2], gl3_matx[3]);
+			memset(gl3_matx, 0, sizeof(gl3_matx));
+		}
+		memset(gl3_matt, 0, sizeof(gl3_matt));
+	}
+
+	memset(imgt, 0, sizeof(imgt));
+	imgn = 0;
+}
+
 gl3image_t *
 GL3_SoF_FindImage(const char *name, int softype, qboolean create)
 {
@@ -1114,7 +1159,22 @@ GL3_SoF_FindImage(const char *name, int softype, qboolean create)
 		return NULL;
 	}
 
-	return LoadSoFImage(name, softype, true);
+	{
+		/* r_om_loadtime: the whole load of an image (its own steps are counted inside) */
+		double t0 = ImgClock();
+		gl3image_t *im;
+
+		imgdepth++;
+		im = LoadSoFImage(name, softype, true);
+		imgdepth--;
+
+		if (!imgdepth)
+		{
+			imgt[5] += ImgClock() - t0;
+		}
+
+		return im;
+	}
 }
 
 /*
@@ -1544,7 +1604,11 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 	gl3image_t *image;
 
 	Com_sprintf(path, sizeof(path), "%s.m32", name);
+	double t0 = ImgClock(), t1;
+
 	size = ri.FS_LoadFile(path, (void **)&m);
+	imgt[0] += ImgClock() - t0;
+	imgn++;
 
 	if (!m || (size < M32_HEADER_SIZE))
 	{
@@ -1617,10 +1681,14 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 
 	if (softype == SOFIMG_WALL)
 	{
+		t1 = ImgClock();
 		HDSeamRepair(m, size, path);
+		imgt[1] += ImgClock() - t1;
 	}
 
+	t1 = ImgClock();
 	CorrectColours(m, size, softype);
+	imgt[2] += ImgClock() - t1;
 
 	image = AllocImageSlot();
 
@@ -1649,7 +1717,9 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 	glGenTextures(1, &image->texnum);
 	GL3_SelectTMU(GL_TEXTURE0);
 	GL3_Bind(image->texnum);
+	t1 = ImgClock();
 	UploadM32(image, m, size, kind, pictipskip);
+	imgt[3] += ImgClock() - t1;
 	SetImageFilter(image);
 	/* r_om_ssr material map of a world texture, from its level-0 texels */
 	if (image->type == it_wall)
@@ -1658,7 +1728,9 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 
 		if ((ofs0 > 0) && (w0 > 0) && (h0 > 0) && (ofs0 + w0 * h0 * 4 <= size))
 		{
+			t1 = ImgClock();
 			GL3_Mat_Make(image->texnum, image->name, m + ofs0, w0, h0);
+			imgt[4] += ImgClock() - t1;
 		}
 	}
 
@@ -1946,6 +2018,18 @@ GL3_SoF_FreeUnusedImages(void)
 /*
  * Finds or loads the given image or NULL
  */
+/* the names GL3_FindImage did not find in this registration (open addressing, cleared by a new sequence) */
+#define MISS_SIZE 4096
+
+typedef struct
+{
+	unsigned hash;
+	int seq;
+	char name[64];
+} missentry_t;
+
+static missentry_t misses[MISS_SIZE];
+
 gl3image_t *
 GL3_FindImage(const char *originname, imagetype_t type)
 {
@@ -2001,11 +2085,57 @@ GL3_FindImage(const char *originname, imagetype_t type)
 		}
 	}
 
-	//
-	// load the pic from disk
-	//
-	image = (gl3image_t *)R_LoadImage(name, namewe, ext, type,
-		r_retexturing->value, (loadimage_t)GL3_LoadPic);
+	/* a name that was not found in this registration is not searched again: Mod_LoadTexinfo asks for
+	   textures/<name>.wal first for every face texture (SoF has none), and each miss walked all search paths and
+	   pak files for the .wal and its .png / .tga / .jpg replacements - 4 s of a 9 s map load */
+	{
+		unsigned h = 2166136261u;
+		const char *c;
+
+		for (c = name; *c; c++)
+		{
+			h = (h ^ (unsigned char)*c) * 16777619u;
+		}
+
+		h |= 1;
+
+		for (i = 0; i < MISS_SIZE; i++)
+		{
+			const missentry_t *e = &misses[(h + i) & (MISS_SIZE - 1)];
+
+			if (!e->hash || (e->seq != registration_sequence))
+			{
+				break;
+			}
+
+			if ((e->hash == h) && !strcmp(e->name, name))
+			{
+				return NULL;
+			}
+		}
+
+		//
+		// load the pic from disk
+		//
+		image = (gl3image_t *)R_LoadImage(name, namewe, ext, type,
+			r_retexturing->value, (loadimage_t)GL3_LoadPic);
+
+		if (!image)
+		{
+			for (i = 0; i < MISS_SIZE; i++)
+			{
+				missentry_t *e = &misses[(h + i) & (MISS_SIZE - 1)];
+
+				if (!e->hash || (e->seq != registration_sequence))
+				{
+					e->hash = h;
+					e->seq = registration_sequence;
+					Q_strlcpy(e->name, name, sizeof(e->name));
+					break;
+				}
+			}
+		}
+	}
 
 	/* fb5: a replaced .tga/.pcx keeps the original size for coordinates (the
 	   .wal/.m32 substitution above already passes realwidth) */

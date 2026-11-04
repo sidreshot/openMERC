@@ -810,15 +810,20 @@ Mod_LoadBrushModel(gl3model_t *mod, void *buffer, int modfilelen)
 	mod->lightdatasize = mod->lightdata ? header->lumps[LUMP_LIGHTING].filelen : 0;
 	if ((mod->bspversion == BSPVERSION_SOF) && mod->lightdata)
 	{
+		GL3_LoadMark("lumps");
 		GL3_Relight_Apply(mod->name, mod->lightdata, mod->lightdatasize,
 			mod_base + header->lumps[LUMP_FACES].fileofs, header->lumps[LUMP_FACES].filelen);
 	}
+	GL3_LoadMark("relight");
 	Mod_LoadPlanes (mod->name, &mod->planes, &mod->numplanes,
 		mod_base, &header->lumps[LUMP_PLANES], 0);
+	GL3_LoadMark("planes");
 	Mod_LoadTexinfo (mod->name, &mod->texinfo, &mod->numtexinfo,
 		mod_base, &header->lumps[LUMP_TEXINFO], (findimage_t)GL3_FindImage,
 		(mod->bspversion == BSPVERSION_SOF) ? GL3_SoF_NoTexture() : gl3_notexture, 0);
+	GL3_LoadMark("texinfo (world textures)");
 	Mod_LoadFaces(mod, mod_base, &header->lumps[LUMP_FACES]);
+	GL3_LoadMark("faces (lightmaps)");
 	Mod_LoadMarksurfaces(mod, mod_base, &header->lumps[LUMP_LEAFFACES]);
 	Mod_LoadVisibility(&mod->vis, mod_base, &header->lumps[LUMP_VISIBILITY]);
 	Mod_LoadLeafs(mod, mod_base, &header->lumps[LUMP_LEAFS]);
@@ -848,6 +853,7 @@ Mod_LoadBrushModel(gl3model_t *mod, void *buffer, int modfilelen)
 			}
 		}
 
+		GL3_LoadMark("bsp tree");
 		GL3_Fog_LoadRegions(mod, mod_base, &h46->lumps[LUMP_FACES], &h46->lumps[LUMP_FACEPOLYS],
 			&h46->lumps[LUMP_VOLUMES], &h46->lumps[LUMP_LEAFS]);
 		GL3_SoF_WorldLights(mod_base + h46->lumps[LUMP_LIGHTS].fileofs, h46->lumps[LUMP_LIGHTS].filelen);
@@ -860,6 +866,7 @@ Mod_LoadBrushModel(gl3model_t *mod, void *buffer, int modfilelen)
 		GL3_Mirror_MapLoad();
 		GL3_Post_MapLoad();
 		GL3_Look_MapLoad(mod->name);
+		GL3_LoadMark("fog, lamps, weather, mirrors, look");
 	}
 	else
 	{
@@ -1017,6 +1024,57 @@ Mod_ForName(const char *name, gl3model_t *parent_model, qboolean crash)
 /*
  * Specifies the model that will be used as the world
  */
+/* r_om_loadtime 1: the time of each stage of a map load ("OMLOAD <stage> <ms>"): where a long load goes */
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
+double
+GL3_LoadClockMs(void)
+{
+#ifdef _WIN32
+	LARGE_INTEGER f, c;
+
+	QueryPerformanceFrequency(&f);
+	QueryPerformanceCounter(&c);
+	return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
+#else
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+#endif
+}
+
+static double loadmark, loadstart;
+
+void
+GL3_LoadMark(const char *stage)
+{
+	static cvar_t *cv;
+	double now = GL3_LoadClockMs();
+
+	if (!cv)
+	{
+		cv = ri.Cvar_Get("r_om_loadtime", "0", 0);
+	}
+
+	if (!stage)
+	{
+		loadmark = loadstart = now;
+		return;
+	}
+
+	if (cv->value)
+	{
+		R_Printf(PRINT_ALL, "OMLOAD %s %.0f ms (total %.0f)\n", stage, now - loadmark, now - loadstart);
+	}
+
+	loadmark = now;
+}
+
 void
 GL3_BeginRegistration(const char *model)
 {
@@ -1044,7 +1102,10 @@ GL3_BeginRegistration(const char *model)
 	GL3_SoF_BeginRegistrationImages();
 	GL3_SoF_ClearLightCache();
 
+	GL3_LoadMark(NULL);
+	GL3_Mat_BatchBegin(); /* the material maps of this registration on all cores */
 	gl3_worldmodel = Mod_ForName(fullname, NULL, true);
+	GL3_LoadMark("world model");
 
 	/* OpenMerc: a world kept from the last cycle still uses its images */
 	if (gl3_worldmodel)
@@ -1162,6 +1223,13 @@ GL3_EndRegistration(void)
 {
 	int i;
 	gl3model_t *mod;
+
+	GL3_Mat_BatchEnd();
+	GL3_LoadMark("models, skins, images (precache)");
+	if (ri.Cvar_Get("r_om_loadtime", "0", 0)->value)
+	{
+		GL3_Image_LoadStats();
+	}
 
 	/* OpenMerc: SoF frees unused images at the end of every registration
 	   cycle (SPEC-002, SPEC-413 §8); models are kept while there is room */

@@ -1395,3 +1395,17 @@ Found by a code audit (three read-only passes: per-frame cost, lifecycle / memor
   walk) is projected through the mirrored camera; its screen rectangle narrows the four frustum planes of the mirror's
   world walk and scissors its drawing (before: the whole mirrored view at 0.7 of the window). ger2 mirror spot:
   1.38 -> 0.26 ms GPU (worst 10.8 -> 5.5 ms); the tsr1 restroom image is unchanged (0.05 % of the pixels differ).
+
+## Map load time (owner: the test windows "stopped responding")
+
+With the HD pack a map load kept the window from pumping messages for 12 s (tsr1; Windows marked it "not responding"
+after 5 s and offered to close it). `r_om_loadtime 1` prints each stage ("OMLOAD ..."); tsr1 15.7 s -> 4.9 s,
+"not responding" 12.5 s -> 0.5 s:
+* Every face texture was first asked for as textures/<name>.wal (yquake2's GetTexImage); each miss searched all
+  paths and paks for the .wal and its .png / .tga / .jpg replacements: ~4 s. GL3_FindImage keeps the names it did
+  not find in this registration and answers them at once.
+* The material maps (r_om_ssr) were computed on one core with a modulo per blur tap: 8 s. The blur's wrap is a
+  counter now, its columns run row by row, and the maps are measured on all cores (gl3_jobs.c GL3_ParallelFor,
+  64 textures a batch during a registration, uploaded on the main thread) - the same floats in the same order, the
+  maps are unchanged (tsr1 tour shots within 0.7 %).
+* Left: HD seam repair 1.3 s, uploads 0.6 s, lightmap faces 0.9 s.

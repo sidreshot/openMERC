@@ -671,17 +671,42 @@ GL3_Mat_SurfReflect(const msurface_t *surf, const vec3_t n)
  * material maps
  * ------------------------------------------------------------------ */
 
-/* box blur with wrap-around (textures tile), twice for a tent shape */
+/* r_om_loadtime: where the material maps' time goes (gl3_model.c clock) */
+double gl3_matt[5], gl3_matx[6];
+#define MatClock GL3_LoadClockMs
+
+/* index i wrapped into 0..n-1 (textures tile; r may exceed a short side) */
+static inline int
+MatWrap(int i, int n)
+{
+	while (i < 0)
+	{
+		i += n;
+	}
+
+	while (i >= n)
+	{
+		i -= n;
+	}
+
+	return i;
+}
+
+/* box blur with wrap-around (textures tile), twice for a tent shape. Running sums; the wrap is a compare, not a
+   modulo per texel (two divisions per texel and pass made the material maps 8 s of a 16 s map load with HD textures) */
 static float *
 MatBlur(const float *src, int w, int h, int r)
 {
-	float *a = malloc(sizeof(float) * w * h), *b = malloc(sizeof(float) * w * h);
+	float *a = malloc(sizeof(float) * w * h), *b = malloc(sizeof(float) * w * h), *colsum = malloc(sizeof(float) * w);
+	float inv = 1.0f / (2 * r + 1);
 	int pass, x, y, k;
+	double tb = MatClock();
 
-	if (!a || !b)
+	if (!a || !b || !colsum)
 	{
 		free(a);
 		free(b);
+		free(colsum);
 		return NULL;
 	}
 
@@ -692,38 +717,78 @@ MatBlur(const float *src, int w, int h, int r)
 		for (y = 0; y < h; y++)
 		{
 			const float *row = a + (size_t)y * w;
+			float *dst = b + (size_t)y * w;
 			float s = 0;
+			int add = MatWrap(r + 1, w), sub = MatWrap(-r, w);
 
 			for (k = -r; k <= r; k++)
 			{
-				s += row[((k % w) + w) % w];
+				s += row[MatWrap(k, w)];
 			}
 
 			for (x = 0; x < w; x++)
 			{
-				b[(size_t)y * w + x] = s / (2 * r + 1);
-				s += row[(x + r + 1) % w] - row[((x - r) % w + w) % w];
+				dst[x] = s * inv;
+				s += row[add] - row[sub];
+
+				if (++add == w)
+				{
+					add = 0;
+				}
+
+				if (++sub == w)
+				{
+					sub = 0;
+				}
 			}
 		}
 
-		for (x = 0; x < w; x++)
+		/* the columns row by row: a running sum per column (memory in order, the same sums as column by column) */
 		{
-			float s = 0;
+			int add = MatWrap(r + 1, h), sub = MatWrap(-r, h);
+
+			for (x = 0; x < w; x++)
+			{
+				colsum[x] = 0;
+			}
 
 			for (k = -r; k <= r; k++)
 			{
-				s += b[(size_t)(((k % h) + h) % h) * w + x];
+				const float *row = b + (size_t)MatWrap(k, h) * w;
+
+				for (x = 0; x < w; x++)
+				{
+					colsum[x] += row[x];
+				}
 			}
 
 			for (y = 0; y < h; y++)
 			{
-				a[(size_t)y * w + x] = s / (2 * r + 1);
-				s += b[(size_t)((y + r + 1) % h) * w + x] - b[(size_t)(((y - r) % h + h) % h) * w + x];
+				const float *ra = b + (size_t)add * w, *rs = b + (size_t)sub * w;
+				float *dst = a + (size_t)y * w;
+
+				for (x = 0; x < w; x++)
+				{
+					dst[x] = colsum[x] * inv;
+					colsum[x] += ra[x] - rs[x];
+				}
+
+				if (++add == h)
+				{
+					add = 0;
+				}
+
+				if (++sub == h)
+				{
+					sub = 0;
+				}
 			}
 		}
 	}
 
 	free(b);
+	free(colsum);
+	gl3_matt[1] += MatClock() - tb;
 	return a;
 }
 
@@ -780,30 +845,36 @@ MatStore(GLuint texnum, GLuint map, float rust)
 	M.rust[texnum] = rust;
 }
 
-/* the material map of a world texture (rgba: w x h, 4 bytes per texel) */
-void
-GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
+/*
+ * The material map of a world texture (rgba: w x h, 4 bytes per texel). The map is measured at most 256 wide; the
+ * texels are averaged down at once (cheap), the measuring itself runs as a job: during a registration (map load)
+ * the jobs of 64 textures at a time run on all cores (GL3_ParallelFor) and the maps are uploaded on the main thread
+ * (before: 8 s of a 16 s HD map load on one core). The same floats in the same order - the maps are unchanged.
+ */
+typedef struct
+{
+	GLuint texnum;
+	int w, h;
+	float *rgb;   /* averaged colour 0..1, 3 floats per texel */
+	byte *out;    /* the map (MatCompute) */
+	float rust;
+} matjob_t;
+
+#define MAT_BATCH 64
+
+static matjob_t matjobs[MAT_BATCH];
+static int nmatjobs;
+static qboolean matbatch;
+
+static void
+MatCompute(matjob_t *j)
 {
 	float *L = NULL, *rm = NULL, *M1 = NULL, *M3 = NULL, *V1 = NULL, *V3 = NULL, *hf = NULL, *G = NULL, *st = NULL;
 	float *tmp = NULL, *pane = NULL, *wm = NULL, hfmean = 0, rust = 0, scale;
 	byte *out = NULL;
-	int x, y, i, n, step = 1, md, hist[256] = {0}, acc, panew = 1, panek = 1;
+	int x, y, i, n, md, hist[256] = {0}, acc, panew = 1, panek = 1;
+	int w = j->w, h = j->h;
 
-	(void)name;
-
-	if (!texnum || !rgba || w < 4 || h < 4)
-	{
-		return;
-	}
-
-	/* measured at most 256 wide: the map only modulates the class */
-	while ((w / step > 256) || (h / step > 256))
-	{
-		step *= 2;
-	}
-
-	w /= step;
-	h /= step;
 	n = w * h;
 	md = w > h ? w : h;
 	L = malloc(sizeof(float) * n);
@@ -821,24 +892,9 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 	{
 		for (x = 0; x < w; x++)
 		{
-			float r = 0, g = 0, b = 0, mx, mn, sat;
-			int a, c;
+			const float *c3 = j->rgb + ((size_t)y * w + x) * 3;
+			float r = c3[0], g = c3[1], b = c3[2], mx, mn, sat;
 
-			for (c = 0; c < step; c++)
-			{
-				for (a = 0; a < step; a++)
-				{
-					const byte *p = rgba + ((size_t)(y * step + c) * w * step + (x * step + a)) * 4;
-
-					r += p[0];
-					g += p[1];
-					b += p[2];
-				}
-			}
-
-			r /= 255.0f * step * step;
-			g /= 255.0f * step * step;
-			b /= 255.0f * step * step;
 			L[y * w + x] = 0.299f * r + 0.587f * g + 0.114f * b;
 			mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
 			mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
@@ -853,6 +909,7 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 	}
 
 	rust /= n;
+
 
 	/* surroundings at two scales: the wide one (stains, blotches), the narrow one (grout, cracks) */
 	M1 = MatBlur(L, w, h, md / 16 > 2 ? md / 16 : 2);
@@ -995,9 +1052,12 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 				{
 					for (dx = -1; dx <= 1; dx++)
 					{
-						int xx = (x2 + dx + pw) % pw, yy = (y2 + dy + ph) % ph;
+						/* wrapped neighbours without a modulo per tap (the modulos were most of the material maps'
+						   load time) */
+						int xx = MatWrap(x2 + dx, pw), yy = MatWrap(y2 + dy, ph);
+						int xn = (xx + 1 == pw) ? 0 : xx + 1, yn = (yy + 1 == ph) ? 0 : yy + 1;
 						float v = Lp[yy * pw + xx];
-						float s1 = fabsf(v - Lp[yy * pw + (xx + 1) % pw]), s2 = fabsf(v - Lp[((yy + 1) % ph) * pw + xx]);
+						float s1 = fabsf(v - Lp[yy * pw + xn]), s2 = fabsf(v - Lp[yn * pw + xx]);
 
 						near = fmaxf(near, fmaxf(s1, s2));
 						lo = fminf(lo, v);
@@ -1054,21 +1114,11 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 		}
 	}
 
-	{
-		GLuint map;
 
-		glGenTextures(1, &map);
-		GL3_SelectTMU(GL_TEXTURE0 + MAT_UNIT);
-		glBindTexture(GL_TEXTURE_2D, map);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, out);
-		glGenerateMipmap(GL_TEXTURE_2D);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-		GL3_SelectTMU(GL_TEXTURE0);
-		MatStore(texnum, map, rust);
-	}
+	j->out = out; /* uploaded by the main thread (MatUpload) */
+	out = NULL;
+	j->rust = rust;
+
 
 done:
 	free(L);
@@ -1085,10 +1135,162 @@ done:
 	free(wm);
 }
 
+
+static void
+MatUpload(matjob_t *j)
+{
+	GLuint map;
+
+	if (j->out && j->texnum)
+	{
+		glGenTextures(1, &map);
+		GL3_SelectTMU(GL_TEXTURE0 + MAT_UNIT);
+		glBindTexture(GL_TEXTURE_2D, map);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, j->w, j->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, j->out);
+		glGenerateMipmap(GL_TEXTURE_2D);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		GL3_SelectTMU(GL_TEXTURE0);
+		MatStore(j->texnum, map, j->rust);
+	}
+
+	free(j->rgb);
+	free(j->out);
+	memset(j, 0, sizeof(*j));
+}
+
+static void
+MatJob(int i, void *ctx)
+{
+	MatCompute(&((matjob_t *)ctx)[i]);
+}
+
+/* the pending maps: measured on all cores, uploaded here */
+void
+GL3_Mat_Flush(void)
+{
+	double t0 = MatClock();
+	int i;
+
+	if (!nmatjobs)
+	{
+		return;
+	}
+
+	GL3_ParallelFor(nmatjobs, MatJob, matjobs);
+
+	for (i = 0; i < nmatjobs; i++)
+	{
+		MatUpload(&matjobs[i]);
+	}
+
+	nmatjobs = 0;
+	gl3_matt[4] += MatClock() - t0;
+}
+
+/* registration (gl3_model.c): the maps are batched from Begin to End */
+void
+GL3_Mat_BatchBegin(void)
+{
+	matbatch = true;
+}
+
+void
+GL3_Mat_BatchEnd(void)
+{
+	GL3_Mat_Flush();
+	matbatch = false;
+}
+
+void
+GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
+{
+	matjob_t j;
+	int x, y, step = 1;
+	double t0 = MatClock();
+
+	(void)name;
+
+	if (!texnum || !rgba || w < 4 || h < 4)
+	{
+		return;
+	}
+
+	/* measured at most 256 wide: the map only modulates the class */
+	while ((w / step > 256) || (h / step > 256))
+	{
+		step *= 2;
+	}
+
+	memset(&j, 0, sizeof(j));
+	j.texnum = texnum;
+	j.w = w / step;
+	j.h = h / step;
+	j.rgb = malloc(sizeof(float) * 3 * j.w * j.h);
+
+	if (!j.rgb)
+	{
+		return;
+	}
+
+	for (y = 0; y < j.h; y++)
+	{
+		for (x = 0; x < j.w; x++)
+		{
+			float r = 0, g = 0, b = 0, *o = j.rgb + ((size_t)y * j.w + x) * 3;
+			int a, c;
+
+			for (c = 0; c < step; c++)
+			{
+				for (a = 0; a < step; a++)
+				{
+					const byte *p = rgba + ((size_t)(y * step + c) * j.w * step + (x * step + a)) * 4;
+
+					r += p[0];
+					g += p[1];
+					b += p[2];
+				}
+			}
+
+			o[0] = r / (255.0f * step * step);
+			o[1] = g / (255.0f * step * step);
+			o[2] = b / (255.0f * step * step);
+		}
+	}
+
+	gl3_matt[0] += MatClock() - t0;
+
+	if (!matbatch)
+	{
+		MatCompute(&j);
+		MatUpload(&j);
+		return;
+	}
+
+	matjobs[nmatjobs++] = j;
+
+	if (nmatjobs == MAT_BATCH)
+	{
+		GL3_Mat_Flush();
+	}
+}
+
 /* the colour texture is deleted: its material map goes too */
 void
 GL3_Mat_Free(GLuint texnum)
 {
+	int i;
+
+	for (i = 0; i < nmatjobs; i++)
+	{
+		if (matjobs[i].texnum == texnum)
+		{
+			matjobs[i].texnum = 0; /* computed, not stored */
+		}
+	}
+
 	if ((int)texnum < M.count && M.maps[texnum])
 	{
 		glDeleteTextures(1, &M.maps[texnum]);

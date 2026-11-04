@@ -628,6 +628,7 @@ set(GL3-Source
 	${REF_SRC_DIR}/gl3/gl3_relight.c
 	${REF_SRC_DIR}/gl3/gl3_lamps.c
 	${REF_SRC_DIR}/gl3/gl3_material.c
+	${REF_SRC_DIR}/gl3/gl3_jobs.c
 	${REF_SRC_DIR}/gl3/gl3_look.c
 	${REF_SRC_DIR}/gl3/gl3_dynlight.c
 	${REF_SRC_DIR}/gl3/gl3_sofapi.c
@@ -730,6 +731,9 @@ set_target_properties(ref_gl3 PROPERTIES
 		)
 target_include_directories(ref_gl3 PRIVATE ${CMAKE_SOURCE_DIR}/src/client/refresh/gl3/glad/include)
 target_link_libraries(ref_gl3 ${yquake2LinkerFlags} ${yquake2SDLLinkerFlags})
+if(NOT WIN32)
+	target_link_libraries(ref_gl3 pthread) # gl3_jobs.c
+endif()
 if(SDL3_SUPPORT)
 	target_link_libraries(ref_gl3 SDL3::SDL3)
 endif()
@@ -772,6 +776,9 @@ set_target_properties(ref_gles3 PROPERTIES
 target_include_directories(ref_gles3 PRIVATE ${CMAKE_SOURCE_DIR}/src/client/refresh/gl3/glad-gles3/include)
 target_compile_definitions(ref_gles3 PRIVATE YQ2_GL3_GLES3=1 YQ2_GL3_GLES=1)
 target_link_libraries(ref_gles3 ${yquake2LinkerFlags} ${yquake2SDLLinkerFlags})
+if(NOT WIN32)
+	target_link_libraries(ref_gles3 pthread) # gl3_jobs.c
+endif()
 if(SDL3_SUPPORT)
 	target_link_libraries(ref_gles3 SDL3::SDL3)
 endif()
