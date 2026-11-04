@@ -1115,7 +1115,8 @@ M_Continue_f(void)
 {
 	char sn[MAX_QPATH], lv[64], tm[64];
 
-	if (cls.state == ca_active)
+	/* "om_continue save" (the newest-save card of the landing page) loads that save even inside a level */
+	if ((cls.state == ca_active) && Q_stricmp(Cmd_Argv(1), "save"))
 	{
 		M_Return_f();
 	}
