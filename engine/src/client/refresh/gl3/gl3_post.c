@@ -3972,6 +3972,53 @@ static const char *ssao_common =
 	"	return proj.y / (ndc + proj.x);\n"
 	"}\n";
 
+/* the SoF fog overlay alpha (gl3_fog.c GL3_Fog_ViewFog) of the eye's region at a view pixel: passes that run
+   after the overlay (SSAO, SSR) fade by it, so they do not draw over the fog. omVF0 start, range, max alpha,
+   height falloff; omVF1 maxs z, size z, dim, on; omVF2 eye, 1 / P00; omVF3 forward, 1 / P11; omVF4 / omVF5
+   right, up. z = view depth of the pixel, v = its position in the view (0..1) */
+static const char *om_viewfog_glsl =
+	"uniform vec4 omVF0;\n"
+	"uniform vec4 omVF1;\n"
+	"uniform vec4 omVF2;\n"
+	"uniform vec4 omVF3;\n"
+	"uniform vec3 omVF4;\n"
+	"uniform vec3 omVF5;\n"
+	"float omViewFog(vec2 v, float z)\n"
+	"{\n"
+	"	if (omVF1.w < 0.5) return 0.0;\n"
+	"	vec2 n = v * 2.0 - 1.0;\n"
+	"	vec3 d = omVF3.xyz * z + omVF4 * (n.x * z * omVF2.w) + omVF5 * (n.y * z * omVF3.w);\n"
+	"	float a = min(max((dot(d, d) - omVF0.x) / omVF0.y, 0.0) / 255.0, omVF0.z);\n"
+	"	if (omVF0.w > 0.5 && omVF1.y > 0.0)\n"
+	"	{\n"
+	"		float h = (omVF1.x - (omVF2.z + d.z)) / omVF1.y;\n"
+	"		a *= h * h;\n"
+	"	}\n"
+	"	return clamp(a * mix(omVF1.z, 1.0, a), 0.0, 1.0);\n"
+	"}\n";
+
+static void
+ViewFogUniforms(GLuint prog)
+{
+	float f[7];
+	vec3_t fwd, right, up;
+
+	if (!GL3_Fog_ViewFog(f))
+	{
+		glUniform4f(glGetUniformLocation(prog, "omVF1"), 0, 0, 0, 0);
+		return;
+	}
+
+	AngleVectors(r_newrefdef.viewangles, fwd, right, up);
+	glUniform4f(glGetUniformLocation(prog, "omVF0"), f[0], f[1], f[2], f[3]);
+	glUniform4f(glGetUniformLocation(prog, "omVF1"), f[4], f[5], f[6], 1);
+	glUniform4f(glGetUniformLocation(prog, "omVF2"), r_newrefdef.vieworg[0], r_newrefdef.vieworg[1],
+		r_newrefdef.vieworg[2], 1.0f / gl3state.projMat3D.Elements[0][0]);
+	glUniform4f(glGetUniformLocation(prog, "omVF3"), fwd[0], fwd[1], fwd[2], 1.0f / gl3state.projMat3D.Elements[1][1]);
+	glUniform3f(glGetUniformLocation(prog, "omVF4"), right[0], right[1], right[2]);
+	glUniform3f(glGetUniformLocation(prog, "omVF5"), up[0], up[1], up[2]);
+}
+
 /* view distance at the occlusion resolution (one full-resolution sample per texel) */
 static const char *ssao_lin_fs =
 	"in vec2 uv;\n"
@@ -4124,6 +4171,8 @@ static const char *ssao_apply_fs =
 	"	vec3 al = clamp(c / max(max(c.r, max(c.g, c.b)), 0.2) * 0.65, 0.0, 0.9) * bounce;\n"
 	"	vec3 a = 2.0404 * al - 0.3324, bb = -4.7951 * al + 0.6417, cc = 2.7552 * al + 0.6903;\n"
 	"	vec3 mb = max(vec3(ao), ((ao * a + bb) * ao + cc) * ao);\n"
+	/* the fog overlay lies over what the occlusion darkens: fade it by the fog of the pixel */
+	"	mb = mix(mb, vec3(1.0), omViewFog(vuv, d));\n"
 	"	outColor = vec4(mb, 1.0);\n"
 	"}\n";
 
@@ -4208,7 +4257,19 @@ SSAOPrograms(void)
 	S.proglin = SSAOLink(ssao_common, ssao_lin_fs);
 	S.progao = SSAOLink("", ssao_ao_fs);
 	S.progblur = SSAOLink("", ssao_blur_fs);
-	S.progapply = SSAOLink(ssao_common, ssao_apply_fs);
+	{
+		/* the apply pass also needs the fog of the view (om_viewfog_glsl) */
+		size_t la = strlen(ssao_common), lb = strlen(om_viewfog_glsl);
+		char *ab = malloc(la + lb + 1);
+
+		if (ab)
+		{
+			memcpy(ab, ssao_common, la);
+			memcpy(ab + la, om_viewfog_glsl, lb + 1);
+			S.progapply = SSAOLink(ab, ssao_apply_fs);
+			free(ab);
+		}
+	}
 	S.progtemp = SSAOLink("", ssao_temp_fs);
 
 	if (!S.proglin || !S.progao || !S.progblur || !S.progapply || !S.progtemp)
@@ -4560,6 +4621,7 @@ GL3_Post_SSAO(void)
 
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 	GL3_UseProgram(S.progapply);
+	ViewFogUniforms(S.progapply);
 	glUniform1i(S.ap_ao, 0);
 	glUniform1i(S.ap_depth, 1);
 	glUniform1i(S.ap_emis, 2);
@@ -7103,6 +7165,10 @@ static const char *ssr_apply_fs =
 	"		add += min(acc, vec3(1.5)) * fr * clamp(m.a * 1.6 - 0.05, 0.0, 1.0) * glint.x;\n"
 	"	}\n"
 	"	float a = 1.0 - (1.0 - r.a) * (1.0 - glint.y * wet);\n"
+	/* reflections, glints and the wet darkening lie under the fog overlay: fade them by its alpha */
+	"	float fogk = 1.0 - omViewFog(vuv, Dist(vuv));\n"
+	"	add *= fogk;\n"
+	"	a *= fogk;\n"
 	"	if (dot(add, vec3(1.0)) + a <= 0.002 || any(isnan(add)) || isnan(a) || any(isinf(add)))\n"
 	"		discard;\n"
 	"	outColor = vec4(add, a);\n"
@@ -7259,7 +7325,21 @@ GL3_Post_SSR(void)
 	if (!SR.prog)
 	{
 		SR.prog = LinkPost(ssr_fs);
-		SR.progapply = LinkPost(ssr_apply_fs);
+		{
+			/* the apply pass also needs the fog of the view (om_viewfog_glsl) */
+			size_t la = strlen(om_viewfog_glsl), lb = strlen(ssr_apply_fs);
+			char *ab = malloc(la + lb + 1);
+
+			SR.progapply = 0;
+
+			if (ab)
+			{
+				memcpy(ab, om_viewfog_glsl, la);
+				memcpy(ab + la, ssr_apply_fs, lb + 1);
+				SR.progapply = LinkPost(ab);
+				free(ab);
+			}
+		}
 		SR.progsmooth = LinkPost(ssr_smooth_fs);
 		SR.progtemp = LinkPost(ssr_temporal_fs);
 
@@ -7469,6 +7549,7 @@ GL3_Post_SSR(void)
 
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 	GL3_UseProgram(SR.progapply);
+	ViewFogUniforms(SR.progapply);
 	glUniform1i(SR.a_ref, 0);
 	glUniform1i(SR.a_sm, 1);
 	glUniform1i(SR.a_depth, 2);

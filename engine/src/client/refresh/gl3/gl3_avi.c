@@ -10,7 +10,7 @@
  *
  * Test extension (not in the original): cvar r_om_avinodialog 1 skips the
  * dialog and records full frames uncompressed, so the recorder can be tested
- * without input.
+ * without input; r_om_avims sets the milliseconds per frame (100 = 10 fps).
  *
  * Implements: SPEC-412 §13 (AVI recording), SPEC-413 §1 step 10 (movie
  *             recording start-up)
@@ -27,6 +27,7 @@ static qboolean recording;
 static qboolean paused;
 static int framecount;
 static int capturemark;     /* system milliseconds */
+static int framems = 100;   /* test extension r_om_avims: milliseconds per frame (original 100) */
 static int avi_w, avi_h;
 
 #ifdef _WIN32
@@ -182,7 +183,14 @@ StartRecording(const char *name)
 	memset(&si, 0, sizeof(si));
 	si.fccType = streamtypeVIDEO;
 	si.dwScale = 1;
-	si.dwRate = 10;
+	{
+		cvar_t *ms = ri.Cvar_Get("r_om_avims", "100", 0);
+
+		/* 0: every rendered frame (frame-exact comparisons of r_om_campath replays), played at 30 fps */
+		framems = (ms->value <= 0) ? 0 : Q_clamp((int)ms->value, 10, 1000);
+	}
+
+	si.dwRate = framems ? 1000 / framems : 30;
 	si.dwSuggestedBufferSize = avirowbytes * avi_h;
 	SetRect(&si.rcFrame, 0, 0, avi_w, avi_h);
 
@@ -382,12 +390,12 @@ GL3_Avi_Frame(void)
 
 	now = AviMilliseconds();
 
-	if (now - capturemark < 100)
+	if (now - capturemark < framems)
 	{
 		return;
 	}
 
-	capturemark += 100;
+	capturemark += framems;
 	WriteFrame();
 }
 

@@ -1565,7 +1565,8 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 				float h = (omPF2.x - p.z) / omPF2.y;
 				al *= h * h;
 			}
-			return floor(al) / 255.0 * omPF2.z;
+			float fa = floor(al) / 255.0;
+			return fa * mix(omPF2.z, 1.0, fa); // gl3_fog.c GL3_Fog_DimAlpha
 		}
 
 		uniform vec4 omFxMat; // GFX-modern r_om_ssr: reflectivity, roughness of liquids (0 = the default material)

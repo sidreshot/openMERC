@@ -1148,7 +1148,14 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 			testmode = gi.cvar("om_testmode", "0", 0);
 		if (testmode->value && !deathmatch->value && ent->health > 0) {
 			ent->flags |= FL_GODMODE | FL_NOTARGET;
-			ent->movetype = MOVETYPE_NOCLIP;
+			/* om_testmode 2: walks with collision (camera paths that move like a player) */
+			if (testmode->value == 2)
+			{
+				if (ent->movetype == MOVETYPE_NOCLIP)
+					ent->movetype = MOVETYPE_WALK;
+			}
+			else
+				ent->movetype = MOVETYPE_NOCLIP;
 		}
 	}
 

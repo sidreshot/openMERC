@@ -605,6 +605,46 @@ OverlayAlpha(int region, const vec3_t p, float D)
 	return floorf(a);
 }
 
+/*
+ * The fog of the region the eye is in, for screen-space passes that run after
+ * the overlay (SSAO, SSR): out[0..3] start, range (squared units), maximum
+ * alpha 0..1, height falloff on; out[4..5] maxs z and size z of the region,
+ * out[6] the overlay dim of the volumetric fog. The overlay alpha of a pixel at
+ * squared distance D is a = min(max((D - start) / range, 0) / 255, max alpha), dimmed to
+ * a * mix(dim, 1, a) (GL3_Fog_DimAlpha). False when the eye is
+ * in no region (or fog is off or a debug mode).
+ */
+qboolean
+GL3_Fog_ViewFog(float out[7])
+{
+	float start, range, maxalpha, color[4];
+	const fogregion_t *r;
+	int mode = gl_fogmode ? (int)gl_fogmode->value : 0;
+
+	if (!fogworld || (fogworld != gl3_worldmodel) || (viewregion < 0) || (viewregion >= numregions) ||
+		(mode == 2) || (mode == 3))
+	{
+		return false;
+	}
+
+	r = &regions[viewregion];
+	Params(r, &start, &range, &maxalpha, color);
+
+	if (range == 0)
+	{
+		return false;
+	}
+
+	out[0] = start;
+	out[1] = range;
+	out[2] = Q_min(maxalpha / 255.0f, 1.0f);
+	out[3] = ((r->flags & 2) && (r->size[2] > 0)) ? 1 : 0;
+	out[4] = r->maxs[2];
+	out[5] = r->size[2];
+	out[6] = GL3_VolFog_OverlayDim();
+	return true;
+}
+
 int
 GL3_Fog_NumRegions(void)
 {
@@ -1093,6 +1133,16 @@ PerPixel(int mode)
 }
 
 /* overlay alpha scale: the volumetric fog takes over part of the overlay (gl3_volfog.c) */
+/* the dim of the overlay where the volumetric fog adds its own: only the thin fog near the eye is dimmed,
+   the dim fades out towards full opacity. A plain a * dim (0.85) never let the fog become opaque, so the
+   distance stayed 15% visible and every section the view walk added there showed (owner: "I see the
+   sections being drawn live", sib1) */
+float
+GL3_Fog_DimAlpha(float a, float dim)
+{
+	return a * (dim + (1.0f - dim) * a);
+}
+
 static float
 OverlayDim(void)
 {
@@ -1214,7 +1264,7 @@ DrawQueued(int from, int to, int mode)
 					v[k].rgba[0] = color[0] / 255.0f;
 					v[k].rgba[1] = color[1] / 255.0f;
 					v[k].rgba[2] = color[2] / 255.0f;
-					v[k].rgba[3] = OverlayAlpha(region, p->verts[k], D) / 255.0f * dim;
+					v[k].rgba[3] = GL3_Fog_DimAlpha(OverlayAlpha(region, p->verts[k], D) / 255.0f, dim);
 
 					if (pp && !q->model)
 					{
@@ -1278,6 +1328,129 @@ GL3_Fog_Regions_f(void)
 	}
 }
 
+/*
+ * Test aid r_om_campath (roadmap phase 1.4, pop test): "rec:<name>" writes the
+ * eye of every rendered world view to <user>/<name> (x y z pitch yaw roll per
+ * line), "play:<name>" replays one line per rendered world view and prints
+ * "OMCAM end" after the last, then resets the cvar. Runs with different
+ * settings see the same frames, so an AVI (r_om_avims 0) can be compared
+ * frame by frame.
+ */
+static void
+CamPath(refdef_t *rd)
+{
+	static cvar_t *cp;
+	static FILE *rec;
+	static float (*path)[6];
+	static int numpath, cappath, cur;
+	static char active[128];
+	char mode[16] = "", name[96] = "", fn[MAX_OSPATH];
+
+	if (!cp)
+	{
+		cp = ri.Cvar_Get("r_om_campath", "", 0);
+	}
+
+	if (strcmp(cp->string, active))
+	{
+		/* a new command: close what runs */
+		if (rec)
+		{
+			fclose(rec);
+			rec = NULL;
+		}
+
+		free(path);
+		path = NULL;
+		numpath = cappath = cur = 0;
+		Q_strlcpy(active, cp->string, sizeof(active));
+
+		{
+			/* "rec:name" (a console cvar value without quotes keeps no blank) */
+			char tmp[128], *c;
+
+			Q_strlcpy(tmp, active, sizeof(tmp));
+
+			for (c = tmp; *c; c++)
+			{
+				if (*c == ':')
+				{
+					*c = ' ';
+				}
+			}
+
+			sscanf(tmp, "%15s %95s", mode, name);
+		}
+
+		if (name[0] && !strstr(name, ".."))
+		{
+			Com_sprintf(fn, sizeof(fn), "%s/%s", GL3_UserDir(), name);
+
+			if (!strcmp(mode, "rec"))
+			{
+				rec = fopen(fn, "w");
+			}
+			else if (!strcmp(mode, "play"))
+			{
+				FILE *f = fopen(fn, "r");
+				float v[6];
+
+				while (f && (fscanf(f, "%f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6))
+				{
+					if (numpath == cappath)
+					{
+						void *n = realloc(path, sizeof(*path) * (cappath ? cappath * 2 : 1024));
+
+						if (!n)
+						{
+							break;
+						}
+
+						path = n;
+						cappath = cappath ? cappath * 2 : 1024;
+					}
+
+					memcpy(path[numpath++], v, sizeof(v));
+				}
+
+				if (f)
+				{
+					fclose(f);
+				}
+			}
+
+			R_Printf(PRINT_ALL, "OMCAM %s %s (%d views)\n", mode, fn, numpath);
+		}
+	}
+
+	if (rd->rdflags & RDF_NOWORLDMODEL)
+	{
+		return;
+	}
+
+	if (rec)
+	{
+		fprintf(rec, "%.2f %.2f %.2f %.3f %.3f %.3f\n", rd->vieworg[0], rd->vieworg[1], rd->vieworg[2],
+			rd->viewangles[0], rd->viewangles[1], rd->viewangles[2]);
+	}
+	else if (path)
+	{
+		if (cur >= numpath)
+		{
+			R_Printf(PRINT_ALL, "OMCAM end\n");
+			free(path);
+			path = NULL;
+			ri.Cvar_Set("r_om_campath", "");
+			active[0] = 0;
+			return;
+		}
+
+		VectorCopy(path[cur], rd->vieworg);
+		VectorCopy((path[cur] + 3), rd->viewangles);
+		cur++;
+	}
+}
+
 void
 GL3_Fog_ViewTest(refdef_t *rd)
 {
@@ -1290,6 +1463,11 @@ GL3_Fog_ViewTest(refdef_t *rd)
 		vt = ri.Cvar_Get("r_om_viewtest", "0", 0);
 		dm = ri.Cvar_Get("deathmatch", "0", 0);
 		mc = ri.Cvar_Get("coop", "0", 0); /* maxclients is 16 in SoF single player */
+	}
+
+	if (!dm->value && !mc->value)
+	{
+		CamPath(rd);
 	}
 
 	if (!vt->string[0] || (vt->string[0] == '0') || (rd->rdflags & RDF_NOWORLDMODEL) || dm->value || mc->value)

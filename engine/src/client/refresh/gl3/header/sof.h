@@ -216,10 +216,12 @@ void GL3_Fog_MarkBoundaryPlane(msurface_t *surf);
 int GL3_Fog_RegionOfPoint(const vec3_t p);
 float GL3_Fog_PointFactor(int region, const vec3_t p, float fogcolor_out[4]);
 int GL3_Fog_NumRegions(void);
+qboolean GL3_Fog_ViewFog(float out[7]); /* fog of the eye's region for post passes (SSAO, SSR) */
 void GL3_Fog_Regions_f(void);
 void GL3_Fog_ViewTest(refdef_t *rd);
 int GL3_Fog_VolumeRegions(float *out, int max);
 float GL3_VolFog_OverlayDim(void);
+float GL3_Fog_DimAlpha(float a, float dim);
 void GL3_Post_VolFog(void);
 int GL3_Fog_SurfaceRegion(msurface_t *surf);
 /* I4c: gl_fogmode 1 (OpenGL linear fog on interior region faces while drawn) */

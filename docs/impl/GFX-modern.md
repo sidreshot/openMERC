@@ -1311,3 +1311,21 @@ correction away and put ours in its place".
   class / family / visibility tests stay for different images only. Strips: arm1 310, jpn1 1167, tsr1 887.
 * At the owner's spot: the vertical line through the bricks is gone, the horizontal one is soft (A/B in one run).
 * Side finding: ai_freeze 1 set before `map tsr1` from om_after hangs the test (frozen intro) - also with seams off.
+
+## Fog is opaque again in the distance; SSAO and SSR under the fog (owner: "I see the sections being drawn live, the shadows lie over the fog", sib1 and every fogged map)
+
+* Cause of the visible sections: with `r_om_volfog` on, the SoF overlay alpha was multiplied by
+  `r_om_volfog_overlaydim` (0.85), so the fog never reached full opacity and the distance stayed 15 % visible.
+  Every cluster the view walk added there (PVS, frustum) appeared in plain sight. Now the dim only applies to
+  thin fog near the eye and fades out towards full opacity: a' = a * mix(dim, 1, a) (`GL3_Fog_DimAlpha`, the
+  per-vertex overlay, the `r_om_ppfog` shader). Fixed view on sib1 (r_om_viewtest 3624_-1888_270_0_195): the far
+  mountains and bridges were visible before, now hidden as with volfog off.
+* SSAO and SSR run after the overlay and darkened / reflected over it. Both now fade by the overlay alpha of the
+  eye's region at the pixel (`GL3_Fog_ViewFog`, shared GLSL `om_viewfog_glsl` in gl3_post.c: squared distance
+  from the depth, start / range / opacity / height falloff of the region). Pixels outside that region are
+  treated with its fog (eye outside every region: no fade).
+* Test aids: `r_om_campath rec:<file>` / `play:<file>` records / replays the eye per rendered frame (user dir);
+  `r_om_avims 0` writes one AVI frame per rendered frame (with `r_om_avinodialog 1`), so runs with different
+  settings compare frame by frame; `om_testmode 2` (game) is god + notarget with walking collision. A synthetic
+  pan path (six 360 degree turns + a walk) on sib1 shows no localized pops after the change; the remaining
+  periodic change every 6 frames with a still camera is a 10 Hz light style.
