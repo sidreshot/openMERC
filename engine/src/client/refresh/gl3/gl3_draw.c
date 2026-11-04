@@ -673,8 +673,11 @@ void GL3_EndFrame(void)
 	GL3_Post_GpuTimer(false);
 
 #ifdef YQ2_GL3_GLES
-	static const GLenum attachments[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
-	glInvalidateFramebuffer(GL_FRAMEBUFFER, 3, attachments);
+	/* the window's depth and stencil are not needed after the frame (a bandwidth saving on tiled GPUs); the window
+	   takes GL_DEPTH / GL_STENCIL, not attachment names, and its colour must not be discarded before the swap */
+	static const GLenum attachments[] = {GL_DEPTH, GL_STENCIL};
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, attachments);
 #endif
 
 	GL3_SwapWindow();

@@ -2420,6 +2420,38 @@ Emu_TexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, 
 		SetTexSwizzle(E.boundtex, swz);
 	}
 
+#ifdef YQ2_GL3_GLES3
+	/* GLES has no BGR / BGRA client formats: swap red and blue on the CPU */
+	if (((fmt == 0x80E0) || (fmt == 0x80E1)) && pixels && (type == GL_UNSIGNED_BYTE) && (width > 0) && (height > 0))
+	{
+		int c = (fmt == 0x80E0) ? 3 : 4;
+		size_t i, n = (size_t)width * height;
+		byte *sw = malloc(n * c);
+
+		if (sw)
+		{
+			const byte *src = (const byte *)pixels;
+
+			for (i = 0; i < n; i++)
+			{
+				sw[i * c] = src[i * c + 2];
+				sw[i * c + 1] = src[i * c + 1];
+				sw[i * c + 2] = src[i * c];
+
+				if (c == 4)
+				{
+					sw[i * c + 3] = src[i * c + 3];
+				}
+			}
+
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+			glTexImage2D(target, level, ifmt, width, height, 0, (c == 3) ? GL_RGB : GL_RGBA, type, sw);
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+			free(sw);
+		}
+	}
+	else
+#endif
 	glTexImage2D(target, level, ifmt, width, height, 0, fmt, type, pixels);
 }
 

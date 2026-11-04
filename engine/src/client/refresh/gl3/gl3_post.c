@@ -2586,9 +2586,13 @@ GL3_Post_VolFog(void)
 	{
 		GLint fbo = 0, vp[4];
 
-		/* marched at half size, then over the view where the depth agrees */
-		glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
-		glGetIntegerv(GL_VIEWPORT, vp);
+		/* marched at half size, then over the view where the depth agrees (the scene framebuffer and the view are
+		   known: no driver query every frame) */
+		fbo = (GLint)P.fbo;
+		vp[0] = P.vx;
+		vp[1] = P.vy;
+		vp[2] = P.vw;
+		vp[3] = P.vh;
 		glDisable(GL_BLEND);
 		glBindFramebuffer(GL_FRAMEBUFFER, V.halffbo);
 		glViewport(0, 0, V.hw, V.hh);

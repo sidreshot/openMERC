@@ -1559,7 +1559,11 @@ GL3_CSM_Info(void)
 			int covered = 0;
 
 			glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, C.tex, 0, l);
+#ifndef YQ2_GL3_GLES3 /* no depth read-back in GLES (a debug command) */
 			glReadPixels(0, 0, C.size, C.size, GL_DEPTH_COMPONENT, GL_FLOAT, px);
+#else
+			memset(px, 0, sizeof(float) * C.size * C.size);
+#endif
 
 			for (i = 0; i < C.size * C.size; i++)
 			{

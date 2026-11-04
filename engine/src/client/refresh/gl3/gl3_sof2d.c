@@ -1513,8 +1513,34 @@ ReadWindowRGB(int *w, int *h)
 	GL3_SoF2D_Flush();
 	GL3_FX_Flush();
 	GL3_DrawCurrent2Dbatch();
+#ifdef YQ2_GL3_GLES3
+	/* GLES guarantees only RGBA reads: read RGBA, pack to RGB in place */
+	{
+		byte *rgba = malloc((size_t)(*w) * (*h) * 4);
+		size_t i, n = (size_t)(*w) * (*h);
+
+		if (!rgba)
+		{
+			free(buf);
+			return NULL;
+		}
+
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		glReadPixels(0, 0, *w, *h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+
+		for (i = 0; i < n; i++)
+		{
+			buf[i * 3] = rgba[i * 4];
+			buf[i * 3 + 1] = rgba[i * 4 + 1];
+			buf[i * 3 + 2] = rgba[i * 4 + 2];
+		}
+
+		free(rgba);
+	}
+#else
 	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 	glReadPixels(0, 0, *w, *h, GL_RGB, GL_UNSIGNED_BYTE, buf);
+#endif
 	return buf;
 }
 
