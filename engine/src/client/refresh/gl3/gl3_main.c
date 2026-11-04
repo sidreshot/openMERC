@@ -2224,21 +2224,21 @@ ApplyPreset(void)
 			{"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
 			{"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
 			{"r_om_ssao", "0"}, {"r_om_ssr", "0"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
-			{"r_om_mirror_scale", "0.5"}, {"r_om_renderscale", "0.75"}, {"r_om_fxaa", "-1"},
+			{"r_om_mirror_scale", "0.5"}, {"r_om_renderscale", "0.75"}, {"r_om_upscale", "1"}, {"r_om_fxaa", "-1"},
 			{"r_om_beams_motes", "0"}, {"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {NULL, NULL}},
 		{ /* medium */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "3"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "1"},
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"}, {"r_om_mirror_scale", "0.7"},
-			{"r_om_renderscale", "1"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
+			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
 			{"r_om_ppl_models", "1"}, {NULL, NULL}},
 		{ /* high: the build's defaults */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"}, {"r_om_mirror_scale", "0.7"},
-			{"r_om_renderscale", "1"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
+			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
 			{"r_om_ppl_models", "1"}, {NULL, NULL}}};
 	int p, i;
 

@@ -1417,7 +1417,14 @@ composite (and FXAA) draw at the scene size and an upscale pass brings the view 
 bilinear taps, then a contrast-adaptive sharpening against the four neighbours clamped to their range (after AMD CAS /
 FSR RCAS; `r_om_upscale_sharp` 0..1, default 0.25). The HUD stays at the window resolution; mirrors follow the scene
 size. tsr1, 1280x720 window, GTX 1050 Ti: GPU 10.25 ms at 1.0, 7.18 at 0.67, 5.07 at 0.5, 6.55 at 0.67 with FXAA; no
-GL errors. Not FSR 1.0 EASU itself (edge-adaptive spatial upsampling) - a candidate for later.
+GL errors.
+
+`r_om_upscale` 1 Catmull-Rom, 2 FSR 1.0 EASU (default; the presets: low 1, medium / high 2): 12 texels, a
+lanczos-like kernel stretched along the local luma edge, clamped to the four nearest texels (no ringing), then the same
+CAS. tsr1 at 0.67, PSNR against the native frame on four shots: Catmull-Rom 37.54 / 39.59 / 40.60 / 40.38 dB, EASU
+37.89 / 39.69 / 40.71 / 40.55; the post pass 0.66 -> 1.00 ms (GTX 1050 Ti, 720p), so the low / mobile preset keeps
+Catmull-Rom. sib1 at 0.5: clean snow edges. The cvars are registered at renderer init (before, the console did not know
+them until the first view).
 
 ## r_om_preset: one knob for the GFX-modern settings
 

@@ -60,7 +60,7 @@ static qboolean SSRWanted(void);
 static void SSRShutdown(void);
 static void FxaaShutdown(void);
 static void UpShutdown(void);
-static cvar_t *r_om_renderscale, *r_om_upscale_sharp;
+static cvar_t *r_om_renderscale, *r_om_upscale_sharp, *r_om_upscale, *r_om_fxaa;
 static void WXShutdown(void);
 static void SSAODeleteTargets(void);
 static void SSRDeleteTargets(void);
@@ -1518,6 +1518,11 @@ GL3_Post_Init(void)
 	r_om_softparticles_dist = ri.Cvar_Get("r_om_softparticles_dist", "12", CVAR_ARCHIVE);
 	r_om_softparticles_add = ri.Cvar_Get("r_om_softparticles_add", "1", CVAR_ARCHIVE);
 	r_om_post_debug = ri.Cvar_Get("r_om_post_debug", "0", 0);
+	/* registered here so the console knows them before the first view */
+	r_om_renderscale = ri.Cvar_Get("r_om_renderscale", "1", CVAR_ARCHIVE);
+	r_om_upscale_sharp = ri.Cvar_Get("r_om_upscale_sharp", "0.25", CVAR_ARCHIVE);
+	r_om_upscale = ri.Cvar_Get("r_om_upscale", "2", CVAR_ARCHIVE);
+	r_om_fxaa = ri.Cvar_Get("r_om_fxaa", "-1", CVAR_ARCHIVE);
 	r_om_gputime = ri.Cvar_Get("r_om_gputime", "0", 0);
 #if defined(_WIN32) && !defined(YQ2_GL3_GLES3)
 	r_om_prof_tag = ri.Cvar_Get("r_om_prof_tag", "", 0);
@@ -1665,6 +1670,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 		{
 			r_om_renderscale = ri.Cvar_Get("r_om_renderscale", "1", CVAR_ARCHIVE);
 			r_om_upscale_sharp = ri.Cvar_Get("r_om_upscale_sharp", "0.25", CVAR_ARCHIVE);
+			r_om_upscale = ri.Cvar_Get("r_om_upscale", "2", CVAR_ARCHIVE);
 		}
 
 		rs = Q_clamp(r_om_renderscale->value, 0.25f, 1.0f);
@@ -1937,7 +1943,6 @@ HDRExposure(void)
  * comes later.
  * ------------------------------------------------------------------ */
 
-static cvar_t *r_om_fxaa;
 
 static struct
 {
@@ -2112,7 +2117,7 @@ static struct
 {
 	qboolean tried;
 	GLuint prog, tex, fbo;
-	GLint u_tex, u_rect, u_size, u_sharp;
+	GLint u_tex, u_rect, u_size, u_sharp, u_mode;
 	int w, h;
 } UP;
 
@@ -2142,9 +2147,73 @@ static const char *upscale_fs =
 	"		texture(tex, vec2(t3.x, t3.y)).rgb * w3.x * w3.y;\n"
 	"	return c;\n"
 	"}\n"
+	/* FSR 1.0 EASU: 12 texels, a lanczos-like kernel stretched along the local edge direction */
+	"uniform int mode;\n"
+	"vec3 T(ivec2 p) { return texelFetch(tex, clamp(p, ivec2(0), ivec2(size.xy) - 1), 0).rgb; }\n"
+	"float Lu(vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }\n"
+	"void Set(inout vec2 dir, inout float len, float w, float la, float lb, float lc, float ld, float le)\n"
+	"{\n"
+	"	float lx = max(abs(ld - lc), abs(lc - lb)), dx = ld - lb;\n"
+	"	lx = clamp(abs(dx) / max(lx, 1e-5), 0.0, 1.0);\n"
+	"	float ly = max(abs(le - lc), abs(lc - la)), dy = le - la;\n"
+	"	ly = clamp(abs(dy) / max(ly, 1e-5), 0.0, 1.0);\n"
+	"	dir += vec2(dx, dy) * w;\n"
+	"	len += (lx * lx + ly * ly) * w;\n"
+	"}\n"
+	"void Tap(inout vec3 ac, inout float aw, vec2 off, vec2 dir, vec2 len2, float lob, float clp, vec3 c)\n"
+	"{\n"
+	"	vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len2;\n"
+	"	float d2 = min(dot(v, v), clp);\n"
+	"	float wb = 0.4 * d2 - 1.0, wa = lob * d2 - 1.0;\n"
+	"	wb = 1.5625 * wb * wb - 0.5625;\n"
+	"	float w = wb * wa * wa;\n"
+	"	ac += c * w;\n"
+	"	aw += w;\n"
+	"}\n"
+	"vec3 Easu(vec2 p)\n"
+	"{\n"
+	"	vec2 pp = p * size.xy - 0.5, fp = floor(pp);\n"
+	"	ivec2 i0 = ivec2(fp);\n"
+	"	pp -= fp;\n"
+	"	vec3 b = T(i0 + ivec2(0, -1)), c = T(i0 + ivec2(1, -1));\n"
+	"	vec3 e = T(i0 + ivec2(-1, 0)), f = T(i0), g = T(i0 + ivec2(1, 0)), h = T(i0 + ivec2(2, 0));\n"
+	"	vec3 i = T(i0 + ivec2(-1, 1)), j = T(i0 + ivec2(0, 1)), k = T(i0 + ivec2(1, 1)), l = T(i0 + ivec2(2, 1));\n"
+	"	vec3 n = T(i0 + ivec2(0, 2)), o = T(i0 + ivec2(1, 2));\n"
+	"	float lb = Lu(b), lc = Lu(c), le = Lu(e), lf = Lu(f), lg = Lu(g), lh = Lu(h);\n"
+	"	float li = Lu(i), lj = Lu(j), lk = Lu(k), ll = Lu(l), ln = Lu(n), lo = Lu(o);\n"
+	"	vec2 dir = vec2(0.0);\n"
+	"	float len = 0.0;\n"
+	"	Set(dir, len, (1.0 - pp.x) * (1.0 - pp.y), lb, le, lf, lg, lj);\n"
+	"	Set(dir, len, pp.x * (1.0 - pp.y), lc, lf, lg, lh, lk);\n"
+	"	Set(dir, len, (1.0 - pp.x) * pp.y, lf, li, lj, lk, ln);\n"
+	"	Set(dir, len, pp.x * pp.y, lg, lj, lk, ll, lo);\n"
+	"	float dr = dot(dir, dir);\n"
+	"	dir = (dr < 1.0 / 32768.0) ? vec2(1.0, 0.0) : dir * inversesqrt(dr);\n"
+	"	len *= 0.5;\n"
+	"	len *= len;\n"
+	"	float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));\n"
+	"	vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);\n"
+	"	float lob = 0.5 + (0.21 - 0.5) * len, clp = 1.0 / lob;\n"
+	"	vec3 ac = vec3(0.0);\n"
+	"	float aw = 0.0;\n"
+	"	Tap(ac, aw, vec2(0.0, -1.0) - pp, dir, len2, lob, clp, b);\n"
+	"	Tap(ac, aw, vec2(1.0, -1.0) - pp, dir, len2, lob, clp, c);\n"
+	"	Tap(ac, aw, vec2(-1.0, 1.0) - pp, dir, len2, lob, clp, i);\n"
+	"	Tap(ac, aw, vec2(0.0, 1.0) - pp, dir, len2, lob, clp, j);\n"
+	"	Tap(ac, aw, vec2(0.0, 0.0) - pp, dir, len2, lob, clp, f);\n"
+	"	Tap(ac, aw, vec2(-1.0, 0.0) - pp, dir, len2, lob, clp, e);\n"
+	"	Tap(ac, aw, vec2(1.0, 1.0) - pp, dir, len2, lob, clp, k);\n"
+	"	Tap(ac, aw, vec2(2.0, 1.0) - pp, dir, len2, lob, clp, l);\n"
+	"	Tap(ac, aw, vec2(2.0, 0.0) - pp, dir, len2, lob, clp, h);\n"
+	"	Tap(ac, aw, vec2(1.0, 0.0) - pp, dir, len2, lob, clp, g);\n"
+	"	Tap(ac, aw, vec2(1.0, 2.0) - pp, dir, len2, lob, clp, o);\n"
+	"	Tap(ac, aw, vec2(0.0, 2.0) - pp, dir, len2, lob, clp, n);\n"
+	/* deringing: inside the range of the four nearest texels */
+	"	return clamp(ac / aw, min(min(f, g), min(j, k)), max(max(f, g), max(j, k)));\n"
+	"}\n"
 	"void main()\n"
 	"{\n"
-	"	vec3 c = CatmullRom(uv);\n"
+	"	vec3 c = (mode == 2) ? Easu(uv) : CatmullRom(uv);\n"
 	"	vec3 n = texture(tex, uv + vec2(0.0, size.w)).rgb, s = texture(tex, uv - vec2(0.0, size.w)).rgb;\n"
 	"	vec3 e = texture(tex, uv + vec2(size.z, 0.0)).rgb, w = texture(tex, uv - vec2(size.z, 0.0)).rgb;\n"
 	"	vec3 mn = min(min(n, s), min(e, w)), mx = max(max(n, s), max(e, w));\n"
@@ -2190,6 +2259,7 @@ UpTarget(void)
 		UP.u_rect = glGetUniformLocation(UP.prog, "rect");
 		UP.u_size = glGetUniformLocation(UP.prog, "size");
 		UP.u_sharp = glGetUniformLocation(UP.prog, "sharp");
+		UP.u_mode = glGetUniformLocation(UP.prog, "mode");
 	}
 
 	if (!UP.fbo || (UP.w != P.w) || (UP.h != P.h))
@@ -2237,6 +2307,7 @@ UpscaleEnd(void)
 	glUniform4f(UP.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniform4f(UP.u_size, fw, fh, 1.0f / fw, 1.0f / fh);
 	glUniform1f(UP.u_sharp, Q_clamp(r_om_upscale_sharp->value, 0.0f, 1.0f));
+	glUniform1i(UP.u_mode, (r_om_upscale->value >= 2.0f) ? 2 : 1);
 	BindTex(GL_TEXTURE0, UP.tex);
 	DrawQuad();
 }
