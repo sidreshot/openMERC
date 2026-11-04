@@ -1391,3 +1391,7 @@ Found by a code audit (three read-only passes: per-frame cost, lifecycle / memor
   guarded; one GLSL ES header with precision for int and all sampler types; post shaders with several outputs get
   `layout(location)` on GLES; opaque textures upload as RGBA8 on GLES (RGB8 + RGBA data is invalid there); lamp
   shadow sampler objects are looked up on every platform (`GL3_GetProcAddress`), not only on Windows.
+* **Mirrors draw only what is seen through them.** The box of the mirror faces on the plane (collected by the world
+  walk) is projected through the mirrored camera; its screen rectangle narrows the four frustum planes of the mirror's
+  world walk and scissors its drawing (before: the whole mirrored view at 0.7 of the window). ger2 mirror spot:
+  1.38 -> 0.26 ms GPU (worst 10.8 -> 5.5 ms); the tsr1 restroom image is unchanged (0.05 % of the pixels differ).
