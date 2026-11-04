@@ -140,7 +140,7 @@ audit_run.ps1 / anom.py / regress.py, campath replay + per-frame AVI for motion)
 * Known, not done (in order of value):
   1. Static world in GPU buffers (phase 2.1) - the CPU still rebuilds the visible world each frame (0.5-0.7 ms of the
      3-4 ms CPU frame here; the wall on large maps).
-  2. Mobile tier: lamp shadows need 18 texture units (GLES guarantees 16 - move them to units 7 / 11), CSM 2048 x 8
+  2. Mobile tier: lamp shadows fit 16 texture units now (units 11 / 7, r_om_lshadow_compact); CSM 2048 x 8
      layers = 128 MB (mobile: 1024, 2 cascades, DEPTH16), MSAA via EXT_multisampled_render_to_texture, the Ghoul
      emulator's CPU tessellation path on GLES 3.0 (samplerBuffer is 3.2).
   3. Done since: render scale + Catmull-Rom/CAS upscale (r_om_renderscale), quality presets (r_om_preset), map

@@ -29,8 +29,30 @@
 
 #define LS_MAXSLOTS 8
 #define LS_BINDING 5        /* uniform block binding point (after uniOMcsm) */
-#define LS_UNIT 16          /* GL_TEXTURE16: the depth cubes with compare (filter taps) */
-#define LS_RAWUNIT 17       /* GL_TEXTURE17: the same with a sampler that reads the depth (blocker search) */
+/* the texture units of the depth cubes: with compare (filter taps) and through a sampler that reads the depth
+   (blocker search). 16 / 17 where the GPU has 18 or more units; else (GLES guarantees 16, mobile GPUs have
+   exactly that) 11 / 7, the two units the world, Ghoul, volumetric fog and beam shaders leave free - the fog and
+   beam passes read the depth copy on unit 3 for it. r_om_lshadow_compact 1 forces 11 / 7 (a desktop test) */
+static int ls_unit = 16, ls_rawunit = 17;
+#define LS_UNIT ls_unit
+#define LS_RAWUNIT ls_rawunit
+
+static qboolean
+LSEnoughUnits(int maxunits)
+{
+	cvar_t *compact = ri.Cvar_Get("r_om_lshadow_compact", "0", 0); /* read when the renderer starts (vid_restart) */
+
+	if ((maxunits >= 18) && !compact->value)
+	{
+		ls_unit = 16;
+		ls_rawunit = 17;
+		return true;
+	}
+
+	ls_unit = 11;
+	ls_rawunit = 7;
+	return maxunits >= 12;
+}
 #define LS_TAN 1.08f        /* tan of half the face field of view: a little over 90 degrees for the filter taps */
 #define LS_NEAR 2.0f
 #define LS_FIXTURE 16.0f    /* a caster this close to its lamp is the lamp's own fixture or chain: no shadow */
@@ -620,7 +642,7 @@ GL3_LShadow_Glsl(void)
 		glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &L.maxunits);
 	}
 
-	return (L.maxunits > LS_RAWUNIT) ? ls_glsl : ls_glsl_none;
+	return LSEnoughUnits(L.maxunits) ? ls_glsl : ls_glsl_none;
 }
 
 /* with prog in use: the block binding and the sampler units */
@@ -679,7 +701,7 @@ BindMap(qboolean on)
 {
 	GLuint t = (on && L.tex) ? L.tex : L.dummy;
 
-	if (L.maxunits <= LS_RAWUNIT)
+	if (!LSEnoughUnits(L.maxunits))
 	{
 		return;
 	}
@@ -755,7 +777,7 @@ GL3_LShadow_Init(void)
 	glBindBufferBase(GL_UNIFORM_BUFFER, LS_BINDING, L.ubo);
 	L.uboenabled = false;
 
-	if (L.maxunits > LS_RAWUNIT)
+	if (LSEnoughUnits(L.maxunits))
 	{
 		glGenTextures(1, &L.dummy);
 		GL3_SelectTMU(GL_TEXTURE0 + LS_UNIT);
@@ -1698,6 +1720,7 @@ GL3_LShadow_Info(void)
 		"%.0f caster vertices a view\n", numlights, L.active ? "active" : "inactive", L.nframes, L.nstatic,
 		L.nframes ? (float)L.ndynverts / L.nframes : 0.0f);
 	L.nframes = L.nstatic = L.ndynverts = 0;
+	R_Printf(PRINT_ALL, "lamp shadows: texture units %d / %d of %d\n", LS_UNIT, LS_RAWUNIT, L.maxunits);
 
 	for (j = 0; j < LS_MAXSLOTS; j++)
 	{

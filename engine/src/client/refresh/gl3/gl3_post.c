@@ -2652,7 +2652,7 @@ VolFogProgram(void)
 	V.u_rect = glGetUniformLocation(p, "rect");
 	GL3_UseProgram(p);
 	GL3_CSM_BindProgram(p);
-	glUniform1i(V.u_depth, 7);
+	glUniform1i(V.u_depth, 3); /* the depth copy on unit 3: unit 7 may hold the lamp shadows' raw cubes (gl3_lshadow.c) */
 
 	/* the upsampling pass of r_om_volfog_half (without it the fog is marched at full size) */
 	v = CompilePost(GL_VERTEX_SHADER, post_vs);
@@ -2765,6 +2765,7 @@ GL3_Post_VolFog(void)
 	fh = (float)P.h;
 
 	GL3_UseProgram(V.prog);
+	BindTex(GL_TEXTURE3, P.texdepthcopy);
 	glUniform4f(V.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniformMatrix4fv(V.u_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
 	glUniform4f(V.u_eye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2], r_newrefdef.time);
@@ -4044,7 +4045,7 @@ ShadeProgram(void)
 	B.s_rect = glGetUniformLocation(p, "rect");
 	GL3_UseProgram(p);
 	GL3_CSM_BindProgram(p);
-	glUniform1i(B.s_depth, 7);
+	glUniform1i(B.s_depth, 3); /* see the volumetric fog */
 	glUniform1i(B.s_shadow, BEAM_UNIT);
 	return true;
 }
@@ -4349,6 +4350,7 @@ GL3_Post_Beams(void)
 	if (shadows && (gshadow > 0) && ShadeProgram())
 	{
 		GL3_UseProgram(B.sprog);
+		BindTex(GL_TEXTURE3, P.texdepthcopy);
 		glUniform4f(B.s_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 		glUniformMatrix4fv(B.s_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
 		glUniform4f(B.s_prm, gl3depthmin, gl3depthmax, gshadow, (float)nb);

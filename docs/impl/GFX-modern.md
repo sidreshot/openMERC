@@ -1426,3 +1426,12 @@ shadows 256 / 2 lamps / 4 taps, no SSAO / SSR, half-size volumetric fog, mirrors
 upscale, FXAA without MSAA, no tessellation, no per-pixel model light), 2 medium, 3 high (this build's defaults).
 Applied once when it changes, the single settings stay editable; GLES builds start on 1. tsr1 GTX 1050 Ti 1280x720:
 high 9.94 ms GPU, medium 9.24, low 3.73.
+
+## Lamp shadows on 16-unit GPUs
+
+The lamp shadows needed texture units 16 and 17 (18 units); GLES guarantees 16 and mobile GPUs report exactly that,
+so they were always off there. With fewer than 18 units they now use 11 (compare) and 7 (raw depth for the blocker
+search) - the units the world, Ghoul, volumetric fog and beam shaders leave free; the fog and beam passes read the
+depth copy on unit 3 instead of 7. `r_om_lshadow_compact 1` forces that layout on desktop (read at renderer start):
+arm1 shop with a character, normal vs compact 0.67 % of the pixels differ, normal vs normal 0.61 % (noise); fog and
+beam maps (kos1, ger1, arm2) unchanged; no GL errors. r_om_lshadow_info prints the units.
