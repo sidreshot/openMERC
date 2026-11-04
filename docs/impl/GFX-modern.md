@@ -1418,3 +1418,11 @@ bilinear taps, then a contrast-adaptive sharpening against the four neighbours c
 FSR RCAS; `r_om_upscale_sharp` 0..1, default 0.25). The HUD stays at the window resolution; mirrors follow the scene
 size. tsr1, 1280x720 window, GTX 1050 Ti: GPU 10.25 ms at 1.0, 7.18 at 0.67, 5.07 at 0.5, 6.55 at 0.67 with FXAA; no
 GL errors. Not FSR 1.0 EASU itself (edge-adaptive spatial upsampling) - a candidate for later.
+
+## r_om_preset: one knob for the GFX-modern settings
+
+0 custom (nothing touched, the default on desktop), 1 low (mobile / integrated GPUs: sun cascades 2 x 1024, lamp
+shadows 256 / 2 lamps / 4 taps, no SSAO / SSR, half-size volumetric fog, mirrors at 0.5, render scale 0.75 with the
+upscale, FXAA without MSAA, no tessellation, no per-pixel model light), 2 medium, 3 high (this build's defaults).
+Applied once when it changes, the single settings stay editable; GLES builds start on 1. tsr1 GTX 1050 Ti 1280x720:
+high 9.94 ms GPU, medium 9.24, low 3.73.

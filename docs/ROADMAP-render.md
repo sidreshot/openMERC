@@ -143,7 +143,8 @@ audit_run.ps1 / anom.py / regress.py, campath replay + per-frame AVI for motion)
   2. Mobile tier: lamp shadows need 18 texture units (GLES guarantees 16 - move them to units 7 / 11), CSM 2048 x 8
      layers = 128 MB (mobile: 1024, 2 cascades, DEPTH16), MSAA via EXT_multisampled_render_to_texture, the Ghoul
      emulator's CPU tessellation path on GLES 3.0 (samplerBuffer is 3.2).
-  3. Render scale + FSR 1.0 (phase 3.1), SMAA as the desktop alternative to MSAA.
+  3. Done since: render scale + Catmull-Rom/CAS upscale (r_om_renderscale), quality presets (r_om_preset), map
+     load 15.7 -> 4.9 s. Still open: FSR 1.0 EASU itself, SMAA.
   4. Vita: needs a GLES2-class lite renderer (this one uses MRT, array / shadow samplers, UBOs, float targets).
   5. Vulkan: the post passes are self-contained (bloom, HDR, FXAA, SSAO, SSR, volfog, weather, shadows); the Ghoul
      fixed-function emulator and the text-assembled shaders are the hard parts.

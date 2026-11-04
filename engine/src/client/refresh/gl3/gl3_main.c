@@ -2209,9 +2209,74 @@ GL3_SetLightLevel(entity_t *currententity)
 	r_lightlevel->value = 150 * Q_max(shadelight[0], Q_max(shadelight[1], shadelight[2]));
 }
 
+/*
+ * OpenMerc r_om_preset: one knob for the GFX-modern settings. 0 = custom (nothing is touched), 1 = low (mobile,
+ * integrated GPUs: 2 sun cascades at 1024, smaller lamp shadows, no SSAO / SSR, 0.75 render scale with the upscale),
+ * 2 = medium, 3 = high (the defaults of this build). Applied once when it changes; the single settings stay
+ * editable afterwards. GLES builds start on low.
+ */
+static void
+ApplyPreset(void)
+{
+	static cvar_t *preset;
+	static const char *const sets[3][24][2] = {
+		{ /* low */
+			{"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
+			{"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
+			{"r_om_ssao", "0"}, {"r_om_ssr", "0"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
+			{"r_om_mirror_scale", "0.5"}, {"r_om_renderscale", "0.75"}, {"r_om_fxaa", "-1"},
+			{"r_om_beams_motes", "0"}, {"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {NULL, NULL}},
+		{ /* medium */
+			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "3"}, {"r_om_csm_soft", "2"},
+			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
+			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "1"},
+			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"}, {"r_om_mirror_scale", "0.7"},
+			{"r_om_renderscale", "1"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
+			{"r_om_ppl_models", "1"}, {NULL, NULL}},
+		{ /* high: the build's defaults */
+			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
+			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
+			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
+			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"}, {"r_om_mirror_scale", "0.7"},
+			{"r_om_renderscale", "1"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
+			{"r_om_ppl_models", "1"}, {NULL, NULL}}};
+	int p, i;
+
+	if (!preset)
+	{
+#ifdef YQ2_GL3_GLES3
+		preset = ri.Cvar_Get("r_om_preset", "1", CVAR_ARCHIVE);
+#else
+		preset = ri.Cvar_Get("r_om_preset", "0", CVAR_ARCHIVE);
+#endif
+		preset->modified = true; /* a preset from the config applies at start */
+	}
+
+	if (!preset->modified)
+	{
+		return;
+	}
+
+	preset->modified = false;
+	p = (int)preset->value;
+
+	if ((p < 1) || (p > 3))
+	{
+		return;
+	}
+
+	for (i = 0; sets[p - 1][i][0]; i++)
+	{
+		ri.Cvar_Set(sets[p - 1][i][0], sets[p - 1][i][1]);
+	}
+
+	R_Printf(PRINT_ALL, "r_om_preset %d applied\n", p);
+}
+
 static void
 GL3_RenderFrame(refdef_t *fd)
 {
+	ApplyPreset();
 	// in case some batched 2D draws are outstanding, draw them now
 	GL3_DrawCurrent2Dbatch();
 	GL3_SoF2D_Flush();
