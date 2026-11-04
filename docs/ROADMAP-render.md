@@ -148,3 +148,9 @@ audit_run.ps1 / anom.py / regress.py, campath replay + per-frame AVI for motion)
   4. Vita: needs a GLES2-class lite renderer (this one uses MRT, array / shadow samplers, UBOs, float targets).
   5. Vulkan: the post passes are self-contained (bloom, HDR, FXAA, SSAO, SSR, volfog, weather, shadows); the Ghoul
      fixed-function emulator and the text-assembled shaders are the hard parts.
+
+Final pass on the last build (32 SP maps, hidden test windows `vid_testwindow 1`, below-normal priority while the
+PC was in use): no GL errors on any map; GPU 5.50 ms mean (5.71 on the second pass); tour shots within a few percent
+except random effects (rain sheet, AA fire, lightning); map load 4.0 s mean, 7.3 s max (tsr1 15.7 s before). The CPU
+column (4.3 ms) is not comparable to the earlier passes: the vertex rings are off again and the runs shared the
+machine at a lower priority - CPU A/B has to be done in one run.
