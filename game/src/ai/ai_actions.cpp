@@ -535,8 +535,7 @@ class DyingAction : public GroundAction { /* classes 3, 4, 5 */
 public:
 	float death_start = 0;
 	int notified = 0;
-	float air_since = 0, air_z = 0; /* the in-air pause (not saved: a loaded body re-measures) */
-	/* SPEC-711 tail of classes 3-5: 112 death start, 116 notified, 120 requested death record */
+	float air_since = 0, air_z = 0; /* the in-air pause (not saved: a loaded body re-measures) */	/* SPEC-711 tail of classes 3-5: 112 death start, 116 notified, 120 requested death record */
 	void SaveTail(SaveRec &r) override
 	{
 		r.F(112, death_start);

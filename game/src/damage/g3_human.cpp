@@ -2541,8 +2541,12 @@ public:
 		/* out of the walls: a little each think while falling, the rest when it has come to rest */
 		if (frozenAt == 0 && !G3_Cinematic())
 			SettleCorpse(6.0f);
-		/* (not while the fall waits in the air: the body would stay on its standing frame) */
-		if (frozenAt == 0 && (AnimDone() || (!pauseKind && now - deathTime > 7.0f))) {
+		/* (not while the fall waits in the air: the body would stay on its standing frame). Only a finished DEATH
+		   animation freezes: ChooseDeath runs this before the death is set, and a pre-death idle or walk that had
+		   just finished froze the instance at the moment of death - the death then played on a paused body, which
+		   stayed upright (owner: "characters hang in one pose, every second time") */
+		if (frozenAt == 0 && ((AnimDone() && cur && cur->cls == ANIMCLS_DEATH) ||
+		                      (!pauseKind && now - deathTime > 7.0f))) {
 			if (!G3_Cinematic())
 				for (int k = 0; k < 3; k++)
 					SettleCorpse(40.0f);
@@ -2558,6 +2562,8 @@ public:
 				}
 			}
 			frozenAt = now;
+			G3_DPrintf("corpse %s frozen on %s (cls %d) after %.1f s\n", ent->classname, cur ? cur->name : "-",
+				cur ? cur->cls : -1, now - deathTime);
 			// the corpse has come to rest: its blood pool (SPEC-721 §7; human models have no `ooze` note, issue #8)
 			if (!pooled && !gibbed) {
 				pooled = true;
