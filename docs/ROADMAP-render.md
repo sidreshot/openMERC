@@ -121,3 +121,29 @@ Phase 1 first: it fixes what the owner sees today and its far cut is the base of
 The coordinate limit (2.6, first item) is small but blocks every large-map test, so it goes in as soon as a
 large test map is wanted. FXAA and render scale (3.1-3.2) are cheap and independent: they can be done any time
 someone needs a break from phase 2.
+
+## Release readiness (audit 2026-11-04)
+
+Tested: all 32 single-player and 43 deathmatch maps, 6-8 spots each (two fixed shots + a timed 360 degree turn),
+GL debug context on; a second pass after the fixes compared shot by shot (tools: session scratchpad audit.py /
+audit_run.ps1 / anom.py / regress.py, campath replay + per-frame AVI for motion).
+
+* GL errors: none on any map (only NVIDIA performance notes: the screenshot read-back, and a vertex shader
+  recompile on first use of three programs - once per run, not a per-frame cost; an integer generic
+  attribute value did not remove it). Three DM maps (sudctf1, suddm1, suddm2) loaded without errors but gave no shots:
+  the DM loadout menu kept the test player from spawning (a harness limit).
+* Frame cost (1080p window 1280x720 in the tour, GTX 1050 Ti): GPU 4-7 ms on every map with all effects on; CPU
+  ~3-4 ms. Hitches seen only on screenshot frames and camera teleports, plus external stalls of the whole process.
+* Fixed in this audit: lifecycle bugs after vid_restart / map change (weather, mirrors, night vision, timers, Ghoul
+  glow lists, ambient-cube / sky-mask / seam caches, SSAO / SSR targets), NaN in Ghoul per-pixel lighting, driver
+  round trips in draw paths, uncached uniform lookups, cascade / mirror / beam redraw costs, GLES build.
+* Known, not done (in order of value):
+  1. Static world in GPU buffers (phase 2.1) - the CPU still rebuilds the visible world each frame (0.5-0.7 ms of the
+     3-4 ms CPU frame here; the wall on large maps).
+  2. Mobile tier: lamp shadows need 18 texture units (GLES guarantees 16 - move them to units 7 / 11), CSM 2048 x 8
+     layers = 128 MB (mobile: 1024, 2 cascades, DEPTH16), MSAA via EXT_multisampled_render_to_texture, the Ghoul
+     emulator's CPU tessellation path on GLES 3.0 (samplerBuffer is 3.2).
+  3. Render scale + FSR 1.0 (phase 3.1), SMAA as the desktop alternative to MSAA.
+  4. Vita: needs a GLES2-class lite renderer (this one uses MRT, array / shadow samplers, UBOs, float targets).
+  5. Vulkan: the post passes are self-contained (bloom, HDR, FXAA, SSAO, SSR, volfog, weather, shadows); the Ghoul
+     fixed-function emulator and the text-assembled shaders are the hard parts.
