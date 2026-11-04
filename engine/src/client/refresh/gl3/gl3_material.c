@@ -916,7 +916,24 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 		float grit = SStep(1.1f, 2.5f, hf[i] / hfmean);
 
 		G[i] = (1.0f - crev) * (1.0f - 0.5f * grit);
-		hist[(int)(G[i] * 255.0f + 0.5f)]++;
+	}
+
+	/* the gloss only at the scale of stains and wear (radius 1/16 of the texture): per texel it followed the
+	   texture's light and dark pattern - reflections and lamp glints on the bright texels, matte outlines - an
+	   embossed, cel-shaded look on doors and panels (owner, twice) */
+	{
+		float *gb = MatBlur(G, w, h, md / 16 > 2 ? md / 16 : 2);
+
+		if (gb)
+		{
+			memcpy(G, gb, sizeof(float) * n);
+			free(gb);
+		}
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		hist[(int)(fminf(fmaxf(G[i], 0.0f), 1.0f) * 255.0f + 0.5f)]++;
 	}
 
 	/* the panes of painted windows (A): texels with no strong step to a neighbour within one texel and little
