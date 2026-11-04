@@ -1673,7 +1673,7 @@ GL3_DrawBrushModel(entity_t *e, gl3model_t *currentmodel)
 }
 
 static void
-RecursiveWorldNode(entity_t *currententity, mnode_t *node)
+RecursiveWorldNode(entity_t *currententity, mnode_t *node, int clipflags)
 {
 	int c, side, sidebit;
 	cplane_t *plane;
@@ -1692,9 +1692,31 @@ RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 		return;
 	}
 
-	if (!r_nocull->value && R_CullBox(node->minmaxs, node->minmaxs + 3, frustum))
+	/* GFX-modern: frustum culling with clip flags - a node wholly in front of a frustum plane passes that plane on
+	   to its children untested (their bounds lie inside its own), as R_CullBox decided for each of them before */
+	if (clipflags)
 	{
-		return;
+		for (c = 0; c < 4; c++)
+		{
+			int s;
+
+			if (!(clipflags & (1 << c)))
+			{
+				continue;
+			}
+
+			s = BOX_ON_PLANE_SIDE(node->minmaxs, node->minmaxs + 3, frustum + c);
+
+			if (s == 2)
+			{
+				return;
+			}
+
+			if (s == 1)
+			{
+				clipflags &= ~(1 << c);
+			}
+		}
 	}
 
 	/* if a leaf node, draw stuff */
@@ -1755,7 +1777,7 @@ RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 	}
 
 	/* recurse down the children, front side first */
-	RecursiveWorldNode(currententity, node->children[side]);
+	RecursiveWorldNode(currententity, node->children[side], clipflags);
 
 	/* draw stuff */
 	for (c = node->numsurfaces,
@@ -1849,7 +1871,7 @@ RecursiveWorldNode(entity_t *currententity, mnode_t *node)
 	}
 
 	/* recurse down the back side */
-	RecursiveWorldNode(currententity, node->children[!side]);
+	RecursiveWorldNode(currententity, node->children[!side], clipflags);
 }
 
 void
@@ -1876,7 +1898,7 @@ GL3_DrawWorld(void)
 	gl3state.currenttexture = -1;
 
 	GL3_ClearSkyBox();
-	RecursiveWorldNode(&ent, gl3_worldmodel->nodes);
+	RecursiveWorldNode(&ent, gl3_worldmodel->nodes, r_nocull->value ? 0 : 15);
 	DrawTextureChains(&ent);
 	GL3_Draw3DBatchesNow();
 	SeamDraw(); /* GFX-modern r_om_seams */
