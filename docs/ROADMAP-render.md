@@ -154,3 +154,7 @@ PC was in use): no GL errors on any map; GPU 5.50 ms mean (5.71 on the second pa
 except random effects (rain sheet, AA fire, lightning); map load 4.0 s mean, 7.3 s max (tsr1 15.7 s before). The CPU
 column (4.3 ms) is not comparable to the earlier passes: the vertex rings are off again and the runs shared the
 machine at a lower priority - CPU A/B has to be done in one run.
+
+CPU A/B (the honest one): the renderer from before the audit and the current one, the same sib1 camera path
+(r_om_campath, 1630 frames), hidden window, normal priority, runs old / new / old / new: CPU per frame (sum of the
+OMPROF parts) 3.98 / 1.96 / 4.00 / 2.00 ms - half; GPU 7.33 / 7.21 / 7.34 / 7.48 ms - unchanged.
