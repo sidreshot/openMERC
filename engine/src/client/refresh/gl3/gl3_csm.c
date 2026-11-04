@@ -36,6 +36,9 @@ extern vec3_t vup, vpn, vright; /* gl3_main.c, the view of this frame */
 #endif
 
 static cvar_t *r_om_csm, *r_om_csm_cascades, *r_om_csm_size, *r_om_csm_soft, *r_om_csm_bias;
+/* r_om_csm_depth16 1: 16-bit cascades (half the memory; the ortho depth is linear, 1/65536 of the light range is far
+   below the bias; ger1 with the sun active: the same frame as 24 bit, 82-85 dB), 64 instead of 128 MB at 2048 x 8 */
+static cvar_t *r_om_csm_depth16;
 static cvar_t *r_om_csm_normalbias, *r_om_csm_split, *r_om_csm_maxdist, *r_om_csm_replace_ghl;
 static cvar_t *r_om_csm_strength, *r_om_csm_debug;
 
@@ -71,7 +74,7 @@ typedef struct
 static struct
 {
 	qboolean failed, active;
-	int size, ncasc;
+	int size, ncasc, bits;
 	GLuint tex, dummy, fbo, prog, vao, vbo, dynvbo, ubo;
 	GLint u_vp;
 	const gl3model_t *built;
@@ -660,11 +663,11 @@ UploadUBO(void)
 }
 
 static void
-DepthArray(GLuint tex, int size, int layers)
+DepthArray(GLuint tex, int size, int layers, int bits)
 {
 	glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
-	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, size, size, layers, 0, GL_DEPTH_COMPONENT,
-		GL_UNSIGNED_INT, NULL);
+	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, (bits == 16) ? GL_DEPTH_COMPONENT16 : GL_DEPTH_COMPONENT24, size, size, layers, 0,
+		GL_DEPTH_COMPONENT, (bits == 16) ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, NULL);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -689,6 +692,7 @@ GL3_CSM_Init(void)
 	r_om_csm_size = ri.Cvar_Get("r_om_csm_size", "2048", CVAR_ARCHIVE);
 	r_om_csm_soft = ri.Cvar_Get("r_om_csm_soft", "2", CVAR_ARCHIVE);
 	r_om_csm_bias = ri.Cvar_Get("r_om_csm_bias", "0.0015", CVAR_ARCHIVE);
+	r_om_csm_depth16 = ri.Cvar_Get("r_om_csm_depth16", "1", CVAR_ARCHIVE);
 	r_om_csm_normalbias = ri.Cvar_Get("r_om_csm_normalbias", "0.02", CVAR_ARCHIVE);
 	r_om_csm_split = ri.Cvar_Get("r_om_csm_split", "0.75", CVAR_ARCHIVE);
 	r_om_csm_maxdist = ri.Cvar_Get("r_om_csm_maxdist", "2048", CVAR_ARCHIVE);
@@ -712,7 +716,7 @@ GL3_CSM_Init(void)
 
 	glGenTextures(1, &C.dummy);
 	GL3_SelectTMU(GL_TEXTURE0 + CSM_UNIT);
-	DepthArray(C.dummy, 1, 2 * CSM_MAXCASC);
+	DepthArray(C.dummy, 1, 2 * CSM_MAXCASC, 16);
 	GL3_SelectTMU(GL_TEXTURE0);
 	BindMap();
 }
@@ -785,8 +789,9 @@ static qboolean
 CreateMap(int size, int ncasc)
 {
 	GLenum st;
+	int bits = (r_om_csm_depth16->value != 0.0f) ? 16 : 24;
 
-	if (C.tex && (C.size == size) && (C.ncasc == ncasc))
+	if (C.tex && (C.size == size) && (C.ncasc == ncasc) && (C.bits == bits))
 	{
 		return true;
 	}
@@ -798,7 +803,7 @@ CreateMap(int size, int ncasc)
 
 	buildgen++; /* new storage: no cached static layer in it */
 	GL3_SelectTMU(GL_TEXTURE0 + CSM_UNIT);
-	DepthArray(C.tex, size, 2 * ncasc);
+	DepthArray(C.tex, size, 2 * ncasc, bits);
 	GL3_SelectTMU(GL_TEXTURE0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, C.fbo);
@@ -822,6 +827,7 @@ CreateMap(int size, int ncasc)
 
 	C.size = size;
 	C.ncasc = ncasc;
+	C.bits = bits;
 	return true;
 }
 
@@ -1521,6 +1527,8 @@ GL3_CSM_Info(void)
 		sun.tosun[0], sun.tosun[1], sun.tosun[2], sun.color[0], sun.color[1], sun.color[2], sun.light,
 		sun.ambient[0], sun.ambient[1], sun.ambient[2], C.active ? "active" : "inactive",
 		C.numstatic / 3, C.numdyn / 9);
+	R_Printf(PRINT_ALL, "CSM: map %d x %d x %d layers, %d-bit depth, %.1f MB\n", C.size, C.size, 2 * C.ncasc, C.bits,
+		(float)C.size * C.size * 2 * C.ncasc * ((C.bits == 16) ? 2 : 4) / (1024.0f * 1024.0f));
 
 	if (C.numdyn >= 3)
 	{

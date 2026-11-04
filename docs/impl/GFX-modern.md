@@ -1442,3 +1442,11 @@ search) - the units the world, Ghoul, volumetric fog and beam shaders leave free
 depth copy on unit 3 instead of 7. `r_om_lshadow_compact 1` forces that layout on desktop (read at renderer start):
 arm1 shop with a character, normal vs compact 0.67 % of the pixels differ, normal vs normal 0.61 % (noise); fog and
 beam maps (kos1, ger1, arm2) unchanged; no GL errors. r_om_lshadow_info prints the units.
+
+## r_om_csm_depth16: 16-bit sun cascades
+
+The cascade array (2 x cascades layers: the static cache and the dynamic copy) was DEPTH_COMPONENT24, stored as 32 bit:
+2048 x 2048 x 8 = 128 MB. The cascades are orthographic, their depth is linear over the light range, and 1/65536 of
+it is far below `r_om_csm_bias`; `r_om_csm_depth16 1` (default) halves the memory. ger1 (sun active in the first spot,
+two shots): 82.3 / 84.6 dB against 24 bit, no acne, the same csm time. `r_om_csm_info` prints the size, depth and
+memory. The cascades stay off where the lightmaps hold no sun (omlight's fit, e.g. kos1 sun 0) or no sky is in the PVS.
