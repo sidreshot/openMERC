@@ -1468,3 +1468,29 @@ recompile warnings as before. CPU world time per spot, A/B on tsr1 + sib1 (GTX 1
 3.16 / 0.51 / 0.49 / 0.39 / 2.90 / 4.75 ms -> 0.13 / 0.15 / 0.52 / 2.17 / 2.81 / 0.40 / 0.41 / 0.38 / 1.97 / 3.85;
 the GPU time unchanged.
 
+## r_om_postaa 2: SMAA 1x
+
+The post antialiasing slot (`r_om_fxaa`: -1 auto = without MSAA, 0 off, 1 on) now runs SMAA 1x by default
+(`r_om_postaa` 2; 1 = the FXAA above). Orthogonal patterns only, as the reference's MEDIUM preset (Jimenez et al.
+2012, no diagonal or corner detection): luma edges with local contrast adaptation into an RG8 target, blending
+weights from the area table into an RGBA8 target, neighbourhood blending into the window (or the upscale target).
+The area table (80 x 80 RG8, offset 0 of the reference's AreaTex) is computed at start from the reference
+generator's orthogonal formulas, the line searches walk the edge texture texel by texel (up to 32 pixels) instead of
+using the search table - no third-party binary data. Checked against the generator's geometry: a one-pixel step
+gives 0.125, the pixel next to the step of a 4-pixel line 0.375, maximum 0.5.
+
+tsr1 / ger1 / sib1, a still camera, no MSAA, one run: FXAA changes 3.8-15.7 % of the pixels, SMAA 4.5-11.4 %; both
+remove the staircases, SMAA keeps the textures sharper. GTX 1050 Ti 720p, post pass per 200 frames: off 0.81 /
+0.86, FXAA 0.86 / 0.89, SMAA 1.02 / 1.09, off again 0.93 / 0.87 ms (about +0.05 FXAA, +0.15 SMAA).
+
+The cvar was first named `r_om_aa` - that name is the anti-aircraft fire of the weather (r_om_aa_maps, kos1-3), two
+file-scope declarations of one variable; renamed before release.
+
+## Video menu: RENDER SCALE AND SMOOTHING
+
+`menus/om_video.tbl` has a section for these: quality preset (`r_om_preset`), render resolution (`r_om_renderscale`:
+Performance 50 %, Balanced 59 %, Quality 67 %, Ultra Quality 77 %, Native), upscaler (`r_om_upscale`: FSR 1.0 /
+Catmull-Rom), upscale sharpening (`r_om_upscale_sharp`), post antialiasing (`r_om_fxaa`) and its method
+(`r_om_postaa`: SMAA / FXAA). The rows are shown while the renderer registers the cvars; `r_om_preset` is now
+registered at renderer start (before, only on the first 3D frame, so the row would be hidden in the main menu).
+

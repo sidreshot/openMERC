@@ -145,7 +145,7 @@ audit_run.ps1 / anom.py / regress.py, campath replay + per-frame AVI for motion)
      layers: DEPTH16 by default now (r_om_csm_depth16, 128 -> 64 MB; the low preset 1024 x 4 layers = 8 MB), MSAA via EXT_multisampled_render_to_texture, the Ghoul
      emulator's CPU tessellation path on GLES 3.0 (samplerBuffer is 3.2).
   3. Done since: render scale + Catmull-Rom/CAS upscale (r_om_renderscale), quality presets (r_om_preset), map
-     load 15.7 -> 4.9 s, FSR 1.0 EASU (r_om_upscale 2). Still open: SMAA.
+     load 15.7 -> 4.9 s, FSR 1.0 EASU (r_om_upscale 2), SMAA 1x (r_om_postaa 2), both in the video menu.
   4. Vita: needs a GLES2-class lite renderer (this one uses MRT, array / shadow samplers, UBOs, float targets).
   5. Vulkan: the post passes are self-contained (bloom, HDR, FXAA, SSAO, SSR, volfog, weather, shadows); the Ghoul
      fixed-function emulator and the text-assembled shaders are the hard parts.

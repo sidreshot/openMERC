@@ -59,8 +59,9 @@ static qboolean ssaomark; /* r_om_ssao runs this view: the weapon is marked in t
 static qboolean SSRWanted(void);
 static void SSRShutdown(void);
 static void FxaaShutdown(void);
+static void SmaaShutdown(void);
 static void UpShutdown(void);
-static cvar_t *r_om_renderscale, *r_om_upscale_sharp, *r_om_upscale, *r_om_fxaa;
+static cvar_t *r_om_renderscale, *r_om_upscale_sharp, *r_om_upscale, *r_om_fxaa, *r_om_postaa;
 static void WXShutdown(void);
 static void SSAODeleteTargets(void);
 static void SSRDeleteTargets(void);
@@ -1523,6 +1524,13 @@ GL3_Post_Init(void)
 	r_om_upscale_sharp = ri.Cvar_Get("r_om_upscale_sharp", "0.25", CVAR_ARCHIVE);
 	r_om_upscale = ri.Cvar_Get("r_om_upscale", "2", CVAR_ARCHIVE);
 	r_om_fxaa = ri.Cvar_Get("r_om_fxaa", "-1", CVAR_ARCHIVE);
+	/* the menu row of the quality preset needs it before the first 3D frame (gl3_main.c ApplyPreset reads it) */
+#ifdef YQ2_GL3_GLES3
+	ri.Cvar_Get("r_om_preset", "1", CVAR_ARCHIVE);
+#else
+	ri.Cvar_Get("r_om_preset", "0", CVAR_ARCHIVE);
+#endif
+	r_om_postaa = ri.Cvar_Get("r_om_postaa", "2", CVAR_ARCHIVE); /* the post antialiasing r_om_fxaa runs: 1 FXAA, 2 SMAA 1x (r_om_aa is the anti-aircraft weather) */
 	r_om_gputime = ri.Cvar_Get("r_om_gputime", "0", 0);
 #if defined(_WIN32) && !defined(YQ2_GL3_GLES3)
 	r_om_prof_tag = ri.Cvar_Get("r_om_prof_tag", "", 0);
@@ -1585,6 +1593,7 @@ GL3_Post_Shutdown(void)
 	if (P.vao) glDeleteVertexArrays(1, &P.vao);
 	windowsamples = -1;
 	FxaaShutdown();
+	SmaaShutdown();
 	UpShutdown();
 	WXShutdown();
 	MirrorShutdown();
@@ -2089,11 +2098,427 @@ FxaaBegin(void)
 	return true;
 }
 
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_postaa 2: SMAA 1x (Jimenez et al., "SMAA: Enhanced Subpixel
+ * Morphological Antialiasing", 2012), the orthogonal patterns only - the
+ * reference's MEDIUM preset (no diagonal or corner detection). Three passes
+ * after the composite: luma edges with local contrast adaptation, blending
+ * weights from the area table, neighbourhood blending. The area table is
+ * computed here at start (the reference's AreaTex.py, orthogonal part, offset 0:
+ * 5 x 5 blocks of 16 x 16 = 80 x 80 RG8), the searches walk the edge texture
+ * texel by texel instead of the search table. Runs in the FXAA slot
+ * (r_om_fxaa decides when, r_om_postaa which: 1 FXAA, 2 SMAA).
+ * ------------------------------------------------------------------ */
+
+#define SMAA_SIZE 16
+#define SMAA_SMOOTH 32.0f
+
+static struct
+{
+	qboolean tried;
+	GLuint pedge, pweight, pblend;
+	GLuint area, etex, wtex, efbo, wfbo;
+	GLint e_tex, e_rect, w_edges, w_area, w_rect, b_tex, b_weights, b_rect, b_rcp;
+	int w, h;
+} SM;
+
+static void
+SmaaAreaSeg(const float p1[2], const float p2[2], float x, float out[2])
+{
+	float d0 = p2[0] - p1[0], d1 = p2[1] - p1[1];
+	float x1 = x, x2 = x + 1.0f;
+
+	out[0] = out[1] = 0.0f;
+
+	if (((x1 >= p1[0]) && (x1 < p2[0])) || ((x2 > p1[0]) && (x2 <= p2[0])))
+	{
+		float y1 = p1[1] + (x1 - p1[0]) * d1 / d0;
+		float y2 = p1[1] + (x2 - p1[0]) * d1 / d0;
+		qboolean trapezoid = ((y1 < 0.0f) == (y2 < 0.0f)) || (fabsf(y1) < 1e-4f) || (fabsf(y2) < 1e-4f);
+
+		if (trapezoid)
+		{
+			float a = (y1 + y2) * 0.5f;
+
+			if (a < 0.0f)
+			{
+				out[0] = fabsf(a);
+			}
+			else
+			{
+				out[1] = fabsf(a);
+			}
+		}
+		else
+		{
+			float xc = -p1[1] * d0 / d1 + p1[0];
+			float fr = xc - floorf(xc);
+			float a1 = (xc > p1[0]) ? y1 * fr * 0.5f : 0.0f;
+			float a2 = (xc < p2[0]) ? y2 * (1.0f - fr) * 0.5f : 0.0f;
+			float a = (fabsf(a1) > fabsf(a2)) ? a1 : -a2;
+
+			if (a < 0.0f)
+			{
+				out[0] = fabsf(a1);
+				out[1] = fabsf(a2);
+			}
+			else
+			{
+				out[0] = fabsf(a2);
+				out[1] = fabsf(a1);
+			}
+		}
+	}
+}
+
+/* area between the segment p1 - p2 and pixel x, both sides */
+static void
+SmaaArea2(float ax, float ay, float bx, float by, float x, float out[2])
+{
+	float p1[2] = {ax, ay}, p2[2] = {bx, by};
+
+	SmaaAreaSeg(p1, p2, x, out);
+}
+
+static void
+SmaaAreaOrtho(int pattern, float left, float right, float out[2])
+{
+	float o1 = 0.5f, o2 = -0.5f, d = left + right + 1.0f, a[2], b[2], p;
+
+	out[0] = out[1] = 0.0f;
+
+	switch (pattern)
+	{
+	case 1: if (left <= right) SmaaArea2(0, o2, d * 0.5f, 0, left, out); break;
+	case 2: if (left >= right) SmaaArea2(d * 0.5f, 0, d, o2, left, out); break;
+	case 3:
+	case 12:
+		if (pattern == 3)
+		{
+			SmaaArea2(0, o2, d * 0.5f, 0, left, a);
+			SmaaArea2(d * 0.5f, 0, d, o2, left, b);
+		}
+		else
+		{
+			SmaaArea2(0, o1, d * 0.5f, 0, left, a);
+			SmaaArea2(d * 0.5f, 0, d, o1, left, b);
+		}
+
+		/* the reference's smootharea: long U shapes keep their area, short ones are rounded */
+		p = Q_clamp(d / SMAA_SMOOTH, 0.0f, 1.0f);
+		out[0] = (sqrtf(a[0] * 2.0f) * 0.5f) * (1.0f - p) + a[0] * p + (sqrtf(b[0] * 2.0f) * 0.5f) * (1.0f - p) + b[0] * p;
+		out[1] = (sqrtf(a[1] * 2.0f) * 0.5f) * (1.0f - p) + a[1] * p + (sqrtf(b[1] * 2.0f) * 0.5f) * (1.0f - p) + b[1] * p;
+		break;
+	case 4: if (left <= right) SmaaArea2(0, o1, d * 0.5f, 0, left, out); break;
+	case 6:
+	case 7:
+	case 14: SmaaArea2(0, o1, d, o2, left, out); break;
+	case 8: if (left >= right) SmaaArea2(d * 0.5f, 0, d, o1, left, out); break;
+	case 9:
+	case 11:
+	case 13: SmaaArea2(0, o2, d, o1, left, out); break;
+	default: break; /* 0, 5, 10, 15: no area */
+	}
+}
+
+static GLuint
+SmaaAreaTexture(void)
+{
+	/* the crossing-edge pair of each pattern, as the shader rounds them (0, 0.25, 0.75, 1 -> 0, 1, 3, 4) */
+	static const int ortho[16][2] = {{0, 0}, {3, 0}, {0, 3}, {3, 3}, {1, 0}, {4, 0}, {1, 3}, {4, 3},
+		{0, 1}, {3, 1}, {0, 4}, {3, 4}, {1, 1}, {4, 1}, {1, 4}, {4, 4}};
+	static byte px[5 * SMAA_SIZE * 5 * SMAA_SIZE * 2];
+	GLuint t;
+	int pat, l, r;
+
+	memset(px, 0, sizeof(px));
+
+	for (pat = 0; pat < 16; pat++)
+	{
+		for (l = 0; l < SMAA_SIZE; l++)
+		{
+			for (r = 0; r < SMAA_SIZE; r++)
+			{
+				float a[2];
+				int x = ortho[pat][0] * SMAA_SIZE + l, y = ortho[pat][1] * SMAA_SIZE + r;
+				byte *o = px + (y * 5 * SMAA_SIZE + x) * 2;
+
+				/* the distances are stored squared: the shader looks up with sqrt(distance) */
+				SmaaAreaOrtho(pat, (float)(l * l), (float)(r * r), a);
+				o[0] = (byte)Q_clamp(a[0] * 255.0f + 0.5f, 0.0f, 255.0f);
+				o[1] = (byte)Q_clamp(a[1] * 255.0f + 0.5f, 0.0f, 255.0f);
+			}
+		}
+	}
+
+	glGenTextures(1, &t);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, t);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, 5 * SMAA_SIZE, 5 * SMAA_SIZE, 0, GL_RG, GL_UNSIGNED_BYTE, px);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	gl3state.currenttexture = -1;
+	return t;
+}
+
+/* pass 1: luma edges, r = edge to the left neighbour, g = edge to the one above (GL +y) */
+static const char *smaa_edge_fs =
+	"uniform sampler2D tex;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"float L(ivec2 p) { return dot(texelFetch(tex, clamp(p, ivec2(0), textureSize(tex, 0) - 1), 0).rgb, vec3(0.2126, 0.7152, 0.0722)); }\n"
+	"void main()\n"
+	"{\n"
+	"	ivec2 p = ivec2(gl_FragCoord.xy);\n"
+	"	float l = L(p), ll = L(p + ivec2(-1, 0)), lt = L(p + ivec2(0, 1));\n"
+	"	vec2 d = abs(l - vec2(ll, lt));\n"
+	"	vec2 e = step(vec2(0.1), d);\n"
+	"	if (e.x + e.y == 0.0) discard;\n"
+	"	vec2 d2 = abs(l - vec2(L(p + ivec2(1, 0)), L(p + ivec2(0, -1))));\n"
+	"	vec2 m = max(d, d2);\n"
+	"	vec2 d3 = abs(vec2(ll, lt) - vec2(L(p + ivec2(-2, 0)), L(p + ivec2(0, 2))));\n"
+	"	m = max(m, d3);\n"
+	/* local contrast adaptation: an edge much weaker than the strongest one around is not one */
+	"	e *= step(max(m.x, m.y), 2.0 * d);\n"
+	"	outColor = vec4(e, 0.0, 1.0);\n"
+	"}\n";
+
+/* pass 2: blending weights, rg for the edge above the pixel, ba for the edge to its left */
+static const char *smaa_weight_fs =
+	"uniform sampler2D edges;\n"
+	"uniform sampler2D area;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"ivec2 sz;\n"
+	"vec2 E(ivec2 p) { return (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, sz))) ? vec2(0.0) : texelFetch(edges, p, 0).rg; }\n"
+	"vec2 Area(vec2 d, float e1, float e2)\n"
+	"{\n"
+	"	vec2 t = 16.0 * floor(4.0 * vec2(e1, e2) + 0.5) + sqrt(d);\n"
+	"	return texture(area, (t + 0.5) / 80.0).rg;\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	ivec2 p = ivec2(gl_FragCoord.xy);\n"
+	"	sz = textureSize(edges, 0);\n"
+	"	vec2 e = E(p);\n"
+	"	vec4 w = vec4(0.0);\n"
+	"	if (e.g > 0.0)\n"
+	"	{\n"
+	/* a horizontal line along the top of this row: its ends, stopping at crossing edges */
+	"		int l = 0, r = 0;\n"
+	"		for (; l < 32; l++)\n"
+	"		{\n"
+	"			ivec2 q = p + ivec2(-l, 0);\n"
+	"			if (E(q + ivec2(-1, 0)).g == 0.0 || E(q).r > 0.0 || E(q + ivec2(0, 1)).r > 0.0) break;\n"
+	"		}\n"
+	"		for (; r < 32; r++)\n"
+	"		{\n"
+	"			ivec2 q = p + ivec2(r + 1, 0);\n"
+	"			if (E(q).g == 0.0 || E(q).r > 0.0 || E(q + ivec2(0, 1)).r > 0.0) break;\n"
+	"		}\n"
+	"		ivec2 a = p + ivec2(-l, 0), b = p + ivec2(r + 1, 0);\n"
+	"		float e1 = 0.75 * E(a).r + 0.25 * E(a + ivec2(0, 1)).r;\n"
+	"		float e2 = 0.75 * E(b).r + 0.25 * E(b + ivec2(0, 1)).r;\n"
+	"		w.rg = Area(min(vec2(float(l), float(r)), vec2(225.0)), e1, e2);\n"
+	"	}\n"
+	"	if (e.r > 0.0)\n"
+	"	{\n"
+	/* a vertical line along the left of this column: up (GL +y) and down */
+	"		int u = 0, d = 0;\n"
+	"		for (; u < 32; u++)\n"
+	"		{\n"
+	"			ivec2 q = p + ivec2(0, u);\n"
+	"			if (E(q + ivec2(0, 1)).r == 0.0 || E(q).g > 0.0 || E(q + ivec2(-1, 0)).g > 0.0) break;\n"
+	"		}\n"
+	"		for (; d < 32; d++)\n"
+	"		{\n"
+	"			ivec2 q = p + ivec2(0, -d - 1);\n"
+	"			if (E(q).r == 0.0 || E(q).g > 0.0 || E(q + ivec2(-1, 0)).g > 0.0) break;\n"
+	"		}\n"
+	"		ivec2 a = p + ivec2(0, u), b = p + ivec2(0, -d - 1);\n"
+	"		float e1 = 0.75 * E(a).g + 0.25 * E(a + ivec2(-1, 0)).g;\n"
+	"		float e2 = 0.75 * E(b).g + 0.25 * E(b + ivec2(-1, 0)).g;\n"
+	"		w.ba = Area(min(vec2(float(u), float(d)), vec2(225.0)), e1, e2);\n"
+	"	}\n"
+	"	outColor = w;\n"
+	"}\n";
+
+/* pass 3: each pixel takes from the neighbour across its strongest edge */
+static const char *smaa_blend_fs =
+	"uniform sampler2D tex;\n"
+	"uniform sampler2D weights;\n"
+	"uniform vec4 rcp;\n"     /* 1 / width, 1 / height of tex */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	ivec2 sz = textureSize(weights, 0);\n"
+	"	ivec2 p = clamp(ivec2(uv * vec2(sz)), ivec2(0), sz - 1);\n"
+	"	vec4 c = texelFetch(weights, p, 0);\n"
+	"	float aR = texelFetch(weights, min(p + ivec2(1, 0), sz - 1), 0).a;\n"   /* right neighbour's left edge */
+	"	float aB = texelFetch(weights, max(p + ivec2(0, -1), ivec2(0)), 0).g;\n" /* the one below: its top edge */
+	"	vec4 a = vec4(aR, aB, c.b, c.r);\n"
+	"	if (dot(a, vec4(1.0)) < 1e-5) { outColor = vec4(texture(tex, uv).rgb, 1.0); return; }\n"
+	"	bool h = max(a.x, a.z) > max(a.y, a.w);\n"
+	"	vec2 w = h ? a.xz : a.yw;\n"
+	"	vec2 o1 = h ? vec2(a.x * rcp.x, 0.0) : vec2(0.0, -a.y * rcp.y);\n"
+	"	vec2 o2 = h ? vec2(-a.z * rcp.x, 0.0) : vec2(0.0, a.w * rcp.y);\n"
+	"	w /= w.x + w.y;\n"
+	"	vec3 r = w.x * texture(tex, uv + o1).rgb + w.y * texture(tex, uv + o2).rgb;\n"
+	"	outColor = vec4(r, 1.0);\n"
+	"}\n";
+
+static void
+SmaaShutdown(void)
+{
+	if (SM.pedge) glDeleteProgram(SM.pedge);
+	if (SM.pweight) glDeleteProgram(SM.pweight);
+	if (SM.pblend) glDeleteProgram(SM.pblend);
+	if (SM.area) glDeleteTextures(1, &SM.area);
+	if (SM.etex) glDeleteTextures(1, &SM.etex);
+	if (SM.wtex) glDeleteTextures(1, &SM.wtex);
+	if (SM.efbo) glDeleteFramebuffers(1, &SM.efbo);
+	if (SM.wfbo) glDeleteFramebuffers(1, &SM.wfbo);
+	memset(&SM, 0, sizeof(SM));
+}
+
+static GLuint
+SmaaTarget(GLuint *tex, GLenum ifmt, GLenum fmt)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	GLuint fbo;
+
+	glGenTextures(1, tex);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, *tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, ifmt, SM.w, SM.h, 0, fmt, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	gl3state.currenttexture = -1;
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *tex, 0);
+	glDrawBuffers(1, one);
+	return fbo;
+}
+
+/* the three passes from FA.tex to dst; false: not available, the caller does FXAA */
+static qboolean
+SmaaEnd(GLuint dst, int vx, int vy, int vw, int vh)
+{
+	float fw = (float)FA.w, fh = (float)FA.h;
+
+	if (!SM.pblend)
+	{
+		if (SM.tried)
+		{
+			return false;
+		}
+
+		SM.tried = true;
+		SM.pedge = LinkPost(smaa_edge_fs);
+		SM.pweight = LinkPost(smaa_weight_fs);
+		SM.pblend = LinkPost(smaa_blend_fs);
+
+		if (!SM.pedge || !SM.pweight || !SM.pblend)
+		{
+			R_Printf(PRINT_ALL, "r_om_postaa 2: the SMAA shaders did not link, FXAA instead\n");
+			SmaaShutdown();
+			SM.tried = true;
+			return false;
+		}
+
+		SM.e_tex = glGetUniformLocation(SM.pedge, "tex");
+		SM.e_rect = glGetUniformLocation(SM.pedge, "rect");
+		SM.w_edges = glGetUniformLocation(SM.pweight, "edges");
+		SM.w_area = glGetUniformLocation(SM.pweight, "area");
+		SM.w_rect = glGetUniformLocation(SM.pweight, "rect");
+		SM.b_tex = glGetUniformLocation(SM.pblend, "tex");
+		SM.b_weights = glGetUniformLocation(SM.pblend, "weights");
+		SM.b_rect = glGetUniformLocation(SM.pblend, "rect");
+		SM.b_rcp = glGetUniformLocation(SM.pblend, "rcp");
+		SM.area = SmaaAreaTexture();
+	}
+
+	if (!SM.efbo || (SM.w != FA.w) || (SM.h != FA.h))
+	{
+		if (SM.etex) glDeleteTextures(1, &SM.etex);
+		if (SM.wtex) glDeleteTextures(1, &SM.wtex);
+		if (SM.efbo) glDeleteFramebuffers(1, &SM.efbo);
+		if (SM.wfbo) glDeleteFramebuffers(1, &SM.wfbo);
+		SM.w = FA.w;
+		SM.h = FA.h;
+		SM.efbo = SmaaTarget(&SM.etex, GL_RG8, GL_RG);
+		SM.wfbo = SmaaTarget(&SM.wtex, GL_RGBA8, GL_RGBA);
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			SmaaShutdown();
+			SM.tried = true;
+			R_Printf(PRINT_ALL, "r_om_postaa 2: no SMAA framebuffer, FXAA instead\n");
+			return false;
+		}
+	}
+
+	/* the passes read and write the same pixel positions the view has in FA.tex */
+	glBindFramebuffer(GL_FRAMEBUFFER, SM.efbo);
+	glViewport(0, 0, SM.w, SM.h);
+	glClearColor(0, 0, 0, 0);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	GL3_UseProgram(SM.pedge);
+	glUniform1i(SM.e_tex, 0);
+	glUniform4f(SM.e_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	BindTex(GL_TEXTURE0, FA.tex);
+	DrawQuad();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, SM.wfbo);
+	glViewport(0, 0, SM.w, SM.h);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	GL3_UseProgram(SM.pweight);
+	glUniform1i(SM.w_edges, 0);
+	glUniform1i(SM.w_area, 1);
+	glUniform4f(SM.w_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	BindTex(GL_TEXTURE0, SM.etex);
+	BindTex(GL_TEXTURE1, SM.area);
+	DrawQuad();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, dst);
+	glViewport(vx, vy, vw, vh);
+	GL3_UseProgram(SM.pblend);
+	glUniform1i(SM.b_tex, 0);
+	glUniform1i(SM.b_weights, 1);
+	glUniform4f(SM.b_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	glUniform4f(SM.b_rcp, 1.0f / fw, 1.0f / fh, 0.0f, 0.0f);
+	BindTex(GL_TEXTURE0, FA.tex);
+	BindTex(GL_TEXTURE1, SM.wtex);
+	DrawQuad();
+	BindTex(GL_TEXTURE1, 0);
+	GL3_SelectTMU(GL_TEXTURE0);
+	return true;
+}
+
 /* the composited view from the FXAA texture to the window */
 static void
 FxaaEnd(GLuint dst, int vx, int vy, int vw, int vh)
 {
 	float fw = (float)FA.w, fh = (float)FA.h;
+
+	if (r_om_postaa && (r_om_postaa->value >= 2.0f) && SmaaEnd(dst, vx, vy, vw, vh))
+	{
+		return;
+	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, dst);
 	glViewport(vx, vy, vw, vh);
