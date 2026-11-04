@@ -1832,7 +1832,10 @@ GL3_Fog_ViewTest(refdef_t *rd)
 		CamPath(rd);
 	}
 
-	if (!vt->string[0] || (vt->string[0] == '0') || (rd->rdflags & RDF_NOWORLDMODEL) || dm->value || mc->value)
+	/* single player only - or in an automated test run (vid_testwindow), where the DM loadout menu keeps the
+	   test player from spawning and the camera is placed here instead */
+	if (!vt->string[0] || (vt->string[0] == '0') || (rd->rdflags & RDF_NOWORLDMODEL) ||
+		((dm->value || mc->value) && !ri.Cvar_Get("vid_testwindow", "0", 0)->value))
 	{
 		return;
 	}
