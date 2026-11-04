@@ -59,6 +59,8 @@ static qboolean ssaomark; /* r_om_ssao runs this view: the weapon is marked in t
 static qboolean SSRWanted(void);
 static void SSRShutdown(void);
 static void FxaaShutdown(void);
+static void UpShutdown(void);
+static cvar_t *r_om_renderscale, *r_om_upscale_sharp;
 static void WXShutdown(void);
 static void SSAODeleteTargets(void);
 static void SSRDeleteTargets(void);
@@ -99,6 +101,8 @@ static struct
 	qboolean bound, bloomthis, depthcopied;
 	qboolean depthfinal;    /* the depth copy holds the finished view (r_om_ssao made it) */
 	int vx, vy, vw, vh;
+	int wx, wy, ww, wh;      /* the view in the window (vx.. are in the scene targets, smaller with r_om_renderscale) */
+	qboolean scaled;
 } P;
 
 /* ------------------------------------------------------------------
@@ -1576,6 +1580,7 @@ GL3_Post_Shutdown(void)
 	if (P.vao) glDeleteVertexArrays(1, &P.vao);
 	windowsamples = -1;
 	FxaaShutdown();
+	UpShutdown();
 	WXShutdown();
 	MirrorShutdown();
 	TimersShutdown();
@@ -1606,6 +1611,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	static const float zero[4] = {0, 0, 0, 0};
 	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
 	qboolean bloom, soft, volfog, beams, ssao;
+	int sw = vid.width, sh = vid.height;
 
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
 	P.bound = P.depthcopied = P.depthfinal = false;
@@ -1651,9 +1657,40 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 		return false;
 	}
 
-	if ((P.w != vid.width) || (P.h != vid.height) || !P.fbo || (P.hdr != HDRWanted()) || (P.mat != SSRWanted()))
+	/* r_om_renderscale: the 3D view at a share of the window, brought up by the composite (UpscaleEnd) */
 	{
-		if (!CreateTargets(vid.width, vid.height))
+		float rs;
+
+		if (!r_om_renderscale)
+		{
+			r_om_renderscale = ri.Cvar_Get("r_om_renderscale", "1", CVAR_ARCHIVE);
+			r_om_upscale_sharp = ri.Cvar_Get("r_om_upscale_sharp", "0.25", CVAR_ARCHIVE);
+		}
+
+		rs = Q_clamp(r_om_renderscale->value, 0.25f, 1.0f);
+		sw = (rs >= 0.999f) ? vid.width : Q_max((int)(vid.width * rs + 0.5f), 16);
+		sh = (rs >= 0.999f) ? vid.height : Q_max((int)(vid.height * rs + 0.5f), 16);
+	}
+
+	P.wx = x;
+	P.wy = y;
+	P.ww = w;
+	P.wh = h;
+	P.scaled = (sw != vid.width) || (sh != vid.height);
+
+	if (P.scaled)
+	{
+		int x1 = (int)((float)(x + w) * sw / vid.width + 0.5f), y1 = (int)((float)(y + h) * sh / vid.height + 0.5f);
+
+		x = (int)((float)x * sw / vid.width + 0.5f);
+		y = (int)((float)y * sh / vid.height + 0.5f);
+		w = Q_max(x1 - x, 1);
+		h = Q_max(y1 - y, 1);
+	}
+
+	if ((P.w != sw) || (P.h != sh) || !P.fbo || (P.hdr != HDRWanted()) || (P.mat != SSRWanted()))
+	{
+		if (!CreateTargets(sw, sh))
 		{
 			DeleteTargets();
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -2049,17 +2086,158 @@ FxaaBegin(void)
 
 /* the composited view from the FXAA texture to the window */
 static void
-FxaaEnd(void)
+FxaaEnd(GLuint dst, int vx, int vy, int vw, int vh)
 {
 	float fw = (float)FA.w, fh = (float)FA.h;
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glViewport(P.vx, P.vy, P.vw, P.vh);
+	glBindFramebuffer(GL_FRAMEBUFFER, dst);
+	glViewport(vx, vy, vw, vh);
 	GL3_UseProgram(FA.prog);
 	glUniform1i(FA.u_tex, 0);
 	glUniform4f(FA.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniform4f(FA.u_rcp, 1.0f / fw, 1.0f / fh, 0.75f, 0.125f);
 	BindTex(GL_TEXTURE0, FA.tex);
+	DrawQuad();
+}
+
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_renderscale (0.25..1): the 3D view is drawn into smaller
+ * scene targets and brought up to the window here - Catmull-Rom (9 bilinear
+ * taps) with a contrast-adaptive sharpening against the four neighbours,
+ * clamped to their range (no ringing; r_om_upscale_sharp 0..1, after AMD
+ * CAS / FSR RCAS). The HUD stays at the window's resolution.
+ * ------------------------------------------------------------------ */
+
+static struct
+{
+	qboolean tried;
+	GLuint prog, tex, fbo;
+	GLint u_tex, u_rect, u_size, u_sharp;
+	int w, h;
+} UP;
+
+static const char *upscale_fs =
+	"uniform sampler2D tex;\n"
+	"uniform vec4 size;\n"    /* texture width, height, 1 / width, 1 / height */
+	"uniform float sharp;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"vec3 CatmullRom(vec2 p)\n"
+	"{\n"
+	"	vec2 sp = p * size.xy;\n"
+	"	vec2 t1 = floor(sp - 0.5) + 0.5;\n"
+	"	vec2 f = sp - t1;\n"
+	"	vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));\n"
+	"	vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);\n"
+	"	vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));\n"
+	"	vec2 w3 = f * f * (-0.5 + 0.5 * f);\n"
+	"	vec2 w12 = w1 + w2;\n"
+	"	vec2 t0 = (t1 - 1.0) * size.zw, t3 = (t1 + 2.0) * size.zw, t12 = (t1 + w2 / w12) * size.zw;\n"
+	"	vec3 c = texture(tex, vec2(t0.x, t0.y)).rgb * w0.x * w0.y + texture(tex, vec2(t12.x, t0.y)).rgb * w12.x * w0.y +\n"
+	"		texture(tex, vec2(t3.x, t0.y)).rgb * w3.x * w0.y;\n"
+	"	c += texture(tex, vec2(t0.x, t12.y)).rgb * w0.x * w12.y + texture(tex, vec2(t12.x, t12.y)).rgb * w12.x * w12.y +\n"
+	"		texture(tex, vec2(t3.x, t12.y)).rgb * w3.x * w12.y;\n"
+	"	c += texture(tex, vec2(t0.x, t3.y)).rgb * w0.x * w3.y + texture(tex, vec2(t12.x, t3.y)).rgb * w12.x * w3.y +\n"
+	"		texture(tex, vec2(t3.x, t3.y)).rgb * w3.x * w3.y;\n"
+	"	return c;\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	vec3 c = CatmullRom(uv);\n"
+	"	vec3 n = texture(tex, uv + vec2(0.0, size.w)).rgb, s = texture(tex, uv - vec2(0.0, size.w)).rgb;\n"
+	"	vec3 e = texture(tex, uv + vec2(size.z, 0.0)).rgb, w = texture(tex, uv - vec2(size.z, 0.0)).rgb;\n"
+	"	vec3 mn = min(min(n, s), min(e, w)), mx = max(max(n, s), max(e, w));\n"
+	/* CAS: the sharpening weight shrinks where the neighbourhood already has contrast */
+	"	vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));\n"
+	"	vec3 k = -amp * mix(0.125, 0.2, sharp) * sharp;\n"
+	"	vec3 r = (c + (n + s + e + w) * k) / (1.0 + 4.0 * k);\n"
+	"	outColor = vec4(clamp(r, min(mn, c), max(mx, c)), 1.0);\n"
+	"}\n";
+
+static void
+UpShutdown(void)
+{
+	if (UP.prog) glDeleteProgram(UP.prog);
+	if (UP.tex) glDeleteTextures(1, &UP.tex);
+	if (UP.fbo) glDeleteFramebuffers(1, &UP.fbo);
+	memset(&UP, 0, sizeof(UP));
+}
+
+/* the scene-size LDR target the composite (and FXAA) draw into when the view is scaled; false: draw straight */
+static qboolean
+UpTarget(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+
+	if (!UP.prog)
+	{
+		if (UP.tried)
+		{
+			return false;
+		}
+
+		UP.tried = true;
+		UP.prog = LinkPost(upscale_fs);
+
+		if (!UP.prog)
+		{
+			R_Printf(PRINT_ALL, "r_om_renderscale: the upscale shader did not link, plain stretch\n");
+			return false;
+		}
+
+		UP.u_tex = glGetUniformLocation(UP.prog, "tex");
+		UP.u_rect = glGetUniformLocation(UP.prog, "rect");
+		UP.u_size = glGetUniformLocation(UP.prog, "size");
+		UP.u_sharp = glGetUniformLocation(UP.prog, "sharp");
+	}
+
+	if (!UP.fbo || (UP.w != P.w) || (UP.h != P.h))
+	{
+		if (UP.tex) glDeleteTextures(1, &UP.tex);
+		if (UP.fbo) glDeleteFramebuffers(1, &UP.fbo);
+		glGenTextures(1, &UP.tex);
+		GL3_SelectTMU(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, UP.tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, P.w, P.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl3state.currenttexture = -1;
+		glGenFramebuffers(1, &UP.fbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, UP.fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, UP.tex, 0);
+		glDrawBuffers(1, one);
+		UP.w = P.w;
+		UP.h = P.h;
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			UpShutdown();
+			UP.tried = true;
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/* the scaled view from UP.tex to the window */
+static void
+UpscaleEnd(void)
+{
+	float fw = (float)UP.w, fh = (float)UP.h;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(P.wx, P.wy, P.ww, P.wh);
+	GL3_UseProgram(UP.prog);
+	glUniform1i(UP.u_tex, 0);
+	glUniform4f(UP.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	glUniform4f(UP.u_size, fw, fh, 1.0f / fw, 1.0f / fh);
+	glUniform1f(UP.u_sharp, Q_clamp(r_om_upscale_sharp->value, 0.0f, 1.0f));
+	BindTex(GL_TEXTURE0, UP.tex);
 	DrawQuad();
 }
 
@@ -2069,7 +2247,7 @@ GL3_Post_EndView(void)
 {
 	float fw, fh;
 	int mode, dbg;
-	qboolean hdr, fxaa;
+	qboolean hdr, fxaa, scaled;
 
 	if (!P.bound)
 	{
@@ -2127,13 +2305,22 @@ GL3_Post_EndView(void)
 
 	/* r_om_fxaa: the composite goes to the FXAA texture first */
 	fxaa = FxaaBegin();
+	/* r_om_renderscale: composite (and FXAA) at the scene size into UP.tex, then up to the window */
+	scaled = P.scaled && UpTarget();
 
 	if (!fxaa)
 	{
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, scaled ? UP.fbo : 0);
 	}
 
-	glViewport(P.vx, P.vy, P.vw, P.vh);
+	if (fxaa || scaled || !P.scaled)
+	{
+		glViewport(P.vx, P.vy, P.vw, P.vh);
+	}
+	else
+	{
+		glViewport(P.wx, P.wy, P.ww, P.wh); /* scaled without the upscale pass: a plain stretch to the window */
+	}
 
 	fw = (float)P.w;
 	fh = (float)P.h;
@@ -2184,7 +2371,19 @@ GL3_Post_EndView(void)
 
 	if (fxaa)
 	{
-		FxaaEnd();
+		if (scaled)
+		{
+			FxaaEnd(UP.fbo, P.vx, P.vy, P.vw, P.vh);
+		}
+		else
+		{
+			FxaaEnd(0, P.wx, P.wy, P.ww, P.wh);
+		}
+	}
+
+	if (scaled)
+	{
+		UpscaleEnd();
 	}
 
 	/* lightmap units were used: let the next lightmapped draw bind its pages again */
@@ -8235,7 +8434,7 @@ MirrorTargets(void)
 	int k;
 	/* r_om_mirror_scale: the mirror images at a share of the window size (0.7: about half the pixels) */
 	float s = Q_clamp(r_om_mirror_scale->value, 0.25f, 1.0f);
-	int w = Q_max((int)(vid.width * s), 16), h = Q_max((int)(vid.height * s), 16);
+	int w = Q_max((int)(P.w * s), 16), h = Q_max((int)(P.h * s), 16); /* of the scene targets (r_om_renderscale) */
 
 	if (MR.fbo[0] && (MR.w == w) && (MR.h == h))
 	{
@@ -8462,7 +8661,7 @@ MirrorPass(const float *n, float d, GLuint fbo, const float *box)
 	gl3_drawsamples = 0; /* the mirror textures are single-sampled */
 	/* the view's rectangle at the mirror texture's scale */
 	{
-		float sx = (float)MR.w / vid.width, sy = (float)MR.h / vid.height;
+		float sx = (float)MR.w / P.w, sy = (float)MR.h / P.h;
 
 		glViewport((int)(P.vx * sx), (int)(P.vy * sy), (int)(P.vw * sx), (int)(P.vh * sy));
 
@@ -8648,8 +8847,8 @@ GL3_Mirror_Render(void)
 	gl3state.currenttexture = -1;
 
 	/* sampled by window position: 1/window size covers the whole (smaller) texture */
-	rect[0] = 1.0f / vid.width;
-	rect[1] = 1.0f / vid.height;
+	rect[0] = 1.0f / P.w; /* gl_FragCoord of the scene targets */
+	rect[1] = 1.0f / P.h;
 	rect[2] = Q_max(0.0f, Q_min(r_om_mirror->value, 1.0f));
 	GL3_SoF_MirrorUniforms(on, planes[0], planes[1], rect, MR.tex[0], MR.tex[1]);
 }

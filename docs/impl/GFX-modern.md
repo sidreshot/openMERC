@@ -1409,3 +1409,12 @@ after 5 s and offered to close it). `r_om_loadtime 1` prints each stage ("OMLOAD
   64 textures a batch during a registration, uploaded on the main thread) - the same floats in the same order, the
   maps are unchanged (tsr1 tour shots within 0.7 %).
 * Left: HD seam repair 1.3 s, uploads 0.6 s, lightmap faces 0.9 s.
+
+## r_om_renderscale: the 3D view below the window resolution (roadmap phase 3.1)
+
+`r_om_renderscale` 0.25..1 (default 1): the scene targets and the 3D viewport are that share of the window; the
+composite (and FXAA) draw at the scene size and an upscale pass brings the view to the window - Catmull-Rom from 9
+bilinear taps, then a contrast-adaptive sharpening against the four neighbours clamped to their range (after AMD CAS /
+FSR RCAS; `r_om_upscale_sharp` 0..1, default 0.25). The HUD stays at the window resolution; mirrors follow the scene
+size. tsr1, 1280x720 window, GTX 1050 Ti: GPU 10.25 ms at 1.0, 7.18 at 0.67, 5.07 at 0.5, 6.55 at 0.67 with FXAA; no
+GL errors. Not FSR 1.0 EASU itself (edge-adaptive spatial upsampling) - a candidate for later.
