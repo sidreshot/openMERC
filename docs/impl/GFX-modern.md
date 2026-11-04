@@ -1450,3 +1450,21 @@ The cascade array (2 x cascades layers: the static cache and the dynamic copy) w
 it is far below `r_om_csm_bias`; `r_om_csm_depth16 1` (default) halves the memory. ger1 (sun active in the first spot,
 two shots): 82.3 / 84.6 dB against 24 bit, no acne, the same csm time. `r_om_csm_info` prints the size, depth and
 memory. The cascades stay off where the lightmaps hold no sun (omlight's fit, e.g. kos1 sun 0) or no sky is in the PVS.
+
+## r_om_worldvbo: the world's vertices in a static buffer (roadmap phase 2.1)
+
+Until now every visible world face copied its vertices (44 bytes each) into the batch arrays and the stream buffer
+every frame. With `r_om_worldvbo 1` (default) the polygons of the world model and its inline models go into one
+static vertex buffer when the first face is drawn after a map's lightmaps are built (tsr1 73k vertices / 3.1 MB,
+kos1 82k / 3.4 MB); a face then adds only its fan as 32-bit indices. Batches keep their order; a batch carries its
+source (`gl3drawCmd_t.src`) and the flush switches between the world VAO and the stream VAO where it changes.
+Faces that stay on the stream path: dynamic light flags this frame (the static copy has none), liquids (warped
+texture coordinates), sky, several polygons. Rebuilt on a new map (GL3_LM_BeginBuildingLightmaps) and with a new
+context.
+
+Checked: the same frame with the cvar toggled 3 frames apart at a fixed spot (tsr1 max difference 6 / 255, ger1 11,
+sib1 only the falling snow and a flickering flare); 13 maps with the GL debug context: no errors, the shader
+recompile warnings as before. CPU world time per spot, A/B on tsr1 + sib1 (GTX 1050 Ti): 0.13 / 0.14 / 0.56 / 2.62 /
+3.16 / 0.51 / 0.49 / 0.39 / 2.90 / 4.75 ms -> 0.13 / 0.15 / 0.52 / 2.17 / 2.81 / 0.40 / 0.41 / 0.38 / 1.97 / 3.85;
+the GPU time unchanged.
+

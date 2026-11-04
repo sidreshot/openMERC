@@ -536,6 +536,7 @@ typedef struct gl3drawCmd_s {
 	byte		color[3]; // for uniCommonData.color; its alpha chan is in .alpha
 	byte		flags;    // gl3drawCmd_Flags
 	byte		styles[MAXLIGHTMAPS]; // indexes into r_newrefdef.lightstyles[]; 255 means "ignore"
+	byte		src; // OpenMerc GFX-modern: 1 the indices are into the static world buffer (GL3_World_AddPoly)
 
 	// the following are set in GL3_BufferAndDraw3D()
 	int			idxBufOffset;

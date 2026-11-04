@@ -124,6 +124,7 @@ void GL3_SurfInit(void)
 void GL3_SurfShutdown(void)
 {
 	GL3_Seam_Invalidate();
+	GL3_World_Shutdown();
 	glDeleteBuffers(1, &gl3state.ebo3D);
 	gl3state.ebo3D = 0;
 	glDeleteBuffers(1, &gl3state.vbo3D);
@@ -223,7 +224,10 @@ GL3_DrawGLPoly(msurface_t *fa, gl3drawCmd_t drawCmd)
 		drawCmd.texdim[0] = (float)fa->texinfo->image->width;
 		drawCmd.texdim[1] = (float)fa->texinfo->image->height;
 	}
-	GL3_Add3DdrawCmdToBatch(p->vertices, p->numverts, GL_TRIANGLE_FAN, drawCmd);
+	if (!GL3_World_AddPoly(fa, drawCmd)) /* r_om_worldvbo: indices only */
+	{
+		GL3_Add3DdrawCmdToBatch(p->vertices, p->numverts, GL_TRIANGLE_FAN, drawCmd);
+	}
 }
 
 void
@@ -257,7 +261,10 @@ GL3_DrawGLFlowingPoly(msurface_t *fa, gl3drawCmd_t drawCmd)
 		drawCmd.scroll = -(float)fmod(vs * clock * 0.01, 1.0);
 		drawCmd.scrollT = -(float)fmod(vt * clock * 0.01, 1.0);
 		drawCmd.flags |= DCFlag_UseScroll;
-		GL3_Add3DdrawCmdToBatch(p->vertices, p->numverts, GL_TRIANGLE_FAN, drawCmd);
+		if (!GL3_World_AddPoly(fa, drawCmd))
+		{
+			GL3_Add3DdrawCmdToBatch(p->vertices, p->numverts, GL_TRIANGLE_FAN, drawCmd);
+		}
 		return;
 	}
 

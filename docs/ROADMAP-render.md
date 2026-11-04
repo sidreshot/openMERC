@@ -138,8 +138,9 @@ audit_run.ps1 / anom.py / regress.py, campath replay + per-frame AVI for motion)
   glow lists, ambient-cube / sky-mask / seam caches, SSAO / SSR targets), NaN in Ghoul per-pixel lighting, driver
   round trips in draw paths, uncached uniform lookups, cascade / mirror / beam redraw costs, GLES build.
 * Known, not done (in order of value):
-  1. Static world in GPU buffers (phase 2.1) - the CPU still rebuilds the visible world each frame (0.5-0.7 ms of the
-     3-4 ms CPU frame here; the wall on large maps).
+  1. Static world in GPU buffers (phase 2.1): done for the vertices (r_om_worldvbo, a face adds only its indices;
+     world CPU -10..-30% in the heavy spots). Still per frame: the BSP walk and the per-face work (fog, detail,
+     seams queues) - per-leaf cached index lists would be the next step (phase 2.2).
   2. Mobile tier: lamp shadows fit 16 texture units now (units 11 / 7, r_om_lshadow_compact); CSM 2048 x 8
      layers: DEPTH16 by default now (r_om_csm_depth16, 128 -> 64 MB; the low preset 1024 x 4 layers = 8 MB), MSAA via EXT_multisampled_render_to_texture, the Ghoul
      emulator's CPU tessellation path on GLES 3.0 (samplerBuffer is 3.2).

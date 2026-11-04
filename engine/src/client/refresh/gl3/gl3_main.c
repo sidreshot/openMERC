@@ -148,11 +148,13 @@ static cvar_t *gl_znear;
 
 DA_TYPEDEF(gl3_3D_vtx_t, Vtx3DArray_t);
 DA_TYPEDEF(GLushort, UShortArray_t);
+DA_TYPEDEF(GLuint, UIntArray_t);
 DA_TYPEDEF(gl3drawCmd_t, DrawCommandArray_t);
 DA_TYPEDEF(hmm_mat4, Mat4Array_t);
 // dynamic arrays to batch all consecutive 3D draws (with gl3_3D_vtx_t) with same texture to reduce drawcalls
 static Vtx3DArray_t vtxBuf = {0};
 static UShortArray_t idxBuf = {0};
+static UIntArray_t worldIdx = {0}; /* r_om_worldvbo: indices into the static world buffer (cmd.src 1) */
 static DrawCommandArray_t drawCmds = {0};
 static Mat4Array_t transModelMats = {0};
 
@@ -792,6 +794,7 @@ GL3_Shutdown(void)
 
 	da_free(vtxBuf);
 	da_free(idxBuf);
+	da_free(worldIdx);
 	da_free(drawCmds);
 	da_free(transModelMats);
 
@@ -981,10 +984,15 @@ GL3_Ring3DReset(void)
 	qglVertexAttribIPointer(GL3_ATTRIB_LIGHTFLAGS, 1, GL_UNSIGNED_INT, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, lightFlags));
 }
 
+static void WorldUploadIndices(void);
+static void WorldBindSource(int src);
+
 void GL3_Draw3DBatchesNow()
 {
 	if(da_count(drawCmds) == 0)
 		return;
+
+	WorldUploadIndices();
 
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
@@ -1011,6 +1019,12 @@ void GL3_Draw3DBatchesNow()
 			glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib, idxBuf.p, GL_STREAM_DRAW);
 			r3dvoff = R3D_VRING;
 			r3dioff = R3D_IRING;
+			vbase = 0;
+			r3dibase = 0;
+		}
+		else if (!vb)
+		{
+			/* r_om_worldvbo: only world batches, nothing for the stream (a 0-byte map is an error) */
 			vbase = 0;
 			r3dibase = 0;
 		}
@@ -1046,10 +1060,17 @@ void GL3_Draw3DBatchesNow()
 	curState.transModelMatIdx = drawCmds.p[0].transModelMatIdx + 1;
 
 	gl3ShaderInfo_t* shader = NULL;
+	int cursrc = 0; /* vao3D is bound */
 
 	for(int i=0, n=da_count(drawCmds); i < n; ++i)
 	{
 		gl3drawCmd_t* cmd = da_getptr(drawCmds, i);
+
+		if(cmd->src != cursrc)
+		{
+			WorldBindSource(cmd->src);
+			cursrc = cmd->src;
+		}
 
 		int flags = cmd->flags;
 		int curFlags = curState.flags;
@@ -1183,15 +1204,29 @@ void GL3_Draw3DBatchesNow()
 		if(updateUni3D)
 			GL3_UpdateUBO3D();
 
-		uintptr_t elemOffset = (uintptr_t)r3dibase + cmd->idxBufOffset * sizeof(GLushort);
-		glDrawElements(GL_TRIANGLES, cmd->numElements, GL_UNSIGNED_SHORT, (void*)elemOffset);
+		if(cmd->src)
+		{
+			glDrawElements(GL_TRIANGLES, cmd->numElements, GL_UNSIGNED_INT,
+				(void*)((uintptr_t)cmd->idxBufOffset * sizeof(GLuint)));
+		}
+		else
+		{
+			uintptr_t elemOffset = (uintptr_t)r3dibase + cmd->idxBufOffset * sizeof(GLushort);
+			glDrawElements(GL_TRIANGLES, cmd->numElements, GL_UNSIGNED_SHORT, (void*)elemOffset);
+		}
 		curState = *cmd;
 
 		++gl3_num3Ddraws;
 	}
 
+	if(cursrc)
+	{
+		WorldBindSource(0);
+	}
+
 	da_clear(vtxBuf);
 	da_clear(idxBuf);
+	da_clear(worldIdx);
 	da_clear(drawCmds);
 
 	da_setcount(transModelMats, 1); // keep index 0 (identity matrix)
@@ -1218,7 +1253,7 @@ void GL3_Draw3DBatchesNow()
 
 static qboolean drawStateEqual(const gl3drawCmd_t* a, const gl3drawCmd_t* b)
 {
-	if( a->flags != b->flags || a->shaderIdx != b->shaderIdx
+	if( a->flags != b->flags || a->shaderIdx != b->shaderIdx || a->src != b->src
 	   || a->texnum != b->texnum || a->lmtexnum != b->lmtexnum
 	   || a->transModelMatIdx != b->transModelMatIdx )
 		return false;
@@ -1255,6 +1290,270 @@ GL3_SetDrawCmdTransMatrix(gl3drawCmd_t* drawCmd, hmm_mat4 mat)
 	int idx = da_count(transModelMats);
 	da_add(transModelMats, mat);
 	drawCmd->transModelMatIdx = idx;
+}
+
+/*
+ * OpenMerc GFX-modern r_om_worldvbo (default 1): the polygons of the world model (and its inline models) go into one
+ * static vertex buffer, built on the first world face after the map's lightmaps; a face of the texture chains then
+ * adds only its fan indices (32 bit) to the batch instead of copying its vertices into the stream buffer every frame.
+ * A face whose vertices carry dynamic light flags this frame, a warped (liquid) or sky face, or one with several
+ * polygons keeps the stream path. The batches keep their order; the flush switches VAOs where the source changes.
+ */
+static struct
+{
+	GLuint vao, vbo, ebo;
+	int *base;          /* per surface of the world model: first vertex in the buffer, -1 not in it */
+	int nsurf, nverts;
+	gl3model_t *model;
+	int gen;
+	qboolean dirty;
+} W = {0, 0, 0, NULL, 0, 0, NULL, -1, true};
+
+void
+GL3_World_Invalidate(void)
+{
+	W.dirty = true;
+}
+
+void
+GL3_World_Shutdown(void)
+{
+	if (W.vao && (gl3state.currentVAO == W.vao))
+	{
+		gl3state.currentVAO = 0;
+	}
+
+	if (W.vbo && (gl3state.currentVBO == W.vbo))
+	{
+		gl3state.currentVBO = 0;
+	}
+
+	if (W.ebo && (gl3state.currentEBO == W.ebo))
+	{
+		gl3state.currentEBO = 0;
+	}
+
+	if (W.vao) glDeleteVertexArrays(1, &W.vao);
+	if (W.vbo) glDeleteBuffers(1, &W.vbo);
+	if (W.ebo) glDeleteBuffers(1, &W.ebo);
+
+	free(W.base);
+	memset(&W, 0, sizeof(W));
+	W.gen = -1;
+	W.dirty = true;
+}
+
+static qboolean
+WorldEligible(const msurface_t *s)
+{
+	return s->polys && !s->polys->next && (s->polys->numverts >= 3) &&
+		!(s->flags & (SURF_DRAWTURB | SURF_DRAWSKY));
+}
+
+static qboolean
+WorldBuild(void)
+{
+	gl3_3D_vtx_t *v;
+	GLuint prevvao = gl3state.currentVAO;
+	int i, n = 0;
+
+	if (W.gen != gl3_contextgen)
+	{
+		/* the GL objects of an earlier context went with it */
+		W.vao = W.vbo = W.ebo = 0;
+	}
+
+	free(W.base);
+	W.base = NULL;
+	W.nsurf = W.nverts = 0;
+	W.model = gl3_worldmodel;
+	W.gen = gl3_contextgen;
+	W.dirty = false;
+
+	for (i = 0; i < gl3_worldmodel->numsurfaces; i++)
+	{
+		if (WorldEligible(&gl3_worldmodel->surfaces[i]))
+		{
+			n += gl3_worldmodel->surfaces[i].polys->numverts;
+		}
+	}
+
+	if (!n)
+	{
+		return false;
+	}
+
+	W.base = malloc(sizeof(int) * gl3_worldmodel->numsurfaces);
+	v = malloc(sizeof(gl3_3D_vtx_t) * n);
+
+	if (!W.base || !v)
+	{
+		free(W.base);
+		free(v);
+		W.base = NULL;
+		return false;
+	}
+
+	for (i = 0, n = 0; i < gl3_worldmodel->numsurfaces; i++)
+	{
+		const msurface_t *s = &gl3_worldmodel->surfaces[i];
+		int k;
+
+		W.base[i] = -1;
+
+		if (!WorldEligible(s))
+		{
+			continue;
+		}
+
+		W.base[i] = n;
+		memcpy(v + n, s->polys->vertices, sizeof(gl3_3D_vtx_t) * s->polys->numverts);
+
+		for (k = 0; k < s->polys->numverts; k++)
+		{
+			v[n + k].lightFlags = 0; /* a face with dynamic light flags takes the stream path */
+		}
+
+		n += s->polys->numverts;
+	}
+
+	if (!W.vao)
+	{
+		glGenVertexArrays(1, &W.vao);
+		glGenBuffers(1, &W.vbo);
+		glGenBuffers(1, &W.ebo);
+	}
+
+	GL3_BindVAO(W.vao);
+	GL3_BindVBO(W.vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(gl3_3D_vtx_t) * (GLsizeiptr)n, v, GL_STATIC_DRAW);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, W.ebo);
+	gl3state.currentEBO = W.ebo;
+
+	glEnableVertexAttribArray(GL3_ATTRIB_POSITION);
+	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), 0);
+	glEnableVertexAttribArray(GL3_ATTRIB_TEXCOORD);
+	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, texCoord));
+	glEnableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
+	qglVertexAttribPointer(GL3_ATTRIB_LMTEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, lmTexCoord));
+	glEnableVertexAttribArray(GL3_ATTRIB_NORMAL);
+	qglVertexAttribPointer(GL3_ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, normal));
+	glEnableVertexAttribArray(GL3_ATTRIB_LIGHTFLAGS);
+	qglVertexAttribIPointer(GL3_ATTRIB_LIGHTFLAGS, 1, GL_UNSIGNED_INT, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, lightFlags));
+
+	free(v);
+	W.nsurf = gl3_worldmodel->numsurfaces;
+	W.nverts = n;
+
+	/* back to the VAO bound before; its element buffer binding is its own, the cache no longer knows it */
+	GL3_BindVAO(prevvao);
+	gl3state.currentEBO = 0;
+
+	R_Printf(PRINT_DEVELOPER, "r_om_worldvbo: %d vertices, %.1f MB\n", n,
+		sizeof(gl3_3D_vtx_t) * (float)n / (1024.0f * 1024.0f));
+	return true;
+}
+
+static qboolean
+WorldReady(void)
+{
+	static cvar_t *cv;
+
+	if (!cv)
+	{
+		cv = ri.Cvar_Get("r_om_worldvbo", "1", CVAR_ARCHIVE);
+	}
+
+	if (!cv->value || !gl3_worldmodel)
+	{
+		return false;
+	}
+
+	if (W.dirty || (W.model != gl3_worldmodel) || (W.gen != gl3_contextgen))
+	{
+		WorldBuild();
+	}
+
+	return W.base != NULL;
+}
+
+/* the flush: the indices of the world batches into the element buffer of the world VAO */
+static void
+WorldUploadIndices(void)
+{
+	if (!da_count(worldIdx) || !W.vao)
+	{
+		return;
+	}
+
+	GL3_BindVAO(W.vao);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, W.ebo);
+	gl3state.currentEBO = W.ebo;
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, da_count(worldIdx) * (GLsizeiptr)sizeof(GLuint), worldIdx.p, GL_STREAM_DRAW);
+}
+
+static void
+WorldBindSource(int src)
+{
+	if (src)
+	{
+		GL3_BindVAO(W.vao);
+		gl3state.currentEBO = W.ebo; /* the VAO's own binding */
+	}
+	else
+	{
+		GL3_BindVAO(gl3state.vao3D);
+		gl3state.currentEBO = 0;
+		GL3_BindEBO(gl3state.ebo3D);
+	}
+}
+
+qboolean
+GL3_World_AddPoly(const msurface_t *fa, gl3drawCmd_t drawCmd)
+{
+	const glpoly_t *p = fa->polys;
+	int si, base, n, k;
+	GLuint *add;
+	gl3drawCmd_t *last;
+
+	if (!WorldReady())
+	{
+		return false;
+	}
+
+	si = (int)(fa - gl3_worldmodel->surfaces);
+
+	if ((si < 0) || (si >= W.nsurf) || ((base = W.base[si]) < 0) || !p || p->next || p->vertices[0].lightFlags)
+	{
+		return false;
+	}
+
+	assert(drawCmd.shaderIdx != -1);
+	n = p->numverts;
+	drawCmd.src = 1;
+	drawCmd.idxBufOffset = da_count(worldIdx);
+	add = da_addn_uninit(worldIdx, 3 * (n - 2));
+
+	for (k = 1; k < n - 1; k++, add += 3)
+	{
+		add[0] = base;
+		add[1] = base + k;
+		add[2] = base + k + 1;
+	}
+
+	last = da_lastptr(drawCmds);
+
+	if (last && drawStateEqual(last, &drawCmd))
+	{
+		last->numElements += 3 * (n - 2);
+	}
+	else
+	{
+		drawCmd.numElements = 3 * (n - 2);
+		da_add(drawCmds, drawCmd);
+	}
+
+	return true;
 }
 
 // assumes gl3state.v[ab]o3D are bound
