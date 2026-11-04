@@ -68,8 +68,36 @@ typedef struct
 	vec3_t origin, fwd, right, up;
 } fogqueued_t;
 
-static fogqueued_t queue[MAX_FOG_QUEUE];
-static int numqueued;
+/* OpenMerc (DEVIATIONS): the queue grows. With the fixed 1024 entries an open
+   map overflowed - sib1 queued up to 5400 fogged faces a frame and up to 80 %
+   of them were drawn without fog, a different set every frame (the owner's
+   "the level draws through the fog, sections pop in") */
+static fogqueued_t *queue;
+static int numqueued, capqueue;
+
+static qboolean
+FogQueueRoom(void)
+{
+	if (numqueued < capqueue)
+	{
+		return true;
+	}
+
+	{
+		int cap = capqueue ? capqueue * 2 : MAX_FOG_QUEUE;
+		fogqueued_t *q = realloc(queue, sizeof(*q) * cap);
+
+		if (!q)
+		{
+			return false;
+		}
+
+		queue = q;
+		capqueue = cap;
+	}
+
+	return true;
+}
 
 static int viewregion = -1;
 static byte regionseen[MAX_FOG_REGIONS]; /* GFX-modern volumetric fog: regions with faces walked this frame */
@@ -408,7 +436,7 @@ GL3_Fog_QueueSurface(msurface_t *surf, entity_t *ent)
 		regionseen[region] = 1;
 	}
 
-	if ((numqueued < MAX_FOG_QUEUE) && (region >= 0))
+	if ((region >= 0) && FogQueueRoom())
 	{
 		queue[numqueued].surf = surf;
 		queue[numqueued].region = region;
@@ -428,7 +456,7 @@ GL3_Fog_QueueModelSurface(msurface_t *surf, int region, const vec3_t origin, con
 	int idx;
 	vec3_t a;
 
-	if (!fogworld || (fogworld != gl3_worldmodel) || (region < 0) || (numqueued >= MAX_FOG_QUEUE))
+	if (!fogworld || (fogworld != gl3_worldmodel) || (region < 0) || !FogQueueRoom())
 	{
 		return;
 	}
@@ -1017,7 +1045,7 @@ GL3_Fog_DrawSurfaceNow(msurface_t *surf)
 	int mode = (int)gl_fogmode->value;
 	int region;
 
-	if (!fogworld || (fogworld != gl3_worldmodel) || (mode == 2) || (numqueued >= MAX_FOG_QUEUE))
+	if (!fogworld || (fogworld != gl3_worldmodel) || (mode == 2) || !FogQueueRoom())
 	{
 		return;
 	}
