@@ -50,6 +50,7 @@ enum { RELIGHT_VERSION = 2, RELIGHT_HEADER = 20, RELIGHT_MAXSPAWN = 64 };
 #define RELIGHT_BUSY_SECONDS (20 * 60)
 
 static cvar_t *r_om_relight;
+static cvar_t *r_om_relight_minfit; /* lowest R2 of the bake's fit ("fit 2" line of the log) that is used */
 static char spawned[RELIGHT_MAXSPAWN][MAX_QPATH];
 static int numspawned;
 
@@ -495,6 +496,25 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *fa
 
 			if ((version == RELIGHT_VERSION) && (ll == size) && (stored == hash))
 			{
+				float fp, fs, fsun, fspot, r2;
+
+				/* a bake whose light model fits the map's own lightmaps badly lights each face of a
+				   rock wall differently (owner on sib1, R2 0.50: "the drawing on the snow levels is
+				   disgusting"); such maps keep their own lighting. The cache stays on disk */
+				if (!r_om_relight_minfit)
+				{
+					r_om_relight_minfit = ri.Cvar_Get("r_om_relight_minfit", "0.7", CVAR_ARCHIVE);
+				}
+
+				if (GL3_Relight_Fit(mapname, &fp, &fs, &fsun, &fspot, &r2) && (r2 < r_om_relight_minfit->value))
+				{
+					R_Printf(PRINT_ALL, "relight: the re-bake of %s fits its lighting too loosely (R2 %.2f < "
+						"r_om_relight_minfit %.2f), the map's own lighting is used\n", mapname, r2,
+						r_om_relight_minfit->value);
+					ri.FS_FreeFile(buf);
+					return;
+				}
+
 				if (!Relight_Guard(mapname, lightdata, buf + RELIGHT_HEADER, size, (const dface46_t *)faces,
 					faceslen / (int)sizeof(dface46_t)))
 				{
