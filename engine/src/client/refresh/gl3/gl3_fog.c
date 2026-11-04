@@ -105,6 +105,7 @@ FogQueueRoom(void)
 static int viewregion = -1;
 static float cutdist2 = -1; /* r_om_fogcull: squared distance beyond which the eye's region is opaque, -1 off */
 static void FogCullFrame(void);
+static void FogTableFree(void);
 static void Params(const fogregion_t *r, float *start, float *range, float *maxalpha, float color[4]);
 static int cullseen, cullfaces, cullents; /* r_om_fogcull 2: faces walked / skipped, entities skipped */
 static float lastcut = -1; /* cutdist2 of the frame the statistics count */
@@ -144,6 +145,7 @@ GL3_Fog_FreeRegions(void)
 		free(fogsurfs);
 	}
 
+	FogTableFree(); /* r_om_ppfog region table */
 	free(leafregion);
 	fogsurfs = NULL;
 	leafregion = NULL;
@@ -1376,46 +1378,130 @@ OverlayDim(void)
 	return GL3_VolFog_OverlayDim();
 }
 
-static void
-PerPixelState(gl3fxstate_t *st, int region, const float *eye, float start, float range, float maxalpha, const float color[4])
+/*
+ * r_om_ppfog for world faces in one batch: the parameters of every region go
+ * to a small float texture (8 texels per region row: start, range, max alpha,
+ * height falloff | maxs z, size z, dim, planes | up to 5 shortening planes),
+ * the vertex carries its region (s) and shimmer offset (t), the colour stays
+ * in the vertex colour. All world overlays then share one effect state
+ * (before: a state change and a draw per polygon). Plane marking and the far
+ * wall run over all queued faces first, so the table is final when drawn.
+ */
+#define FOGTAB_W 8
+
+static GLuint fogtab;
+static float *fogtabdata, *fogtablast;
+static int fogtabrows;
+
+GLuint
+GL3_Fog_TableTexture(void)
 {
-	fogregion_t *r = &regions[region];
-	int k, n = 0;
+	return fogtab;
+}
 
-	(void)color;
-	st->ppfog = 1;
-	VectorCopy(eye, st->pf0);
-	st->pf0[3] = 1;
-	st->pf1[0] = start;
-	st->pf1[1] = range;
-	st->pf1[2] = maxalpha;
-	st->pf1[3] = ((r->flags & 2) && (r->size[2] > 0)) ? 1 : 0;
-	st->pf2[0] = r->maxs[2];
-	st->pf2[1] = r->size[2];
-	st->pf2[2] = OverlayDim();
-	memset(st->pfpl, 0, sizeof(st->pfpl));
-
-	if (viewregion != region)
+static void
+FogTableFree(void)
+{
+	if (fogtab)
 	{
-		for (k = 0; k < r->numplanes; k++)
-		{
-			if (!r->planemarked[k])
-			{
-				VectorCopy(r->planes[k]->normal, st->pfpl[n]);
-				st->pfpl[n][3] = r->planes[k]->dist;
-				n++;
-			}
-		}
+		glDeleteTextures(1, &fogtab);
+		fogtab = 0;
 	}
 
-	st->pf2[3] = (float)n;
+	free(fogtabdata);
+	free(fogtablast);
+	fogtabdata = fogtablast = NULL;
+	fogtabrows = 0;
+}
+
+static qboolean
+FogTableUpload(void)
+{
+	int i, k, n = numregions;
+	size_t size = (size_t)n * FOGTAB_W * 4 * sizeof(float);
+
+	if (n <= 0)
+	{
+		return false;
+	}
+
+	if (fogtabrows != n)
+	{
+		FogTableFree();
+		fogtabdata = calloc(1, size);
+		fogtablast = calloc(1, size);
+
+		if (!fogtabdata || !fogtablast)
+		{
+			FogTableFree();
+			return false;
+		}
+
+		glGenTextures(1, &fogtab);
+		GL3_SelectTMU(GL_TEXTURE4);
+		glBindTexture(GL_TEXTURE_2D, fogtab);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, FOGTAB_W, n, 0, GL_RGBA, GL_FLOAT, NULL);
+		GL3_SelectTMU(GL_TEXTURE0);
+		fogtabrows = n;
+		memset(fogtablast, 0xff, size); /* forces the first upload */
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		const fogregion_t *r = &regions[i];
+		float *t = fogtabdata + i * FOGTAB_W * 4;
+		float start, range, maxalpha, color[4];
+		int np = 0;
+
+		Params(r, &start, &range, &maxalpha, color);
+		memset(t, 0, FOGTAB_W * 4 * sizeof(float));
+		t[0] = start;
+		t[1] = range;
+		t[2] = maxalpha;
+		t[3] = ((r->flags & 2) && (r->size[2] > 0)) ? 1 : 0;
+		t[4] = r->maxs[2];
+		t[5] = r->size[2];
+		t[6] = OverlayDim();
+
+		if (viewregion != i)
+		{
+			for (k = 0; (k < r->numplanes) && (np < 5); k++)
+			{
+				if (!r->planemarked[k])
+				{
+					float *pl = t + 8 + np * 4;
+
+					VectorCopy(r->planes[k]->normal, pl);
+					pl[3] = r->planes[k]->dist;
+					np++;
+				}
+			}
+		}
+
+		t[7] = (float)np;
+	}
+
+	if (memcmp(fogtabdata, fogtablast, size))
+	{
+		GL3_SelectTMU(GL_TEXTURE4);
+		glBindTexture(GL_TEXTURE_2D, fogtab);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, FOGTAB_W, n, GL_RGBA, GL_FLOAT, fogtabdata);
+		GL3_SelectTMU(GL_TEXTURE0);
+		memcpy(fogtablast, fogtabdata, size);
+	}
+
+	return true;
 }
 
 /* draws the overlay of the queued faces from .. to - 1 */
 static void
 DrawQueued(int from, int to, int mode)
 {
-	gl3fxstate_t st;
+	gl3fxstate_t st, tst;
 	int i, j, k;
 	qboolean pp = PerPixel(mode);
 	float dim = OverlayDim();
@@ -1425,6 +1511,44 @@ DrawQueued(int from, int to, int mode)
 	st.alphatest = false;
 	st.polyoffset = (gl_offsetfactor->value != 0) || (gl_offsetunits->value != 0);
 	GL3_FX_SetState(&st);
+
+	if (pp)
+	{
+		/* pass 1: plane marking and the far wall candidate over every queued world face */
+		for (i = from; i < to; i++)
+		{
+			const fogqueued_t *q = &queue[i];
+			const fogsurf_t *fs = &fogsurfs[q->surf - fogworld->surfaces];
+			const fogregion_t *r = &regions[q->region];
+
+			if (q->model)
+			{
+				continue;
+			}
+
+			for (j = 0; j < fs->numpolys; j++)
+			{
+				const fogpoly_t *p = &fs->polys[j];
+
+				for (k = 0; p->verts && (k < p->numverts); k++)
+				{
+					float D = ThicknessEye(q->region, p->verts[k], r_newrefdef.vieworg);
+
+					if ((r->farwall != 0) && (D < wallbestD))
+					{
+						wallbestD = D;
+						wallregion = q->region;
+					}
+				}
+			}
+		}
+
+		pp = FogTableUpload();
+		tst = st;
+		tst.ppfog = 2;
+		VectorCopy(r_newrefdef.vieworg, tst.pf0);
+		tst.pf0[3] = 2;
+	}
 
 	for (i = from; i < to; i++)
 	{
@@ -1485,6 +1609,20 @@ DrawQueued(int from, int to, int mode)
 					continue;
 				}
 
+				if (pp && !q->model)
+				{
+					/* table mode: region in s, shimmer offset of the vertex in t (marking was done in pass 1) */
+					const float *pv = p->verts[k];
+
+					v[k].rgba[0] = color[0] / 255.0f;
+					v[k].rgba[1] = color[1] / 255.0f;
+					v[k].rgba[2] = color[2] / 255.0f;
+					v[k].rgba[3] = 1;
+					v[k].st[0] = (float)region;
+					v[k].st[1] = (r->flags & 1) ? r->w[((int)floorf(fabsf(pv[0]) + fabsf(pv[1]) + fabsf(pv[2]))) % 10] : 0;
+					continue;
+				}
+
 				{
 					float D = ThicknessEye(region, p->verts[k], eye);
 
@@ -1516,10 +1654,7 @@ DrawQueued(int from, int to, int mode)
 
 			if (pp && !q->model && (mode != 3))
 			{
-				gl3fxstate_t pst = st;
-
-				PerPixelState(&pst, region, eye, start, range, maxalpha, color);
-				GL3_FX_SetState(&pst);
+				GL3_FX_SetState(&tst);
 			}
 			else
 			{

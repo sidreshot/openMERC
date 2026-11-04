@@ -72,6 +72,7 @@ vec3_t gl3_origin;
 int gl3_visframecount; /* bumped when going to a new PVS */
 int gl3_framecount; /* used for dlight push checking */
 int gl3_contextgen = 1; /* OpenMerc: GL contexts made (header/local.h) */
+gl3glstate_t gl3gls = {GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE, GL_ONE, GL_ZERO, GL_BACK}; /* header/local.h */
 
 int c_brush_polys, c_alias_polys;
 
@@ -868,10 +869,7 @@ A2CForDraw(const gl3ShaderInfo_t *shader, int flags)
 
 	if (k >= 0 && !(flags & DCFlag_Blend) && r_om_a2c->value)
 	{
-		GLint sb = 0;
-
-		glGetIntegerv(GL_SAMPLE_BUFFERS, &sb);
-		on = (sb > 0);
+		on = (gl3_drawsamples > 0); /* gl3_post.c: no driver query per batch */
 	}
 
 	if (k >= 0)
@@ -893,16 +891,77 @@ A2CForDraw(const gl3ShaderInfo_t *shader, int flags)
 		if (on)
 		{
 			glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-			glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+#ifndef YQ2_GL3_GLES3
+			glEnable(GL_SAMPLE_ALPHA_TO_ONE); /* not in GLES */
+#endif
 		}
 		else
 		{
 			glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+#ifndef YQ2_GL3_GLES3
 			glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+#endif
 		}
 
 		a2con = on;
 	}
+}
+
+/*
+ * OpenMerc: the batches go into a vertex ring and an index ring instead of re-specifying both buffers for every
+ * batch (the world, seams, brush models: dozens of glBufferData pairs a frame, each orphaning what queued draws
+ * read). Each batch is appended unsynchronised; the attribute pointers of the 3D VAO move to the batch's first
+ * vertex, so its indices stay relative (GLES 3.0 has no BaseVertex draws). A full ring is orphaned once.
+ */
+#define R3D_VRING ((GLsizeiptr)16 * 1024 * 1024)
+#define R3D_IRING ((GLsizeiptr)4 * 1024 * 1024)
+
+static GLuint r3dvbo, r3debo;
+static int r3dgen;
+static GLsizeiptr r3dvoff, r3dioff;
+
+static GLintptr
+Ring3DPut(GLenum target, GLsizeiptr ring, GLsizeiptr *off, const void *data, GLsizeiptr bytes)
+{
+	GLintptr at;
+	void *p;
+
+	if (*off + bytes > ring)
+	{
+		glBufferData(target, ring, NULL, GL_STREAM_DRAW);
+		*off = 0;
+	}
+
+	at = *off;
+	p = glMapBufferRange(target, at, bytes, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+
+	if (p)
+	{
+		memcpy(p, data, bytes);
+		glUnmapBuffer(target);
+	}
+	else
+	{
+		glBufferSubData(target, at, bytes, data);
+	}
+
+	*off += (bytes + 15) & ~(GLsizeiptr)15;
+	return at;
+}
+
+static GLintptr r3dibase; /* byte offset of this batch's indices */
+
+/* another user of the 3D VBO (the triangle outlines) re-specifies it: the attributes back at 0, the rings start
+   again on the next batch (the VAO and VBO must be bound) */
+void
+GL3_Ring3DReset(void)
+{
+	r3dvbo = r3debo = 0;
+	qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), 0);
+	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, texCoord));
+	qglVertexAttribPointer(GL3_ATTRIB_LMTEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, lmTexCoord));
+	qglVertexAttribPointer(GL3_ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, normal));
+	qglVertexAttribIPointer(GL3_ATTRIB_LIGHTFLAGS, 1, GL_UNSIGNED_INT, sizeof(gl3_3D_vtx_t), offsetof(gl3_3D_vtx_t, lightFlags));
 }
 
 void GL3_Draw3DBatchesNow()
@@ -914,8 +973,42 @@ void GL3_Draw3DBatchesNow()
 	GL3_BindVBO(gl3state.vbo3D);
 	GL3_BindEBO(gl3state.ebo3D);
 
-	glBufferData(GL_ARRAY_BUFFER, da_count(vtxBuf)*sizeof(gl3_3D_vtx_t), vtxBuf.p, GL_STREAM_DRAW);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, da_count(idxBuf)*sizeof(GLushort), idxBuf.p, GL_STREAM_DRAW);
+	{
+		GLsizeiptr vb = da_count(vtxBuf) * (GLsizeiptr)sizeof(gl3_3D_vtx_t);
+		GLsizeiptr ib = da_count(idxBuf) * (GLsizeiptr)sizeof(GLushort);
+		GLintptr vbase;
+
+		if ((r3dvbo != gl3state.vbo3D) || (r3debo != gl3state.ebo3D) || (r3dgen != gl3_contextgen))
+		{
+			r3dvbo = gl3state.vbo3D;
+			r3debo = gl3state.ebo3D;
+			r3dgen = gl3_contextgen;
+			r3dvoff = R3D_VRING; /* both rings are (re)allocated by the first put */
+			r3dioff = R3D_IRING;
+		}
+
+		if ((vb > R3D_VRING) || (ib > R3D_IRING))
+		{
+			/* larger than a ring: the old way */
+			glBufferData(GL_ARRAY_BUFFER, vb, vtxBuf.p, GL_STREAM_DRAW);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, ib, idxBuf.p, GL_STREAM_DRAW);
+			r3dvoff = R3D_VRING;
+			r3dioff = R3D_IRING;
+			vbase = 0;
+			r3dibase = 0;
+		}
+		else
+		{
+			vbase = Ring3DPut(GL_ARRAY_BUFFER, R3D_VRING, &r3dvoff, vtxBuf.p, vb);
+			r3dibase = Ring3DPut(GL_ELEMENT_ARRAY_BUFFER, R3D_IRING, &r3dioff, idxBuf.p, ib);
+		}
+
+		qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), vbase);
+		qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), vbase + offsetof(gl3_3D_vtx_t, texCoord));
+		qglVertexAttribPointer(GL3_ATTRIB_LMTEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), vbase + offsetof(gl3_3D_vtx_t, lmTexCoord));
+		qglVertexAttribPointer(GL3_ATTRIB_NORMAL, 3, GL_FLOAT, GL_FALSE, sizeof(gl3_3D_vtx_t), vbase + offsetof(gl3_3D_vtx_t, normal));
+		qglVertexAttribIPointer(GL3_ATTRIB_LIGHTFLAGS, 1, GL_UNSIGNED_INT, sizeof(gl3_3D_vtx_t), vbase + offsetof(gl3_3D_vtx_t, lightFlags));
+	}
 
 	++gl3_numBufferVtxData;
 
@@ -1073,7 +1166,7 @@ void GL3_Draw3DBatchesNow()
 		if(updateUni3D)
 			GL3_UpdateUBO3D();
 
-		uintptr_t elemOffset = cmd->idxBufOffset * sizeof(GLushort);
+		uintptr_t elemOffset = (uintptr_t)r3dibase + cmd->idxBufOffset * sizeof(GLushort);
 		glDrawElements(GL_TRIANGLES, cmd->numElements, GL_UNSIGNED_SHORT, (void*)elemOffset);
 		curState = *cmd;
 
@@ -1840,6 +1933,7 @@ SetupGL(void)
 	{
 		glBindFramebuffer(GL_FRAMEBUFFER, gl3state.ppFBO);
 		gl3state.ppFBObound = true;
+		gl3_drawsamples = 0; /* the warp framebuffer is single-sampled */
 		if(gl3state.ppFBtex == 0)
 		{
 			gl3state.ppFBtexWidth = -1; // make sure we generate the texture storage below

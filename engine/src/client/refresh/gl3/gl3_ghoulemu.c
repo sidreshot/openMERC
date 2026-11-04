@@ -715,7 +715,7 @@ static const char *emu_fs =
 	"}\n"
 	"vec4 omLit(vec4 vc)\n"
 	"{\n"
-	"	vec3 n = normalize(vEN);\n"
+	"	vec3 n = dot(vEN, vEN) > 1e-12 ? normalize(vEN) : vec3(0.0, 0.0, 1.0);\n"
 	"	bool cm = omM[4].y > 0.5;\n"
 	"	vec4 ma = cm ? vc : omM[0];\n"
 	"	vec4 md = cm ? vc : omM[1];\n"
@@ -850,7 +850,7 @@ static GLuint
 Compile(GLenum type, const char *src)
 {
 #ifdef YQ2_GL3_GLES3
-	const char *version = "#version 300 es\nprecision highp float;\n";
+	const char *version = GL3_GLES_HEADER;
 #else
 	const char *version = "#version 150\n";
 #endif
@@ -1314,9 +1314,16 @@ GL3_GhoulEmu_TakeRound(void)
 	return r;
 }
 
+/* the vertex ring of Flush (whole vertices, so a draw can start at any of them) */
+#define EMU_RING ((GLsizeiptr)sizeof(emuvtx_t) * 65536)
+static GLuint emuringvbo;
+static int emuringgen;
+static GLsizeiptr emuringoff;
+
 static void
 Flush(void)
 {
+	GLint first = 0; /* first vertex of this primitive in the vertex ring */
 	GLenum mode = GL_TRIANGLES;
 	emuvtx_t *out, *flat;
 	int n = 0, nflat, i, count = E.numverts, gputess = 0;
@@ -1504,6 +1511,7 @@ Flush(void)
 #endif
 
 	GL3_UseProgram(E.prog);
+	first = 0;
 #ifndef YQ2_GL3_GLES3
 	if (gputess)
 	{
@@ -1558,7 +1566,51 @@ Flush(void)
 
 		GL3_BindVAO(E.vao);
 		GL3_BindVBO(E.vbo);
-		glBufferData(GL_ARRAY_BUFFER, n * sizeof(emuvtx_t), out, GL_STREAM_DRAW);
+		/* a ring of vertices in one big buffer: each primitive is appended unsynchronised and drawn from its first
+		   vertex; the store is orphaned once per lap (before: glBufferData per glBegin/glEnd primitive, hundreds
+		   to thousands of re-specifications of one buffer a frame) */
+		{
+			GLsizeiptr bytes = (GLsizeiptr)n * (GLsizeiptr)sizeof(emuvtx_t);
+			void *p = NULL;
+
+			if ((emuringvbo != E.vbo) || (emuringgen != gl3_contextgen) || (bytes > EMU_RING / 4))
+			{
+				emuringvbo = E.vbo;
+				emuringgen = gl3_contextgen;
+				emuringoff = EMU_RING; /* allocate below */
+			}
+
+			if (bytes > EMU_RING / 4)
+			{
+				/* a huge primitive: its own store, the ring starts again next time */
+				glBufferData(GL_ARRAY_BUFFER, bytes, out, GL_STREAM_DRAW);
+				emuringvbo = 0;
+			}
+			else
+			{
+				if (emuringoff + bytes > EMU_RING)
+				{
+					glBufferData(GL_ARRAY_BUFFER, EMU_RING, NULL, GL_STREAM_DRAW);
+					emuringoff = 0;
+				}
+
+				p = glMapBufferRange(GL_ARRAY_BUFFER, emuringoff, bytes,
+					GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+
+				if (p)
+				{
+					memcpy(p, out, bytes);
+					glUnmapBuffer(GL_ARRAY_BUFFER);
+				}
+				else
+				{
+					glBufferSubData(GL_ARRAY_BUFFER, emuringoff, bytes, out);
+				}
+
+				first = (GLint)(emuringoff / (GLsizeiptr)sizeof(emuvtx_t));
+				emuringoff += bytes;
+			}
+		}
 	}
 
 	GL3_SelectTMU(GL_TEXTURE0);
@@ -1701,7 +1753,7 @@ Flush(void)
 		/* the bloom source only: not the scene colour, not the material of the reflections */
 		glColorMaski(0, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 		glColorMaski(2, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		glDrawArrays(mode, 0, n);
+		glDrawArrays(mode, first, n);
 		glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL3_Post_MaterialWrites(true);
 		return;
@@ -1722,12 +1774,9 @@ Flush(void)
 		if (E.alphatest && !E.blendon && r_om_a2c->value)
 		{
 			int f = AlphaFuncIndex(E.alphafunc);
-			GLint sb = 0;
-
 			if (f == 4 || f == 6)
 			{
-				glGetIntegerv(GL_SAMPLE_BUFFERS, &sb);
-				a2c = (sb > 0);
+				a2c = (gl3_drawsamples > 0); /* gl3_post.c: no driver query per primitive */
 			}
 		}
 
@@ -1736,15 +1785,19 @@ Flush(void)
 		if (a2c)
 		{
 			glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-			glEnable(GL_SAMPLE_ALPHA_TO_ONE);
-			glDrawArrays(mode, 0, n);
+#ifndef YQ2_GL3_GLES3
+			glEnable(GL_SAMPLE_ALPHA_TO_ONE); /* not in GLES */
+#endif
+			glDrawArrays(mode, first, n);
 			glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+#ifndef YQ2_GL3_GLES3
 			glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+#endif
 			return;
 		}
 	}
 
-	glDrawArrays(mode, 0, n);
+	glDrawArrays(mode, first, n);
 }
 
 /* ------------------------------------------------------------------
@@ -3030,6 +3083,11 @@ GL3_GhoulEmu_End(void)
 void
 GL3_GhoulEmu_Shutdown(void)
 {
+	/* the glow / round texture names belong to the old context: a new skin given an old glow name drew only into
+	   the bloom source (invisible), an old round name tessellated an unrelated model */
+	numglow = numround = 0;
+	sawround = false;
+
 	if (E.prog)
 	{
 		glDeleteProgram(E.prog);

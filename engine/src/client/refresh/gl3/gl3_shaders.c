@@ -45,7 +45,7 @@ CompileShader(GLenum shaderType, const char* shaderSrc, const char* shaderSrc2)
 	GLuint shader = glCreateShader(shaderType);
 
 #ifdef YQ2_GL3_GLES3
-	const char* version = "#version 300 es\nprecision highp float;\n";
+	const char* version = GL3_GLES_HEADER;
 #else // Desktop GL
 	const char* version = "#version 150\n";
 #endif
@@ -1569,6 +1569,39 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			return fa * mix(omPF2.z, 1.0, fa); // gl3_fog.c GL3_Fog_DimAlpha
 		}
 
+		// the same with the parameters of region r from the region table (gl3_fog.c FogTableUpload, 8 texels a row)
+		uniform highp sampler2D omFogTab;
+
+		float omPPFogTab(vec3 p, float shimmer, int r)
+		{
+			vec4 t0 = texelFetch(omFogTab, ivec2(0, r), 0); // start, range, max alpha, height falloff
+			vec4 t1 = texelFetch(omFogTab, ivec2(1, r), 0); // maxs z, size z, dim, planes
+			vec3 d = p - omPF0.xyz;
+			float D0 = dot(d, d);
+			float D = D0;
+			int n = int(t1.w);
+			for(int k = 0; k < 5; k++)
+			{
+				if(k >= n) break;
+				vec4 pl = texelFetch(omFogTab, ivec2(2 + k, r), 0);
+				float a = dot(pl.xyz, omPF0.xyz) - pl.w;
+				float b = pl.w - dot(pl.xyz, p);
+				if(a != 0.0 && b != 0.0 && ((a > 0.0) != (b > 0.0))) continue;
+				float s = a * a + b * b;
+				if(s > 0.0) D = min(D, D0 * b * b / s);
+			}
+			D += shimmer;
+			float al = (t0.y != 0.0) ? (D - t0.x) / t0.y : 0.0;
+			al = clamp(al, 0.0, t0.z);
+			if(t0.w > 0.5 && t1.y > 0.0)
+			{
+				float h = (t1.x - p.z) / t1.y;
+				al *= h * h;
+			}
+			float fa = floor(al) / 255.0;
+			return fa * mix(t1.z, 1.0, fa);
+		}
+
 		uniform vec4 omFxMat; // GFX-modern r_om_ssr: reflectivity, roughness of liquids (0 = the default material)
 
 		float omEyeDist(float z)
@@ -1581,7 +1614,11 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		{
 			vec4 c;
 
-			if(omPF0.w > 0.5)
+			if(omPF0.w > 1.5)
+			{
+				c = vec4(passColor.rgb, omPPFogTab(passFxWorld, passTexCoord.y, int(passTexCoord.x + 0.5)));
+			}
+			else if(omPF0.w > 0.5)
 			{
 				c = vec4(passColor.rgb, omPPFog(passFxWorld, passColor.a));
 			}
@@ -2164,6 +2201,7 @@ void GL3_ShutdownShaders(void)
 
 	// let's (ab)use the fact that all 4 UBO handles are consecutive fields
 	// of the gl3state struct
+	GL3_Ring3DShutdown();
 	glDeleteBuffers(4, &gl3state.uniCommonUBO);
 	gl3state.uniCommonUBO = gl3state.uni2DUBO = gl3state.uni3DUBO = gl3state.uniLightsUBO = 0;
 }
@@ -2234,9 +2272,125 @@ void GL3_UpdateUBO2D(void)
 	updateUBO(gl3state.uni2DUBO, sizeof(gl3state.uni2DData), &gl3state.uni2DData);
 }
 
+/*
+ * OpenMerc: the 3D uniform block changes between draws of one batch (model matrix, emissive weight, texture size,
+ * scroll, fog, alpha) - hundreds of times a frame. Each glBufferData re-specified the one buffer that queued draws
+ * still read. r_om_uboring 1 (default): a ring of aligned slots in one big buffer; every update maps the next slot
+ * unsynchronised (nothing queued reads it: the ring is orphaned once per lap) and binds that range.
+ */
+static GLuint ring3d;
+static GLintptr ringoff, ringlast;
+static GLsizeiptr ringstride, ringsize;
+static qboolean ringbound;
+static cvar_t *r_om_uboring;
+
+#define UBORING_SLOTS 2048
+
+static qboolean
+Ring3D(void)
+{
+	GLint align = 256;
+
+	if (!r_om_uboring)
+	{
+		r_om_uboring = ri.Cvar_Get("r_om_uboring", "1", CVAR_ARCHIVE);
+	}
+
+	if (!r_om_uboring->value)
+	{
+		return false;
+	}
+
+	if (ring3d)
+	{
+		return true;
+	}
+
+	glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &align);
+	align = (align > 0) ? align : 256;
+	ringstride = ((GLsizeiptr)sizeof(gl3state.uni3DData) + align - 1) / align * align;
+	ringsize = ringstride * UBORING_SLOTS;
+	glGenBuffers(1, &ring3d);
+	glBindBuffer(GL_UNIFORM_BUFFER, ring3d);
+	gl3state.currentUBO = ring3d;
+	glBufferData(GL_UNIFORM_BUFFER, ringsize, NULL, GL_STREAM_DRAW);
+	ringoff = 0;
+	ringlast = 0;
+	return true;
+}
+
+void
+GL3_Ring3DShutdown(void)
+{
+	if (ring3d)
+	{
+		glDeleteBuffers(1, &ring3d);
+	}
+
+	ring3d = 0;
+	ringbound = false;
+}
+
 void GL3_UpdateUBO3D(void)
 {
-	updateUBO(gl3state.uni3DUBO, sizeof(gl3state.uni3DData), &gl3state.uni3DData);
+	void *p;
+
+	if (!Ring3D())
+	{
+		if (ringbound)
+		{
+			glBindBufferBase(GL_UNIFORM_BUFFER, GL3_BINDINGPOINT_UNI3D, gl3state.uni3DUBO);
+			ringbound = false;
+		}
+
+		updateUBO(gl3state.uni3DUBO, sizeof(gl3state.uni3DData), &gl3state.uni3DData);
+		return;
+	}
+
+	if (gl3state.currentUBO != ring3d)
+	{
+		gl3state.currentUBO = ring3d;
+		glBindBuffer(GL_UNIFORM_BUFFER, ring3d);
+	}
+
+	if (ringoff + ringstride > ringsize)
+	{
+		glBufferData(GL_UNIFORM_BUFFER, ringsize, NULL, GL_STREAM_DRAW); /* orphan: a fresh store for the next lap */
+		ringoff = 0;
+	}
+
+	++gl3_numBufferUniforms;
+	p = glMapBufferRange(GL_UNIFORM_BUFFER, ringoff, ringstride,
+		GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+
+	if (p)
+	{
+		memcpy(p, &gl3state.uni3DData, sizeof(gl3state.uni3DData));
+		glUnmapBuffer(GL_UNIFORM_BUFFER);
+	}
+	else
+	{
+		glBufferSubData(GL_UNIFORM_BUFFER, ringoff, sizeof(gl3state.uni3DData), &gl3state.uni3DData);
+	}
+
+	glBindBufferRange(GL_UNIFORM_BUFFER, GL3_BINDINGPOINT_UNI3D, ring3d, ringoff, sizeof(gl3state.uni3DData));
+	ringbound = true;
+	ringlast = ringoff;
+	ringoff += ringstride;
+}
+
+/* binds the 3D block where its data is now (paths that rebind all binding points) */
+void
+GL3_BindUBO3D(void)
+{
+	if (ringbound && ring3d)
+	{
+		glBindBufferRange(GL_UNIFORM_BUFFER, GL3_BINDINGPOINT_UNI3D, ring3d, ringlast, sizeof(gl3state.uni3DData));
+	}
+	else
+	{
+		glBindBufferBase(GL_UNIFORM_BUFFER, GL3_BINDINGPOINT_UNI3D, gl3state.uni3DUBO);
+	}
 }
 
 void GL3_UpdateUBOLights(void)
@@ -2259,14 +2413,14 @@ void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
 	{
 		GLint loc;
 
-		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omLtShVP")) == -1)
+		if (!si[i]->shaderProgram || (loc = GL3_UniformLoc(si[i]->shaderProgram, "omLtShVP")) == -1)
 		{
 			continue;
 		}
 
 		GL3_UseProgram(si[i]->shaderProgram);
 		glUniformMatrix4fv(loc, 1, GL_FALSE, shvp);
-		glUniform1i(glGetUniformLocation(si[i]->shaderProgram, "omLtSh"), 9);
+		glUniform1i(GL3_UniformLoc(si[i]->shaderProgram, "omLtSh"), 9);
 	}
 
 	if (shtex)
@@ -2288,21 +2442,21 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 	{
 		GLint loc;
 
-		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omLt")) == -1)
+		if (!si[i]->shaderProgram || (loc = GL3_UniformLoc(si[i]->shaderProgram, "omLt")) == -1)
 		{
 			continue;
 		}
 
 		GL3_UseProgram(si[i]->shaderProgram);
 		glUniform4fv(loc, 1, bolt);
-		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omLtCol"), 1, color);
+		glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omLtCol"), 1, color);
 
 		if (occvp)
 		{
-			glUniformMatrix4fv(glGetUniformLocation(si[i]->shaderProgram, "omLtOccVP"), 1, GL_FALSE, occvp);
+			glUniformMatrix4fv(GL3_UniformLoc(si[i]->shaderProgram, "omLtOccVP"), 1, GL_FALSE, occvp);
 		}
 
-		glUniform1i(glGetUniformLocation(si[i]->shaderProgram, "omLtOcc"), 12);
+		glUniform1i(GL3_UniformLoc(si[i]->shaderProgram, "omLtOcc"), 12);
 	}
 
 	if (occtex)
@@ -2324,18 +2478,18 @@ void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *pl
 	{
 		GLint loc;
 
-		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omMirror")) == -1)
+		if (!si[i]->shaderProgram || (loc = GL3_UniformLoc(si[i]->shaderProgram, "omMirror")) == -1)
 		{
 			continue;
 		}
 
 		GL3_UseProgram(si[i]->shaderProgram);
 		glUniform4fv(loc, 1, on);
-		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omMirrorPlane"), 1, plane);
-		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omMirrorRect"), 1, rect);
-		glUniform1i(glGetUniformLocation(si[i]->shaderProgram, "omMirrorTex"), 13);
-		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omMirrorPlane2"), 1, plane2);
-		glUniform1i(glGetUniformLocation(si[i]->shaderProgram, "omMirrorTex2"), 15);
+		glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omMirrorPlane"), 1, plane);
+		glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omMirrorRect"), 1, rect);
+		glUniform1i(GL3_UniformLoc(si[i]->shaderProgram, "omMirrorTex"), 13);
+		glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omMirrorPlane2"), 1, plane2);
+		glUniform1i(GL3_UniformLoc(si[i]->shaderProgram, "omMirrorTex2"), 15);
 	}
 
 	if (tex)
@@ -2363,14 +2517,14 @@ void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 	{
 		GLint loc;
 
-		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omMatA[0]")) == -1)
+		if (!si[i]->shaderProgram || (loc = GL3_UniformLoc(si[i]->shaderProgram, "omMatA[0]")) == -1)
 		{
 			continue;
 		}
 
 		GL3_UseProgram(si[i]->shaderProgram);
 		glUniform4fv(loc, n, a);
-		glUniform4fv(glGetUniformLocation(si[i]->shaderProgram, "omMatB[0]"), n, b);
+		glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omMatB[0]"), n, b);
 	}
 }
 
@@ -2384,7 +2538,7 @@ void GL3_SoF_SSRUniforms(const float *ssr)
 	{
 		GLint loc;
 
-		if (!si[i]->shaderProgram || (loc = glGetUniformLocation(si[i]->shaderProgram, "omSsr")) == -1)
+		if (!si[i]->shaderProgram || (loc = GL3_UniformLoc(si[i]->shaderProgram, "omSsr")) == -1)
 		{
 			continue;
 		}
@@ -2410,7 +2564,7 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 			continue;
 		}
 
-		loc = glGetUniformLocation(si[i]->shaderProgram, "omMono");
+		loc = GL3_UniformLoc(si[i]->shaderProgram, "omMono");
 
 		if (loc != -1)
 		{
@@ -2418,4 +2572,54 @@ void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 			glUniform1i(loc, mode);
 		}
 	}
+}
+
+/* header/local.h GL3_UniformLoc: (program, name pointer, context) -> location, open addressing */
+#define UNICACHE 512
+
+static struct
+{
+	GLuint prog;
+	const char *name;
+	int gen;
+	GLint loc;
+} unicache[UNICACHE];
+
+void
+GL3_UniformCacheClear(void)
+{
+	memset(unicache, 0, sizeof(unicache));
+}
+
+GLint
+GL3_UniformLoc(GLuint prog, const char *name)
+{
+	unsigned h = ((unsigned)prog * 2654435761u) ^ (unsigned)((size_t)name >> 3);
+	int i;
+
+	if (!prog)
+	{
+		return -1;
+	}
+
+	for (i = 0; i < 16; i++)
+	{
+		int k = (int)((h + (unsigned)i) % UNICACHE);
+
+		if ((unicache[k].prog == prog) && (unicache[k].name == name) && (unicache[k].gen == gl3_contextgen))
+		{
+			return unicache[k].loc;
+		}
+
+		if (!unicache[k].prog || (unicache[k].gen != gl3_contextgen))
+		{
+			unicache[k].prog = prog;
+			unicache[k].name = name;
+			unicache[k].gen = gl3_contextgen;
+			unicache[k].loc = glGetUniformLocation(prog, name);
+			return unicache[k].loc;
+		}
+	}
+
+	return glGetUniformLocation(prog, name); /* a full neighbourhood: ask the driver */
 }

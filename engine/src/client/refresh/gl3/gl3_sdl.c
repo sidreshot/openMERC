@@ -113,6 +113,13 @@ DebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei le
 
 // ---------
 
+/* header/local.h: a GL entry point of the current context (functions glad was not generated for) */
+void *
+GL3_GetProcAddress(const char *name)
+{
+	return (void *)SDL_GL_GetProcAddress(name);
+}
+
 void GL3_SwapWindow(void)
 {
 	SDL_GL_SwapWindow(window);
@@ -345,6 +352,7 @@ int GL3_InitContext(void* win)
 	}
 
 	gl3_contextgen++; /* a new context: the Ghoul emulation's objects of the old one are gone */
+	GL3_StateReset(); /* header/local.h: the GL defaults of the new context */
 
 	// Check if we've got the requested MSAA.
 	int msaa_samples = 0;

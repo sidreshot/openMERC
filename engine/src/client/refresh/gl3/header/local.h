@@ -62,9 +62,177 @@
 
 #endif
 
+/* the GLSL header of GLES builds: GLSL ES gives sampler arrays, shadow samplers and 3D samplers no default
+   precision (compile error) and int only mediump (flag bits above 15 lost) */
+#define GL3_GLES_HEADER "#version 300 es\nprecision highp float;\nprecision highp int;\n" \
+	"precision highp sampler2DArray;\nprecision highp sampler2DArrayShadow;\nprecision highp sampler2DShadow;\n" \
+	"precision highp sampler3D;\n"
+
+#ifdef YQ2_GL3_GLES3
+/* GLES 3.0 has no per-buffer colour mask (its users - SSR material writes, the seam pass - are desktop paths) */
+#define glColorMaski(i, r, g, b, a) ((void)0)
+#endif
+
 /* gl3_sdl.c / gl3_win32.c: counts the GL contexts made - GL objects of an older one are gone (a glIsProgram
    to find that out waits for the driver to finish all queued work) */
 extern int gl3_contextgen;
+
+/*
+ * OpenMerc: a shadow of the GL state that the Ghoul emulator and the shadow / beam passes used to ask the driver
+ * for once per model and per pass (glIsEnabled, glGetIntegerv(GL_BLEND_SRC_RGB / GL_CULL_FACE_MODE),
+ * glGetBooleanv(GL_DEPTH_WRITEMASK)): with a threaded driver each query waits for the driver thread. Every
+ * renderer source includes this header, so the setters below go through the shadow and the queries of the
+ * tracked state read it. GL3_StateReset() when a context is made (the GL defaults).
+ */
+typedef struct
+{
+	GLboolean blend, cull, depthtest, depthmask;
+	GLenum bsrc, bdst, cullmode;
+} gl3glstate_t;
+
+extern gl3glstate_t gl3gls;
+
+static inline void
+GL3_StateReset(void)
+{
+	gl3gls.blend = gl3gls.cull = gl3gls.depthtest = GL_FALSE;
+	gl3gls.depthmask = GL_TRUE;
+	gl3gls.bsrc = GL_ONE;
+	gl3gls.bdst = GL_ZERO;
+	gl3gls.cullmode = GL_BACK;
+}
+
+static inline GLboolean *
+GL3_StateCap(GLenum cap)
+{
+	switch (cap)
+	{
+		case GL_BLEND: return &gl3gls.blend;
+		case GL_CULL_FACE: return &gl3gls.cull;
+		case GL_DEPTH_TEST: return &gl3gls.depthtest;
+		default: return NULL;
+	}
+}
+
+static inline void
+GL3_StEnable(GLenum cap)
+{
+	GLboolean *s = GL3_StateCap(cap);
+
+	if (s)
+	{
+		*s = GL_TRUE;
+	}
+
+	glad_glEnable(cap);
+}
+
+static inline void
+GL3_StDisable(GLenum cap)
+{
+	GLboolean *s = GL3_StateCap(cap);
+
+	if (s)
+	{
+		*s = GL_FALSE;
+	}
+
+	glad_glDisable(cap);
+}
+
+static inline GLboolean
+GL3_StIsEnabled(GLenum cap)
+{
+	GLboolean *s = GL3_StateCap(cap);
+
+	return s ? *s : glad_glIsEnabled(cap);
+}
+
+static inline void
+GL3_StBlendFunc(GLenum s, GLenum d)
+{
+	gl3gls.bsrc = s;
+	gl3gls.bdst = d;
+	glad_glBlendFunc(s, d);
+}
+
+static inline void
+GL3_StDepthMask(GLboolean m)
+{
+	gl3gls.depthmask = m ? GL_TRUE : GL_FALSE;
+	glad_glDepthMask(m);
+}
+
+static inline void
+GL3_StCullFace(GLenum m)
+{
+	gl3gls.cullmode = m;
+	glad_glCullFace(m);
+}
+
+static inline void
+GL3_StGetIntegerv(GLenum p, GLint *v)
+{
+	switch (p)
+	{
+		case GL_BLEND_SRC_RGB: case GL_BLEND_SRC_ALPHA: *v = (GLint)gl3gls.bsrc; return;
+		case GL_BLEND_DST_RGB: case GL_BLEND_DST_ALPHA: *v = (GLint)gl3gls.bdst; return;
+		case GL_CULL_FACE_MODE: *v = (GLint)gl3gls.cullmode; return;
+		case GL_BLEND: *v = gl3gls.blend; return;
+		case GL_CULL_FACE: *v = gl3gls.cull; return;
+		case GL_DEPTH_TEST: *v = gl3gls.depthtest; return;
+		case GL_DEPTH_WRITEMASK: *v = gl3gls.depthmask; return;
+		default: glad_glGetIntegerv(p, v); return;
+	}
+}
+
+static inline void
+GL3_StGetBooleanv(GLenum p, GLboolean *v)
+{
+	switch (p)
+	{
+		case GL_DEPTH_WRITEMASK: *v = gl3gls.depthmask; return;
+		case GL_BLEND: *v = gl3gls.blend; return;
+		case GL_CULL_FACE: *v = gl3gls.cull; return;
+		case GL_DEPTH_TEST: *v = gl3gls.depthtest; return;
+		default: glad_glGetBooleanv(p, v); return;
+	}
+}
+
+#undef glEnable
+#undef glDisable
+#undef glIsEnabled
+#undef glBlendFunc
+#undef glDepthMask
+#undef glCullFace
+#undef glGetIntegerv
+#undef glGetBooleanv
+#define glEnable GL3_StEnable
+#define glDisable GL3_StDisable
+#define glIsEnabled GL3_StIsEnabled
+#define glBlendFunc GL3_StBlendFunc
+#define glDepthMask GL3_StDepthMask
+#define glCullFace GL3_StCullFace
+#define glGetIntegerv GL3_StGetIntegerv
+#define glGetBooleanv GL3_StGetBooleanv
+
+/* gl3_shaders.c: uniform locations looked up in per-frame code, cached by (program, name literal); a deleted
+   program or a new context clears the cache */
+GLint GL3_UniformLoc(GLuint prog, const char *name);
+void GL3_UniformCacheClear(void);
+
+/* gl3_sdl.c / gl3_win32.c: a GL entry point of the current context */
+void *GL3_GetProcAddress(const char *name);
+
+static inline void
+GL3_StDeleteProgram(GLuint p)
+{
+	GL3_UniformCacheClear();
+	glad_glDeleteProgram(p);
+}
+
+#undef glDeleteProgram
+#define glDeleteProgram GL3_StDeleteProgram
 
 #include "../../ref_shared.h"
 

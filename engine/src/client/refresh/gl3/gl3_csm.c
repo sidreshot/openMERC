@@ -90,6 +90,11 @@ static struct
 	qboolean uboenabled;
 } C;
 
+/* the static layers drawn last: their projections, map size, texture and the static build they hold */
+static float statvp[CSM_MAXCASC][16];
+static int statsize, statgen, buildgen = 1;
+static GLuint stattex;
+
 /* ------------------------------------------------------------------
  * the sun keys (R16.2)
  * ------------------------------------------------------------------ */
@@ -613,7 +618,7 @@ static GLuint
 CompileCsm(GLenum type, const char *src)
 {
 #ifdef YQ2_GL3_GLES3
-	const char *version = "#version 300 es\nprecision highp float;\n";
+	const char *version = GL3_GLES_HEADER;
 #else
 	const char *version = "#version 150\n";
 #endif
@@ -784,6 +789,7 @@ CreateMap(int size, int ncasc)
 		glGenTextures(1, &C.tex);
 	}
 
+	buildgen++; /* new storage: no cached static layer in it */
 	GL3_SelectTMU(GL_TEXTURE0 + CSM_UNIT);
 	DepthArray(C.tex, size, 2 * ncasc);
 	GL3_SelectTMU(GL_TEXTURE0);
@@ -910,6 +916,7 @@ BuildStatic(void)
 
 	C.numstatic = n / 3;
 	C.built = w;
+	buildgen++; /* the cached static layers are stale */
 	R_Printf(PRINT_DEVELOPER, "CSM: %d static caster triangles\n", C.numstatic / 3);
 }
 
@@ -1176,7 +1183,16 @@ GL3_CSM_Frame(void)
 
 		glUniformMatrix4fv(C.u_vp, 1, GL_FALSE, C.u.vp[c]);
 
-		/* static world */
+		/* static world: its layer stays valid while the cascade's (texel-snapped) projection, the map size, the
+		   texture and the static build stay the same - the far cascades are redrawn rarely, the near one when the
+		   eye moves by a texel (before: every layer of the whole static world every frame) */
+		if (!memcmp(statvp[c], C.u.vp[c], sizeof(statvp[c])) && (statsize == size) && (stattex == C.tex) &&
+			(statgen == buildgen))
+		{
+			goto dynamic;
+		}
+
+		memcpy(statvp[c], C.u.vp[c], sizeof(statvp[c]));
 		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, C.tex, 0, c);
 		glClearBufferfv(GL_DEPTH, 0, &one);
 
@@ -1188,6 +1204,7 @@ GL3_CSM_Frame(void)
 			glDrawArrays(GL_TRIANGLES, 0, C.numstatic);
 		}
 
+dynamic:
 		/* dynamic casters */
 		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, C.tex, 0, ncasc + c);
 		glClearBufferfv(GL_DEPTH, 0, &one);
@@ -1200,6 +1217,10 @@ GL3_CSM_Frame(void)
 			glDrawArrays(GL_TRIANGLES, 0, C.numdyn / 3);
 		}
 	}
+
+	statsize = size;
+	stattex = C.tex;
+	statgen = buildgen;
 
 	GL3_BindVAO(0);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);

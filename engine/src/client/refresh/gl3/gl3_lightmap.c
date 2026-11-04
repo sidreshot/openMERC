@@ -252,11 +252,11 @@ GL3_LM_CreateSurfaceLightmap(msurface_t *surf)
 void
 GL3_LM_BeginBuildingLightmaps(gl3model_t *m)
 {
-
 	static lightstyle_t lightstyles[MAX_LIGHTSTYLES];
 	int i;
 
 	GL3_DynLight_Free(); /* OpenMerc (I4c): new lightmap pages, the dynamic layers start again */
+	GL3_Seam_Invalidate(); /* gl3_surf.c r_om_seams: a new map */
 
 	memset(gl3_lms.allocated, 0, sizeof(gl3_lms.allocated));
 

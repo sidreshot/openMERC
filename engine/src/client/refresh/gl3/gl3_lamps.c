@@ -130,19 +130,19 @@ GL3_Lamps_View(GLuint prog, const float *eye)
 		}
 	}
 
-	loc = glGetUniformLocation(prog, "omBL");
+	loc = GL3_UniformLoc(prog, "omBL");
 	if (loc != -1 && n > 0)
 	{
 		glUniform4fv(loc, n, pos);
 	}
 
-	loc = glGetUniformLocation(prog, "omBC");
+	loc = GL3_UniformLoc(prog, "omBC");
 	if (loc != -1 && n > 0)
 	{
 		glUniform4fv(loc, n, col);
 	}
 
-	loc = glGetUniformLocation(prog, "omBN");
+	loc = GL3_UniformLoc(prog, "omBN");
 	if (loc != -1)
 	{
 		glUniform1i(loc, n);

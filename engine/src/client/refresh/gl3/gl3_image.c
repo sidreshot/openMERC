@@ -804,7 +804,12 @@ InternalFormat(qboolean has_alpha)
 		return v;
 	}
 
+#ifdef YQ2_GL3_GLES3
+	/* GLES: an RGB8 texture takes only RGB data, the images come as RGBA (opaque .m32 were not uploaded) */
+	return GL_RGBA8;
+#else
 	return has_alpha ? GL_RGBA8 : GL_RGB8;
+#endif
 }
 
 static int

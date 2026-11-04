@@ -54,6 +54,13 @@ GetGLProc(const char *name)
 	return p;
 }
 
+/* header/local.h: a GL entry point of the current context (functions glad was not generated for) */
+void *
+GL3_GetProcAddress(const char *name)
+{
+	return GetGLProc(name);
+}
+
 static void
 DestroyGLWindow(void)
 {
@@ -249,6 +256,7 @@ CreateGLWindow(int width, int height, qboolean fullscreen)
 	}
 
 	gl3_contextgen++; /* a new context: the Ghoul emulation's objects of the old one are gone */
+	GL3_StateReset(); /* header/local.h: the GL defaults of the new context */
 
 	if (!opengl32)
 	{

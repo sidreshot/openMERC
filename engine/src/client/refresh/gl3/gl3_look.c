@@ -456,19 +456,19 @@ GL3_Look_Uniforms(GLuint prog, float time, float aspect)
 		GL3_SelectTMU(GL_TEXTURE0);
 	}
 
-	glUniform1i(glGetUniformLocation(prog, "look"), 1);
-	glUniform4f(glGetUniformLocation(prog, "look0"), ev, l->toe * k, neutral.shoulder + (l->shoulder - neutral.shoulder) * k,
+	glUniform1i(GL3_UniformLoc(prog, "look"), 1);
+	glUniform4f(GL3_UniformLoc(prog, "look0"), ev, l->toe * k, neutral.shoulder + (l->shoulder - neutral.shoulder) * k,
 		basesat * (1.0f + (l->sat - 1.0f) * k));
 	/* the menu's contrast and gamma as SoF's colour table (SPEC-413 §9): S power k, gamma power 1 - g */
 	{
 		float c = vid_contrast->value;
 
-		glUniform4f(glGetUniformLocation(prog, "look1"), sh[0], sh[1], sh[2], (c < 0.5f) ? powf(1.5f - c, 3.0f) : sqrtf(1.5f - c));
+		glUniform4f(GL3_UniformLoc(prog, "look1"), sh[0], sh[1], sh[2], (c < 0.5f) ? powf(1.5f - c, 3.0f) : sqrtf(1.5f - c));
 	}
-	glUniform4f(glGetUniformLocation(prog, "look2"), hi[0], hi[1], hi[2], 1.0f - Q_clamp(vid_gamma->value, -1.0f, 0.95f));
-	glUniform4f(glGetUniformLocation(prog, "look3"), l->vignette * k, l->grain * k, fmodf(time, 100.0f), lutk);
+	glUniform4f(GL3_UniformLoc(prog, "look2"), hi[0], hi[1], hi[2], 1.0f - Q_clamp(vid_gamma->value, -1.0f, 0.95f));
+	glUniform4f(GL3_UniformLoc(prog, "look3"), l->vignette * k, l->grain * k, fmodf(time, 100.0f), lutk);
 	/* the menu's brightness: SoF's offset (160 b - 80) / 255 */
-	glUniform4f(glGetUniformLocation(prog, "look4"), aspect, (float)LK.lutsize, 1.0f + (l->adapt - 1.0f) * k,
+	glUniform4f(GL3_UniformLoc(prog, "look4"), aspect, (float)LK.lutsize, 1.0f + (l->adapt - 1.0f) * k,
 		(160.0f * vid_brightness->value - 80.0f) / 255.0f);
-	glUniform1i(glGetUniformLocation(prog, "lut"), LOOK_UNIT);
+	glUniform1i(GL3_UniformLoc(prog, "lut"), LOOK_UNIT);
 }

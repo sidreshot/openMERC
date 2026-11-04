@@ -1344,3 +1344,50 @@ correction away and put ours in its place".
 * Image: identical except SSR on wet floors, which traced against the depth of the skipped distance and lost
   part of a near reflection (sib1 walkway). Hence default 0; it is meant for the large maps of phase 2, together
   with a depth-only stand-in for skipped faces.
+
+## r_om_ppfog in one batch; r_om_fxaa
+
+* Per-pixel region fog no longer sets an effect state per polygon (the drawback in 15.4): the parameters of every
+  region go to a small float texture on GL_TEXTURE4 (8 texels a row: start, range, max alpha, height falloff |
+  maxs z, size z, dim, planes | up to 5 shortening planes), the vertex carries its region in s and its shimmer
+  offset in t, the colour stays in the vertex colour. All world overlays of a pass share one state. Plane marking
+  and the far wall run over every queued face first, so the table is final when drawn (before, a polygon could
+  see fewer marked planes than a later one). The texture is re-uploaded only when its content changes. Faces of
+  inline models keep the per-vertex path.
+* r_om_fxaa (FXAA 3.11 quality after Lottes): the composite draws into a view-size RGBA8 texture and an FXAA pass
+  brings it to the window (3D view only, the HUD comes later). -1 (default) = on when the window has no MSAA
+  (ports, r_msaa_samples 0), 0 off, 1 always.
+
+## Renderer audit 2026-11-04: streaming, driver syncs, lifecycle, GLES build
+
+Found by a code audit (three read-only passes: per-frame cost, lifecycle / memory safety, portability) and fixed:
+
+* **Streaming without re-specification.** The 3D batches (world, seams, brush models), the effect batches and the
+  Ghoul emulator's primitives went through `glBufferData` per batch / per glBegin-glEnd primitive - hundreds to
+  thousands of re-specifications of the same buffer a frame. Now each writes into a ring (16 MB vertices + 4 MB
+  indices for the 3D batches, ~4.7 MB effects, 4 MB Ghoul), mapped unsynchronised and orphaned once per lap; the
+  3D VAO's attribute pointers move to the batch's first vertex (no BaseVertex draw, so GLES 3.0 works). The 3D uniform
+  block (changes per draw: model matrix, emissive weight, texture size, scroll, fog) lives in a ring of aligned slots
+  bound with `glBindBufferRange` (`r_om_uboring 1`, 0 = the old single buffer).
+* **No driver round trips in draw paths.** A shadow of the tracked GL state (blend, cull, depth test, depth mask,
+  blend function, cull mode) in header/local.h: the setters update it and `glIsEnabled`/`glGetIntegerv`/
+  `glGetBooleanv` of that state read it (the Ghoul emulator asked 9 times per model, the shadow and beam passes
+  per pass). `GL_SAMPLE_BUFFERS` is no longer asked per alpha-tested Ghoul primitive and per world batch: the
+  sample count is set where the view's framebuffer is bound (`gl3_drawsamples`). Uniform locations looked up per
+  frame (mirror, lightning, material, SSR, mono, seams, look, lamps, weather, sky tint, the view fog) come from a
+  cache keyed by (program, name literal, context), cleared by every `glDeleteProgram`.
+* **Less redrawn.** The static layers of the sun cascades are kept while the cascade's texel-snapped projection,
+  the map and the shadow texture stay the same (before: the whole static world into every cascade every frame).
+  The light beams no longer copy the depth again when SSAO / SSR copied the finished view.
+* **Lifecycle (vid_restart, map change).** The weather (programs, VAO, occlusion / sky / strike maps), the mirror
+  targets, the night-vision noise texture, the GPU timers and the Ghoul glow / round texture lists kept names of
+  the old GL context and drew with them or deleted new objects of the new context; they are released at shutdown
+  now. Caches keyed on `gl3_worldmodel` never noticed a new map (it is always mod_known[0]): the ambient-cube
+  probes, the weather's sky mask, AA guns and lightning warm-up, and the seam strips reset at map load. The
+  SSAO / SSR framebuffers that attach the scene colour are deleted with the scene targets (toggling r_om_hdr gave
+  the same texture names back and the effects drew into deleted textures). A zero normal in the Ghoul per-pixel
+  lighting no longer gives NaN speckles.
+* **GLES3 build compiles again** (`ref_gles3`): `GL_SAMPLE_ALPHA_TO_ONE`, texture read-back and `glColorMaski`
+  guarded; one GLSL ES header with precision for int and all sampler types; post shaders with several outputs get
+  `layout(location)` on GLES; opaque textures upload as RGBA8 on GLES (RGB8 + RGBA data is invalid there); lamp
+  shadow sampler objects are looked up on every platform (`GL3_GetProcAddress`), not only on Windows.

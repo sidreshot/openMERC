@@ -26,10 +26,16 @@
 
 #define POST_MAXLEVELS 7
 
+/* float colour targets that GLES 3.0 cannot render to without EXT_color_buffer_half_float (the half-size fog,
+   the mirrors): RGBA8 there, the effects work instead of switching themselves off */
 #ifdef YQ2_GL3_GLES3
-/* GLES 3.0 has no per-buffer colour mask; r_om_ssr (the only user) is desktop only */
-#define glColorMaski(i, r, g, b, a) ((void)0)
+#define OM_RT_FMT GL_RGBA8
+#define OM_RT_TYPE GL_UNSIGNED_BYTE
+#else
+#define OM_RT_FMT GL_RGBA16F
+#define OM_RT_TYPE GL_HALF_FLOAT
 #endif
+
 
 gl3post_t gl3post;
 
@@ -52,6 +58,12 @@ static void SSAOShutdown(void);
 static qboolean ssaomark; /* r_om_ssao runs this view: the weapon is marked in the stencil */
 static qboolean SSRWanted(void);
 static void SSRShutdown(void);
+static void FxaaShutdown(void);
+static void WXShutdown(void);
+static void SSAODeleteTargets(void);
+static void SSRDeleteTargets(void);
+static void MirrorShutdown(void);
+static void TimersShutdown(void);
 static void SSRKeepColour(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
 static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth, *r_om_ssr_temporal, *r_om_ssr_ripple, *r_om_ssr_checker;
@@ -976,16 +988,54 @@ static GLuint
 CompilePost(GLenum type, const char *src)
 {
 #ifdef YQ2_GL3_GLES3
-	const char *version = "#version 300 es\nprecision highp float;\n";
+	const char *version = GL3_GLES_HEADER;
 #else
 	const char *version = "#version 150\n";
 #endif
 	const char *srcs[2] = {version, src};
 	GLuint s = glCreateShader(type);
 	GLint ok = 0;
+#ifdef YQ2_GL3_GLES3
+	/* GLSL ES needs a location on every output of a shader with several (desktop: glBindFragDataLocation) */
+	static const char *const outs[4][2] = {{"out vec4 outColor;", "layout(location = 0) out vec4 outColor;"},
+		{"out vec4 outEmissive;", "layout(location = 1) out vec4 outEmissive;"},
+		{"out vec4 outEmis;", "layout(location = 1) out vec4 outEmis;"},
+		{"out vec4 outMaterial;", "layout(location = 2) out vec4 outMaterial;"}};
+	char *fix = NULL;
+
+	if ((type == GL_FRAGMENT_SHADER) && !strstr(src, "layout(location"))
+	{
+		size_t len = strlen(src) + 128;
+		int k;
+
+		fix = malloc(len);
+
+		if (fix)
+		{
+			Q_strlcpy(fix, src, len);
+
+			for (k = 0; k < 4; k++)
+			{
+				char *at = strstr(fix, outs[k][0]);
+				size_t ol = strlen(outs[k][0]), nlen = strlen(outs[k][1]);
+
+				if (at && (strlen(fix) + nlen - ol < len))
+				{
+					memmove(at + nlen, at + ol, strlen(at + ol) + 1);
+					memcpy(at, outs[k][1], nlen);
+				}
+			}
+
+			srcs[1] = fix;
+		}
+	}
+#endif
 
 	glShaderSource(s, 2, srcs, NULL);
 	glCompileShader(s);
+#ifdef YQ2_GL3_GLES3
+	free(fix);
+#endif
 	glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
 
 	if (!ok)
@@ -1091,6 +1141,11 @@ static void
 DeleteTargets(void)
 {
 	int i;
+
+	/* the SSAO / SSR framebuffers attach the scene colour and depth: with new scene targets (r_om_hdr toggled) the
+	   driver hands out the same names again, their keys matched and they kept drawing into the deleted ones */
+	SSAODeleteTargets();
+	SSRDeleteTargets();
 
 	if (P.fbo) glDeleteFramebuffers(1, &P.fbo);
 	for (i = 0; i < 3; i++)
@@ -1437,6 +1492,12 @@ CreateChain(int vw, int vh)
  * frame
  * ------------------------------------------------------------------ */
 
+/* samples of the framebuffer the 3D draws go to (alpha-to-coverage needs a multisampled target): set where the
+   view's framebuffer is bound, so the draw paths need not ask the driver (glGetIntegerv(GL_SAMPLE_BUFFERS) waited
+   for the driver thread once per alpha-tested Ghoul primitive and per world batch) */
+int gl3_drawsamples;
+static int windowsamples = -1;
+
 void
 GL3_Post_Init(void)
 {
@@ -1477,6 +1538,31 @@ GL3_Post_Init(void)
 	memset(&gl3post, 0, sizeof(gl3post));
 }
 
+/* vid_restart: the timer queries are names of the old context (r_om_gputime gave GL errors and garbage after it) */
+static void
+TimersShutdown(void)
+{
+#if defined(_WIN32) && !defined(YQ2_GL3_GLES3)
+	int i;
+
+	if (T.tried && T.getui64)
+	{
+		glDeleteQueries(GPUQ, T.q);
+	}
+
+	if (PR.tried && PR.counter)
+	{
+		for (i = 0; i < GPUQ; i++)
+		{
+			glDeleteQueries(PROFMARKS, PR.q[i]);
+		}
+	}
+
+	memset(&T, 0, sizeof(T));
+	memset(&PR, 0, sizeof(PR));
+#endif
+}
+
 void
 GL3_Post_Shutdown(void)
 {
@@ -1488,6 +1574,11 @@ GL3_Post_Shutdown(void)
 	if (P.proglum) glDeleteProgram(P.proglum);
 	if (P.progexp) glDeleteProgram(P.progexp);
 	if (P.vao) glDeleteVertexArrays(1, &P.vao);
+	windowsamples = -1;
+	FxaaShutdown();
+	WXShutdown();
+	MirrorShutdown();
+	TimersShutdown();
 	VolFogShutdown();
 	BeamShutdown();
 	SSAOShutdown();
@@ -1518,6 +1609,17 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
 	P.bound = P.depthcopied = P.depthfinal = false;
+
+	if (windowsamples < 0)
+	{
+		GLint sb = 0;
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glGetIntegerv(GL_SAMPLE_BUFFERS, &sb);
+		windowsamples = sb;
+	}
+
+	gl3_drawsamples = windowsamples; /* the window, unless the post path binds its own framebuffer below */
 	ssaomark = false;
 	BeamsBeginView();
 
@@ -1604,6 +1706,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	}
 
 	P.bound = true;
+	gl3_drawsamples = P.samples;
 	P.bloomthis = bloom;
 	P.vx = x;
 	P.vy = y;
@@ -1787,13 +1890,186 @@ HDRExposure(void)
 	}
 }
 
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_fxaa: FXAA (after Lottes, FXAA 3.11 quality: local
+ * contrast test, edge direction from the 3x3 luma, a search along the edge
+ * in growing steps, the blend offset from the nearer end, a sub-pixel term
+ * for thin lines). The composite then draws into a view-size LDR texture and
+ * this pass brings it to the window. -1 (default) = on when the window has no
+ * MSAA (ports, r_msaa_samples 0), 0 off, 1 always. Only the 3D view; the HUD
+ * comes later.
+ * ------------------------------------------------------------------ */
+
+static cvar_t *r_om_fxaa;
+
+static struct
+{
+	qboolean tried;
+	GLuint prog, tex, fbo;
+	GLint u_tex, u_rcp, u_rect;
+	int w, h;
+} FA;
+
+static const char *fxaa_fs =
+	"uniform sampler2D tex;\n"
+	"uniform vec4 rcp;\n"     /* 1 / texture width, 1 / height, subpixel amount, edge threshold */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"float L(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }\n"
+	"float LT(vec2 p) { return L(texture(tex, p).rgb); }\n"
+	"void main()\n"
+	"{\n"
+	"	vec2 p = uv;\n"
+	"	vec3 cM = texture(tex, p).rgb;\n"
+	"	float lM = L(cM);\n"
+	"	float lN = L(textureOffset(tex, p, ivec2(0, 1)).rgb), lS = L(textureOffset(tex, p, ivec2(0, -1)).rgb);\n"
+	"	float lE = L(textureOffset(tex, p, ivec2(1, 0)).rgb), lW = L(textureOffset(tex, p, ivec2(-1, 0)).rgb);\n"
+	"	float mx = max(lM, max(max(lN, lS), max(lE, lW))), mn = min(lM, min(min(lN, lS), min(lE, lW)));\n"
+	"	float range = mx - mn;\n"
+	"	if (range < max(0.0312, mx * rcp.w)) { outColor = vec4(cM, 1.0); return; }\n"
+	"	float lNW = L(textureOffset(tex, p, ivec2(-1, 1)).rgb), lNE = L(textureOffset(tex, p, ivec2(1, 1)).rgb);\n"
+	"	float lSW = L(textureOffset(tex, p, ivec2(-1, -1)).rgb), lSE = L(textureOffset(tex, p, ivec2(1, -1)).rgb);\n"
+	"	float lNS = lN + lS, lWE = lW + lE;\n"
+	"	float eH = abs(-2.0 * lW + lNW + lSW) + 2.0 * abs(-2.0 * lM + lNS) + abs(-2.0 * lE + lNE + lSE);\n"
+	"	float eV = abs(-2.0 * lS + lSW + lSE) + 2.0 * abs(-2.0 * lM + lWE) + abs(-2.0 * lN + lNW + lNE);\n"
+	"	bool horz = eH >= eV;\n"
+	"	float stepLen = horz ? rcp.y : rcp.x;\n"
+	"	float l1 = horz ? lS : lW, l2 = horz ? lN : lE;\n"
+	"	float g1 = abs(l1 - lM), g2 = abs(l2 - lM);\n"
+	"	bool is1 = g1 >= g2;\n"
+	"	float grad = 0.25 * max(g1, g2);\n"
+	"	if (is1) stepLen = -stepLen;\n"
+	"	float lLocal = 0.5 * ((is1 ? l1 : l2) + lM);\n"
+	"	vec2 cur = p;\n"
+	"	if (horz) cur.y += 0.5 * stepLen; else cur.x += 0.5 * stepLen;\n"
+	"	vec2 off = horz ? vec2(rcp.x, 0.0) : vec2(0.0, rcp.y);\n"
+	"	vec2 u1 = cur - off, u2 = cur + off;\n"
+	"	float e1 = LT(u1) - lLocal, e2 = LT(u2) - lLocal;\n"
+	"	bool r1 = abs(e1) >= grad, r2 = abs(e2) >= grad;\n"
+	"	const float Q[10] = float[10](1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 4.0, 8.0);\n"
+	"	for (int i = 1; i < 10; i++)\n"
+	"	{\n"
+	"		if (r1 && r2) break;\n"
+	"		if (!r1) { u1 -= off * Q[i]; e1 = LT(u1) - lLocal; r1 = abs(e1) >= grad; }\n"
+	"		if (!r2) { u2 += off * Q[i]; e2 = LT(u2) - lLocal; r2 = abs(e2) >= grad; }\n"
+	"	}\n"
+	"	float d1 = horz ? p.x - u1.x : p.y - u1.y, d2 = horz ? u2.x - p.x : u2.y - p.y;\n"
+	"	bool near1 = d1 < d2;\n"
+	"	float edgeOff = 0.5 - min(d1, d2) / max(d1 + d2, 1e-6);\n"
+	"	bool correct = ((near1 ? e1 : e2) < 0.0) != (lM < lLocal);\n"
+	"	float f = correct ? edgeOff : 0.0;\n"
+	"	float lAvg = (2.0 * (lNS + lWE) + (lNW + lNE + lSW + lSE)) / 12.0;\n"
+	"	float s1 = clamp(abs(lAvg - lM) / range, 0.0, 1.0);\n"
+	"	float s2 = (-2.0 * s1 + 3.0) * s1 * s1;\n"
+	"	f = max(f, s2 * s2 * rcp.z);\n"
+	"	if (horz) p.y += f * stepLen; else p.x += f * stepLen;\n"
+	"	outColor = vec4(texture(tex, p).rgb, 1.0);\n"
+	"}\n";
+
+static void
+FxaaShutdown(void)
+{
+	if (FA.prog) glDeleteProgram(FA.prog);
+	if (FA.tex) glDeleteTextures(1, &FA.tex);
+	if (FA.fbo) glDeleteFramebuffers(1, &FA.fbo);
+	memset(&FA, 0, sizeof(FA));
+}
+
+/* true when this view goes through FXAA (its framebuffer is then bound) */
+static qboolean
+FxaaBegin(void)
+{
+	if (!r_om_fxaa)
+	{
+		r_om_fxaa = ri.Cvar_Get("r_om_fxaa", "-1", CVAR_ARCHIVE);
+	}
+
+	if (!r_om_fxaa->value || ((r_om_fxaa->value < 0) && P.samples) || (r_om_post_debug->value != 0))
+	{
+		return false;
+	}
+
+	if (!FA.prog)
+	{
+		if (FA.tried)
+		{
+			return false;
+		}
+
+		FA.tried = true;
+		FA.prog = LinkPost(fxaa_fs);
+
+		if (!FA.prog)
+		{
+			R_Printf(PRINT_ALL, "r_om_fxaa: the shader did not link, FXAA is off\n");
+			return false;
+		}
+
+		FA.u_tex = glGetUniformLocation(FA.prog, "tex");
+		FA.u_rcp = glGetUniformLocation(FA.prog, "rcp");
+		FA.u_rect = glGetUniformLocation(FA.prog, "rect");
+	}
+
+	if (!FA.fbo || (FA.w != P.w) || (FA.h != P.h))
+	{
+		static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+
+		if (FA.tex) glDeleteTextures(1, &FA.tex);
+		if (FA.fbo) glDeleteFramebuffers(1, &FA.fbo);
+		glGenTextures(1, &FA.tex);
+		GL3_SelectTMU(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, FA.tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, P.w, P.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		gl3state.currenttexture = -1;
+		glGenFramebuffers(1, &FA.fbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, FA.fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, FA.tex, 0);
+		glDrawBuffers(1, one);
+		FA.w = P.w;
+		FA.h = P.h;
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			FxaaShutdown();
+			FA.tried = true;
+			R_Printf(PRINT_ALL, "r_om_fxaa: no framebuffer, FXAA is off\n");
+			return false;
+		}
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, FA.fbo);
+	return true;
+}
+
+/* the composited view from the FXAA texture to the window */
+static void
+FxaaEnd(void)
+{
+	float fw = (float)FA.w, fh = (float)FA.h;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	GL3_UseProgram(FA.prog);
+	glUniform1i(FA.u_tex, 0);
+	glUniform4f(FA.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	glUniform4f(FA.u_rcp, 1.0f / fw, 1.0f / fh, 0.75f, 0.125f);
+	BindTex(GL_TEXTURE0, FA.tex);
+	DrawQuad();
+}
+
 /* end of the 3D view: resolve, bloom and composite into the default framebuffer */
 void
 GL3_Post_EndView(void)
 {
 	float fw, fh;
 	int mode, dbg;
-	qboolean hdr;
+	qboolean hdr, fxaa;
 
 	if (!P.bound)
 	{
@@ -1849,7 +2125,14 @@ GL3_Post_EndView(void)
 		HDRExposure();
 	}
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	/* r_om_fxaa: the composite goes to the FXAA texture first */
+	fxaa = FxaaBegin();
+
+	if (!fxaa)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 
 	fw = (float)P.w;
@@ -1892,12 +2175,17 @@ GL3_Post_EndView(void)
 	}
 	else
 	{
-		glUniform1i(glGetUniformLocation(P.progcomp, "look"), 0);
+		glUniform1i(GL3_UniformLoc(P.progcomp, "look"), 0);
 	}
 	BindTex(GL_TEXTURE2, P.texemis);
 	BindTex(GL_TEXTURE1, P.nlevels ? P.leveltex[0] : P.texemis);
 	BindTex(GL_TEXTURE0, P.texcolor);
 	DrawQuad();
+
+	if (fxaa)
+	{
+		FxaaEnd();
+	}
 
 	/* lightmap units were used: let the next lightmapped draw bind its pages again */
 	gl3state.currentlightmap = -1;
@@ -2226,7 +2514,7 @@ VolFogHalfTarget(void)
 	V.halffbo = V.halftex = 0;
 
 	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
-	V.halftex = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_NEAREST);
+	V.halftex = NewTexture(OM_RT_FMT, GL_RGBA, OM_RT_TYPE, w, h, GL_NEAREST);
 	glGenFramebuffers(1, &V.halffbo);
 	glBindFramebuffer(GL_FRAMEBUFFER, V.halffbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, V.halftex, 0);
@@ -3677,12 +3965,18 @@ GL3_Post_Beams(void)
 	GL3_Draw3DBatchesNow();
 	GL3_FX_Flush();
 
-	/* the full depth of the view (models and effects included) for the march */
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
-	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
-		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	/* the full depth of the view (models and effects included) for the march - unless SSAO / SSR copied the
+	   finished view already (nothing between them writes depth) */
+	if (!P.depthfinal)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		P.depthfinal = true;
+	}
+
 	P.depthcopied = true;
 
 	for (i = 0; i < nb; i++)
@@ -3997,26 +4291,78 @@ static const char *om_viewfog_glsl =
 	"	return clamp(a * mix(omVF1.z, 1.0, a), 0.0, 1.0);\n"
 	"}\n";
 
+/* the uniform locations of om_viewfog_glsl, cached per program (ViewFogForget when a program is deleted) */
+static struct
+{
+	GLuint prog;
+	GLint loc[6];
+} viewfogloc[4];
+
+static void
+ViewFogForget(GLuint prog)
+{
+	int i;
+
+	for (i = 0; i < 4; i++)
+	{
+		if (viewfogloc[i].prog == prog)
+		{
+			viewfogloc[i].prog = 0;
+		}
+	}
+}
+
 static void
 ViewFogUniforms(GLuint prog)
 {
+	static const char *const names[6] = {"omVF0", "omVF1", "omVF2", "omVF3", "omVF4", "omVF5"};
 	float f[7];
 	vec3_t fwd, right, up;
+	GLint *loc = NULL;
+	int i, k;
+
+	for (i = 0; (i < 4) && !loc; i++)
+	{
+		if (viewfogloc[i].prog == prog)
+		{
+			loc = viewfogloc[i].loc;
+		}
+	}
+
+	for (i = 0; (i < 4) && !loc; i++)
+	{
+		if (!viewfogloc[i].prog)
+		{
+			viewfogloc[i].prog = prog;
+
+			for (k = 0; k < 6; k++)
+			{
+				viewfogloc[i].loc[k] = glGetUniformLocation(prog, names[k]);
+			}
+
+			loc = viewfogloc[i].loc;
+		}
+	}
+
+	if (!loc)
+	{
+		return;
+	}
 
 	if (!GL3_Fog_ViewFog(f))
 	{
-		glUniform4f(glGetUniformLocation(prog, "omVF1"), 0, 0, 0, 0);
+		glUniform4f(loc[1], 0, 0, 0, 0);
 		return;
 	}
 
 	AngleVectors(r_newrefdef.viewangles, fwd, right, up);
-	glUniform4f(glGetUniformLocation(prog, "omVF0"), f[0], f[1], f[2], f[3]);
-	glUniform4f(glGetUniformLocation(prog, "omVF1"), f[4], f[5], f[6], 1);
-	glUniform4f(glGetUniformLocation(prog, "omVF2"), r_newrefdef.vieworg[0], r_newrefdef.vieworg[1],
-		r_newrefdef.vieworg[2], 1.0f / gl3state.projMat3D.Elements[0][0]);
-	glUniform4f(glGetUniformLocation(prog, "omVF3"), fwd[0], fwd[1], fwd[2], 1.0f / gl3state.projMat3D.Elements[1][1]);
-	glUniform3f(glGetUniformLocation(prog, "omVF4"), right[0], right[1], right[2]);
-	glUniform3f(glGetUniformLocation(prog, "omVF5"), up[0], up[1], up[2]);
+	glUniform4f(loc[0], f[0], f[1], f[2], f[3]);
+	glUniform4f(loc[1], f[4], f[5], f[6], 1);
+	glUniform4f(loc[2], r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2],
+		1.0f / gl3state.projMat3D.Elements[0][0]);
+	glUniform4f(loc[3], fwd[0], fwd[1], fwd[2], 1.0f / gl3state.projMat3D.Elements[1][1]);
+	glUniform3f(loc[4], right[0], right[1], right[2]);
+	glUniform3f(loc[5], up[0], up[1], up[2]);
 }
 
 /* view distance at the occlusion resolution (one full-resolution sample per texel) */
@@ -4675,7 +5021,7 @@ SSAOShutdown(void)
 	if (S.progtemp) glDeleteProgram(S.progtemp);
 	if (S.progao) glDeleteProgram(S.progao);
 	if (S.progblur) glDeleteProgram(S.progblur);
-	if (S.progapply) glDeleteProgram(S.progapply);
+	if (S.progapply) { ViewFogForget(S.progapply); glDeleteProgram(S.progapply); }
 
 	if ((gl3state.currentShaderProgram == S.proglin) || (gl3state.currentShaderProgram == S.progao) ||
 		(gl3state.currentShaderProgram == S.progblur) ||
@@ -4870,7 +5216,35 @@ static struct
 	GLuint skytex;
 	const void *skymodel;
 	qboolean occvalid;
+	const void *warm;     /* the map the lightning warm-up was done for */
 } WX;
+
+/* vid_restart: the weather's GL objects belong to the old context (WXCreate returned early on the old names and
+   drew with them); the per-map flags stay, the map is loaded again after the restart */
+static void
+WXShutdown(void)
+{
+	GLuint progs[7] = {WX.progaa, WX.progsnow, WX.progwar, WX.progsmoke, WX.prograin, WX.progsplash, WX.progbolt};
+	int i;
+
+	for (i = 0; i < 7; i++)
+	{
+		if (progs[i]) glDeleteProgram(progs[i]);
+	}
+
+	if (WX.vao) glDeleteVertexArrays(1, &WX.vao);
+	if (WX.bolt_vbo) glDeleteBuffers(1, &WX.bolt_vbo);
+	if (WX.occtex) glDeleteTextures(1, &WX.occtex);
+	if (WX.occfbo) glDeleteFramebuffers(1, &WX.occfbo);
+	if (WX.shtex) glDeleteTextures(1, &WX.shtex);
+	if (WX.shfbo) glDeleteFramebuffers(1, &WX.shfbo);
+	if (WX.skytex) glDeleteTextures(1, &WX.skytex);
+	WX.progaa = WX.progsnow = WX.progwar = WX.progsmoke = WX.prograin = WX.progsplash = WX.progbolt = 0;
+	WX.vao = WX.bolt_vbo = WX.occtex = WX.occfbo = WX.shtex = WX.shfbo = WX.skytex = 0;
+	WX.failed = false;
+	WX.occmodel = WX.skymodel = WX.gunmodel = WX.warm = NULL;
+	WX.occvalid = WX.shvalid = false;
+}
 
 /* map load (gl3_model.c): does the map ask for rain? */
 void
@@ -4883,6 +5257,10 @@ GL3_Weather_MapLoad(const char *ents, int len)
 	WX.occmodel = NULL;
 	WX.occvalid = false;
 	WX.next = 0;
+	/* gl3_worldmodel is always mod_known[0]: the per-map caches keyed on it must be reset here (the sky mask,
+	   the anti-aircraft guns and the lightning warm-up of the previous map were kept) */
+	WX.skymodel = WX.gunmodel = NULL;
+	WX.warm = NULL;
 
 	if (!ents || len <= 0)
 	{
@@ -5077,14 +5455,19 @@ WXSkyMask(void)
 					pix[k] = NULL;
 					GL3_SelectTMU(GL_TEXTURE0);
 					GL3_Bind(im->texnum);
+					iw[k] = ih[k] = 0;
+#ifndef YQ2_GL3_GLES3 /* no texture read-back in GLES (weather is desktop only) */
 					glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &iw[k]);
 					glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ih[k]);
+#endif
 					if ((iw[k] > 0) && (ih[k] > 0) && (iw[k] <= 4096) && (ih[k] <= 4096))
 					{
 						pix[k] = malloc((size_t)iw[k] * ih[k] * 4);
 						if (pix[k])
 						{
+#ifndef YQ2_GL3_GLES3
 							glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pix[k]);
+#endif
 						}
 					}
 					nimg++;
@@ -5483,13 +5866,11 @@ GL3_Post_WeatherFrame(void)
 		/* at the first frame of a stormy map: the sky mask (sky images read back), the extra caster geometry and
 		   the strike's shadow target are made now, not at the first strike (a 30-40 ms hitch on arm1 and jpn2) */
 		{
-			static const void *warm;
-
-			if (warm != gl3_worldmodel)
+			if (WX.warm != gl3_worldmodel)
 			{
 				vec3_t keep;
 
-				warm = gl3_worldmodel;
+				WX.warm = gl3_worldmodel;
 				WXSkyMask();
 				VectorCopy(WX.ldir, keep);
 				VectorSet(WX.ldir, 0, 0, 1);
@@ -5576,7 +5957,7 @@ GL3_Post_WeatherFrame(void)
 			}
 		}
 
-		if (p && (loc = glGetUniformLocation(p, "omSkyTint")) != -1)
+		if (p && (loc = GL3_UniformLoc(p, "omSkyTint")) != -1)
 		{
 			GL3_UseProgram(p);
 			glUniform4f(loc, tint * (0.95f + add) + warr, tint * (0.97f + add) + warg, tint + add, 0);
@@ -6550,13 +6931,13 @@ GL3_Post_Weather(void)
 		glUniform1f(WX.r_time, r_newrefdef.time);
 		glUniform1i(WX.r_occ, 0);
 		glUniformMatrix4fv(WX.r_occvp, 1, GL_FALSE, WX.occvp);
-		glUniform1i(glGetUniformLocation(WX.prograin, "scenecol"), 1);
-		glUniform1i(glGetUniformLocation(WX.prograin, "depthtex"), 2);
-		glUniform4f(glGetUniformLocation(WX.prograin, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
-		glUniform4f(glGetUniformLocation(WX.prograin, "proj"), gl3state.projMat3D.Elements[2][2],
+		glUniform1i(GL3_UniformLoc(WX.prograin, "scenecol"), 1);
+		glUniform1i(GL3_UniformLoc(WX.prograin, "depthtex"), 2);
+		glUniform4f(GL3_UniformLoc(WX.prograin, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(GL3_UniformLoc(WX.prograin, "proj"), gl3state.projMat3D.Elements[2][2],
 			gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
-		glUniform4f(glGetUniformLocation(WX.prograin, "view"), (float)P.vx, (float)P.vy, (float)P.vw, (float)P.vh);
-		glUniform1f(glGetUniformLocation(WX.prograin, "refr"), col ? 1.0f : 0.0f);
+		glUniform4f(GL3_UniformLoc(WX.prograin, "view"), (float)P.vx, (float)P.vy, (float)P.vw, (float)P.vh);
+		glUniform1f(GL3_UniformLoc(WX.prograin, "refr"), col ? 1.0f : 0.0f);
 		BindTex(GL_TEXTURE2, P.texdepthcopy);
 		BindTex(GL_TEXTURE1, col ? col : WX.occtex);
 		BindTex(GL_TEXTURE0, WX.occtex);
@@ -6564,7 +6945,7 @@ GL3_Post_Weather(void)
 		for (l = 0; l < 2; l++)
 		{
 			glUniform4f(WX.r_params, lay[l][0], lay[l][1], 750.0f, 0.032f);
-			glUniform4f(glGetUniformLocation(WX.prograin, "layer"), lay[l][2], lay[l][3], lay[l][4], lay[l][5]);
+			glUniform4f(GL3_UniformLoc(WX.prograin, "layer"), lay[l][2], lay[l][3], lay[l][4], lay[l][5]);
 			glUniform4f(WX.r_color, 0.55f + flash * 0.9f, 0.6f + flash * 0.9f, 0.68f + flash * 1.0f,
 				lay[l][7] + flash * 0.25f);
 			glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(lay[l][6] * dens));
@@ -6583,7 +6964,7 @@ GL3_Post_Weather(void)
 		glUniform4f(WX.s_params, 900.0f, 0.3f, 3.5f, 0);
 		glUniform1i(WX.s_occ, 0);
 		glUniformMatrix4fv(WX.s_occvp, 1, GL_FALSE, WX.occvp);
-		glUniformMatrix4fv(glGetUniformLocation(WX.progsplash, "occinv"), 1, GL_FALSE, inv);
+		glUniformMatrix4fv(GL3_UniformLoc(WX.progsplash, "occinv"), 1, GL_FALSE, inv);
 		glUniform4f(WX.s_color, 0.7f + flash * 0.5f, 0.72f + flash * 0.5f, 0.78f + flash * 0.5f, 0.16f);
 		glDrawArrays(GL_TRIANGLES, 0, 6 * (int)(1500 * dens));
 	}
@@ -6602,14 +6983,14 @@ nodrops:
 		glDisable(GL_DEPTH_TEST);
 		glBlendFunc(GL_ONE, GL_ONE);
 		GL3_UseProgram(WX.progbolt);
-		glUniform1i(glGetUniformLocation(WX.progbolt, "skymask"), 3);
-		glUniform3fv(glGetUniformLocation(WX.progbolt, "eye"), 1, r_newrefdef.vieworg);
+		glUniform1i(GL3_UniformLoc(WX.progbolt, "skymask"), 3);
+		glUniform3fv(GL3_UniformLoc(WX.progbolt, "eye"), 1, r_newrefdef.vieworg);
 		BindTex(GL_TEXTURE3, WX.skytex);
 		glUniformMatrix4fv(WX.b_vp, 1, GL_FALSE, &pv.Elements[0][0]);
-		glUniform1i(glGetUniformLocation(WX.progbolt, "depthtex"), 2);
-		glUniform4f(glGetUniformLocation(WX.progbolt, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
-		glUniform4f(glGetUniformLocation(WX.progbolt, "view"), (float)P.vx, (float)P.vy, (float)P.vw, (float)P.vh);
-		glUniform4f(glGetUniformLocation(WX.progbolt, "proj"), gl3state.projMat3D.Elements[2][2],
+		glUniform1i(GL3_UniformLoc(WX.progbolt, "depthtex"), 2);
+		glUniform4f(GL3_UniformLoc(WX.progbolt, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(GL3_UniformLoc(WX.progbolt, "view"), (float)P.vx, (float)P.vy, (float)P.vw, (float)P.vh);
+		glUniform4f(GL3_UniformLoc(WX.progbolt, "proj"), gl3state.projMat3D.Elements[2][2],
 			gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
 		BindTex(GL_TEXTURE2, P.texdepthcopy);
 
@@ -7633,7 +8014,7 @@ SSRShutdown(void)
 	}
 
 	if (SR.prog) glDeleteProgram(SR.prog);
-	if (SR.progapply) glDeleteProgram(SR.progapply);
+	if (SR.progapply) { ViewFogForget(SR.progapply); glDeleteProgram(SR.progapply); }
 	if (SR.progsmooth) glDeleteProgram(SR.progsmooth);
 	if (SR.progtemp) glDeleteProgram(SR.progtemp);
 
@@ -7767,6 +8148,16 @@ MirrorDeleteTargets(void)
 	MR.rbdepth = 0;
 }
 
+/* vid_restart: the mirror targets are names of the old context (with the same window size they were used
+   again; with another size the deletes hit new objects of the new context) */
+static void
+MirrorShutdown(void)
+{
+	MirrorDeleteTargets();
+	MR.w = MR.h = 0;
+	MR.failed = false;
+}
+
 static qboolean
 MirrorTargets(void)
 {
@@ -7789,7 +8180,7 @@ MirrorTargets(void)
 
 	for (k = 0; k < MIRROR_PLANES; k++)
 	{
-		MR.tex[k] = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, MR.w, MR.h, GL_LINEAR);
+		MR.tex[k] = NewTexture(OM_RT_FMT, GL_RGBA, OM_RT_TYPE, MR.w, MR.h, GL_LINEAR);
 		glGenFramebuffers(1, &MR.fbo[k]);
 		glBindFramebuffer(GL_FRAMEBUFFER, MR.fbo[k]);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, MR.tex[k], 0);
@@ -7903,6 +8294,7 @@ MirrorPass(const float *n, float d, GLuint fbo)
 	GL3_UpdateUBO3D();
 
 	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	gl3_drawsamples = 0; /* the mirror textures are single-sampled */
 	/* the view's rectangle at the mirror texture's scale */
 	{
 		float sx = (float)MR.w / vid.width, sy = (float)MR.h / vid.height;
@@ -8051,6 +8443,7 @@ GL3_Mirror_Render(void)
 	{
 		MR.failed = true;
 		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		gl3_drawsamples = P.samples;
 		GL3_SoF_MirrorUniforms(on, planes[0], planes[1], rect, 0, 0);
 		return;
 	}
@@ -8067,6 +8460,7 @@ GL3_Mirror_Render(void)
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	gl3_drawsamples = P.samples;
 	SceneBuffers();
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 	gl3state.currentlightmap = -1;

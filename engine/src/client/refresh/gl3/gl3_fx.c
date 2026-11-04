@@ -28,6 +28,13 @@
 
 static GLuint vaofx, vbofx;
 static gl3fxvtx_t fxverts[MAX_FX_VERTS];
+
+/* the vertex ring of GL3_FX_Flush: room for several full batches */
+#define FX_RING ((GLsizeiptr)sizeof(gl3fxvtx_t) * MAX_FX_VERTS * 8)
+static GLuint fxringvbo;
+static int fxringgen;
+static GLsizeiptr fxringoff;
+static GLint fxfirst;
 static int numfxverts;
 static gl3fxstate_t fxstate;      /* state of the pending vertices */
 static qboolean fxstate_valid;
@@ -35,6 +42,7 @@ static qboolean fxstate_valid;
 static GLint u_texmode, u_alphatest, u_fogmode, u_fogstart, u_fogend, u_fogcolor, u_fogplane;
 static GLint u_emis, u_softp, u_softv, u_depth, u_fxmat; /* GFX-modern (gl3_post.c) */
 static GLint u_pf0, u_pf1, u_pf2, u_pfpl; /* GFX-modern r_om_ppfog (gl3_fog.c) */
+static GLint u_fogtab; /* r_om_ppfog region table (GL_TEXTURE4) */
 
 static GLuint u_program; /* program the uniform locations belong to */
 
@@ -60,7 +68,9 @@ QueryUniforms(void)
 	u_pf1 = glGetUniformLocation(prog, "omPF1");
 	u_pf2 = glGetUniformLocation(prog, "omPF2");
 	u_pfpl = glGetUniformLocation(prog, "omPFPl");
+	u_fogtab = glGetUniformLocation(prog, "omFogTab");
 	glUniform1i(u_depth, 7); /* depth copy of the post path on GL_TEXTURE7 */
+	glUniform1i(u_fogtab, 4);
 }
 
 void
@@ -84,6 +94,8 @@ GL3_FX_Init(void)
 	fxstate_valid = false;
 }
 
+void GL3_FX_NightVisionShutdown(void);
+
 void
 GL3_FX_Shutdown(void)
 {
@@ -98,6 +110,7 @@ GL3_FX_Shutdown(void)
 	}
 
 	vbofx = vaofx = 0;
+	GL3_FX_NightVisionShutdown();
 	numfxverts = 0;
 }
 
@@ -163,7 +176,36 @@ GL3_FX_Flush(void)
 
 	GL3_BindVAO(vaofx);
 	GL3_BindVBO(vbofx);
-	glBufferData(GL_ARRAY_BUFFER, numfxverts * sizeof(gl3fxvtx_t), fxverts, GL_STREAM_DRAW);
+	/* a vertex ring: each batch is appended unsynchronised, the store orphaned once per lap (before: glBufferData
+	   per flush, several hundred a frame in effect-heavy views) */
+	{
+		GLsizeiptr bytes = (GLsizeiptr)numfxverts * (GLsizeiptr)sizeof(gl3fxvtx_t);
+		void *p;
+
+		if ((fxringvbo != vbofx) || (fxringgen != gl3_contextgen) || (fxringoff + bytes > FX_RING))
+		{
+			glBufferData(GL_ARRAY_BUFFER, FX_RING, NULL, GL_STREAM_DRAW);
+			fxringvbo = vbofx;
+			fxringgen = gl3_contextgen;
+			fxringoff = 0;
+		}
+
+		p = glMapBufferRange(GL_ARRAY_BUFFER, fxringoff, bytes, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT |
+			GL_MAP_INVALIDATE_RANGE_BIT);
+
+		if (p)
+		{
+			memcpy(p, fxverts, bytes);
+			glUnmapBuffer(GL_ARRAY_BUFFER);
+		}
+		else
+		{
+			glBufferSubData(GL_ARRAY_BUFFER, fxringoff, bytes, fxverts);
+		}
+
+		fxfirst = (GLint)(fxringoff / (GLsizeiptr)sizeof(gl3fxvtx_t));
+		fxringoff += bytes;
+	}
 
 	if (st->texnum)
 	{
@@ -200,6 +242,14 @@ GL3_FX_Flush(void)
 		{
 			glUniform4f(u_softv, 1, 1, 1, 0);
 		}
+	}
+
+	if (st->ppfog == 2)
+	{
+		/* the region table of gl3_fog.c */
+		GL3_SelectTMU(GL_TEXTURE4);
+		glBindTexture(GL_TEXTURE_2D, GL3_Fog_TableTexture());
+		GL3_SelectTMU(GL_TEXTURE0);
 	}
 
 	if (st->ppfog)
@@ -242,7 +292,7 @@ GL3_FX_Flush(void)
 		glDisable(GL_CULL_FACE);
 	}
 
-	glDrawArrays(GL_TRIANGLES, 0, numfxverts);
+	glDrawArrays(GL_TRIANGLES, fxfirst, numfxverts);
 	++gl3_num3Ddraws;
 	++gl3_numBufferVtxData;
 	numfxverts = 0;
@@ -333,11 +383,14 @@ static int numlightcache;
 static int lightqueries;
 static gl3model_t *lightcacheworld;
 
+static void AmbCacheClear(void);
+
 void
 GL3_SoF_ClearLightCache(void)
 {
 	numlightcache = 0;
 	lightqueries = 0;
+	AmbCacheClear(); /* r_om_ambcube probes: gl3_worldmodel is always mod_known[0], its pointer never told maps apart */
 }
 
 /* first surface with a lightmap hit by the ray; static light into color */
@@ -606,6 +659,13 @@ typedef struct
 
 static ambprobe_t ambcache[AMBCACHE_SIZE];
 static gl3model_t *ambcacheworld;
+
+static void
+AmbCacheClear(void)
+{
+	memset(ambcache, 0, sizeof(ambcache));
+	ambcacheworld = NULL;
+}
 static cvar_t *r_om_ambcube, *r_om_ambcube_debug;
 
 static const float ambdirs[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
@@ -1805,8 +1865,24 @@ GL3_FX_SortedPass(void)
 
 static GLuint noisetex;
 static float nvtime;
-static qboolean nvbright;
 static qboolean nvhavetex;
+
+/* vid_restart: the noise texture is a name of the old context (it overwrote and later deleted an unrelated new
+   texture) */
+void
+GL3_FX_NightVisionShutdown(void)
+{
+	if (noisetex)
+	{
+		glDeleteTextures(1, &noisetex);
+	}
+
+	noisetex = 0;
+	nvhavetex = false;
+	nvtime = 0;
+}
+static qboolean nvbright;
+
 
 static int
 IRand(int lo, int hi)

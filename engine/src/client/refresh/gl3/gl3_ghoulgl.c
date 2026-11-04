@@ -442,7 +442,7 @@ GL3_Ghoul_LeaveFixedFunction(void)
 	/* the uniform blocks are bound to binding points, not to GL_UNIFORM_BUFFER; rebinding them is cheap */
 	glBindBufferBase(GL_UNIFORM_BUFFER, 0, gl3state.uniCommonUBO);
 	glBindBufferBase(GL_UNIFORM_BUFFER, 1, gl3state.uni2DUBO);
-	glBindBufferBase(GL_UNIFORM_BUFFER, 2, gl3state.uni3DUBO);
+	GL3_BindUBO3D(); /* the 3D block may live in a ring slot (gl3_shaders.c) */
 	glBindBufferBase(GL_UNIFORM_BUFFER, 3, gl3state.uniLightsUBO);
 }
 

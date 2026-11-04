@@ -123,6 +123,7 @@ void GL3_SurfInit(void)
 
 void GL3_SurfShutdown(void)
 {
+	GL3_Seam_Invalidate();
 	glDeleteBuffers(1, &gl3state.ebo3D);
 	gl3state.ebo3D = 0;
 	glDeleteBuffers(1, &gl3state.vbo3D);
@@ -320,6 +321,7 @@ DrawTriangleOutlines(void)
 	GL3_UpdateUBOCommon();
 	GL3_BindVAO(gl3state.vao3D);
 	GL3_BindVBO(gl3state.vbo3D);
+	GL3_Ring3DReset(); /* gl3_main.c: the outlines re-specify the batch VBO */
 
 	curr_vtx = 0;
 
@@ -515,6 +517,14 @@ static gl3_3D_vtx_t *seamverts;
 static int numseamverts, capseamverts;
 static int *seamdrawn;       /* gl3_framecount when each world face was last drawn */
 static const msurface_t *seamsurfaces;
+
+/* map load and shutdown: the strips hold face and image pointers; the hunk often lands at the same address
+   (vid_restart, the same map again), so the surface pointer alone kept stale strips */
+void
+GL3_Seam_Invalidate(void)
+{
+	seamsurfaces = NULL;
+}
 static float seamwidth;
 
 static qboolean
@@ -787,6 +797,10 @@ SeamTexel(gl3image_t *img, const mtexinfo_t *ti, const vec3_t p, float out[3])
 			level++;
 		}
 
+#ifdef YQ2_GL3_GLES3
+		/* GLES has no texture read-back: no texels, the seam keeps both textures unblended */
+		st->w = st->h = 0;
+#else
 		GL3_SelectTMU(GL_TEXTURE0);
 		GL3_Bind(img->texnum);
 		glGetTexLevelParameteriv(GL_TEXTURE_2D, level, GL_TEXTURE_WIDTH, &st->w);
@@ -802,6 +816,7 @@ SeamTexel(gl3image_t *img, const mtexinfo_t *ti, const vec3_t p, float out[3])
 				glPixelStorei(GL_PACK_ALIGNMENT, 4);
 			}
 		}
+#endif
 	}
 
 	if (!st->rgba)
@@ -1157,11 +1172,11 @@ SeamDraw(void)
 
 	GL3_Draw3DBatchesNow();
 	GL3_UseProgram(si->shaderProgram);
-	locp = glGetUniformLocation(si->shaderProgram, "omSeamP");
-	locd = glGetUniformLocation(si->shaderProgram, "omSeamD");
-	locs = glGetUniformLocation(si->shaderProgram, "omSeamS");
-	loct = glGetUniformLocation(si->shaderProgram, "omSeamT");
-	glUniform1i(glGetUniformLocation(si->shaderProgram, "omSeam"), (r_om_seams->value >= 2) ? 2 : 1);
+	locp = GL3_UniformLoc(si->shaderProgram, "omSeamP");
+	locd = GL3_UniformLoc(si->shaderProgram, "omSeamD");
+	locs = GL3_UniformLoc(si->shaderProgram, "omSeamS");
+	loct = GL3_UniformLoc(si->shaderProgram, "omSeamT");
+	glUniform1i(GL3_UniformLoc(si->shaderProgram, "omSeam"), (r_om_seams->value >= 2) ? 2 : 1);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glPolygonOffset(-1.0f, -2.0f);
 	for (i = 1; i < 4; i++)

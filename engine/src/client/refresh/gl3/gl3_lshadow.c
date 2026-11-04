@@ -48,7 +48,6 @@ static cvar_t *r_om_lshadow_softmax, *r_om_lshadow_taps, *r_om_lshadow_search;
 static float wpoint = 1.2f, wsurf = 0.85f, wspot = 0.6f;
 
 /* sampler objects (GL 3.3, not in the loader): the depth read without compare on LS_RAWUNIT */
-#ifdef _WIN32
 typedef void (APIENTRY *pfnGenSamplers)(GLsizei n, GLuint *s);
 typedef void (APIENTRY *pfnDeleteSamplers)(GLsizei n, const GLuint *s);
 typedef void (APIENTRY *pfnBindSampler)(GLuint unit, GLuint s);
@@ -57,7 +56,6 @@ static pfnGenSamplers qglGenSamplers;
 static pfnDeleteSamplers qglDeleteSamplers;
 static pfnBindSampler qglBindSampler;
 static pfnSamplerParameteri qglSamplerParameteri;
-#endif
 
 enum { LS_POINT, LS_SPOT, LS_SURF };
 
@@ -697,22 +695,13 @@ BindMap(qboolean on)
 static void
 CreateSampler(void)
 {
-#ifdef _WIN32
-	typedef PROC (WINAPI *pfnWglGetProcAddress)(LPCSTR);
-	HMODULE gl = GetModuleHandleA("opengl32.dll");
-	pfnWglGetProcAddress wgp = gl ? (pfnWglGetProcAddress)(void *)GetProcAddress(gl, "wglGetProcAddress") : NULL;
-
+	/* core in GL 3.3 and GLES 3.0, looked up from the context on every platform (before: Windows only, so Linux had
+	   no penumbra blocker search) */
 	L.sampler = 0;
-
-	if (!wgp)
-	{
-		return;
-	}
-
-	qglGenSamplers = (pfnGenSamplers)(void *)wgp("glGenSamplers");
-	qglDeleteSamplers = (pfnDeleteSamplers)(void *)wgp("glDeleteSamplers");
-	qglBindSampler = (pfnBindSampler)(void *)wgp("glBindSampler");
-	qglSamplerParameteri = (pfnSamplerParameteri)(void *)wgp("glSamplerParameteri");
+	qglGenSamplers = (pfnGenSamplers)GL3_GetProcAddress("glGenSamplers");
+	qglDeleteSamplers = (pfnDeleteSamplers)GL3_GetProcAddress("glDeleteSamplers");
+	qglBindSampler = (pfnBindSampler)GL3_GetProcAddress("glBindSampler");
+	qglSamplerParameteri = (pfnSamplerParameteri)GL3_GetProcAddress("glSamplerParameteri");
 
 	if (!qglGenSamplers || !qglDeleteSamplers || !qglBindSampler || !qglSamplerParameteri)
 	{
@@ -726,9 +715,6 @@ CreateSampler(void)
 	qglSamplerParameteri(L.sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	qglSamplerParameteri(L.sampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 	qglBindSampler(LS_RAWUNIT, L.sampler);
-#else
-	L.sampler = 0;
-#endif
 }
 
 void
@@ -793,13 +779,11 @@ GL3_LShadow_Init(void)
 void
 GL3_LShadow_Shutdown(void)
 {
-#ifdef _WIN32
 	if (L.sampler && qglDeleteSamplers)
 	{
 		qglBindSampler(LS_RAWUNIT, 0);
 		qglDeleteSamplers(1, &L.sampler);
 	}
-#endif
 
 	if (L.tex) glDeleteTextures(1, &L.tex);
 	if (L.dummy) glDeleteTextures(1, &L.dummy);
@@ -819,7 +803,7 @@ static GLuint
 Compile(GLenum type, const char *src)
 {
 #ifdef YQ2_GL3_GLES3
-	const char *version = "#version 300 es\nprecision highp float;\n";
+	const char *version = GL3_GLES_HEADER;
 #else
 	const char *version = "#version 150\n";
 #endif

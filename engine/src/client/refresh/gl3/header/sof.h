@@ -226,6 +226,12 @@ void GL3_Fog_ViewTest(refdef_t *rd);
 int GL3_Fog_VolumeRegions(float *out, int max);
 float GL3_VolFog_OverlayDim(void);
 float GL3_Fog_DimAlpha(float a, float dim);
+void GL3_Seam_Invalidate(void);
+void GL3_BindUBO3D(void);
+void GL3_Ring3DReset(void);
+void GL3_Ring3DShutdown(void);
+extern int gl3_drawsamples; /* samples of the framebuffer 3D draws go to (gl3_post.c) */
+GLuint GL3_Fog_TableTexture(void); /* r_om_ppfog region table, GL_TEXTURE4 */
 void GL3_Post_VolFog(void);
 int GL3_Fog_SurfaceRegion(msurface_t *surf);
 /* I4c: gl_fogmode 1 (OpenGL linear fog on interior region faces while drawn) */
