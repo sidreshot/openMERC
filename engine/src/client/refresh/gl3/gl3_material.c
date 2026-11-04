@@ -458,11 +458,13 @@ MatFallback(const gl3image_t *img, const char *key, int m)
 {
 	static const char *const liquid[] = {"water", "slime", "lava", "molten", "sewage", "acid", NULL};
 	static const char *const glass[] = {"glass", "window", "wndw", NULL};
-	static const char *const ice[] = {"icewall", "ice_", "_ice", "frozen", NULL};
+	/* not "icewall"/"ice_wall": the SoF ice walls are snow-covered rock and frost (sib1 icewall_c), sorted as
+	   ground below; "ice_" alone also caught office_ / police_ */
+	static const char *const ice[] = {"ice_tube", "icicle", "_ice", "frozen", NULL};
 	static const char *const fabric[] = {"carpet", "rug", "rubber", "tire", "cloth", "tarp", "canvas", "curtain",
 		"towel", "mattress", "paper", "cardboard", "sandbag", "cork", "wallpaper", "couch", "sofa", NULL};
 	static const char *const ground[] = {"snow", "grass", "sand", "dirt", "mud", "gravel", "hay", "straw", "terrain",
-		"soil", "leaves", "rubble", "caverock", "cavefloor", "moss", NULL};
+		"soil", "leaves", "rubble", "caverock", "cavefloor", "moss", "icewall", "ice_wall", NULL};
 	static const char *const damp[] = {"sewer", "sewcon", "bsew", "mildew", "gutter", "drain", "slimy", "wet", NULL};
 	static const char *const rusty[] = {"rust", "dirty", "burn", "grime", "grate", "grating", "rivet", "metalrib",
 		"damage", "scorch", "chainlink", "fence", "barbwire", "catwalk", "girder", "ibeam", NULL};

@@ -984,8 +984,9 @@ tex tokyo/mirror                             mirror
 # --- ice (4)
 tex siberia/1_2_ice_tubes                    ice
 tex siberia/2_concrete2a_ice1                ice
-tex siberia/ice_wall1                        ice
-tex siberia/icewall_c                        ice
+# icewall_c and ice_wall1 are snow-covered rock and frost, not clear ice: matte (owner: "snow has reflections" on sib1)
+tex siberia/ice_wall1                        ground
+tex siberia/icewall_c                        ground
 
 # --- liquid (21)
 tex armory/2_mortar                          liquid
