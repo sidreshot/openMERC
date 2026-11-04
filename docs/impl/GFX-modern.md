@@ -1298,3 +1298,16 @@ correction away and put ours in its place".
 * A/B/C within one run (vid_restart): jpn1 corridor and arm1 shop, the bands are gone with 2. jpn1 load is about
   the same (20 s, within 1 s). The proper cure is re-upscaling the pack with wrapped borders (hdtex.py already
   does that, it needs Real-ESRGAN to be allowed to run).
+
+## r_om_seams on one texture with a broken placement (owner's F11 shot: arm1 brick pillar, omsetpos 112 -103 37 213 -4)
+
+* The pillar is armory/3_store_white_bottom on several coplanar faces with different texinfo: other offsets and
+  mirrored axes (f1948 t -1.33 vs f1954 t +1.33 - the dark foot of the texture turned up to the ceiling on purpose).
+  The retail 64x64 image is near noise, so the jumps never showed; the HD pack invented crisp bricks with white
+  mortar, and every face split became a hard line through the bricks. Not an HD tile seam (r_om_hdseam can't help).
+* SeamBuild now also takes a border between faces with the SAME image when the placement jumps there
+  (SeamMapJump: coordinates in retail texels, modulo the tile, more than one texel apart at any of five points).
+  The existing strip (the neighbour's mapping blended in, half at the seam, height blend) hides it; the material
+  class / family / visibility tests stay for different images only. Strips: arm1 310, jpn1 1167, tsr1 887.
+* At the owner's spot: the vertical line through the bricks is gone, the horizontal one is soft (A/B in one run).
+* Side finding: ai_freeze 1 set before `map tsr1` from om_after hangs the test (frozen intro) - also with seams off.

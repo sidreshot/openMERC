@@ -919,6 +919,38 @@ SeamVisible(const msurface_t *a, const msurface_t *b, const vec3_t e0, const vec
 	return (diff / steps) > 0.25f * Q_max(lum / steps, 0.08f);
 }
 
+/* one texture on both faces, but its placement jumps along the common border (another offset, a mirrored axis:
+   the artist fitted each face on its own). Invisible on the blurry retail art, a hard line through the bricks of
+   an HD replacement. Texture coordinates in retail texels, compared modulo the tile at five points */
+static qboolean
+SeamMapJump(const msurface_t *a, const msurface_t *b, const vec3_t e0, const vec3_t e1)
+{
+	const mtexinfo_t *ta = a->texinfo, *tb = b->texinfo;
+	int i, k;
+
+	for (i = 0; i < 5; i++)
+	{
+		vec3_t p;
+
+		VectorLerp(e0, e1, i / 4.0f, p);
+
+		for (k = 0; k < 2; k++)
+		{
+			float size = k ? ta->image->height : ta->image->width;
+			float d = (DotProduct(p, ta->vecs[k]) + ta->vecs[k][3]) - (DotProduct(p, tb->vecs[k]) + tb->vecs[k][3]);
+
+			d -= size * floorf(d / size + 0.5f);
+
+			if (fabsf(d) > 1.0f)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 /* one side of a world face, for matching the borders of coplanar faces */
 typedef struct
 {
@@ -1028,7 +1060,9 @@ SeamBuild(void)
 				vec3_t r0, r1, p0, p1;
 				float s0, s1, lo, hi;
 
-				if ((ed[i].face == ed[j].face) || (a->texinfo->image == b->texinfo->image))
+				qboolean same = (a->texinfo->image == b->texinfo->image);
+
+				if ((ed[i].face == ed[j].face) || (same && (a->texinfo == b->texinfo)))
 				{
 					continue;
 				}
@@ -1057,18 +1091,22 @@ SeamBuild(void)
 					continue;
 				}
 
-				/* only a seam that shows: the variants of one surface (dirty tiles, tiles with graffiti, a frieze)
-				   were fitted to each other at their seams by the artist */
-				if (SeamFamily(a->texinfo->image->name, b->texinfo->image->name) ||
-					((int)(-GL3_Mat_SurfClass(a) + 0.5f) == (int)(-GL3_Mat_SurfClass(b) + 0.5f)))
-				{
-					continue;
-				}
-
 				VectorMA(ed[i].a, lo, t, p0);
 				VectorMA(ed[i].a, hi, t, p1);
 
-				if (!SeamVisible(a, b, p0, p1))
+				if (same)
+				{
+					/* one texture: a seam only where its placement jumps */
+					if (!SeamMapJump(a, b, p0, p1))
+					{
+						continue;
+					}
+				}
+				/* only a seam that shows: the variants of one surface (dirty tiles, tiles with graffiti, a frieze)
+				   were fitted to each other at their seams by the artist */
+				else if (SeamFamily(a->texinfo->image->name, b->texinfo->image->name) ||
+					((int)(-GL3_Mat_SurfClass(a) + 0.5f) == (int)(-GL3_Mat_SurfClass(b) + 0.5f)) ||
+					!SeamVisible(a, b, p0, p1))
 				{
 					continue;
 				}
