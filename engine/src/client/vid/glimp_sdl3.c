@@ -136,10 +136,23 @@ CreateSDLWindow(SDL_WindowFlags flags, int fullscreen, int w, int h)
 	 *  * https://github.com/libsdl-org/SDL/issues/3656 */
 	SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "1");
 
+	/* OpenMerc test aid vid_testwindow 1 (automated test runs, not for players): the window takes no focus, is not
+	   activated when shown and sits outside the desktop - the runs do not get in the way of the person at the PC */
+	cvar_t *testwin = Cvar_Get("vid_testwindow", "0", 0);
+	int posx = last_position_x, posy = last_position_y;
+
+	if (testwin->value && !fullscreen)
+	{
+		flags |= SDL_WINDOW_NOT_FOCUSABLE;
+		SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+		posx = -w - 64;
+		posy = 32;
+	}
+
 	SDL_PropertiesID props = SDL_CreateProperties();
 	SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, OM_VERSION_STRING);
-	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, last_position_x);
-	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, last_position_y);
+	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, posx);
+	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, posy);
 	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, w);
 	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, h);
 	SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, flags);
