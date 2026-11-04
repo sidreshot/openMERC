@@ -1494,3 +1494,22 @@ Catmull-Rom), upscale sharpening (`r_om_upscale_sharp`), post antialiasing (`r_o
 (`r_om_postaa`: SMAA / FXAA). The rows are shown while the renderer registers the cvars; `r_om_preset` is now
 registered at renderer start (before, only on the first 3D frame, so the row would be hidden in the main menu).
 
+SMAA / FXAA on five more maps (same method): kos1 9.5 / 9.9 % of the pixels changed, nyc1 8.2 / 8.5, irq3b 1.3 /
+1.7, sud1 5.3 / 5.7, jpn2 3.9 / 4.6; no GL errors. The video menu section was checked on screen (menu main ->
+video, scrolled): all six rows with their labels and values.
+
+## Frustum clip flags in the world walk
+
+RecursiveWorldNode passes a mask of the four frustum planes: a node wholly in front of a plane clears its bit, its
+children skip that plane (their bounds lie inside the node's). Same frames on tsr1, kos1, sib1, ger1, irq3b, nyc1;
+the CPU gain is within the noise of this machine (the frame CPU time is mostly the wait for the GPU).
+
+## Pass on all 75 maps (2026-11-05, this build)
+
+32 SP + 43 DM maps, hidden test windows, GL debug context: 0 GL errors, 0 undefined-behaviour messages, the static
+world buffer built on every map with a world. The anomaly flags (flat / orange shots) are the same spots as in the
+first pass (a camera in a wall or in thick fog). Average over the SP maps against the first pass: GPU 5.35 -> 5.30 ms,
+CPU 3.96 -> 3.95 ms (noise either way per map). Eleven DM maps have no info_player_start (irqdm1, jpndm2, kosdm1,
+nycctf1, nycdm1, raven, sibctf1, sudctf1, suddm1-3): started in single player the game stops with "Couldn't find
+spawn point", as the original does; the harness starts them with deathmatch 1.
+
