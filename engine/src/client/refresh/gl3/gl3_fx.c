@@ -182,6 +182,14 @@ GL3_FX_Flush(void)
 		GLsizeiptr bytes = (GLsizeiptr)numfxverts * (GLsizeiptr)sizeof(gl3fxvtx_t);
 		void *p;
 
+		if (!GL3_RingsOn())
+		{
+			glBufferData(GL_ARRAY_BUFFER, bytes, fxverts, GL_STREAM_DRAW);
+			fxringvbo = 0;
+			fxfirst = 0;
+			goto uploaded;
+		}
+
 		if ((fxringvbo != vbofx) || (fxringgen != gl3_contextgen) || (fxringoff + bytes > FX_RING))
 		{
 			glBufferData(GL_ARRAY_BUFFER, FX_RING, NULL, GL_STREAM_DRAW);
@@ -206,6 +214,7 @@ GL3_FX_Flush(void)
 		fxfirst = (GLint)(fxringoff / (GLsizeiptr)sizeof(gl3fxvtx_t));
 		fxringoff += bytes;
 	}
+uploaded:
 
 	if (st->texnum)
 	{

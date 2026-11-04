@@ -1362,13 +1362,13 @@ correction away and put ours in its place".
 
 Found by a code audit (three read-only passes: per-frame cost, lifecycle / memory safety, portability) and fixed:
 
-* **Streaming without re-specification.** The 3D batches (world, seams, brush models), the effect batches and the
-  Ghoul emulator's primitives went through `glBufferData` per batch / per glBegin-glEnd primitive - hundreds to
-  thousands of re-specifications of the same buffer a frame. Now each writes into a ring (16 MB vertices + 4 MB
-  indices for the 3D batches, ~4.7 MB effects, 4 MB Ghoul), mapped unsynchronised and orphaned once per lap; the
-  3D VAO's attribute pointers move to the batch's first vertex (no BaseVertex draw, so GLES 3.0 works). The 3D uniform
-  block (changes per draw: model matrix, emissive weight, texture size, scroll, fog) lives in a ring of aligned slots
-  bound with `glBindBufferRange` (`r_om_uboring 1`, 0 = the old single buffer).
+* **Streaming rings - measured, vertex rings off by default.** The 3D batches, effect batches and Ghoul primitives can
+  write into rings (unsynchronised maps, orphaned once per lap; the 3D VAO's attribute pointers move to the batch's first
+  vertex, no BaseVertex draw needed on GLES 3.0): `r_om_ringbuf 1`. A/B/A in one run on a GTX 1050 Ti (tsr1): +0.3 ms GPU
+  on the models and 26 ms spikes when the 16 MB ring was orphaned - the driver keeps the mapped stream buffer in system
+  memory, its renaming of small glBufferData stores is faster. Default 0; kept for drivers that copy on every
+  re-specification (to be measured on mobile). The 3D uniform block ring (`r_om_uboring 1`) measured neutral on the GPU
+  and stays on.
 * **No driver round trips in draw paths.** A shadow of the tracked GL state (blend, cull, depth test, depth mask,
   blend function, cull mode) in header/local.h: the setters update it and `glIsEnabled`/`glGetIntegerv`/
   `glGetBooleanv` of that state read it (the Ghoul emulator asked 9 times per model, the shadow and beam passes

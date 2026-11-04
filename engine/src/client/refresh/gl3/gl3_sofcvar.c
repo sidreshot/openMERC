@@ -205,7 +205,7 @@ GL3_SoF_RegisterCvars(void)
 	Get("r_om_softparticles", "0", CVAR_ARCHIVE);
 	Get("r_om_softparticles_dist", "12", CVAR_ARCHIVE);
 	Get("r_om_softparticles_add", "1", CVAR_ARCHIVE);
-	Get("r_om_ppfog", "0", CVAR_ARCHIVE);
+	Get("r_om_ppfog", "1", CVAR_ARCHIVE); /* the SoF overlay rule per pixel, one batch (gl3_fog.c): default since the 2026-11-04 audit */
 	Get("r_om_overbright", "0", CVAR_ARCHIVE); /* non-original; menu must label it */
 	Get("r_om_overbright_scale", "2", CVAR_ARCHIVE);
 	Get("r_om_overbright_models", "1", CVAR_ARCHIVE);

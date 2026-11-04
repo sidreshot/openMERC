@@ -1580,7 +1580,7 @@ Flush(void)
 				emuringoff = EMU_RING; /* allocate below */
 			}
 
-			if (bytes > EMU_RING / 4)
+			if ((bytes > EMU_RING / 4) || !GL3_RingsOn())
 			{
 				/* a huge primitive: its own store, the ring starts again next time */
 				glBufferData(GL_ARRAY_BUFFER, bytes, out, GL_STREAM_DRAW);

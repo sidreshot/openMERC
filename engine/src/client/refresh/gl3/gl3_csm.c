@@ -93,6 +93,13 @@ static struct
 /* the static layers drawn last: their projections, map size, texture and the static build they hold */
 static float statvp[CSM_MAXCASC][16];
 static int statsize, statgen, buildgen = 1;
+
+/* the generation of the static casters (gl3_post.c beam caches) */
+int
+GL3_CSM_StaticGen(void)
+{
+	return buildgen;
+}
 static GLuint stattex;
 
 /* ------------------------------------------------------------------

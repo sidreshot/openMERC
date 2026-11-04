@@ -1355,7 +1355,7 @@ PerPixel(int mode)
 {
 	if (!r_om_ppfog)
 	{
-		r_om_ppfog = ri.Cvar_Get("r_om_ppfog", "0", CVAR_ARCHIVE);
+		r_om_ppfog = ri.Cvar_Get("r_om_ppfog", "1", CVAR_ARCHIVE);
 	}
 
 	return (r_om_ppfog->value != 0) && (mode != 3);

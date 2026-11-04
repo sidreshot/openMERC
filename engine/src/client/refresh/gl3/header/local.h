@@ -86,8 +86,9 @@ extern int gl3_contextgen;
  */
 typedef struct
 {
-	GLboolean blend, cull, depthtest, depthmask;
-	GLenum bsrc, bdst, cullmode;
+	GLboolean blend, cull, depthtest, depthmask, polyoffset;
+	GLenum bsrc, bdst, cullmode, depthfunc;
+	GLfloat dnear, dfar;
 } gl3glstate_t;
 
 extern gl3glstate_t gl3gls;
@@ -100,6 +101,10 @@ GL3_StateReset(void)
 	gl3gls.bsrc = GL_ONE;
 	gl3gls.bdst = GL_ZERO;
 	gl3gls.cullmode = GL_BACK;
+	gl3gls.polyoffset = GL_FALSE;
+	gl3gls.depthfunc = GL_LESS;
+	gl3gls.dnear = 0;
+	gl3gls.dfar = 1;
 }
 
 static inline GLboolean *
@@ -110,6 +115,7 @@ GL3_StateCap(GLenum cap)
 		case GL_BLEND: return &gl3gls.blend;
 		case GL_CULL_FACE: return &gl3gls.cull;
 		case GL_DEPTH_TEST: return &gl3gls.depthtest;
+		case GL_POLYGON_OFFSET_FILL: return &gl3gls.polyoffset;
 		default: return NULL;
 	}
 }
@@ -171,10 +177,43 @@ GL3_StCullFace(GLenum m)
 }
 
 static inline void
+GL3_StDepthFunc(GLenum f)
+{
+	gl3gls.depthfunc = f;
+	glad_glDepthFunc(f);
+}
+
+static inline void
+GL3_StDepthRange(GLfloat n, GLfloat f)
+{
+	gl3gls.dnear = n;
+	gl3gls.dfar = f;
+#ifdef YQ2_GL3_GLES3
+	glad_glDepthRangef(n, f);
+#else
+	glad_glDepthRange(n, f);
+#endif
+}
+
+static inline void
+GL3_StGetFloatv(GLenum p, GLfloat *v)
+{
+	if (p == GL_DEPTH_RANGE)
+	{
+		v[0] = gl3gls.dnear;
+		v[1] = gl3gls.dfar;
+		return;
+	}
+
+	glad_glGetFloatv(p, v);
+}
+
+static inline void
 GL3_StGetIntegerv(GLenum p, GLint *v)
 {
 	switch (p)
 	{
+		case GL_DEPTH_FUNC: *v = (GLint)gl3gls.depthfunc; return;
 		case GL_BLEND_SRC_RGB: case GL_BLEND_SRC_ALPHA: *v = (GLint)gl3gls.bsrc; return;
 		case GL_BLEND_DST_RGB: case GL_BLEND_DST_ALPHA: *v = (GLint)gl3gls.bdst; return;
 		case GL_CULL_FACE_MODE: *v = (GLint)gl3gls.cullmode; return;
@@ -207,6 +246,9 @@ GL3_StGetBooleanv(GLenum p, GLboolean *v)
 #undef glCullFace
 #undef glGetIntegerv
 #undef glGetBooleanv
+#undef glDepthFunc
+#undef glDepthRange
+#undef glGetFloatv
 #define glEnable GL3_StEnable
 #define glDisable GL3_StDisable
 #define glIsEnabled GL3_StIsEnabled
@@ -215,6 +257,9 @@ GL3_StGetBooleanv(GLenum p, GLboolean *v)
 #define glCullFace GL3_StCullFace
 #define glGetIntegerv GL3_StGetIntegerv
 #define glGetBooleanv GL3_StGetBooleanv
+#define glDepthFunc GL3_StDepthFunc
+#define glDepthRange GL3_StDepthRange
+#define glGetFloatv GL3_StGetFloatv
 
 /* gl3_shaders.c: uniform locations looked up in per-frame code, cached by (program, name literal); a deleted
    program or a new context clears the cache */

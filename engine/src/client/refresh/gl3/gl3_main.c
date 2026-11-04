@@ -72,7 +72,7 @@ vec3_t gl3_origin;
 int gl3_visframecount; /* bumped when going to a new PVS */
 int gl3_framecount; /* used for dlight push checking */
 int gl3_contextgen = 1; /* OpenMerc: GL contexts made (header/local.h) */
-gl3glstate_t gl3gls = {GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE, GL_ONE, GL_ZERO, GL_BACK}; /* header/local.h */
+gl3glstate_t gl3gls = {GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE, GL_FALSE, GL_ONE, GL_ZERO, GL_BACK, GL_LESS, 0, 1}; /* header/local.h */
 
 int c_brush_polys, c_alias_polys;
 
@@ -951,6 +951,23 @@ Ring3DPut(GLenum target, GLsizeiptr ring, GLsizeiptr *off, const void *data, GLs
 
 static GLintptr r3dibase; /* byte offset of this batch's indices */
 
+/* r_om_ringbuf: 1 the vertex rings of the 3D, effect and Ghoul batches, 0 (default) glBufferData per batch. Measured on a
+   GTX 1050 Ti (tsr1, A/B/A in one run): the rings cost +0.3 ms GPU on models and gave 26 ms spikes when a 16 MB
+   ring was orphaned - the driver keeps a mapped stream buffer in system memory, its renaming of small glBufferData
+   stores is faster. Kept for drivers (mobile) that copy on every re-specification - to be measured there */
+qboolean
+GL3_RingsOn(void)
+{
+	static cvar_t *cv;
+
+	if (!cv)
+	{
+		cv = ri.Cvar_Get("r_om_ringbuf", "0", CVAR_ARCHIVE); /* 1 measured slower on desktop NVIDIA (GPU +0.3 ms, spikes on orphaning); for drivers that copy on every glBufferData */
+	}
+
+	return cv->value != 0;
+}
+
 /* another user of the 3D VBO (the triangle outlines) re-specifies it: the attributes back at 0, the rings start
    again on the next batch (the VAO and VBO must be bound) */
 void
@@ -987,7 +1004,7 @@ void GL3_Draw3DBatchesNow()
 			r3dioff = R3D_IRING;
 		}
 
-		if ((vb > R3D_VRING) || (ib > R3D_IRING))
+		if ((vb > R3D_VRING) || (ib > R3D_IRING) || !GL3_RingsOn())
 		{
 			/* larger than a ring: the old way */
 			glBufferData(GL_ARRAY_BUFFER, vb, vtxBuf.p, GL_STREAM_DRAW);

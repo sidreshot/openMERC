@@ -229,6 +229,8 @@ float GL3_Fog_DimAlpha(float a, float dim);
 void GL3_Seam_Invalidate(void);
 void GL3_BindUBO3D(void);
 void GL3_Ring3DReset(void);
+int GL3_CSM_StaticGen(void);
+qboolean GL3_RingsOn(void);
 void GL3_Ring3DShutdown(void);
 extern int gl3_drawsamples; /* samples of the framebuffer 3D draws go to (gl3_post.c) */
 GLuint GL3_Fog_TableTexture(void); /* r_om_ppfog region table, GL_TEXTURE4 */

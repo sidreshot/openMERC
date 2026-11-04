@@ -2711,6 +2711,10 @@ static struct
 
 	qboolean tried;
 	GLuint prog, shadowtex, shadowfbo;
+	GLuint readfbo;            /* the cached world-only layer as a blit source */
+	float worldvp[BEAM_DRAW][16]; /* the lamp projection each world-only layer was drawn with */
+	int worldgen[BEAM_DRAW];   /* and the static build / texture generation, 0 = none */
+	int texgen;
 	GLint u_depth, u_shadow, u_invpv, u_eye, u_prm, u_prm2, u_b0, u_b1, u_b2, u_b3, u_bvp, u_rect;
 
 	/* dust motes */
@@ -3866,6 +3870,7 @@ BeamShadowTargets(void)
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 	GL3_SelectTMU(GL_TEXTURE0);
 
+	B.texgen++; /* new layers: nothing cached in them */
 	glGenFramebuffers(1, &B.shadowfbo);
 	glBindFramebuffer(GL_FRAMEBUFFER, B.shadowfbo);
 	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, 0);
@@ -4039,19 +4044,58 @@ GL3_Post_Beams(void)
 			int mode = (int)r_om_beams_shadows->value; /* 1 all, 2 world only, 3 models only (tests) */
 			int nf = (mode == 2) ? 0 : FilterCasters(&bl[i]);
 
-			glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, i);
-			glClearBufferfv(GL_DEPTH, 0, &one);
-
-			if (!GL3_CSM_DrawDepth(vps + i * 16, B.flt, nf, mode != 3))
+			if (mode != 3)
 			{
-				shadows = false;
+				/* the world alone (layer BEAM_DRAW + i) is drawn only when the lamp's projection, the static build
+				   or the texture changed - lamps stand still; then it is copied into layer i and only the
+				   characters are drawn over it (before: the whole static world twice per beam every frame) */
+				int gen = GL3_CSM_StaticGen() * 64 + (B.texgen & 63);
+
+				if ((B.worldgen[i] != gen) || memcmp(B.worldvp[i], vps + i * 16, sizeof(B.worldvp[i])))
+				{
+					glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, BEAM_DRAW + i);
+					glClearBufferfv(GL_DEPTH, 0, &one);
+
+					if (GL3_CSM_DrawDepth(vps + i * 16, NULL, 0, true))
+					{
+						memcpy(B.worldvp[i], vps + i * 16, sizeof(B.worldvp[i]));
+						B.worldgen[i] = gen;
+					}
+					else
+					{
+						B.worldgen[i] = 0;
+						shadows = false;
+					}
+				}
+
+				if (!B.readfbo)
+				{
+					glGenFramebuffers(1, &B.readfbo);
+				}
+
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, B.readfbo);
+				glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, BEAM_DRAW + i);
+				glReadBuffer(GL_NONE);
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, B.shadowfbo);
+				glFramebufferTextureLayer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, i);
+				glBlitFramebuffer(0, 0, BEAM_SHADOW, BEAM_SHADOW, 0, 0, BEAM_SHADOW, BEAM_SHADOW, GL_DEPTH_BUFFER_BIT,
+					GL_NEAREST);
+				glBindFramebuffer(GL_FRAMEBUFFER, B.shadowfbo);
+
+				if ((nf >= 9) && !GL3_CSM_DrawDepth(vps + i * 16, B.flt, nf, false))
+				{
+					shadows = false;
+				}
 			}
-
-			if (gshadow > 0)
+			else
 			{
-				glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, BEAM_DRAW + i);
+				glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, i);
 				glClearBufferfv(GL_DEPTH, 0, &one);
-				GL3_CSM_DrawDepth(vps + i * 16, NULL, 0, true);
+
+				if (!GL3_CSM_DrawDepth(vps + i * 16, B.flt, nf, false))
+				{
+					shadows = false;
+				}
 			}
 		}
 
@@ -4203,6 +4247,7 @@ BeamShutdown(void)
 	}
 
 	if (B.shadowfbo) glDeleteFramebuffers(1, &B.shadowfbo);
+	if (B.readfbo) glDeleteFramebuffers(1, &B.readfbo);
 	if (B.shadowtex) glDeleteTextures(1, &B.shadowtex);
 
 	for (i = 0; i < BEAM_MAXCAP; i++)
