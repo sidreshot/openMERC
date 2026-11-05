@@ -204,7 +204,7 @@ MF_Ready(const char *font)
 	{
 		mf_cvar = Cvar_Get("menu_ttf", "1", CVAR_ARCHIVE);
 #ifdef __ANDROID__
-		mf_size = Cvar_Get("menu_textsize", "2.2", CVAR_ARCHIVE); /* a phone: text and rows a finger hits */
+		mf_size = Cvar_Get("menu_textsize", "1.4", CVAR_ARCHIVE); /* a phone: text and rows a finger hits */
 #else
 		mf_size = Cvar_Get("menu_textsize", "1", CVAR_ARCHIVE);
 #endif

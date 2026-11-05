@@ -50,6 +50,10 @@ float glimp_refreshRate = -1.0f;
 /* openMERC Android: vid_surfacescale (default 0.6) - the window surface is made that fraction of the panel and the
    display hardware scales it up (OpenMercActivity.setSurfaceScale): every pixel pass, the HUD included, runs on
    fewer pixels; on the Adreno 610 phone the passes at the panel's 2400x1080 cost 20-40 ms alone */
+/* SDL normalizes a finger by the surface buffer, Android reports it in view pixels: with a scaled surface the
+   normalized position is the true one divided by this (input/sdl3.c multiplies it back) */
+float glimp_touchscale_x = 1.0f, glimp_touchscale_y = 1.0f;
+
 static void
 AndroidSurfaceSize(int *width, int *height)
 {
@@ -59,6 +63,9 @@ AndroidSurfaceSize(int *width, int *height)
 	int w = (s < 0.999f) ? Q_max((int)(*width * s + 0.5f), 16) : 0, h = (s < 0.999f) ? Q_max((int)(*height * s + 0.5f), 16) : 0;
 	JNIEnv *env;
 	jobject activity;
+
+	glimp_touchscale_x = w ? (float)w / (float)*width : 1.0f;
+	glimp_touchscale_y = h ? (float)h / (float)*height : 1.0f;
 
 	if (w)
 	{

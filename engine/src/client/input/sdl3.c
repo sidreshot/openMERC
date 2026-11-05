@@ -782,6 +782,13 @@ IN_Update(void)
 			{
 				static SDL_FingerID menufinger;
 				int type = (event.type == SDL_EVENT_FINGER_DOWN) ? 0 : (event.type == SDL_EVENT_FINGER_MOTION) ? 1 : 2;
+#ifdef __ANDROID__
+				extern float glimp_touchscale_x, glimp_touchscale_y;
+
+				/* vid_surfacescale: SDL divided the view position by the smaller buffer */
+				event.tfinger.x *= glimp_touchscale_x;
+				event.tfinger.y *= glimp_touchscale_y;
+#endif
 
 				if (Touch_Active())
 				{
