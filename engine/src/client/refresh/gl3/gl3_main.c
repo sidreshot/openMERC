@@ -1462,6 +1462,16 @@ WorldBuild(void)
 	return true;
 }
 
+static qboolean WorldReady(void);
+
+/* OpenMerc: built at the end of a map's registration, under the loading plaque, instead of in the first frame of
+   the map (a 0.2 s hitch when the view appeared) */
+void
+GL3_WorldVBO_Prewarm(void)
+{
+	WorldReady();
+}
+
 static qboolean
 WorldReady(void)
 {

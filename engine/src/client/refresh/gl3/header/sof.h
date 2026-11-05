@@ -242,6 +242,10 @@ void GL3_Mat_Flush(void);
 void GL3_ParallelFor(int n, void (*fn)(int i, void *ctx), void *ctx); /* gl3_jobs.c */
 void GL3_Jobs_Shutdown(void);
 void GL3_Image_LoadDone(void); /* gl3_image.c: end of a registration */
+void GL3_CSM_Prewarm(void);      /* the first frame's builds, at the end of a registration */
+void GL3_WorldVBO_Prewarm(void);
+void GL3_Seams_Prewarm(void);
+void GL3_Mat_Prewarm(void);
 double GL3_LoadClockMs(void); /* r_om_loadtime (gl3_model.c) */
 qboolean GL3_RingsOn(void);
 void GL3_Ring3DShutdown(void);

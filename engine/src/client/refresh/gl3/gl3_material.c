@@ -1790,6 +1790,18 @@ MatProbe_f(void)
 		M.cls[c].b[0], M.cls[c].b[1], M.cls[c].b[2], M.cls[c].b[3]);
 }
 
+/* OpenMerc: built at the end of a map's registration, under the loading plaque, instead of in the first frame of
+   the map (a 0.2 s hitch when the view appeared) */
+void
+GL3_Mat_Prewarm(void)
+{
+	if (!M.loaded)
+	{
+		GL3_Mat_Init();
+		MatLoad();
+	}
+}
+
 void
 GL3_Mat_Init(void)
 {

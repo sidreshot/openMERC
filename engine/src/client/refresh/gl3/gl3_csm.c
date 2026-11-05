@@ -1012,6 +1012,18 @@ OrthoForCascade(int c, float dnear, float dfar, const vec3_t X, const vec3_t Y, 
 	C.u.bias[c] = Q_max(r_om_csm_bias->value, 0.0f) * 1000.0f / (zmax - zmin) * 0.5f;
 }
 
+/* OpenMerc: built at the end of a map's registration, under the loading plaque, instead of in the first frame of
+   the map (a 0.2 s hitch when the view appeared) */
+void
+GL3_CSM_Prewarm(void)
+{
+	if (r_om_csm && r_om_csm->value && sun.valid && !C.failed && gl3_worldmodel && (C.built != gl3_worldmodel) &&
+		!((sunweight >= 0) && (sunweight < 1)))
+	{
+		BuildStatic();
+	}
+}
+
 static qboolean
 WantCsm(void)
 {

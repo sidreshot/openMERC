@@ -1236,6 +1236,16 @@ GL3_EndRegistration(void)
 	   cycle (SPEC-002, SPEC-413 §8); models are kept while there is room */
 	GL3_FreeUnusedImages();
 
+	/* what the first frame of the map would build, still under the loading plaque */
+	if (gl3_worldmodel)
+	{
+		GL3_Mat_Prewarm();
+		GL3_WorldVBO_Prewarm();
+		GL3_CSM_Prewarm();
+		GL3_Seams_Prewarm();
+		GL3_LoadMark("first-frame builds (static shadows, world buffer, seams)");
+	}
+
 	if (Mod_HasFreeSpace() && GL3_ImageHasFreeSpace())
 	{
 		// should be enough space for load next maps

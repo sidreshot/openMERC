@@ -1150,6 +1150,28 @@ SeamBuild(void)
 	R_Printf(PRINT_DEVELOPER, "r_om_seams: %d strips\n", numseams);
 }
 
+/* OpenMerc: built at the end of a map's registration, under the loading plaque, instead of in the first frame of
+   the map (a 0.2 s hitch when the view appeared) */
+void
+GL3_Seams_Prewarm(void)
+{
+	float w;
+
+	if (!r_om_seams || !r_om_seams->value || !gl3state.si3DlmSeam.shaderProgram || !gl3_worldmodel ||
+		(gl3_worldmodel->bspversion != BSPVERSION_SOF))
+	{
+		return;
+	}
+
+	w = Q_clamp(r_om_seams_width->value, 2.0f, 64.0f);
+
+	if ((seamsurfaces != gl3_worldmodel->surfaces) || (seamwidth != w))
+	{
+		seamwidth = w;
+		SeamBuild();
+	}
+}
+
 /* after the opaque world: the strips of the faces drawn this frame, within 2500 units */
 static void
 SeamDraw(void)
