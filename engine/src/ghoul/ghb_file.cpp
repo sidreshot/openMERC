@@ -284,8 +284,29 @@ bool DecodeIndexList(const int16_t *idx, int n, std::vector<uint16_t> &tris)
 
 } // namespace
 
+extern "C" long long Sys_Microseconds(void);
+/* OpenMerc: model files read and parsed during a map load (OMLOADTIME) */
+extern "C" long long ghoul_load_us;
+extern "C" int ghoul_load_n;
+long long ghoul_load_us;
+int ghoul_load_n;
+
+namespace
+{
+struct LoadTimer
+{
+	long long t0 = Sys_Microseconds();
+	~LoadTimer()
+	{
+		ghoul_load_us += Sys_Microseconds() - t0;
+		ghoul_load_n++;
+	}
+};
+}
+
 bool GhbFile::Load(const std::string &gamePath)
 {
+	LoadTimer timer;
 	void *d = nullptr;
 	int len = Host().load_file ? Host().load_file(Host().ctx, gamePath.c_str(), &d) : -1;
 	if (len < 0 || !d)

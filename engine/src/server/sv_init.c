@@ -700,8 +700,13 @@ SV_Map(qboolean attractloop, const char *levelstring, qboolean loadgame)
 		extern long long fs_stat_us;
 		extern int fs_stat_opens, fs_stat_loosemiss;
 
+		extern long long ghoul_load_us;
+		extern int ghoul_load_n;
+
 		fs_stat_us = 0;
 		fs_stat_opens = fs_stat_loosemiss = 0;
+		ghoul_load_us = 0;
+		ghoul_load_n = 0;
 	}
 	sv.loadgame = loadgame;
 	sv.attractloop = attractloop;

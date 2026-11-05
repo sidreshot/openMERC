@@ -709,11 +709,13 @@ SCR_EndLoadingPlaque(void)
 	{
 		extern long long fs_stat_us;
 		extern int fs_stat_opens, fs_stat_loosemiss;
+		extern long long ghoul_load_us;
+		extern int ghoul_load_n;
 
 		Com_Printf("OMLOADTIME %s %d ms (server %d: collision %d, game spawn %d; client models/images %d; file lookups %d "
-				"in %d ms, %d directory misses)\n", cl.configstrings[CS_MODELS + 1], Sys_Milliseconds() - om_loadstart,
-				om_loadserver, om_loadcm, om_loadspawn, om_loadprep, fs_stat_opens, (int)(fs_stat_us / 1000),
-				fs_stat_loosemiss);
+				"in %d ms, %d directory misses; Ghoul models %d in %d ms)\n", cl.configstrings[CS_MODELS + 1],
+				Sys_Milliseconds() - om_loadstart, om_loadserver, om_loadcm, om_loadspawn, om_loadprep, fs_stat_opens,
+				(int)(fs_stat_us / 1000), fs_stat_loosemiss, ghoul_load_n, (int)(ghoul_load_us / 1000));
 		om_loadstart = 0;
 	}
 
