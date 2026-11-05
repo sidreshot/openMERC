@@ -34,6 +34,14 @@
 
 #include "header/local.h"
 
+#ifdef _MSC_VER
+#include <intrin.h> /* _InterlockedCompareExchange */
+#include <direct.h> /* _mkdir */
+#else
+#include <sys/stat.h>
+#endif
+#include "../../../common/unzip/miniz/miniz.h"
+
 #define MAT_MAXCLASS 24
 #define MAT_UNIT 14
 #define MAT_HASH 2048
@@ -694,19 +702,122 @@ MatWrap(int i, int n)
 
 /* box blur with wrap-around (textures tile), twice for a tent shape. Running sums; the wrap is a compare, not a
    modulo per texel (two divisions per texel and pass made the material maps 8 s of a 16 s map load with HD textures) */
+/* the scratch memory of one measuring job: every array of MatCompute and MatBlur (about twenty of up to 256 KB a
+   texture) is cut from it, reset per texture, instead of the heap (no lock, no fresh pages per texture) */
+#define MAT_ARENA (12 * 1024 * 1024)
+#define MAT_ARENAS 8
+
+typedef struct
+{
+	volatile long busy;
+	char *base;
+	size_t used;
+} matarena_t;
+
+static matarena_t matarenas[MAT_ARENAS];
+
+#if defined(_MSC_VER)
+static __declspec(thread) matarena_t *matcur;
+#else
+static __thread matarena_t *matcur;
+#endif
+
+static void *
+MatAlloc(size_t n)
+{
+	matarena_t *a = matcur;
+
+	n = (n + 63) & ~(size_t)63;
+
+	if (a && a->base && (a->used + n <= MAT_ARENA))
+	{
+		void *p = a->base + a->used;
+
+		a->used += n;
+		return p;
+	}
+
+	return malloc(n); /* a texture larger than the arena: the heap as before */
+}
+
+static void
+MatFree(void *p)
+{
+	matarena_t *a = matcur;
+
+	if (!p || (a && a->base && ((char *)p >= a->base) && ((char *)p < a->base + MAT_ARENA)))
+	{
+		return; /* the arena is reset with the next texture */
+	}
+
+	free(p);
+}
+
+/* an arena for this thread's job (one per worker; the main thread outside a batch takes one too) */
+static void
+MatArenaBegin(void)
+{
+	int i;
+
+	matcur = NULL;
+
+	for (i = 0; i < MAT_ARENAS; i++)
+	{
+#ifdef _MSC_VER
+		if (_InterlockedCompareExchange(&matarenas[i].busy, 1, 0) == 0)
+#else
+		if (__sync_bool_compare_and_swap(&matarenas[i].busy, 0, 1))
+#endif
+		{
+			if (!matarenas[i].base)
+			{
+				matarenas[i].base = malloc(MAT_ARENA);
+			}
+
+			matarenas[i].used = 0;
+			matcur = &matarenas[i];
+			return;
+		}
+	}
+}
+
+static void
+MatArenaEnd(void)
+{
+	if (matcur)
+	{
+		matcur->busy = 0;
+		matcur = NULL;
+	}
+}
+
+/* the arenas go at the end of a registration */
+static void
+MatArenasFree(void)
+{
+	int i;
+
+	for (i = 0; i < MAT_ARENAS; i++)
+	{
+		free(matarenas[i].base);
+		matarenas[i].base = NULL;
+		matarenas[i].busy = 0;
+	}
+}
+
 static float *
 MatBlur(const float *src, int w, int h, int r)
 {
-	float *a = malloc(sizeof(float) * w * h), *b = malloc(sizeof(float) * w * h), *colsum = malloc(sizeof(float) * w);
+	float *a = MatAlloc(sizeof(float) * w * h), *b = MatAlloc(sizeof(float) * w * h), *colsum = MatAlloc(sizeof(float) * w);
 	float inv = 1.0f / (2 * r + 1);
 	int pass, x, y, k;
 	double tb = MatClock();
 
 	if (!a || !b || !colsum)
 	{
-		free(a);
-		free(b);
-		free(colsum);
+		MatFree(a);
+		MatFree(b);
+		MatFree(colsum);
 		return NULL;
 	}
 
@@ -786,8 +897,8 @@ MatBlur(const float *src, int w, int h, int r)
 		}
 	}
 
-	free(b);
-	free(colsum);
+	MatFree(b);
+	MatFree(colsum);
 	gl3_matt[1] += MatClock() - tb;
 	return a;
 }
@@ -877,10 +988,10 @@ MatCompute(matjob_t *j)
 
 	n = w * h;
 	md = w > h ? w : h;
-	L = malloc(sizeof(float) * n);
-	rm = malloc(sizeof(float) * n);
-	tmp = malloc(sizeof(float) * n);
-	wm = malloc(sizeof(float) * n);
+	L = MatAlloc(sizeof(float) * n);
+	rm = MatAlloc(sizeof(float) * n);
+	tmp = MatAlloc(sizeof(float) * n);
+	wm = MatAlloc(sizeof(float) * n);
 	out = malloc((size_t)n * 4);
 
 	if (!L || !rm || !tmp || !wm || !out)
@@ -948,7 +1059,7 @@ MatCompute(matjob_t *j)
 			tmp[i] = fabsf(L[i] - b1[i]);
 		}
 
-		free(b1);
+		MatFree(b1);
 	}
 
 	hf = MatBlur(tmp, w, h, 2);
@@ -986,7 +1097,7 @@ MatCompute(matjob_t *j)
 		if (gb)
 		{
 			memcpy(G, gb, sizeof(float) * n);
-			free(gb);
+			MatFree(gb);
 		}
 	}
 
@@ -1010,14 +1121,14 @@ MatCompute(matjob_t *j)
 
 		pw = w / k > 1 ? w / k : 1;
 		ph = h / k > 1 ? h / k : 1;
-		Lp = malloc(sizeof(float) * pw * ph);
-		Wp = malloc(sizeof(float) * pw * ph);
-		pane = malloc(sizeof(float) * pw * ph);
+		Lp = MatAlloc(sizeof(float) * pw * ph);
+		Wp = MatAlloc(sizeof(float) * pw * ph);
+		pane = MatAlloc(sizeof(float) * pw * ph);
 
 		if (!Lp || !Wp || !pane)
 		{
-			free(Lp);
-			free(Wp);
+			MatFree(Lp);
+			MatFree(Wp);
 			goto done;
 		}
 
@@ -1071,8 +1182,8 @@ MatCompute(matjob_t *j)
 			}
 		}
 
-		free(Lp);
-		free(Wp);
+		MatFree(Lp);
+		MatFree(Wp);
 		pb = MatBlur(pane, pw, ph, 1);
 
 		if (!pb)
@@ -1085,7 +1196,7 @@ MatCompute(matjob_t *j)
 			pane[i] = SStep(0.35f, 0.7f, pb[i]);
 		}
 
-		free(pb);
+		MatFree(pb);
 		panew = pw;
 		panek = k;
 	}
@@ -1121,18 +1232,18 @@ MatCompute(matjob_t *j)
 
 
 done:
-	free(L);
-	free(rm);
-	free(tmp);
-	free(out);
-	free(M1);
-	free(M3);
-	free(V1);
-	free(V3);
-	free(hf);
-	free(st);
-	free(pane);
-	free(wm);
+	MatFree(L);
+	MatFree(rm);
+	MatFree(tmp);
+	MatFree(out);
+	MatFree(M1);
+	MatFree(M3);
+	MatFree(V1);
+	MatFree(V3);
+	MatFree(hf);
+	MatFree(st);
+	MatFree(pane);
+	MatFree(wm);
 }
 
 
@@ -1161,10 +1272,186 @@ MatUpload(matjob_t *j)
 	memset(j, 0, sizeof(*j));
 }
 
+
+/* ------------------------------------------------------------------
+ * the material maps on disk (r_om_matcache 1): a map depends only on the
+ * texels it is measured from, so it is kept in <user dir>/matcache/ under a
+ * 64-bit hash of those texels, their size and MAT_CACHE_VERSION, deflated
+ * (miniz). A later load reads it instead of measuring (1.2 s of a PC load of
+ * tsr1 with the HD pack). The jobs read and write the files themselves.
+ * ------------------------------------------------------------------ */
+
+#define MAT_CACHE_VERSION 1   /* raise it with any change of MatCompute */
+
+static char matcachedir[MAX_OSPATH]; /* "" = no cache this batch */
+
+static unsigned long long
+MatCacheKey(const matjob_t *j)
+{
+	const unsigned char *b = (const unsigned char *)j->rgb;
+	size_t i, n = sizeof(float) * 3 * (size_t)j->w * j->h;
+	unsigned long long h = 14695981039346656037ull;
+
+	h = (h ^ (unsigned long long)MAT_CACHE_VERSION) * 1099511628211ull;
+	h = (h ^ (unsigned long long)j->w) * 1099511628211ull;
+	h = (h ^ (unsigned long long)j->h) * 1099511628211ull;
+
+	for (i = 0; i < n; i++)
+	{
+		h = (h ^ b[i]) * 1099511628211ull;
+	}
+
+	return h;
+}
+
+static void
+MatCachePath(char *path, size_t size, unsigned long long key)
+{
+	Com_sprintf(path, (int)size, "%s/%08x%08x.omm", matcachedir, (unsigned)(key >> 32), (unsigned)key);
+}
+
+/* the file: "OMM1", width, height, rust (float), deflated length, the deflated map */
+static qboolean
+MatCacheRead(matjob_t *j, unsigned long long key)
+{
+	char path[MAX_OSPATH];
+	FILE *f;
+	int head[5];
+	unsigned char *z;
+	mz_ulong len = (mz_ulong)j->w * j->h * 4;
+	qboolean ok = false;
+
+	MatCachePath(path, sizeof(path), key);
+
+	if (!(f = fopen(path, "rb")))
+	{
+		return false;
+	}
+
+	if ((fread(head, sizeof(int), 5, f) == 5) && (head[0] == 0x314D4D4F) && (head[1] == j->w) && (head[2] == j->h) &&
+		(head[4] > 0) && (head[4] < 64 * 1024 * 1024) && (z = malloc(head[4])) != NULL)
+	{
+		if ((fread(z, 1, head[4], f) == (size_t)head[4]) && (j->out = malloc(len)) != NULL)
+		{
+			mz_ulong got = len;
+
+			if ((mz_uncompress(j->out, &got, z, (mz_ulong)head[4]) == MZ_OK) && (got == len))
+			{
+				memcpy(&j->rust, &head[3], sizeof(float));
+				ok = true;
+			}
+			else
+			{
+				free(j->out);
+				j->out = NULL;
+			}
+		}
+
+		free(z);
+	}
+
+	fclose(f);
+	return ok;
+}
+
+static void
+MatCacheWrite(const matjob_t *j, unsigned long long key)
+{
+	char path[MAX_OSPATH], tmp[MAX_OSPATH + 8];
+	mz_ulong len = (mz_ulong)j->w * j->h * 4, zl = mz_compressBound(len);
+	unsigned char *z = malloc(zl);
+	int head[5];
+	FILE *f;
+
+	if (!z)
+	{
+		return;
+	}
+
+	if (mz_compress2(z, &zl, j->out, len, 1) == MZ_OK)
+	{
+		MatCachePath(path, sizeof(path), key);
+		Com_sprintf(tmp, sizeof(tmp), "%s.tmp", path);
+		head[0] = 0x314D4D4F; /* "OMM1" */
+		head[1] = j->w;
+		head[2] = j->h;
+		memcpy(&head[3], &j->rust, sizeof(float));
+		head[4] = (int)zl;
+
+		/* written whole, then renamed: a load never reads a half-written map */
+		if ((f = fopen(tmp, "wb")) != NULL)
+		{
+			qboolean ok = (fwrite(head, sizeof(int), 5, f) == 5) && (fwrite(z, 1, zl, f) == zl);
+
+			fclose(f);
+			remove(path);
+
+			if (!ok || rename(tmp, path))
+			{
+				remove(tmp);
+			}
+		}
+	}
+
+	free(z);
+}
+
+/* a job: the map from the cache, or measured and stored */
+static void
+MatComputeCached(matjob_t *j)
+{
+	unsigned long long key = 0;
+
+	if (matcachedir[0])
+	{
+		key = MatCacheKey(j);
+
+		if (MatCacheRead(j, key))
+		{
+			return;
+		}
+	}
+
+	MatArenaBegin();
+	MatCompute(j);
+	MatArenaEnd();
+
+	if (matcachedir[0] && j->out)
+	{
+		MatCacheWrite(j, key);
+	}
+}
+
+/* the cache directory of this registration (main thread: the engine's imports) */
+static void
+MatCacheBegin(void)
+{
+	static cvar_t *on;
+
+	if (!on)
+	{
+		on = ri.Cvar_Get("r_om_matcache", "1", CVAR_ARCHIVE);
+	}
+
+	matcachedir[0] = 0;
+
+	if (!on->value || !ri.FS_Gamedir())
+	{
+		return;
+	}
+
+	Com_sprintf(matcachedir, sizeof(matcachedir), "%s/matcache", ri.FS_Gamedir());
+#ifdef _WIN32
+	_mkdir(matcachedir);
+#else
+	mkdir(matcachedir, 0755);
+#endif
+}
+
 static void
 MatJob(int i, void *ctx)
 {
-	MatCompute(&((matjob_t *)ctx)[i]);
+	MatComputeCached(&((matjob_t *)ctx)[i]);
 }
 
 /* the pending maps: measured on all cores, uploaded here */
@@ -1201,6 +1488,7 @@ GL3_Mat_Flush(void)
 void
 GL3_Mat_BatchBegin(void)
 {
+	MatCacheBegin();
 	matbatch = true;
 }
 
@@ -1208,6 +1496,7 @@ void
 GL3_Mat_BatchEnd(void)
 {
 	GL3_Mat_Flush();
+	MatArenasFree();
 	matbatch = false;
 }
 
@@ -1313,7 +1602,12 @@ GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h)
 
 	if (!matbatch)
 	{
-		MatCompute(&j);
+		if (!matcachedir[0])
+		{
+			MatCacheBegin();
+		}
+
+		MatComputeCached(&j);
 		MatUpload(&j);
 		return;
 	}

@@ -652,6 +652,9 @@ set(GL3-Source
 	${REF_SRC_DIR}/files/pvs.c
 	${COMMON_SRC_DIR}/shared/shared.c
 	${COMMON_SRC_DIR}/md4.c
+	${COMMON_SRC_DIR}/unzip/miniz/miniz.c
+	${COMMON_SRC_DIR}/unzip/miniz/miniz_tdef.c
+	${COMMON_SRC_DIR}/unzip/miniz/miniz_tinfl.c
 	)
 
 set(Glad-GL3-Source ${REF_SRC_DIR}/gl3/glad/src/glad.c)
