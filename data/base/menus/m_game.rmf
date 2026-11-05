@@ -1,4 +1,4 @@
-<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): new game: name, difficulty, tutorial. Own page in the openMERC
+<!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): new game: name, difficulty, level select, tutorial. Own page in the openMERC
      style: no stock backdrop, folder model, icons or stock strings -->
 <stm>
 <set menu_skill $skill>
@@ -25,6 +25,8 @@
 <text "^MENU_OMSET_PG_GAME_D4^" ombutton btint transgray width 280 height 26 key mouse1 "set menu_skill 4;freshgame" tip "^MENU_OMSET_PG_GAME_DTIP^"><br>
 <blank 3 3><br>
 <text "^MENU_OMSET_PG_GAME_DCUSTOM^" ombutton btint transgray width 280 height 26 key mouse1 "menu game2"><br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_GAME_LEVELS^" ombutton btint transgray width 280 height 26 key mouse1 "menu levels"><br>
 <hbr>
 <font type title tint orange atint orange>
 <text "^MENU_OMSET_PG_GAME_TRAIN^">

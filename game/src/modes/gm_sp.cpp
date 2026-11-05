@@ -52,7 +52,7 @@ static const gm_spkit *gm_kitfor(const char *map)
 	return &gm_kit_default;
 }
 
-void GM_DefaultWeapons(edict_t *ent)
+void GM_DefaultWeapons(edict_t *ent, int armor)
 {
 	if (!GM_IsClient(ent))
 		return;
@@ -91,5 +91,5 @@ void GM_DefaultWeapons(edict_t *ent)
 	if (pe && pe->PrecacheViewModels)
 		pe->PrecacheViewModels(mask);
 	inv->SwitchToWeapon(WP_PISTOL1);
-	inv->AddArmor(1000);
+	inv->AddArmor(armor);
 }

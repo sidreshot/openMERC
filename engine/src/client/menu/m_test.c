@@ -417,14 +417,19 @@ MT_TourNext(void)
 }
 
 /* om_after <frames> <text>: console text run after <frames> client frames
-   (the console's "wait" is not tied to drawn frames in OpenMerc) */
+   (the console's "wait" is not tied to drawn frames in OpenMerc);
+   om_after t<seconds> <text>: once the local game has run <seconds> since its map started (game time - the same
+   moment of a level on a fast PC and a slow phone) */
 #define MT_AFTER 128
 
 static struct
 {
 	int frames;
+	int gamems; /* > 0: wait for this game time instead of frames */
 	char text[1024];
 } mt_after[MT_AFTER];
+
+int SV_GameMsec(void);
 
 static void
 MT_After_f(void)
@@ -442,6 +447,7 @@ MT_After_f(void)
 		if (!mt_after[i].text[0])
 		{
 			mt_after[i].frames = atoi(Cmd_Argv(1));
+			mt_after[i].gamems = (Cmd_Argv(1)[0] == 't') ? (int)(atof(Cmd_Argv(1) + 1) * 1000.0f) + 1 : 0;
 			Q_strlcpy(mt_after[i].text, Cmd_Args() + strlen(Cmd_Argv(1)) + 1, sizeof(mt_after[i].text));
 
 			/* drop the quotes of a single quoted argument */
@@ -464,7 +470,12 @@ MT_AfterFrame(void)
 
 	for (i = 0; i < MT_AFTER; i++)
 	{
-		if (mt_after[i].text[0] && --mt_after[i].frames <= 0)
+		if (!mt_after[i].text[0])
+		{
+			continue;
+		}
+
+		if (mt_after[i].gamems ? (SV_GameMsec() >= mt_after[i].gamems - 1) : (--mt_after[i].frames <= 0))
 		{
 			Cbuf_AddText(mt_after[i].text);
 			Cbuf_AddText("\n");

@@ -135,8 +135,11 @@ IGhoulCallback *g_noteCallbacks[7] = {&s_cb0, &s_cb1, &s_cb2, &s_cb3, &s_cb4, &s
 /* ------------------------------------------------------------------------------------------------ */
 static bool specular_on()
 {
-    const char *cv = (const char *)g_com.ghlSpecular;
-    return cv && *(const float *)(cv + 0x18) > 0.f;
+    /* the engine's cvar object (shared.h cvar_t: name, string, latched string, flags, change callback, modified,
+       value): value is at 0x18 in a 32-bit build and at 0x2C in a 64-bit one - laid out by the compiler here */
+    struct cvar_head { char *name, *string, *latched; int flags; void (*changed)(void *); int modified; float value; };
+    const cvar_head *cv = (const cvar_head *)g_com.ghlSpecular;
+    return cv && cv->value > 0.f;
 }
 
 static void precache_model_resources(int weapon, IGhoulObject *obj)

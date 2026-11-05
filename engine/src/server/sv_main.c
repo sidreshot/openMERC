@@ -330,6 +330,13 @@ SV_ReadPackets(void)
 	}
 }
 
+/* OpenMerc test harness (om_after t<seconds>): game milliseconds since the map started, -1 without a local game */
+int
+SV_GameMsec(void)
+{
+	return (sv.state == ss_game) ? (int)sv.time - 1000 : -1;
+}
+
 /*
  * If a packet has not been received from a client for timeout->value
  * seconds, drop the conneciton.

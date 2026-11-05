@@ -2,7 +2,7 @@ VERSION 1
 ID 201
 REFERENCE MENU_OMSET_PG
 DESCRIPTION "OpenMerc folder pages, dialogs and key actions"
-COUNT 166
+COUNT 182
 INDEX 0
 {
    REFERENCE HOME_TIP
@@ -998,4 +998,100 @@ INDEX 165
    REFERENCE LOAD_EMPTY
    TEXT_ENGLISH "No saved games yet. Saves appear here after F6 / quick save or the Save page."
    TEXT_RUSSIAN "Сохранённых игр пока нет. Они появятся здесь после быстрого сохранения (F6) или со страницы «Сохранить»."
+}
+INDEX 166
+{
+   REFERENCE GAME_LEVELS
+   TEXT_ENGLISH "Level Select"
+   TEXT_RUSSIAN "Выбор уровня"
+}
+INDEX 167
+{
+   REFERENCE LEVELS_TITLE
+   TEXT_ENGLISH "LEVEL SELECT"
+   TEXT_RUSSIAN "ВЫБОР УРОВНЯ"
+}
+INDEX 168
+{
+   REFERENCE LEVELS_TICK
+   TEXT_ENGLISH "*** START THE CAMPAIGN AT ANY LEVEL WITH THAT MISSION'S WEAPONS ***"
+   TEXT_RUSSIAN "*** НАЧНИТЕ КАМПАНИЮ С ЛЮБОГО УРОВНЯ - С ОРУЖИЕМ ЭТОЙ МИССИИ ***"
+}
+INDEX 169
+{
+   REFERENCE LEVELS_SKILLS
+   TEXT_ENGLISH "Very Easy,Easy,Normal,Hard,Very Hard"
+   TEXT_RUSSIAN "Очень легко,Легко,Нормально,Сложно,Очень сложно"
+}
+INDEX 170
+{
+   REFERENCE LEVELS_SKILL
+   TEXT_ENGLISH "Difficulty"
+   TEXT_RUSSIAN "Сложность"
+}
+INDEX 171
+{
+   REFERENCE LV_TSR
+   TEXT_ENGLISH "New York: Subway"
+   TEXT_RUSSIAN "Нью-Йорк: метро"
+}
+INDEX 172
+{
+   REFERENCE LV_TRN
+   TEXT_ENGLISH "Train"
+   TEXT_RUSSIAN "Поезд"
+}
+INDEX 173
+{
+   REFERENCE LV_KOS
+   TEXT_ENGLISH "Kosovo"
+   TEXT_RUSSIAN "Косово"
+}
+INDEX 174
+{
+   REFERENCE LV_SIB
+   TEXT_ENGLISH "Siberia"
+   TEXT_RUSSIAN "Сибирь"
+}
+INDEX 175
+{
+   REFERENCE LV_IRQA
+   TEXT_ENGLISH "Iraq"
+   TEXT_RUSSIAN "Ирак"
+}
+INDEX 176
+{
+   REFERENCE LV_NYC
+   TEXT_ENGLISH "New York"
+   TEXT_RUSSIAN "Нью-Йорк"
+}
+INDEX 177
+{
+   REFERENCE LV_SUD
+   TEXT_ENGLISH "Sudan"
+   TEXT_RUSSIAN "Судан"
+}
+INDEX 178
+{
+   REFERENCE LV_JPN
+   TEXT_ENGLISH "Japan"
+   TEXT_RUSSIAN "Япония"
+}
+INDEX 179
+{
+   REFERENCE LV_IRQB
+   TEXT_ENGLISH "Iraq: return"
+   TEXT_RUSSIAN "Ирак: возвращение"
+}
+INDEX 180
+{
+   REFERENCE LV_GER
+   TEXT_ENGLISH "Germany"
+   TEXT_RUSSIAN "Германия"
+}
+INDEX 181
+{
+   REFERENCE LV_TUT
+   TEXT_ENGLISH "Training"
+   TEXT_RUSSIAN "Обучение"
 }

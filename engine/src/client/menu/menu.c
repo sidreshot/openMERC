@@ -298,7 +298,7 @@ static int
 M_RailCurrent(const char *name)
 {
 	static const struct { const char *name; int row; } map[] = {
-		{"game", 1}, {"game2", 1}, {"game3", 1}, {"load", 2}, {"save", 3}, {"credits", 4},
+		{"game", 1}, {"game2", 1}, {"game3", 1}, {"levels", 1}, {"load", 2}, {"save", 3}, {"credits", 4},
 		{"player", 5}, {"player2", 5}, {"join", 6}, {"advjoin", 6}, {"socks", 6}, {"motd", 6}, {"start", 7},
 		{"bots", 7}, {"pickbot", 7}, {"dmflags", 7}, {"options", 8}, {"chat", 8},
 		{"keys", 9}, {"joystick", 9}, {"video", 10}, {"audio", 11}, {"scale", 12},
@@ -953,6 +953,7 @@ M_Menu_f(void)
 		return;
 	}
 
+	Com_DPrintf("menu %s (client state %d)\n", Cmd_Argv(1), cls.state);
 	M_OpenMenu(Cmd_Argv(1), Cmd_Argc() > 2 ? Cmd_Argv(2) : NULL, false);
 }
 

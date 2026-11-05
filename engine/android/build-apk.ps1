@@ -30,7 +30,9 @@ $env:JAVA_HOME = $jdk
 if ($LASTEXITCODE) { throw "d8 failed" }
 
 # manifest -> base apk
-& "$bt\aapt2.exe" link -o "$w\base.apk" -I $jar --manifest "$here\AndroidManifest.xml" --min-sdk-version 26 --target-sdk-version 34
+& "$bt\aapt2.exe" compile --dir "$here\res" -o "$w\res.zip"
+if ($LASTEXITCODE) { throw "aapt2 compile failed" }
+& "$bt\aapt2.exe" link -o "$w\base.apk" -I $jar --manifest "$here\AndroidManifest.xml" -R "$w\res.zip" --auto-add-overlay --min-sdk-version 26 --target-sdk-version 34
 if ($LASTEXITCODE) { throw "aapt2 failed" }
 
 # native libraries: the engine, its modules (lib<name>.so, Sys_LoadLibrary finds them by that name), SDL3,

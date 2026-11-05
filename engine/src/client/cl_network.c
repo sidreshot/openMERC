@@ -131,6 +131,9 @@ CL_ForwardToServer_f(void)
 	}
 }
 
+/* set by Com_Error around the CL_Drop of an ERR_DROP other than the disconnect command (common/clientserver.c) */
+qboolean cl_droperror;
+
 /*
  * Called after an ERR_DROP was thrown
  */
@@ -147,7 +150,7 @@ CL_Drop(void)
 		/* OpenMerc: a load that failed before the client connected (a savegame of another build: the game refuses
 		   it) left the loading plaque up for two minutes - a "hang" on a phone, where no console key brings the
 		   menu back. The plaque goes and the main menu opens. */
-		if (cls.disable_screen)
+		if (cls.disable_screen && cl_droperror)
 		{
 			SCR_EndLoadingPlaque();
 			Cbuf_AddText("menu main\n");

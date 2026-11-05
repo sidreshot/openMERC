@@ -184,7 +184,7 @@ void SP_misc_ctf_base(edict_t *ent);
 void GM_ConquerZone(edict_t *ent);
 
 // Single-player cheat `defaultweapons` (SPEC-790 B11)
-void GM_DefaultWeapons(edict_t *ent);
+void GM_DefaultWeapons(edict_t *ent, int armor = 1000);
 
 //-----------------------------------------------------------------------------------------------------------
 // Conquer zones for bots (SPEC-790 B10: a position counts as inside a zone when it lies within the zone's box)

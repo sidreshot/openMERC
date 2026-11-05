@@ -947,9 +947,14 @@ Key_HistoryPath(char *path, size_t size)
 		}
 #endif
 	}
-	else
+	else if (Sys_GetHomeDir())
 	{
 		Com_sprintf(path, size, "%sconsole_history.txt", Sys_GetHomeDir());
+	}
+	else
+	{
+		/* no home folder (Android): the user folder the configuration is written to */
+		Com_sprintf(path, size, "%s/console_history.txt", FS_Gamedir());
 	}
 }
 

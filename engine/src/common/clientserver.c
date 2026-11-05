@@ -312,7 +312,15 @@ Com_Error(int code, const char *fmt, ...)
 	{
 		SV_Shutdown(va("Server crashed: %s\n", msg), false);
 #ifndef DEDICATED_ONLY
-		CL_Drop();
+		{
+			/* a failed load (not the "disconnect" of newgame.cfg, not the server's own drop at a level start) ends
+			   the loading plaque there (cl_network.c CL_Drop) */
+			extern qboolean cl_droperror;
+
+			cl_droperror = strcmp(msg, "Disconnected from server") != 0;
+			CL_Drop();
+			cl_droperror = false;
+		}
 #endif
 		recursive = false;
 		YQ2_LONGJMP(abortframe, 1);

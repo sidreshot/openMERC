@@ -879,6 +879,16 @@ void ClientBegin(edict_t *ent)
 	else if (game.maxclients > 1)
 		gix.welcomeprint(ent);
 
+	/* OpenMerc level select (menus "startlevel <map>"): a campaign started at a later level gets that mission's
+	   weapons and items instead of the first mission's knife, pistol and shotgun; once, on that first spawn */
+	{
+		cvar_t *kit = gi.cvar("om_levelkit", "0", 0);
+		if (kit->value && !level.intermissiontime && ent->client->inv) {
+			gi.cvar_set("om_levelkit", "0");
+			GM_DefaultWeapons(ent, 100);
+		}
+	}
+
 	ClientEndServerFrame(ent);
 	/* G6b (SPEC-AMEND-005 G6b.1): at the very end of a single-player Begin the worldspawn script runner is used
 	 * (queued for the next frame's script step); the deathmatch path returned above */
@@ -1148,8 +1158,11 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 			testmode = gi.cvar("om_testmode", "0", 0);
 		if (testmode->value && !deathmatch->value && ent->health > 0) {
 			ent->flags |= FL_GODMODE | FL_NOTARGET;
+			/* om_testmode 3: as 2, but the enemies see and fight the player (AI tests) */
+			if (testmode->value == 3)
+				ent->flags &= ~FL_NOTARGET;
 			/* om_testmode 2: walks with collision (camera paths that move like a player) */
-			if (testmode->value == 2)
+			if (testmode->value >= 2)
 			{
 				if (ent->movetype == MOVETYPE_NOCLIP)
 					ent->movetype = MOVETYPE_WALK;
