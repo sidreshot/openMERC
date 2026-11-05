@@ -769,6 +769,8 @@ extern void GL3_Mat_Init(void);
 extern void GL3_Mat_Shutdown(void);
 extern void GL3_Mat_Make(GLuint texnum, const char *name, const byte *rgba, int w, int h);
 extern void GL3_Mat_Free(GLuint texnum);
+extern qboolean GL3_Mat_Wanted(void);
+extern void GL3_Mat_Watch(void);
 extern void GL3_Mat_Bind(GLuint texnum);
 extern void GL3_Mat_Frame(void);
 // gl3_look.c: colour grading of the picture (r_om_look)

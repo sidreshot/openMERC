@@ -2761,6 +2761,9 @@ GL3_BeginFrame(float camera_separation)
 			gl3_colorlight->modified = true;
 		}
 
+		/* material maps skipped while nothing read them (GL3_Mat_Wanted) */
+		GL3_Mat_Watch();
+
 		/* the world programs fold gl_monolightmap 0 in (LmVariant): a map latched with another mode remakes them */
 		{
 			extern int gl3_monolightmap_mode, gl3_shader_mono;
