@@ -1852,6 +1852,20 @@ BindTex(GLenum unit, GLuint tex)
 	}
 }
 
+/* tiled GPUs (GLES: Adreno, Mali, PowerVR): the contents of the bound framebuffer's attachment(s) are not needed -
+   a pass that overwrites the whole target does not load the old tile contents from memory, and an attachment no
+   later pass reads (the scene depth after the view) is not written back. Desktop drivers ignore it; the desktop
+   core profile 3.2 has no entry point, so only the GLES build calls it. */
+static void
+PostDiscard(GLenum attachment)
+{
+#ifdef YQ2_GL3_GLES3
+	glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, &attachment);
+#else
+	(void)attachment;
+#endif
+}
+
 static void
 Bloom(void)
 {
@@ -1866,6 +1880,7 @@ Bloom(void)
 	for (i = 0; i < P.nlevels; i++)
 	{
 		glBindFramebuffer(GL_FRAMEBUFFER, P.levelfbo[i]);
+		PostDiscard(GL_COLOR_ATTACHMENT0); /* the down pass writes every texel */
 		glViewport(0, 0, P.lw[i], P.lh[i]);
 
 		if (i == 0)
@@ -2823,6 +2838,11 @@ GL3_Post_EndView(void)
 	GL3_FX_Flush();
 	P.bound = false;
 
+	/* the scene's depth and stencil are done (later passes read the depth copies, the next view clears them):
+	   not written back to memory on a tiled GPU */
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	PostDiscard(GL_DEPTH_STENCIL_ATTACHMENT);
+
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_BLEND);
@@ -2876,6 +2896,11 @@ GL3_Post_EndView(void)
 	if (!fxaa)
 	{
 		glBindFramebuffer(GL_FRAMEBUFFER, scaled ? UP.fbo : 0);
+
+		if (scaled)
+		{
+			PostDiscard(GL_COLOR_ATTACHMENT0); /* the composite writes the view, the upscale reads only the view */
+		}
 	}
 
 	if (fxaa || scaled || !P.scaled)
@@ -3437,6 +3462,7 @@ GL3_Post_VolFog(void)
 		vp[3] = P.vh;
 		glDisable(GL_BLEND);
 		glBindFramebuffer(GL_FRAMEBUFFER, V.halffbo);
+		PostDiscard(GL_COLOR_ATTACHMENT0); /* the march writes every texel */
 		glViewport(0, 0, V.hw, V.hh);
 		DrawQuad();
 

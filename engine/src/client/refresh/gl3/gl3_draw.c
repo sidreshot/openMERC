@@ -653,6 +653,17 @@ void GL3_EndFrame(void)
 	gl3_numBufferVtxData = 0;
 	gl3_numBufferUniforms = 0;
 
+	/* OpenMerc: 2 = also to the console every 100 frames (perf tours read it from the log) */
+	if(gl3_show_draw_stats->value >= 2.0f)
+	{
+		static int frames;
+
+		if((++frames % 100) == 0)
+		{
+			R_Printf(PRINT_ALL, "OMDRAWS 3D %d 2D %d vtxbuf %d unibuf %d\n", num3D, num2D, numBufVtx, numBufUni);
+		}
+	}
+
 	if(gl3_show_draw_stats->value)
 	{
 		float factor = 2.0f; // TODO: like SCR_GetConsoleScale()

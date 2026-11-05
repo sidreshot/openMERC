@@ -1661,6 +1661,7 @@ Flush(void)
 			{
 				/* a huge primitive: its own store, the ring starts again next time */
 				glBufferData(GL_ARRAY_BUFFER, bytes, out, GL_STREAM_DRAW);
+				++gl3_numBufferVtxData;
 				emuringvbo = 0;
 			}
 			else
@@ -1830,6 +1831,7 @@ Flush(void)
 		/* the bloom source only: not the scene colour, not the material of the reflections */
 		glColorMaski(0, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 		glColorMaski(2, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		++gl3_num3Ddraws;
 		glDrawArrays(mode, first, n);
 		glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL3_Post_MaterialWrites(true);
@@ -1865,6 +1867,7 @@ Flush(void)
 #ifndef YQ2_GL3_GLES3
 			glEnable(GL_SAMPLE_ALPHA_TO_ONE); /* not in GLES */
 #endif
+			++gl3_num3Ddraws;
 			glDrawArrays(mode, first, n);
 			glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 #ifndef YQ2_GL3_GLES3
@@ -1874,6 +1877,7 @@ Flush(void)
 		}
 	}
 
+	++gl3_num3Ddraws;
 	glDrawArrays(mode, first, n);
 }
 
