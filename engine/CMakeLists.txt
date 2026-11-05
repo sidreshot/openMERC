@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.31 FATAL_ERROR)
+﻿cmake_minimum_required(VERSION 3.31 FATAL_ERROR)
 
 # Print a message that using the Makefiles is recommended.
 message(NOTICE: " The CMakeLists.txt is unmaintained. Use the Makefile if possible.")
@@ -10,6 +10,11 @@ endif()
 
 # CMake project configuration.
 project(openMerc C CXX) # OpenMerc I1b: CXX for server/sv_ghoul.cpp
+
+# OpenMerc: SoF / Quake code assumes a signed char (x86); ARM's default is unsigned
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM64)" OR ANDROID)
+	add_compile_options(-fsigned-char)
+endif()
 
 # OpenMerc: the release version shown everywhere ("openMERC V<version>": menus, window title,
 # console stamp); `git describe` of the build goes only into the build info (OM_BUILD:

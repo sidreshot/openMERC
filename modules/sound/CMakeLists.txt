@@ -1,10 +1,15 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
+﻿# SPDX-License-Identifier: GPL-2.0-or-later
 # OpenMerc sound module: OMsnd.dll, a drop-in sound backend for the original 32-bit SoF.exe 1.07f
 # (select it with `snd_dll OMsnd`) and the only sound backend of the OpenMerc engine: the default backend's game-facing
 # rules (SPEC-040) on OpenAL Soft voices (OMsnd 1.0, docs/impl/SND2.md).
 # Implements: SPEC-004, SPEC-040
 cmake_minimum_required(VERSION 3.20)
 project(OMsnd C)
+
+# OpenMerc: SoF / Quake code assumes a signed char (x86); ARM's default is unsigned
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM64)" OR ANDROID)
+	add_compile_options(-fsigned-char)
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)

@@ -357,8 +357,12 @@ static int ShotFilter(trace_t *tr)
 	if (e->ghoulInst) {
 		float dist;
 		vec3_t pt;
-		if (!GhoulRayHit(e, g_shotstart, g_shotdir, 1e9f, &dist, pt))
+		if (!GhoulRayHit(e, g_shotstart, g_shotdir, 1e9f, &dist, pt)) {
+			if (gi.cvar("om_shotdebug", "0", 0)->value)
+				gi.dprintf("OMGHOUL miss %s start %s dir %s\n", e->classname ? e->classname : "?", vtos(g_shotstart),
+				           vtos(g_shotdir));
 			return 0;
+		}
 		VectorCopy(pt, tr->endpos);
 		return 1;
 	}
@@ -553,6 +557,16 @@ static void FireBullet(edict_t *ent, int a, const vec3_t start_in, const vec3_t 
 		gi.multicast(start, MULTICAST_PVS);
 	}
 
+	{
+		/* om_shotdebug 1: what every bullet hit (ports: hit detection checks) */
+		static cvar_t *dbg;
+		if (!dbg)
+			dbg = gi.cvar("om_shotdebug", "0", 0);
+		if (dbg->value)
+			gi.dprintf("OMBULLET %s frac %.3f end %s take %d\n",
+			           tr.ent ? (tr.ent->classname ? tr.ent->classname : "?") : "-", (double)tr.fraction,
+			           vtos(tr.endpos), tr.ent ? (int)tr.ent->takedamage : -1);
+	}
 	if (tr.ent && tr.ent != world && tr.ent->takedamage && !g_attack_nodamage &&
 	    CharacterShotHurts(ent, tr.ent, start, tr.endpos))
 		T_Damage(tr.ent, ent, ent, dir, tr.endpos, start, dmg, dmg, flags | 0x200, attacks[a].mod);

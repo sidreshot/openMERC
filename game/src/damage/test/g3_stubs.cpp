@@ -31,6 +31,10 @@ trace_t gi_wrap::trace(const float *start, const float *mins, const float *maxs,
 	gix.trace(start, mins, maxs, end, pass, mask, &tr);
 	return tr;
 }
+void gi_wrap::dprintf(const char *fmt, ...) /* om_shotdebug output: dropped in the tests */
+{
+	(void)fmt;
+}
 namespace fx {
 scripted_kill_fn g_arm_scripted_kill;
 attack_fn g_fire_attack;

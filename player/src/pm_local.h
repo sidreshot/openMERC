@@ -235,6 +235,10 @@ public:
 
     bool muzzle, converge;   /* 0xC8: our own, beyond the 200 bytes the game knows */
 };
+/* the game reads these members by byte offset (game/src/player_api.h WDESC_*) */
+static_assert(offsetof(WeaponDesc, spreadPerShot) == (sizeof(void *) == 8 ? 0x20 : 0x1C), "WDESC_SPREAD_PRI");
+static_assert(offsetof(WeaponDesc, spreadMax) == (sizeof(void *) == 8 ? 0x28 : 0x24), "WDESC_MAXSPREAD_PRI");
+static_assert(offsetof(WeaponDesc, attack) == (sizeof(void *) == 8 ? 0xBC : 0xB8), "WDESC_ATTACK_PRI");
 
 /* ------------------------------------------------------------------------------------------------
  * Inventory object (SPEC-003 Interface, SPEC-601). 79 thiscall slots in table order, then the data:
@@ -406,6 +410,10 @@ public:
     edict_t *Owner() const { return st.ctx ? st.ctx->owner : NULL; }
     unsigned char *PS() const;
 };
+/* the game reads these members by byte offset (game/src/player_api.h INV_*) */
+static_assert(offsetof(Inventory, st) + offsetof(InvState, curWeapon) == (sizeof(void *) == 8 ? 0x38 : 0x2C), "INV_CURWEAPON_OFS");
+static_assert(offsetof(Inventory, st) + offsetof(InvState, inst) == (sizeof(void *) == 8 ? 0x158 : 0x14C), "INV_VIEWINST_OFS");
+static_assert(offsetof(Inventory, st) + offsetof(InvState, spread) == (sizeof(void *) == 8 ? 0x288 : 0x270), "INV_SPREAD_OFS");
 
 #if defined(_M_IX86) || defined(__i386__)
 static_assert(sizeof(WeaponDesc) - 4 >= 0xC4 + 4 - 4, "weapon description");

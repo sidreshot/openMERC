@@ -1,10 +1,15 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
+﻿# SPDX-License-Identifier: GPL-2.0-or-later
 # OpenMerc game module: gamex86.dll, a drop-in replacement for the original 32-bit gamex86.dll 1.07f
 # (first slice: world core, world entities, player/client, items, projectiles and equipment).
 # Also builds g18probe.dll, the black-box interface probe used to measure unspecified layouts.
 # Implements: SPEC-001, SPEC-006, SPEC-760, SPEC-761, SPEC-780, SPEC-781, SPEC-782
 cmake_minimum_required(VERSION 3.20)
 project(OMGame CXX)
+
+# OpenMerc: SoF / Quake code assumes a signed char (x86); ARM's default is unsigned
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM64)" OR ANDROID)
+	add_compile_options(-fsigned-char)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

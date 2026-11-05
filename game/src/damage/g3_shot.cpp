@@ -79,6 +79,15 @@ int Dmg_ShotFilter(trace_t *tr)
 	G3_WorldToEntity(ent, shotStart, ls);
 	G3_WorldDirToEntity(ent, shotDir, ld);
 	int n = ent->ghoulInst->TraceRay(G3_Time(), ls, ld, recs, DMG_SHOT_MAX_HITS);
+	{
+		/* om_shotdebug 1: every shot tested against a character's model (ports: hit detection checks) */
+		static cvar_t *dbg;
+		if (!dbg && gix.cvar) /* the unit tests have no cvars */
+			dbg = gi.cvar("om_shotdebug", "0", 0);
+		if (dbg && dbg->value)
+			gi.dprintf("OMSHOT %s n %d ls %s ld %s t %.3f\n", ent->classname ? ent->classname : "?", n, vtos(ls),
+			           vtos(ld), (double)G3_Time());
+	}
 	if (n <= 0)
 		return 0; // the shot passes between the limbs
 	if (n > DMG_SHOT_MAX_HITS)

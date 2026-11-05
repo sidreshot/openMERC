@@ -208,10 +208,13 @@ protected:
 	~PlayerInventory() {}
 };
 
-// Members of player.dll objects the game reads (SPEC-782 Interface 1)
-#define INV_CURWEAPON_OFS 0x2C
-#define INV_VIEWINST_OFS 0x14C
-#define INV_SPREAD_OFS 0x270
+// Members of player.dll objects the game reads (SPEC-782 Interface 1). 32-bit: the SoF layout; 64-bit (our own
+// player module only, e.g. Android arm64): the same classes with 8-byte pointers - checked by static_asserts in
+// player/src/pm_local.h. The 32-bit offsets on a 64-bit build read garbage: no shot ever left the gun on Android.
+#define OM_PTR64 (sizeof(void *) == 8)
+#define INV_CURWEAPON_OFS (OM_PTR64 ? 0x38 : 0x2C)
+#define INV_VIEWINST_OFS (OM_PTR64 ? 0x158 : 0x14C)
+#define INV_SPREAD_OFS (OM_PTR64 ? 0x288 : 0x270)
 
 // Weapon description: 32 virtual slots; the game calls 28 (0x70) and 29 (0x74)
 class WeaponDesc {
@@ -230,12 +233,13 @@ public:
 protected:
 	~WeaponDesc() {}
 };
-#define WDESC_SPREAD_PRI 0x1C
-#define WDESC_SPREAD_ALT 0x20
-#define WDESC_MAXSPREAD_PRI 0x24
-#define WDESC_MAXSPREAD_ALT 0x28
-#define WDESC_ATTACK_PRI 0xB8
-#define WDESC_ATTACK_ALT 0xBC
+/* the fields follow the vtable pointer: 4 bytes further on a 64-bit build */
+#define WDESC_SPREAD_PRI (OM_PTR64 ? 0x20 : 0x1C)
+#define WDESC_SPREAD_ALT (OM_PTR64 ? 0x24 : 0x20)
+#define WDESC_MAXSPREAD_PRI (OM_PTR64 ? 0x28 : 0x24)
+#define WDESC_MAXSPREAD_ALT (OM_PTR64 ? 0x2C : 0x28)
+#define WDESC_ATTACK_PRI (OM_PTR64 ? 0xBC : 0xB8)
+#define WDESC_ATTACK_ALT (OM_PTR64 ? 0xC0 : 0xBC)
 
 #if defined(_M_IX86) || defined(__i386__) /* the SoF 32-bit x86 ABI (MSVC or GCC/Clang i386) */
 static_assert(sizeof(PlayerCommonImport) == 76, "SPEC-003 common import is 76 bytes");

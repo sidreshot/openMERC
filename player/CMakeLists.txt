@@ -1,10 +1,15 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
+﻿# SPDX-License-Identifier: GPL-2.0-or-later
 # OpenMerc player module: player.dll, a drop-in replacement for the original 32-bit player.dll 1.07f
 # (weapons, ammunition, armor, items, inventory, in-view weapon models, weapon commands, weapon prediction).
 # Also builds omptrace.dll, the black-box tracing proxy used to compare it with the original.
 # Implements: SPEC-003, SPEC-600, SPEC-601, SPEC-602
 cmake_minimum_required(VERSION 3.20)
 project(OMPlayer CXX)
+
+# OpenMerc: SoF / Quake code assumes a signed char (x86); ARM's default is unsigned
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM64)" OR ANDROID)
+	add_compile_options(-fsigned-char)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
