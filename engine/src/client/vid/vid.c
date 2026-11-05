@@ -406,6 +406,18 @@ const char* lib_ext = "so";
 static void
 VID_GetRendererLibPath(const char *renderer, char *path, size_t len)
 {
+#ifdef __ANDROID__
+	/* Android: the renderer is lib/<abi>/libref_<name>.so next to libmain.so (the APK's native library folder);
+	   the binary dir is the data folder there */
+	char base[64];
+
+	snprintf(base, sizeof(base), "ref_%s", renderer);
+
+	if (Sys_NativeLibPath(base, path, len))
+	{
+		return;
+	}
+#endif
 	snprintf(path, len, "%sref_%s.%s", Sys_GetBinaryDir(), renderer, lib_ext);
 }
 

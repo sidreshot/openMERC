@@ -162,8 +162,10 @@ CreateSDLWindow(SDL_WindowFlags flags, int fullscreen, int w, int h)
 
 	if (window)
 	{
-		/* enable text input */
+#ifndef __ANDROID__
+		/* enable text input (Android: it opens the on-screen keyboard; IN_Update turns it on for the console only) */
 		SDL_StartTextInput(window);
+#endif
 
 		/* save current display as default */
 		SDL_DisplayID current = SDL_GetDisplayForWindow(window);
@@ -446,6 +448,11 @@ GLimp_Init(void)
 
 	if (!SDL_WasInit(SDL_INIT_VIDEO))
 	{
+#ifdef __ANDROID__
+		/* openMERC Android: landscape only (SDL otherwise picks the orientation from the window's aspect, and the
+		   desktop mode of a phone held upright is portrait) */
+		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
 		if (!SDL_Init(SDL_INIT_VIDEO))
 		{
 			Com_Printf("Couldn't init SDL video: %s.\n", SDL_GetError());
@@ -557,6 +564,19 @@ GLimp_InitGraphics(int fullscreen, int *pwidth, int *pheight)
 	int curWidth, curHeight;
 	int width = *pwidth;
 	int height = *pheight;
+
+#ifdef __ANDROID__
+	/* the desktop mode of a phone held upright is portrait; the game runs in landscape (SDL_HINT_ORIENTATIONS) */
+	if (width < height)
+	{
+		int t = width;
+
+		width = height;
+		height = t;
+		*pwidth = width;
+		*pheight = height;
+	}
+#endif
 
 	if (fullscreen == FULLSCREEN_EXCLUSIVE || fullscreen == FULLSCREEN_DESKTOP)
 	{
@@ -672,7 +692,11 @@ GLimp_InitGraphics(int fullscreen, int *pwidth, int *pheight)
 	flags = Glimp_DetermineHighDPISupport(flags);
 
 	/* Mkay, now the hard work. Let's create the window. */
+#ifdef __ANDROID__
+	cvar_t *gl_msaa_samples = Cvar_Get("r_msaa_samples", "0", CVAR_ARCHIVE); /* see ref_gles3 (gl3_main.c) */
+#else
 	cvar_t *gl_msaa_samples = Cvar_Get("r_msaa_samples", "8", CVAR_ARCHIVE);
+#endif
 
 	while (1)
 	{

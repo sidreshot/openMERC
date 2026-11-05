@@ -36,6 +36,11 @@
 
 #include "../../common/header/common.h"
 
+#ifdef __ANDROID__
+/* openMERC Android: SDL's Java activity calls SDL_main of libmain.so */
+#include <SDL3/SDL_main.h>
+#endif
+
 void registerHandler(void);
 void setCustomCfgDir(const char* dir);
 

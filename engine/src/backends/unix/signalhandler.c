@@ -120,12 +120,14 @@ terminate(int sig)
 void
 registerHandler(void)
 {
-	/* Crash */
+#ifndef __ANDROID__
+	/* Crash (on Android debuggerd writes a tombstone with a symbolised backtrace; stdout is not visible there) */
 	signal(SIGSEGV, signalhandler);
 	signal(SIGILL, signalhandler);
 	signal(SIGFPE, signalhandler);
 	signal(SIGABRT, signalhandler);
 	signal(SIGBUS, signalhandler);
+#endif
 
 	/* User abort */
 	signal(SIGINT, terminate);

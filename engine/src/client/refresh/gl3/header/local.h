@@ -282,6 +282,7 @@ GL3_StDeleteProgram(GLuint p)
 #include "../../ref_shared.h"
 
 #include <stddef.h> // offsetof()
+#include <ctype.h> // tolower(), isalpha() - MSVC brings it with stdlib, the NDK does not
 
 #include "HandmadeMath.h"
 
@@ -475,7 +476,8 @@ typedef struct
 	gl3ShaderInfo_t si2DpostProcess; // shader to render postprocess FBO, when *not* underwater
 	gl3ShaderInfo_t si2DpostProcessWater; // shader to apply water-warp postprocess effect
 
-	gl3ShaderInfo_t si3Dlm;        // a regular opaque face (e.g. from brush) with lightmap
+	gl3ShaderInfo_t si3Dlm;        // a regular opaque face (e.g. from brush) with lightmap (alpha tested: grates, fences)
+	gl3ShaderInfo_t si3DlmOpaque;  // OpenMerc: the same without discard - a texture without alpha keeps early depth / LRZ
 	// TODO: lm-only variants for gl_lightmap 1
 	gl3ShaderInfo_t si3Dtrans;     // transparent is always w/o lightmap
 	gl3ShaderInfo_t si3DcolorOnly; // used for beams - no lightmaps
@@ -877,6 +879,8 @@ extern void GL3_ShutdownMeshes(void);
 // gl3_shaders.c
 
 extern qboolean GL3_RecreateShaders(void);
+extern qboolean gl3_world_lamps; /* world shaders made with the lamp shadow receiver */
+gl3ShaderInfo_t *GL3_WorldShaderFor(const gl3image_t *image); /* si3DlmOpaque or si3Dlm (gl3_shaders.c) */
 extern qboolean GL3_InitShaders(void);
 extern void GL3_ShutdownShaders(void);
 extern void GL3_UpdateUBOCommon(void);

@@ -123,6 +123,14 @@ SV_OpenPlayerLibrary(void)
 		}
 	}
 
+#ifdef __ANDROID__
+	/* Android: the APK's native library folder (libplayer.so) */
+	if (Sys_NativeLibPath("player", name, sizeof(name)) && SV_TryPlayerLibrary(name))
+	{
+		return true;
+	}
+#endif
+
 	return false;
 }
 

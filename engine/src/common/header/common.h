@@ -902,6 +902,9 @@ void Sys_Nanosleep(int);
 void *Sys_GetProcAddress(void *handle, const char *sym);
 void Sys_FreeLibrary(void *handle);
 void *Sys_LoadLibrary(const char *path, const char *sym, void **handle);
+#ifdef __ANDROID__
+qboolean Sys_NativeLibPath(const char *base, char *out, size_t len); /* <APK lib folder>/lib<base>.so */
+#endif
 void Sys_GetWorkDir(char *buffer, size_t len);
 qboolean Sys_SetWorkDir(char *path);
 qboolean Sys_Realpath(const char *in, char *out, size_t size);

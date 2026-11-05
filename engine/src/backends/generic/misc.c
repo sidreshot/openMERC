@@ -29,6 +29,10 @@
 
 #include "../../common/header/shared.h"
 
+#ifdef __ANDROID__
+#include <SDL3/SDL_system.h>
+#endif
+
 #if defined(__linux) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__sun) || defined(__APPLE__)
 #include <unistd.h> // readlink(), amongst others
 #endif
@@ -179,6 +183,19 @@ const char *Sys_GetBinaryDir(void)
 	if(exeDir[0] != '\0') {
 		return exeDir;
 	}
+
+#ifdef __ANDROID__
+	/* openMERC Android: the game folder is the app's external files folder
+	   (Android/data/<package>/files: base/, openmerc/), the modules come from the APK */
+	{
+		const char *ext = SDL_GetAndroidExternalStoragePath();
+
+		if (ext && ext[0]) {
+			snprintf(exeDir, sizeof(exeDir), "%s/", ext);
+			return exeDir;
+		}
+	}
+#endif
 
 	SetExecutablePath(exeDir);
 

@@ -48,6 +48,20 @@ void Snd_DebugString(const char *s)
 
 #ifdef _WIN32
 #define ENG_LOOKUP(winname, elfname) ((void *)GetProcAddress(exe, winname))
+#elif defined(__ANDROID__)
+/* openMERC Android: the engine is libmain.so, loaded by the Java activity without RTLD_GLOBAL - RTLD_DEFAULT does
+   not see it, its own handle does */
+static void *Eng_AndroidLookup(const char *name)
+{
+    static void *engine;
+
+    if (!engine) {
+        engine = dlopen("libmain.so", RTLD_NOW | RTLD_NOLOAD);
+    }
+
+    return engine ? dlsym(engine, name) : dlsym(RTLD_DEFAULT, name);
+}
+#define ENG_LOOKUP(winname, elfname) Eng_AndroidLookup(elfname)
 #else
 #define ENG_LOOKUP(winname, elfname) dlsym(RTLD_DEFAULT, elfname)
 #endif

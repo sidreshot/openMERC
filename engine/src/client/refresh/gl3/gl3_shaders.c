@@ -626,9 +626,10 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 
 			// apply lightmap
 			vec4 lmTex = texture(lightmap0, passLMcoord) * lmScales[0];
-			lmTex     += texture(lightmap1, passLMcoord) * lmScales[1];
-			lmTex     += texture(lightmap2, passLMcoord) * lmScales[2];
-			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
+			// OpenMerc: the other light styles only where the face has them (most faces: style 0 alone; uniform branch, no fetch)
+			if(lmScales[1] != vec4(0.0)) lmTex += texture(lightmap1, passLMcoord) * lmScales[1];
+			if(lmScales[2] != vec4(0.0)) lmTex += texture(lightmap2, passLMcoord) * lmScales[2];
+			if(lmScales[3] != vec4(0.0)) lmTex += texture(lightmap3, passLMcoord) * lmScales[3];
 			vec3 omLm0 = lmTex.rgb; // the lightmap before the shadows of moving casters (their common floor)
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
 			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
@@ -1067,9 +1068,10 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 
 			// apply lightmap
 			vec4 lmTex = texture(lightmap0, passLMcoord) * lmScales[0];
-			lmTex     += texture(lightmap1, passLMcoord) * lmScales[1];
-			lmTex     += texture(lightmap2, passLMcoord) * lmScales[2];
-			lmTex     += texture(lightmap3, passLMcoord) * lmScales[3];
+			// OpenMerc: the other light styles only where the face has them (most faces: style 0 alone; uniform branch, no fetch)
+			if(lmScales[1] != vec4(0.0)) lmTex += texture(lightmap1, passLMcoord) * lmScales[1];
+			if(lmScales[2] != vec4(0.0)) lmTex += texture(lightmap2, passLMcoord) * lmScales[2];
+			if(lmScales[3] != vec4(0.0)) lmTex += texture(lightmap3, passLMcoord) * lmScales[3];
 			vec3 omLm0 = lmTex.rgb; // the lightmap before the shadows of moving casters (their common floor)
 			omCsmApply(lmTex.rgb, passWorldCoord, passNormal); // GFX-modern: sun shadows of moving casters (gl3_csm.c)
 			omLsApply(lmTex.rgb, omLm0, passWorldCoord, passNormal); // GFX-modern: lamp shadows of moving casters (gl3_lshadow.c)
@@ -1995,6 +1997,9 @@ static void initUBOs(void)
 	gl3state.currentUBO = gl3state.uniLightsUBO;
 }
 
+/* the world shaders were made with the lamp shadow receiver (r_om_lshadow on; gl3_main.c remakes them on a change) */
+qboolean gl3_world_lamps = true;
+
 static qboolean createShaders(void)
 {
 	if (!initShader2D(&gl3state.si2D, vertexSrc2D, fragmentSrc2D, true))
@@ -2029,6 +2034,8 @@ static qboolean createShaders(void)
 
 	/* GFX-modern: the lightmapped shaders receive the sun shadows (gl3_csm.c) */
 	static char* lmFragCsm = NULL;
+	cvar_t *r_om_lshadow_world = ri.Cvar_Get("r_om_lshadow", "1", CVAR_ARCHIVE);
+	gl3_world_lamps = r_om_lshadow_world->value != 0.0f;
 	free(lmFragCsm);
 	{
 		/* GFX-modern r_om_pdlight: the per-pixel SoF dlight function goes before main() */
@@ -2045,7 +2052,8 @@ static qboolean createShaders(void)
 		memcpy(joined + pre, fragmentSrcOmPdl, ins);
 		memcpy(joined + pre + ins, fragmentSrcOmWorld, insb); /* GFX-modern: lightning, reflection material, mirrors */
 		strcpy(joined + pre + ins + insb, lmsrc + pre);
-		lmFragCsm = GL3_CSM_Prepend(joined);
+		/* r_om_lshadow 0: the world shaders without the lamp shadow receiver (gl3_main.c recompiles them on a change) */
+		lmFragCsm = GL3_CSM_PrependLamps(joined, gl3_world_lamps);
 		free(joined);
 	}
 	if(lmFragCsm == NULL)
@@ -2058,6 +2066,28 @@ static qboolean createShaders(void)
 	{
 		Com_Printf("WARNING: Failed to create shader program for textured 3D rendering with lightmap!\n");
 		return false;
+	}
+	/* OpenMerc: the opaque variant - every discard of the lightmapped shader becomes an empty statement (GL3_WorldShaderFor) */
+	{
+		char *opq = strdup(lightmappedFrag), *d;
+
+		if(opq == NULL)
+		{
+			return false;
+		}
+
+		while((d = strstr(opq, "discard;")) != NULL)
+		{
+			memcpy(d, "        ", 8); /* keeps "if(...) ;" valid */
+		}
+
+		if(!initShader3D(&gl3state.si3DlmOpaque, vertexSrc3Dlm, opq))
+		{
+			Com_Printf("WARNING: Failed to create the opaque lightmapped shader, faces stay on the alpha tested one\n");
+			gl3state.si3DlmOpaque.shaderProgram = 0;
+		}
+
+		free(opq);
 	}
 	if(!initShader3D(&gl3state.si3Dtrans, vertexSrc3D, fragmentSrc3D))
 	{
@@ -2206,10 +2236,13 @@ void GL3_ShutdownShaders(void)
 	gl3state.uniCommonUBO = gl3state.uni2DUBO = gl3state.uni3DUBO = gl3state.uniLightsUBO = 0;
 }
 
+static void UniformLocFlush(void);
+
 qboolean GL3_RecreateShaders(void)
 {
 	// delete and recreate the existing shaders (but not the UBOs)
 	deleteShaders();
+	UniformLocFlush(); /* the driver may hand the new programs the old names */
 	return createShaders();
 }
 
@@ -2406,10 +2439,10 @@ void GL3_UpdateUBOLights(void)
 /* GFX-modern r_om_rain (gl3_post.c): the strike's shadow map (texture unit 9) and its view-projection */
 void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
 {
-	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
 	int i;
 
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -2435,10 +2468,10 @@ void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
    and strength (w 0 = none), colour, the top-down depth map (texture unit 12) and its view-projection */
 void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const float *occvp, GLuint occtex)
 {
-	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
 	int i;
 
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -2471,10 +2504,10 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
 	GLuint tex2)
 {
-	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
 	int i;
 
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -2510,10 +2543,10 @@ void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *pl
 /* GFX-modern r_om_ssr: the parameters of the material classes (gl3_material.c) */
 void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 {
-	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
 	int i;
 
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -2531,10 +2564,10 @@ void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 /* GFX-modern r_om_ssr: reflections on, rain wetness (gl3_post.c) */
 void GL3_SoF_SSRUniforms(const float *ssr)
 {
-	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
 	int i;
 
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -2548,14 +2581,37 @@ void GL3_SoF_SSRUniforms(const float *ssr)
 	}
 }
 
+/* the gl_monolightmap mode the world shaders run (its A / C modes cut texels by the lightmap: alpha tested) */
+static int worldmono;
+
+/* a face of this texture: without alpha (most walls) the world shader without discard, so the GPU keeps its early
+   depth test (Adreno: LRZ, a discard anywhere in the shader turns it off for the draw); grates, fences and the
+   gl_monolightmap modes that cut by the lightmap the alpha tested one */
+gl3ShaderInfo_t *
+GL3_WorldShaderFor(const gl3image_t *image)
+{
+	static cvar_t *r_om_worldopaque;
+
+	if (!r_om_worldopaque)
+	{
+		/* 0 by default: on the Adreno 610 the split into two programs cost 10 ms (arm1, lamp shadows off) */
+		r_om_worldopaque = ri.Cvar_Get("r_om_worldopaque", "0", 0);
+	}
+
+	return (image && !image->has_alpha && (worldmono < 3) && gl3state.si3DlmOpaque.shaderProgram && r_om_worldopaque->value) ?
+		&gl3state.si3DlmOpaque : &gl3state.si3Dlm;
+}
+
 void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 {
 	extern int gl3_monolightmap_mode;
-	gl3ShaderInfo_t *si[4] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
 	int mode = fullbright ? 0 : gl3_monolightmap_mode;
 	int i;
 
-	for (i = 0; i < 4; i++)
+	worldmono = mode;
+
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -2587,6 +2643,12 @@ static struct
 
 void
 GL3_UniformCacheClear(void)
+{
+	memset(unicache, 0, sizeof(unicache));
+}
+
+static void
+UniformLocFlush(void)
 {
 	memset(unicache, 0, sizeof(unicache));
 }

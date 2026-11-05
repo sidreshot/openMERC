@@ -110,17 +110,61 @@ static struct
  * measurement: r_om_gputime 1 prints the mean GPU time of the frames
  * (BeginFrame to the buffer swap) every 100 frames, "OMGPU <ms>", as the
  * frame rate is capped (vid_maxfps 999). Timer queries (GL 3.3 /
- * ARB_timer_query) are looked up at first use; desktop Windows only.
+ * ARB_timer_query; GLES: EXT_disjoint_timer_query, e.g. Adreno / Mali)
+ * are looked up at first use.
  * ------------------------------------------------------------------ */
-
-#if defined(_WIN32) && !defined(YQ2_GL3_GLES3)
-#include <windows.h>
 
 #ifndef GL_TIME_ELAPSED
 #define GL_TIME_ELAPSED 0x88BF
 #endif
+#ifndef GL_GPU_DISJOINT_EXT
+#define GL_GPU_DISJOINT_EXT 0x8FBB
+#endif
+
+#ifndef APIENTRY
+#define APIENTRY
+#endif
 
 typedef void (APIENTRY *pfnGetQueryObjectui64v)(GLuint, GLenum, GLuint64 *);
+
+/* the timer query entry points: core / ARB names on desktop GL, the EXT names on GLES */
+static void *
+TimerProc(const char *name)
+{
+#ifdef YQ2_GL3_GLES3
+	char ext[64];
+	GLint i, n = 0;
+
+	glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+
+	for (i = 0; i < n; i++)
+	{
+		if (!strcmp((const char *)glGetStringi(GL_EXTENSIONS, i), "GL_EXT_disjoint_timer_query"))
+		{
+			snprintf(ext, sizeof(ext), "%sEXT", name);
+			return GL3_GetProcAddress(ext);
+		}
+	}
+
+	return NULL;
+#else
+	return GL3_GetProcAddress(name);
+#endif
+}
+
+/* GLES: a disjoint event (clock change, power state) makes the results in flight meaningless */
+static qboolean
+TimerDisjoint(void)
+{
+#ifdef YQ2_GL3_GLES3
+	GLint d = 0;
+
+	glGetIntegerv(GL_GPU_DISJOINT_EXT, &d);
+	return d != 0;
+#else
+	return false;
+#endif
+}
 
 #define GPUQ 4
 
@@ -151,14 +195,7 @@ GL3_Post_GpuTimer(qboolean begin)
 	if (!T.tried)
 	{
 		T.tried = true;
-		{
-			/* opengl32.dll is loaded with the context; this module does not link it */
-			typedef PROC (WINAPI *pfnWglGetProcAddress)(LPCSTR);
-			HMODULE gl = GetModuleHandleA("opengl32.dll");
-			pfnWglGetProcAddress wgp = gl ? (pfnWglGetProcAddress)(void *)GetProcAddress(gl, "wglGetProcAddress") : NULL;
-
-			T.getui64 = wgp ? (pfnGetQueryObjectui64v)(void *)wgp("glGetQueryObjectui64v") : NULL;
-		}
+		T.getui64 = (pfnGetQueryObjectui64v)TimerProc("glGetQueryObjectui64v");
 
 		if (T.getui64)
 		{
@@ -178,6 +215,11 @@ GL3_Post_GpuTimer(qboolean begin)
 	if (begin && !T.inquery)
 	{
 		/* the oldest query's result (GPUQ frames ago) */
+		if (T.issued[T.qi] && TimerDisjoint())
+		{
+			memset(T.issued, 0, sizeof(T.issued));
+		}
+
 		if (T.issued[T.qi])
 		{
 			GLuint64 ns = 0;
@@ -230,7 +272,6 @@ static struct
 	const char *sname[PROFMARKS];
 	int sn;
 	double mean, cmean;
-	LARGE_INTEGER freq;
 } PR;
 
 /* perf tour: every change of r_om_prof_tag prints "OMSPOT <old tag>" with the frames timed since the last change -
@@ -382,7 +423,7 @@ ProfCollect(int f)
 void
 GL3_Post_ProfMark(const char *name)
 {
-	LARGE_INTEGER now;
+	double now;
 	int f;
 
 	if (!r_om_gputime || r_om_gputime->value < 2 || !T.getui64)
@@ -392,13 +433,8 @@ GL3_Post_ProfMark(const char *name)
 
 	if (!PR.tried)
 	{
-		typedef PROC (WINAPI *pfnWglGetProcAddress)(LPCSTR);
-		HMODULE gl = GetModuleHandleA("opengl32.dll");
-		pfnWglGetProcAddress wgp = gl ? (pfnWglGetProcAddress)(void *)GetProcAddress(gl, "wglGetProcAddress") : NULL;
-
 		PR.tried = true;
-		PR.counter = wgp ? (pfnQueryCounter)(void *)wgp("glQueryCounter") : NULL;
-		QueryPerformanceFrequency(&PR.freq);
+		PR.counter = (pfnQueryCounter)TimerProc("glQueryCounter");
 
 		if (PR.counter)
 		{
@@ -411,14 +447,14 @@ GL3_Post_ProfMark(const char *name)
 		return;
 	}
 
-	QueryPerformanceCounter(&now);
+	now = GL3_LoadClockMs();
 
 	/* "frame" starts the next frame: the oldest one's results are read first (GPUQ frames ago); the whole frame
 	   (game, sound and the rest of the client too) is timed from one start to the next */
 	if (!strcmp(name, "frame"))
 	{
 		static double last, fmean;
-		double t = (double)now.QuadPart * 1000.0 / (double)PR.freq.QuadPart;
+		double t = now;
 
 		if (last > 0)
 		{
@@ -452,6 +488,11 @@ GL3_Post_ProfMark(const char *name)
 		}
 		PR.cur = (PR.cur + 1) % GPUQ;
 
+		if (TimerDisjoint())
+		{
+			memset(PR.n, 0, sizeof(PR.n)); /* timestamps in flight span a clock change */
+		}
+
 		if (PR.n[PR.cur])
 		{
 			ProfCollect(PR.cur);
@@ -469,22 +510,9 @@ GL3_Post_ProfMark(const char *name)
 
 	PR.counter(PR.q[f][PR.n[f]], GL_TIMESTAMP);
 	PR.name[f][PR.n[f]] = name;
-	PR.cpu[f][PR.n[f]] = (double)now.QuadPart * 1000.0 / (double)PR.freq.QuadPart;
+	PR.cpu[f][PR.n[f]] = now;
 	PR.n[f]++;
 }
-#else
-void
-GL3_Post_GpuTimer(qboolean begin)
-{
-	(void)begin;
-}
-
-void
-GL3_Post_ProfMark(const char *name)
-{
-	(void)name;
-}
-#endif
 
 /* ------------------------------------------------------------------
  * fragment shader wrapper (used by gl3_shaders.c and gl3_ghoulemu.c)
@@ -1532,9 +1560,7 @@ GL3_Post_Init(void)
 #endif
 	r_om_postaa = ri.Cvar_Get("r_om_postaa", "2", CVAR_ARCHIVE); /* the post antialiasing r_om_fxaa runs: 1 FXAA, 2 SMAA 1x (r_om_aa is the anti-aircraft weather) */
 	r_om_gputime = ri.Cvar_Get("r_om_gputime", "0", 0);
-#if defined(_WIN32) && !defined(YQ2_GL3_GLES3)
 	r_om_prof_tag = ri.Cvar_Get("r_om_prof_tag", "", 0);
-#endif
 	r_om_overbright = ri.Cvar_Get("r_om_overbright", "0", CVAR_ARCHIVE);
 	r_om_overbright_scale = ri.Cvar_Get("r_om_overbright_scale", "2", CVAR_ARCHIVE);
 	r_om_overbright_models = ri.Cvar_Get("r_om_overbright_models", "1", CVAR_ARCHIVE);
@@ -1559,7 +1585,6 @@ GL3_Post_Init(void)
 static void
 TimersShutdown(void)
 {
-#if defined(_WIN32) && !defined(YQ2_GL3_GLES3)
 	int i;
 
 	if (T.tried && T.getui64)
@@ -1577,7 +1602,6 @@ TimersShutdown(void)
 
 	memset(&T, 0, sizeof(T));
 	memset(&PR, 0, sizeof(PR));
-#endif
 }
 
 void
@@ -2540,9 +2564,9 @@ FxaaEnd(GLuint dst, int vx, int vy, int vw, int vh)
 
 static struct
 {
-	qboolean tried;
-	GLuint prog, tex, fbo;
-	GLint u_tex, u_rect, u_size, u_sharp, u_mode;
+	int tried; /* bit 1 << mode: that mode's program was tried */
+	GLuint progs[3], prog, tex, fbo; /* one program per mode (1 Catmull-Rom, 2 EASU): no dead branch holds registers */
+	GLint u_tex, u_rect, u_size, u_sharp;
 	int w, h;
 } UP;
 
@@ -2572,55 +2596,57 @@ static const char *upscale_fs =
 	"		texture(tex, vec2(t3.x, t3.y)).rgb * w3.x * w3.y;\n"
 	"	return c;\n"
 	"}\n"
-	/* FSR 1.0 EASU: 12 texels, a lanczos-like kernel stretched along the local edge direction */
-	"uniform int mode;\n"
-	"vec3 T(ivec2 p) { return texelFetch(tex, clamp(p, ivec2(0), ivec2(size.xy) - 1), 0).rgb; }\n"
-	"float Lu(vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }\n"
-	"void Set(inout vec2 dir, inout float len, float w, float la, float lb, float lc, float ld, float le)\n"
+	/* FSR 1.0 EASU: 12 texels, a lanczos-like kernel stretched along the local edge direction. Half precision like
+	   FSR's FP16 path (FSR_EASU_H): the texels are fetched by integer position, only the position itself needs
+	   full precision (GLES: twice the ALU rate on Adreno / Mali; desktop GLSL ignores the qualifiers) */
+	"mediump vec3 T(ivec2 p) { return texelFetch(tex, clamp(p, ivec2(0), ivec2(size.xy) - 1), 0).rgb; }\n"
+	"mediump float Lu(mediump vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }\n"
+	"void Set(inout mediump vec2 dir, inout mediump float len, mediump float w, mediump float la, mediump float lb, mediump float lc, mediump float ld, mediump float le)\n"
 	"{\n"
-	"	float lx = max(abs(ld - lc), abs(lc - lb)), dx = ld - lb;\n"
+	"	mediump float lx = max(abs(ld - lc), abs(lc - lb)), dx = ld - lb;\n"
 	"	lx = clamp(abs(dx) / max(lx, 1e-5), 0.0, 1.0);\n"
-	"	float ly = max(abs(le - lc), abs(lc - la)), dy = le - la;\n"
+	"	mediump float ly = max(abs(le - lc), abs(lc - la)), dy = le - la;\n"
 	"	ly = clamp(abs(dy) / max(ly, 1e-5), 0.0, 1.0);\n"
 	"	dir += vec2(dx, dy) * w;\n"
 	"	len += (lx * lx + ly * ly) * w;\n"
 	"}\n"
-	"void Tap(inout vec3 ac, inout float aw, vec2 off, vec2 dir, vec2 len2, float lob, float clp, vec3 c)\n"
+	"void Tap(inout mediump vec3 ac, inout mediump float aw, mediump vec2 off, mediump vec2 dir, mediump vec2 len2, mediump float lob, mediump float clp, mediump vec3 c)\n"
 	"{\n"
-	"	vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len2;\n"
-	"	float d2 = min(dot(v, v), clp);\n"
-	"	float wb = 0.4 * d2 - 1.0, wa = lob * d2 - 1.0;\n"
+	"	mediump vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len2;\n"
+	"	mediump float d2 = min(dot(v, v), clp);\n"
+	"	mediump float wb = 0.4 * d2 - 1.0, wa = lob * d2 - 1.0;\n"
 	"	wb = 1.5625 * wb * wb - 0.5625;\n"
-	"	float w = wb * wa * wa;\n"
+	"	mediump float w = wb * wa * wa;\n"
 	"	ac += c * w;\n"
 	"	aw += w;\n"
 	"}\n"
+	"mediump vec3 gMn, gMx, gBl;\n"
 	"vec3 Easu(vec2 p)\n"
 	"{\n"
-	"	vec2 pp = p * size.xy - 0.5, fp = floor(pp);\n"
+	"	highp vec2 hp = p * size.xy - 0.5, fp = floor(hp);\n"
 	"	ivec2 i0 = ivec2(fp);\n"
-	"	pp -= fp;\n"
-	"	vec3 b = T(i0 + ivec2(0, -1)), c = T(i0 + ivec2(1, -1));\n"
-	"	vec3 e = T(i0 + ivec2(-1, 0)), f = T(i0), g = T(i0 + ivec2(1, 0)), h = T(i0 + ivec2(2, 0));\n"
-	"	vec3 i = T(i0 + ivec2(-1, 1)), j = T(i0 + ivec2(0, 1)), k = T(i0 + ivec2(1, 1)), l = T(i0 + ivec2(2, 1));\n"
-	"	vec3 n = T(i0 + ivec2(0, 2)), o = T(i0 + ivec2(1, 2));\n"
-	"	float lb = Lu(b), lc = Lu(c), le = Lu(e), lf = Lu(f), lg = Lu(g), lh = Lu(h);\n"
-	"	float li = Lu(i), lj = Lu(j), lk = Lu(k), ll = Lu(l), ln = Lu(n), lo = Lu(o);\n"
-	"	vec2 dir = vec2(0.0);\n"
-	"	float len = 0.0;\n"
+	"	mediump vec2 pp = hp - fp;\n"
+	"	mediump vec3 b = T(i0 + ivec2(0, -1)), c = T(i0 + ivec2(1, -1));\n"
+	"	mediump vec3 e = T(i0 + ivec2(-1, 0)), f = T(i0), g = T(i0 + ivec2(1, 0)), h = T(i0 + ivec2(2, 0));\n"
+	"	mediump vec3 i = T(i0 + ivec2(-1, 1)), j = T(i0 + ivec2(0, 1)), k = T(i0 + ivec2(1, 1)), l = T(i0 + ivec2(2, 1));\n"
+	"	mediump vec3 n = T(i0 + ivec2(0, 2)), o = T(i0 + ivec2(1, 2));\n"
+	"	mediump float lb = Lu(b), lc = Lu(c), le = Lu(e), lf = Lu(f), lg = Lu(g), lh = Lu(h);\n"
+	"	mediump float li = Lu(i), lj = Lu(j), lk = Lu(k), ll = Lu(l), ln = Lu(n), lo = Lu(o);\n"
+	"	mediump vec2 dir = vec2(0.0);\n"
+	"	mediump float len = 0.0;\n"
 	"	Set(dir, len, (1.0 - pp.x) * (1.0 - pp.y), lb, le, lf, lg, lj);\n"
 	"	Set(dir, len, pp.x * (1.0 - pp.y), lc, lf, lg, lh, lk);\n"
 	"	Set(dir, len, (1.0 - pp.x) * pp.y, lf, li, lj, lk, ln);\n"
 	"	Set(dir, len, pp.x * pp.y, lg, lj, lk, ll, lo);\n"
-	"	float dr = dot(dir, dir);\n"
+	"	mediump float dr = dot(dir, dir);\n"
 	"	dir = (dr < 1.0 / 32768.0) ? vec2(1.0, 0.0) : dir * inversesqrt(dr);\n"
 	"	len *= 0.5;\n"
 	"	len *= len;\n"
-	"	float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));\n"
-	"	vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);\n"
-	"	float lob = 0.5 + (0.21 - 0.5) * len, clp = 1.0 / lob;\n"
-	"	vec3 ac = vec3(0.0);\n"
-	"	float aw = 0.0;\n"
+	"	mediump float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));\n"
+	"	mediump vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);\n"
+	"	mediump float lob = 0.5 + (0.21 - 0.5) * len, clp = 1.0 / lob;\n"
+	"	mediump vec3 ac = vec3(0.0);\n"
+	"	mediump float aw = 0.0;\n"
 	"	Tap(ac, aw, vec2(0.0, -1.0) - pp, dir, len2, lob, clp, b);\n"
 	"	Tap(ac, aw, vec2(1.0, -1.0) - pp, dir, len2, lob, clp, c);\n"
 	"	Tap(ac, aw, vec2(-1.0, 1.0) - pp, dir, len2, lob, clp, i);\n"
@@ -2634,11 +2660,21 @@ static const char *upscale_fs =
 	"	Tap(ac, aw, vec2(1.0, 2.0) - pp, dir, len2, lob, clp, o);\n"
 	"	Tap(ac, aw, vec2(0.0, 2.0) - pp, dir, len2, lob, clp, n);\n"
 	/* deringing: inside the range of the four nearest texels */
-	"	return clamp(ac / aw, min(min(f, g), min(j, k)), max(max(f, g), max(j, k)));\n"
+	"	gMn = min(min(f, g), min(j, k));\n"
+	"	gMx = max(max(f, g), max(j, k));\n"
+	"	gBl = mix(mix(f, g, pp.x), mix(j, k, pp.x), pp.y);\n"
+	"	return clamp(ac / aw, gMn, gMx);\n"
 	"}\n"
 	"void main()\n"
 	"{\n"
-	"	vec3 c = (mode == 2) ? Easu(uv) : CatmullRom(uv);\n"
+	"#if OM_UP_MODE == 2\n"
+	/* EASU: the sharpening from its own texels (no extra taps on a texture-bound phone GPU) - the detail EASU adds
+	   over the bilinear of the four nearest texels, scaled up where the neighbourhood is flat (CAS), clamped */
+	"	vec3 c = Easu(uv);\n"
+	"	mediump vec3 amp = sqrt(clamp(min(gMn, 1.0 - gMx) / max(gMx, 1e-4), 0.0, 1.0));\n"
+	"	outColor = vec4(clamp(c + (c - gBl) * (amp * mix(1.0, 1.6, sharp) * sharp), gMn, gMx), 1.0);\n"
+	"#else\n"
+	"	vec3 c = CatmullRom(uv);\n"
 	"	vec3 n = texture(tex, uv + vec2(0.0, size.w)).rgb, s = texture(tex, uv - vec2(0.0, size.w)).rgb;\n"
 	"	vec3 e = texture(tex, uv + vec2(size.z, 0.0)).rgb, w = texture(tex, uv - vec2(size.z, 0.0)).rgb;\n"
 	"	vec3 mn = min(min(n, s), min(e, w)), mx = max(max(n, s), max(e, w));\n"
@@ -2647,12 +2683,19 @@ static const char *upscale_fs =
 	"	vec3 k = -amp * mix(0.125, 0.2, sharp) * sharp;\n"
 	"	vec3 r = (c + (n + s + e + w) * k) / (1.0 + 4.0 * k);\n"
 	"	outColor = vec4(clamp(r, min(mn, c), max(mx, c)), 1.0);\n"
+	"#endif\n"
 	"}\n";
 
 static void
 UpShutdown(void)
 {
-	if (UP.prog) glDeleteProgram(UP.prog);
+	int i;
+
+	for (i = 1; i < 3; i++)
+	{
+		if (UP.progs[i]) glDeleteProgram(UP.progs[i]);
+	}
+
 	if (UP.tex) glDeleteTextures(1, &UP.tex);
 	if (UP.fbo) glDeleteFramebuffers(1, &UP.fbo);
 	memset(&UP, 0, sizeof(UP));
@@ -2664,27 +2707,45 @@ UpTarget(void)
 {
 	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
 
-	if (!UP.prog)
 	{
-		if (UP.tried)
+		int mode = (r_om_upscale->value >= 2.0f) ? 2 : 1;
+
+		if (!UP.progs[mode])
 		{
-			return false;
+			char *src;
+			size_t n = strlen(upscale_fs) + 32;
+
+			if (UP.tried & (1 << mode))
+			{
+				return false;
+			}
+
+			UP.tried |= 1 << mode;
+
+			if ((src = malloc(n)) == NULL)
+			{
+				return false;
+			}
+
+			snprintf(src, n, "#define OM_UP_MODE %d\n%s", mode, upscale_fs);
+			UP.progs[mode] = LinkPost(src);
+			free(src);
+
+			if (!UP.progs[mode])
+			{
+				R_Printf(PRINT_ALL, "r_om_renderscale: the upscale shader did not link, plain stretch\n");
+				return false;
+			}
 		}
 
-		UP.tried = true;
-		UP.prog = LinkPost(upscale_fs);
-
-		if (!UP.prog)
+		if (UP.prog != UP.progs[mode])
 		{
-			R_Printf(PRINT_ALL, "r_om_renderscale: the upscale shader did not link, plain stretch\n");
-			return false;
+			UP.prog = UP.progs[mode];
+			UP.u_tex = glGetUniformLocation(UP.prog, "tex");
+			UP.u_rect = glGetUniformLocation(UP.prog, "rect");
+			UP.u_size = glGetUniformLocation(UP.prog, "size");
+			UP.u_sharp = glGetUniformLocation(UP.prog, "sharp");
 		}
-
-		UP.u_tex = glGetUniformLocation(UP.prog, "tex");
-		UP.u_rect = glGetUniformLocation(UP.prog, "rect");
-		UP.u_size = glGetUniformLocation(UP.prog, "size");
-		UP.u_sharp = glGetUniformLocation(UP.prog, "sharp");
-		UP.u_mode = glGetUniformLocation(UP.prog, "mode");
 	}
 
 	if (!UP.fbo || (UP.w != P.w) || (UP.h != P.h))
@@ -2711,7 +2772,7 @@ UpTarget(void)
 		{
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
 			UpShutdown();
-			UP.tried = true;
+			UP.tried = 6; /* no target: neither mode */
 			return false;
 		}
 	}
@@ -2732,7 +2793,6 @@ UpscaleEnd(void)
 	glUniform4f(UP.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniform4f(UP.u_size, fw, fh, 1.0f / fw, 1.0f / fh);
 	glUniform1f(UP.u_sharp, Q_clamp(r_om_upscale_sharp->value, 0.0f, 1.0f));
-	glUniform1i(UP.u_mode, (r_om_upscale->value >= 2.0f) ? 2 : 1);
 	BindTex(GL_TEXTURE0, UP.tex);
 	DrawQuad();
 }

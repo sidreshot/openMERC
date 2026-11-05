@@ -634,6 +634,12 @@ static const char *ls_glsl_none =
 	"void omLsApply(inout vec3 lm, vec3 lm0, vec3 wp, vec3 nrm) {}\n";
 
 const char *
+GL3_LShadow_GlslNone(void)
+{
+	return ls_glsl_none;
+}
+
+const char *
 GL3_LShadow_Glsl(void)
 {
 	/* the world shaders are made before GL3_LShadow_Init */

@@ -36,6 +36,9 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/select.h> /* for fd_set */
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 #ifndef FNDELAY
 #define FNDELAY O_NDELAY
 #endif
@@ -94,6 +97,9 @@ Sys_Error(const char *error, ...)
 	vsnprintf(string, 1024, error, argptr);
 	va_end(argptr);
 	fprintf(stderr, "Error: %s\n", string);
+#ifdef __ANDROID__
+	__android_log_print(ANDROID_LOG_ERROR, "openMERC", "Error: %s", string);
+#endif
 
 	exit(1);
 }
@@ -210,6 +216,12 @@ Sys_ConsoleInput(void)
 void
 Sys_ConsoleOutput(char *string)
 {
+#ifdef __ANDROID__
+	/* no terminal on Android: the console goes to logcat (tag openMERC) */
+	__android_log_write(ANDROID_LOG_INFO, "openMERC", ((string[0] == 0x01) || (string[0] == 0x02)) ? string + 1 : string);
+	return;
+#endif
+
 	if ((string[0] == 0x01) || (string[0] == 0x02))
 	{
 		if (color_active)
@@ -766,6 +778,24 @@ Sys_FreeLibrary(void *handle)
 	}
 }
 
+#ifdef __ANDROID__
+/* openMERC Android: <native library folder of the APK>/lib<base>.so (the folder of libmain.so) */
+qboolean
+Sys_NativeLibPath(const char *base, char *out, size_t len)
+{
+	Dl_info info;
+	const char *slash;
+
+	if (!dladdr((void *)Sys_NativeLibPath, &info) || !info.dli_fname || !(slash = strrchr(info.dli_fname, '/')))
+	{
+		return false;
+	}
+
+	snprintf(out, len, "%.*slib%s.so", (int)(slash - info.dli_fname + 1), info.dli_fname, base);
+	return true;
+}
+#endif
+
 void *
 Sys_LoadLibrary(const char *path, const char *sym, void **handle)
 {
@@ -777,6 +807,20 @@ Sys_LoadLibrary(const char *path, const char *sym, void **handle)
 	module = dlopen(path, RTLD_LAZY | RTLD_NODELETE);
 #else
 	module = dlopen(path, RTLD_LAZY);
+#endif
+
+#ifdef __ANDROID__
+	/* openMERC Android: the modules are lib<name>.so in the APK's native library folder; the linker finds them
+	   by that name (ref_gles3.so, OMsnd.so, base/gamex86.so, base/player.so) */
+	if (!module)
+	{
+		char lib[MAX_OSPATH];
+		const char *b = strrchr(path, '/');
+
+		b = b ? b + 1 : path;
+		snprintf(lib, sizeof(lib), "%s%s", strncmp(b, "lib", 3) ? "lib" : "", b);
+		module = dlopen(lib, RTLD_LAZY);
+	}
 #endif
 
 	if (!module)

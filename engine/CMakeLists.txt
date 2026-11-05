@@ -686,6 +686,14 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 		set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT openMerc)
 		set_target_properties(openMerc PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/release)
 	endif()
+elseif(ANDROID)
+	# openMERC Android: the client is libmain.so, SDL's Java activity loads it and calls SDL_main
+	add_library(openMerc SHARED ${Client-Source} ${Client-SDL-Source} ${Client-Header}
+			${Platform-Specific-Source} ${Backends-Generic-Source})
+	set_target_properties(openMerc PROPERTIES OUTPUT_NAME "main" LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/release)
+	target_link_libraries(openMerc ${yquake2LinkerFlags} ${yquake2ClientLinkerFlags}
+		${yquake2SDLLinkerFlags} ${yquake2ZLibLinkerFlags} log android)
+	target_compile_definitions(openMerc PRIVATE OM_SOF_ELF_EXPORTS)
 else()
 	add_executable(openMerc ${Client-Source} ${Client-SDL-Source} ${Client-Header}
 			${Platform-Specific-Source} ${Backends-Generic-Source})
@@ -731,7 +739,7 @@ set_target_properties(ref_gl3 PROPERTIES
 		)
 target_include_directories(ref_gl3 PRIVATE ${CMAKE_SOURCE_DIR}/src/client/refresh/gl3/glad/include)
 target_link_libraries(ref_gl3 ${yquake2LinkerFlags} ${yquake2SDLLinkerFlags})
-if(NOT WIN32)
+if(NOT WIN32 AND NOT ANDROID) # bionic has pthreads in libc
 	target_link_libraries(ref_gl3 pthread) # gl3_jobs.c
 endif()
 if(SDL3_SUPPORT)
@@ -776,7 +784,7 @@ set_target_properties(ref_gles3 PROPERTIES
 target_include_directories(ref_gles3 PRIVATE ${CMAKE_SOURCE_DIR}/src/client/refresh/gl3/glad-gles3/include)
 target_compile_definitions(ref_gles3 PRIVATE YQ2_GL3_GLES3=1 YQ2_GL3_GLES=1)
 target_link_libraries(ref_gles3 ${yquake2LinkerFlags} ${yquake2SDLLinkerFlags})
-if(NOT WIN32)
+if(NOT WIN32 AND NOT ANDROID) # bionic has pthreads in libc
 	target_link_libraries(ref_gles3 pthread) # gl3_jobs.c
 endif()
 if(SDL3_SUPPORT)

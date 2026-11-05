@@ -303,7 +303,13 @@ GL3_Register(void)
 	gl_lefthand = GL3_LocalCvar("hand", "0", CVAR_USERINFO | CVAR_ARCHIVE);
 	r_gunfov = GL3_LocalCvar("r_gunfov", "80", CVAR_ARCHIVE);
 	r_farsee = GL3_LocalCvar("r_farsee", "1", CVAR_LATCH | CVAR_ARCHIVE); /* OpenMerc: max draw distance by default */
+#ifdef YQ2_GL3_GLES3
+	/* GLES (phones): no MSAA on the window - the scaled 3D view goes through FSR and SMAA, an MSAA back buffer only
+	   costs bandwidth there (and switches the post AA off) */
+	gl_msaa_samples = GL3_LocalCvar("r_msaa_samples", "0", CVAR_ARCHIVE);
+#else
 	gl_msaa_samples = GL3_LocalCvar("r_msaa_samples", "8", CVAR_ARCHIVE); /* OpenMerc: max MSAA default; driver may clamp */
+#endif
 	r_retexturing = GL3_LocalCvar("r_retexturing", "1", CVAR_ARCHIVE);
 	r_om_hdseam = GL3_LocalCvar("r_om_hdseam", "2", 0); /* upscaled textures: 1 repair tile borders, 2 + retail tone everywhere */
 	r_scale8bittextures = GL3_LocalCvar("r_scale8bittextures", "0", CVAR_ARCHIVE);
@@ -2523,22 +2529,24 @@ ApplyPreset(void)
 			{"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
 			{"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
 			{"r_om_ssao", "0"}, {"r_om_ssr", "0"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
-			{"r_om_mirror_scale", "0.5"}, {"r_om_renderscale", "0.75"}, {"r_om_upscale", "1"}, {"r_om_fxaa", "-1"},
-			{"r_om_beams_motes", "0"}, {"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {NULL, NULL}},
+			{"r_om_mirror_scale", "0.5"}, {"r_om_renderscale", "0.67"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "0"},
+			{"r_om_beams_motes", "0"}, {"r_om_tess", "0"}, {"r_om_ppl_models", "0"},
+			/* measured on an Adreno 610 phone (2400x1080, arm1): lamp shadows 18 ms, seam strips 12 ms, look 8 ms */
+			{"r_om_lshadow", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"}, {NULL, NULL}},
 		{ /* medium */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "3"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "1"},
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"}, {"r_om_mirror_scale", "0.7"},
 			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
-			{"r_om_ppl_models", "1"}, {NULL, NULL}},
+			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {NULL, NULL}},
 		{ /* high: the build's defaults */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"}, {"r_om_mirror_scale", "0.7"},
 			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
-			{"r_om_ppl_models", "1"}, {NULL, NULL}}};
+			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {NULL, NULL}}};
 	int p, i;
 
 	if (!preset)
@@ -2691,6 +2699,21 @@ GL3_BeginFrame(float camera_separation)
 		GL3_SoF_RequestRestart();
 	}
 #endif
+
+	{
+		/* r_om_lshadow on / off: the world shaders with or without the lamp shadow receiver (gl3_shaders.c) */
+		static cvar_t *lshadow;
+
+		if (!lshadow)
+		{
+			lshadow = ri.Cvar_Get("r_om_lshadow", "1", CVAR_ARCHIVE);
+		}
+
+		if ((lshadow->value != 0.0f) != gl3_world_lamps)
+		{
+			gl3_colorlight->modified = true;
+		}
+	}
 
 	if (gl3_particle_square->modified || gl3_colorlight->modified)
 	{

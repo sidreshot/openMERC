@@ -233,6 +233,15 @@ Qcommon_Mainloop(void)
 /* SoF: default.cfg, then config.cfg (SPEC-301 Behaviour 2) */
 void Qcommon_ExecConfigs(qboolean gameStartUp)
 {
+	/* platform defaults default_video.cfg reads ($om_default_*): phones run the GLES renderer without MSAA (FSR and
+	   SMAA instead), PCs the GL 3 renderer with 8x MSAA */
+#ifdef __ANDROID__
+	Cvar_FullSet("om_default_renderer", "gles3", CVAR_NOSET);
+	Cvar_FullSet("om_default_msaa", "0", CVAR_NOSET);
+#else
+	Cvar_FullSet("om_default_renderer", "gl3", CVAR_NOSET);
+	Cvar_FullSet("om_default_msaa", "8", CVAR_NOSET);
+#endif
 	Cbuf_AddText("exec default.cfg\n");
 	Cbuf_AddText("exec config.cfg\n");
 

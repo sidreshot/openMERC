@@ -33,6 +33,7 @@
  */
 
 #include <assert.h>
+#include <ctype.h> // tolower()
 #include <stddef.h> // ofsetof()
 
 #include "header/local.h"
@@ -425,7 +426,7 @@ RenderBrushPoly(entity_t *currententity, msurface_t *fa, gl3drawCmd_t drawCmd)
 	}
 	else
 	{
-		GL3_SetDrawCmdShader(&drawCmd, &gl3state.si3Dlm);
+		GL3_SetDrawCmdShader(&drawCmd, GL3_WorldShaderFor(image));
 		GL3_DrawGLPoly(fa, drawCmd);
 	}
 
@@ -1354,7 +1355,7 @@ RenderLightmappedPoly(entity_t *currententity, msurface_t *surf, gl3drawCmd_t dr
 	}
 	else
 	{
-		GL3_SetDrawCmdShader(&drawCmd, &gl3state.si3Dlm);
+		GL3_SetDrawCmdShader(&drawCmd, GL3_WorldShaderFor(image));
 		GL3_DrawGLPoly(surf, drawCmd);
 	}
 }

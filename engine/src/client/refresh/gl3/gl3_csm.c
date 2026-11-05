@@ -590,7 +590,15 @@ GL3_CSM_Glsl(void)
 char *
 GL3_CSM_Prepend(const char *src)
 {
-	const char *ls = GL3_LShadow_Glsl();
+	return GL3_CSM_PrependLamps(src, true);
+}
+
+/* lamps false: the lamp shadow receiver is an empty function (r_om_lshadow 0: the world shaders drop its taps and
+   registers - on a phone GPU a big uber shader costs even in branches never taken) */
+char *
+GL3_CSM_PrependLamps(const char *src, qboolean lamps)
+{
+	const char *ls = lamps ? GL3_LShadow_Glsl() : GL3_LShadow_GlslNone();
 	size_t a = strlen(csm_glsl), l = strlen(ls), b = strlen(src);
 	char *s = malloc(a + l + b + 1);
 

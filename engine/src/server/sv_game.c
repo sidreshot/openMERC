@@ -1321,6 +1321,17 @@ SV_LoadGameLibrary(void)
 		Com_Error(ERR_DROP, "failed to load game DLL");
 	}
 
+#ifdef __ANDROID__
+	/* Android: the APK's native library folder (libgamex86.so) */
+	if (Sys_NativeLibPath("gamex86", name, sizeof(name)) && Sys_IsFile(name) &&
+		(entry = Sys_LoadLibrary(name, "GetGameAPI", &game_library)))
+	{
+		Com_DPrintf("LoadLibrary (%s)\n", name);
+		sv_gamechecksum = SV_FileChecksum(name);
+		return (sof_getgameapi_t)entry;
+	}
+#endif
+
 	return NULL;
 }
 

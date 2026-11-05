@@ -409,6 +409,7 @@ qboolean GL3_CSM_Active(void);
 qboolean GL3_CSM_ReplaceGhoul(void);
 const char *GL3_CSM_Glsl(void);
 char *GL3_CSM_Prepend(const char *src);
+char *GL3_CSM_PrependLamps(const char *src, qboolean lamps); /* lamps false: no lamp shadow receiver */
 void GL3_CSM_BindProgram(GLuint prog);
 const float *GL3_CSM_InvPV(void);
 void GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride);
@@ -436,6 +437,7 @@ void GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, co
 void GL3_LShadow_Frame(void);
 qboolean GL3_LShadow_Capturing(void);
 const char *GL3_LShadow_Glsl(void);
+const char *GL3_LShadow_GlslNone(void);
 void GL3_LShadow_BindProgram(GLuint prog);
 void GL3_LShadow_Info(void);
 float GL3_LShadow_BlobKeep(const vec3_t origin);
