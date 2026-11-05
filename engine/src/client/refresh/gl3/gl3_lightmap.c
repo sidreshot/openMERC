@@ -315,7 +315,15 @@ typedef struct
 	const cplane_t *plane;
 	int back, face;
 	vec3_t a, b;
+	vec3_t mn, mx;   /* bounds of the edge (a quick reject of pairs that cannot share a stretch) */
 } lmedge_t;
+
+/* a border stretch shared by edges i and j (the geometry does not change between the rounds) */
+typedef struct
+{
+	int i, j;
+	float lo, hi;
+} lmpair_t;
 
 static int
 LMEdgeCmp(const void *x, const void *y)
@@ -370,8 +378,9 @@ GL3_LM_StitchSeams(gl3model_t *m)
 	cvar_t *on = ri.Cvar_Get("r_om_lmstitch", "1", CVAR_ARCHIVE);
 	cvar_t *width = ri.Cvar_Get("r_om_lmstitch_width", "3", CVAR_ARCHIVE);
 	lmedge_t *ed;
+	lmpair_t *pairs = NULL;
 	float **acc;   /* per face: per style per sample r g b weight */
-	int numed = 0, i, j, g0, g1, round, faces = 0, points = 0, K;
+	int numed = 0, i, j, g0, g1, round, faces = 0, points = 0, K, numpairs = 0, maxpairs = 0, pi;
 
 	if (!on->value || (m->bspversion != BSPVERSION_SOF) || !m->numsurfaces)
 	{
@@ -405,6 +414,7 @@ GL3_LM_StitchSeams(gl3model_t *m)
 			const float *vb = m->vertexes[(e1 > 0) ? m->edges[e1].v[0] : m->edges[-e1].v[1]].position;
 			lmedge_t *e = &ed[numed];
 			vec3_t d;
+			int k;
 
 			VectorSubtract(vb, va, d);
 
@@ -418,6 +428,13 @@ GL3_LM_StitchSeams(gl3model_t *m)
 			e->face = i;
 			VectorCopy(va, e->a);
 			VectorCopy(vb, e->b);
+
+			for (k = 0; k < 3; k++)
+			{
+				e->mn[k] = Q_min(va[k], vb[k]);
+				e->mx[k] = Q_max(va[k], vb[k]);
+			}
+
 			numed++;
 		}
 	}
@@ -441,54 +458,103 @@ GL3_LM_StitchSeams(gl3model_t *m)
 			}
 		}
 
-		for (g0 = 0; g0 < numed; g0 = g1)
+		/* the shared stretches: found once (pairs of edges of a plane, the same as before, in the same order) and
+		   walked in every round - the rounds only change the samples */
+		if (round == 0)
 		{
-			for (g1 = g0 + 1; (g1 < numed) && !LMEdgeCmp(&ed[g0], &ed[g1]); g1++)
+			for (g0 = 0; g0 < numed; g0 = g1)
 			{
-			}
+				for (g1 = g0 + 1; (g1 < numed) && !LMEdgeCmp(&ed[g0], &ed[g1]); g1++)
+				{
+				}
 
-			for (i = g0; i < g1; i++)
+				for (i = g0; i < g1; i++)
+				{
+					vec3_t t;
+					float len;
+
+					VectorSubtract(ed[i].b, ed[i].a, t);
+					len = VectorNormalize(t);
+
+					for (j = i + 1; j < g1; j++)
+					{
+						vec3_t r0, r1, off;
+						float s0, s1, lo, hi;
+
+						if (ed[i].face == ed[j].face)
+						{
+							continue;
+						}
+
+						/* a stretch of 2 units with both ends of j within 0.1 of i's line lies in both bounds */
+						if ((ed[j].mn[0] > ed[i].mx[0] + 0.25f) || (ed[j].mx[0] < ed[i].mn[0] - 0.25f) ||
+							(ed[j].mn[1] > ed[i].mx[1] + 0.25f) || (ed[j].mx[1] < ed[i].mn[1] - 0.25f) ||
+							(ed[j].mn[2] > ed[i].mx[2] + 0.25f) || (ed[j].mx[2] < ed[i].mn[2] - 0.25f))
+						{
+							continue;
+						}
+
+						VectorSubtract(ed[j].a, ed[i].a, r0);
+						VectorSubtract(ed[j].b, ed[i].a, r1);
+						s0 = DotProduct(r0, t);
+						s1 = DotProduct(r1, t);
+						VectorMA(r0, -s0, t, off);
+						if (DotProduct(off, off) > 0.01f)
+						{
+							continue;
+						}
+						VectorMA(r1, -s1, t, off);
+						if (DotProduct(off, off) > 0.01f)
+						{
+							continue;
+						}
+
+						lo = Q_max(0.0f, Q_min(s0, s1));
+						hi = Q_min(len, Q_max(s0, s1));
+
+						if (hi - lo < 2.0f)
+						{
+							continue;
+						}
+
+						if (numpairs == maxpairs)
+						{
+							lmpair_t *np = realloc(pairs, sizeof(*pairs) * (size_t)(maxpairs ? maxpairs * 2 : 1024));
+
+							if (!np)
+							{
+								continue;
+							}
+
+							pairs = np;
+							maxpairs = maxpairs ? maxpairs * 2 : 1024;
+						}
+
+						pairs[numpairs].i = i;
+						pairs[numpairs].j = j;
+						pairs[numpairs].lo = lo;
+						pairs[numpairs].hi = hi;
+						numpairs++;
+					}
+				}
+			}
+		}
+
+		for (pi = 0; pi < numpairs; pi++)
+		{
 			{
 				vec3_t t;
-				float len;
 
+				i = pairs[pi].i;
+				j = pairs[pi].j;
 				VectorSubtract(ed[i].b, ed[i].a, t);
-				len = VectorNormalize(t);
+				VectorNormalize(t);
 
-				for (j = i + 1; j < g1; j++)
 				{
 					msurface_t *A = &m->surfaces[ed[i].face], *B = &m->surfaces[ed[j].face];
-					vec3_t r0, r1, off, p;
-					float s0, s1, lo, hi, step, x;
+					vec3_t p;
+					float lo = pairs[pi].lo, hi = pairs[pi].hi, step, x;
 					int ka, kb;
-
-					if (ed[i].face == ed[j].face)
-					{
-						continue;
-					}
-
-					VectorSubtract(ed[j].a, ed[i].a, r0);
-					VectorSubtract(ed[j].b, ed[i].a, r1);
-					s0 = DotProduct(r0, t);
-					s1 = DotProduct(r1, t);
-					VectorMA(r0, -s0, t, off);
-					if (DotProduct(off, off) > 0.01f)
-					{
-						continue;
-					}
-					VectorMA(r1, -s1, t, off);
-					if (DotProduct(off, off) > 0.01f)
-					{
-						continue;
-					}
-
-					lo = Q_max(0.0f, Q_min(s0, s1));
-					hi = Q_min(len, Q_max(s0, s1));
-
-					if (hi - lo < 2.0f)
-					{
-						continue;
-					}
 
 					step = Q_min(A->lmstep[0], B->lmstep[0]) * 0.5f;
 
@@ -707,6 +773,7 @@ GL3_LM_StitchSeams(gl3model_t *m)
 
 	free(acc);
 	free(ed);
+	free(pairs);
 	R_Printf(PRINT_DEVELOPER, "r_om_lmstitch: %d faces, %d border points\n", faces, points / 3);
 }
 
