@@ -414,6 +414,7 @@ extern char sv_outputbuf[SV_OUTPUTBUF_LENGTH];
 void SV_FlushRedirect(int sv_redirected, char *outputbuf);
 void SV_SendClientMessages(void);
 void SV_SendPrepClientMessages(void);
+void SV_SendSignonReplies(void);
 void SV_Multicast(const vec3_t origin, int to, int excludeent);
 void SV_Unicast(const edict_t *ent, qboolean reliable);
 void SV_StartSound(const vec3_t origin, const edict_t *entity, int channel,

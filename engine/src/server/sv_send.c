@@ -685,6 +685,30 @@ SV_SendClientMessages(void)
 	}
 }
 
+/* OpenMerc: between server frames, the signon replies of connecting clients go out at once (Quake II sent them
+   with the next 10 Hz frame: every step of the handshake - configstrings, ghoulstrings, baselines, precache -
+   waited up to 100 ms, most of a second of every map load). Only new data with no reliable message in flight: a
+   remote client gets no extra packets while it acknowledges. */
+void
+SV_SendSignonReplies(void)
+{
+	client_t *c;
+	int i;
+
+	for (i = 0, c = svs.clients; i < svs.numclients; i++, c++)
+	{
+		if ((c->state == cs_free) || (c->state == cs_spawned) || c->netchan.message.overflowed)
+		{
+			continue;
+		}
+
+		if (c->netchan.message.cursize && !c->netchan.reliable_length)
+		{
+			Netchan_Transmit(&c->netchan, 0, NULL);
+		}
+	}
+}
+
 void
 SV_SendPrepClientMessages(void)
 {

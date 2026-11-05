@@ -521,6 +521,7 @@ SV_Frame(int usec)
 			svs.realtime = sv.time - 100;
 		}
 
+		SV_SendSignonReplies();
 		NET_Sleep(sv.time - svs.realtime);
 		return;
 	}
