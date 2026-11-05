@@ -32,6 +32,7 @@ byte *membase;
 int hunkcount;
 size_t hunkmaxsize;
 size_t cursize;
+static size_t committed; /* OpenMerc: bytes of the hunk committed so far */
 
 void *
 Hunk_Begin(int maxsize)
@@ -40,6 +41,7 @@ Hunk_Begin(int maxsize)
 	/* plus 32 bytes for cacheline */
 	hunkmaxsize = maxsize + sizeof(size_t) + 32;
 	cursize = 0;
+	committed = 0;
 
 	membase = VirtualAlloc(NULL, hunkmaxsize, MEM_RESERVE, PAGE_NOACCESS);
 
@@ -54,17 +56,33 @@ Hunk_Begin(int maxsize)
 void *
 Hunk_Alloc(int size)
 {
-	void *buf;
-
 	/* round to cacheline */
 	size = (size + 31) & ~31;
 
-	/* commit pages as needed */
-	buf = VirtualAlloc(membase, cursize + size, MEM_COMMIT, PAGE_READWRITE);
-
-	if (!buf)
+	/* commit pages as needed. OpenMerc: only the pages beyond those already committed, 1 MB at a time - committing
+	   the whole range again at every allocation made the kernel walk all its pages each time (the 12 000 face
+	   polygons of a map took 0.4 s) */
+	if (cursize + size > committed)
 	{
-		Sys_Error("VirtualAlloc commit failed.\n");
+		size_t want = cursize + size + 1024 * 1024;
+
+		if (want > hunkmaxsize)
+		{
+			want = hunkmaxsize;
+		}
+
+		if (!VirtualAlloc(membase + committed, want - committed, MEM_COMMIT, PAGE_READWRITE))
+		{
+			/* near the end of the reservation: only what is needed */
+			want = cursize + size;
+
+			if (!VirtualAlloc(membase + committed, want - committed, MEM_COMMIT, PAGE_READWRITE))
+			{
+				Sys_Error("VirtualAlloc commit failed.\n");
+			}
+		}
+
+		committed = want;
 	}
 
 	cursize += size;
