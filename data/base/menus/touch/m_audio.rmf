@@ -1,0 +1,25 @@
+<!-- OpenMerc: the sound page on touch screens (menus/touch overrides menus/m_audio.rmf there): no output device list
+     (a Windows feature), no window-focus muting, no sound restart button -->
+<stm>
+<strings menu_omset>
+
+<vbar tint vbargray>
+
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_VOLUME^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint normaltext>
+<slider cvar s_om_gain min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_MASTER^" split 230><hbr>
+<slider cvar s_volume min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_EFFECTS^" split 230><hbr>
+<slider cvar s_om_voicevolume min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_VOICE^" split 230><hbr>
+<slider cvar s_musicvolume min 0.0 max 1.0 step 0.05 atext "^MENU_OMSET_MUSIC^" split 230><hbr>
+<hbr>
+<center>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_MUSIC_ON^" split 230 cvari s_musicenabled><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_HRTF^" split 230 cvari s_om_hrtf><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_REVERB^" split 230 cvari s_om_reverb><hbr>
+<hbr>
+<blank 16 16>
+</stm>

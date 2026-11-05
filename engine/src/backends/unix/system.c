@@ -99,6 +99,7 @@ Sys_Error(const char *error, ...)
 	fprintf(stderr, "Error: %s\n", string);
 #ifdef __ANDROID__
 	__android_log_print(ANDROID_LOG_ERROR, "openMERC", "Error: %s", string);
+	_exit(1);
 #endif
 
 	exit(1);
@@ -126,7 +127,12 @@ Sys_Quit(void)
 
 	printf("------------------------------------\n");
 
+#ifdef __ANDROID__
+	/* no static destructors: SDL's and the driver's threads still hold their mutexes (an abort at every quit) */
+	_exit(0);
+#else
 	exit(0);
+#endif
 }
 
 void

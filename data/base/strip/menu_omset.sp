@@ -2,7 +2,7 @@ VERSION 1
 ID 197
 REFERENCE MENU_OMSET
 DESCRIPTION "OpenMerc audio, controls, gameplay and multiplayer pages"
-COUNT 126
+COUNT 128
 INDEX 0
 {
    REFERENCE OFFON
@@ -758,4 +758,16 @@ INDEX 125
    REFERENCE LIMB_OPTS
    TEXT_ENGLISH "30 s,1 min,2 min,5 min,Always"
    TEXT_RUSSIAN "30 Я,1 ЛХМ,2 ЛХМ,5 ЛХМ,бЯЕЦДЮ"
+}
+INDEX 126
+{
+   REFERENCE TAB_PAD
+   TEXT_ENGLISH "Gamepad"
+   TEXT_RUSSIAN "цЕИЛОЮД"
+}
+INDEX 127
+{
+   REFERENCE PG_TOUCH_TICK
+   TEXT_ENGLISH "*** TAP AN OPTION TO CHANGE IT: THE LEFT ARROW STEPS BACK *** SWIPE UP OR DOWN TO SCROLL ***"
+   TEXT_RUSSIAN "*** мюфлхре мю оюпюлерп, врнаш хглемхрэ ецн: кебюъ ярпекйю - мюгюд *** опнбедхре ббепу хкх бмхг, врнаш кхярюрэ ***"
 }

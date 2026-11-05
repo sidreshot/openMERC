@@ -1502,9 +1502,9 @@ Slider_Finish(mparse_t *p, mwidget_t *w)
 	{
 		d->flat = true;
 		d->bw = 150;
-		d->bh = 14;
-		d->kw = 8;
-		d->kh = 14;
+		d->bh = Touch_Enabled() ? 22 : 14; /* OpenMerc: a knob a finger hits */
+		d->kw = Touch_Enabled() ? 14 : 8;
+		d->kh = d->bh;
 		d->cw = 4;
 		d->ch = 4;
 		w->w = d->bw + 2 * d->ch;
@@ -1513,7 +1513,7 @@ Slider_Finish(mparse_t *p, mwidget_t *w)
 		if (w->split > 0)
 		{
 			w->w = MW_SplitWidth(w, MW_SW(d->atext, w->font), w->w, ML_ContentW(p->page) - 2 * w->bpad);
-			w->h = MW_FH(w) > d->bh ? MW_FH(w) : d->bh;
+			w->h = (MW_FH(w) > d->bh ? MW_FH(w) : d->bh) + MW_RowPad(w);
 		}
 
 		w->flags |= WF_INTERACTIVE;

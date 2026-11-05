@@ -144,6 +144,15 @@ CL_Drop(void)
 
 	if (cls.state == ca_disconnected)
 	{
+		/* OpenMerc: a load that failed before the client connected (a savegame of another build: the game refuses
+		   it) left the loading plaque up for two minutes - a "hang" on a phone, where no console key brings the
+		   menu back. The plaque goes and the main menu opens. */
+		if (cls.disable_screen)
+		{
+			SCR_EndLoadingPlaque();
+			Cbuf_AddText("menu main\n");
+		}
+
 		return;
 	}
 
