@@ -81,33 +81,41 @@ GL3_LM_UploadBlock(void)
 qboolean
 GL3_LM_AllocBlock(int w, int h, int *x, int *y)
 {
-	int i, j;
-	int best, best2;
+	/* OpenMerc: the Quake II skyline search with the maximum of each window of w columns from a monotonic queue -
+	   O(BLOCK_WIDTH) instead of O(BLOCK_WIDTH x w) per lightmap. A spot is valid when its window's maximum is below the
+	   best height so far, and then becomes the best: the same spots in the same order as the column-by-column test */
+	static int queue[BLOCK_WIDTH];
+	int i, best, head = 0, tail = 0;
 
 	best = BLOCK_HEIGHT;
 
-	for (i = 0; i < BLOCK_WIDTH - w; i++)
+	if ((w <= 0) || (w >= BLOCK_WIDTH))
 	{
-		best2 = 0;
+		return false;
+	}
 
-		for (j = 0; j < w; j++)
+	for (i = 0; i < BLOCK_WIDTH - 1; i++)
+	{
+		int start = i - w + 1;
+
+		/* column i enters the window, smaller or equal ones before it can never be its maximum again */
+		while ((tail > head) && (gl3_lms.allocated[queue[tail - 1]] <= gl3_lms.allocated[i]))
 		{
-			if (gl3_lms.allocated[i + j] >= best)
-			{
-				break;
-			}
-
-			if (gl3_lms.allocated[i + j] > best2)
-			{
-				best2 = gl3_lms.allocated[i + j];
-			}
+			tail--;
 		}
 
-		if (j == w)
+		queue[tail++] = i;
+
+		if (queue[head] < start)
 		{
-			/* this is a valid spot */
-			*x = i;
-			*y = best = best2;
+			head++;
+		}
+
+		/* the window start .. i is the spot at column start (start < BLOCK_WIDTH - w, as before) */
+		if ((start >= 0) && (gl3_lms.allocated[queue[head]] < best))
+		{
+			*x = start;
+			*y = best = gl3_lms.allocated[queue[head]];
 		}
 	}
 
