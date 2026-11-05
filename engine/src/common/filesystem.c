@@ -64,6 +64,8 @@ typedef struct
 	int hashnext;
 } fsPackFile_t;
 
+#define FS_PACK_SPARES 4
+
 typedef struct
 {
 	char filename[MAX_OSPATH];
@@ -71,6 +73,8 @@ typedef struct
 	int numfiles;
 	fsPackFile_t *files;
 	int hash[FS_PACK_HASH];
+	FILE *spare[FS_PACK_SPARES];  /* OpenMerc: streams of closed entries, reused by the next open */
+	int numspare;
 } fsPack_t;
 
 /* OpenMerc: the files under a directory mount (FS_DirIndex): the upper-case relative path and the path as on
@@ -99,6 +103,7 @@ typedef struct
 	FILE *file;
 	qboolean frompack;
 	int remaining;                /* bytes left in a pack entry */
+	fsPack_t *pack;               /* the archive the stream reads (it goes back to its spares) */
 } fsHandle_t;
 
 typedef struct fsLink_s
@@ -523,7 +528,16 @@ FS_FCloseFile(fileHandle_t f)
 
 	if (handle->file)
 	{
-		fclose(handle->file);
+		/* OpenMerc: an archive's stream is kept for the next entry (a map load opened the archive thousands of
+		   times: an open and a stat per file) */
+		if (handle->pack && (handle->pack->numspare < FS_PACK_SPARES))
+		{
+			handle->pack->spare[handle->pack->numspare++] = handle->file;
+		}
+		else
+		{
+			fclose(handle->file);
+		}
 	}
 
 	memset(handle, 0, sizeof(*handle));
@@ -1045,7 +1059,7 @@ FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 				continue;
 			}
 
-			file = Q_fopen(pack->filename, "rb");
+			file = pack->numspare ? pack->spare[--pack->numspare] : Q_fopen(pack->filename, "rb");
 
 			if (!file)
 			{
@@ -1061,6 +1075,7 @@ FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 				return -1;
 			}
 
+			handle->pack = pack;
 			fseek(file, pack->files[i].offset, SEEK_SET);
 			Q_strlcpy(handle->name, pack->files[i].origname, sizeof(handle->name));
 			handle->file = file;
@@ -1788,6 +1803,24 @@ FS_FreeSearchPaths(fsSearchPath_t *start, fsSearchPath_t *end)
 			if (cur->pack->handle)
 			{
 				fclose(cur->pack->handle);
+			}
+
+			while (cur->pack->numspare > 0)
+			{
+				fclose(cur->pack->spare[--cur->pack->numspare]);
+			}
+
+			/* a stream still open on this archive is closed, not kept, when its handle goes */
+			{
+				int h;
+
+				for (h = 0; h < FS_MAX_HANDLES; h++)
+				{
+					if (fs_handles[h].pack == cur->pack)
+					{
+						fs_handles[h].pack = NULL;
+					}
+				}
 			}
 
 			Z_Free(cur->pack->files);
