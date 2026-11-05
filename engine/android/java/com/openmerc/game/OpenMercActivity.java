@@ -35,11 +35,23 @@ public class OpenMercActivity extends SDLActivity {
                     return;
                 }
 
+                /* the view keeps the whole screen (SDL adds it as wrap_content: a SurfaceView with a fixed buffer size
+                   would measure itself to that size); only its buffer is smaller */
+                android.view.ViewGroup.LayoutParams lp = mSurface.getLayoutParams();
+
+                if (lp != null) {
+                    lp.width = android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+                    lp.height = android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+                    mSurface.setLayoutParams(lp);
+                }
+
                 if (w <= 0 || h <= 0) {
                     mSurface.getHolder().setSizeFromLayout();
                 } else {
                     mSurface.getHolder().setFixedSize(w, h);
                 }
+
+                mSurface.requestLayout();
             }
         });
     }
