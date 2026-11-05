@@ -25,15 +25,29 @@
 
 #include "header/menu.h"
 #include "header/m_draw.h"
+#include "../header/sofclient.h" /* Touch_Enabled */
 
 /* layout metrics, menu units */
 #define MWD_GAP 8          /* nav panel to tab strip */
-#define MWD_TABH 30        /* tab strip */
+#define MWD_TABH MWD_TabH() /* tab strip: 30, touch screens 40 */
 #define MWD_RIM 9          /* panel rim (padding inside the panel border) */
 #define MWD_INNER 14       /* panel edge to content */
 #define MWD_TITLEH 24
-#define MWD_FOOTH 24
+#define MWD_FOOTH MWD_FootH() /* footer buttons and ticker: 28, touch screens 40 */
 #define MWD_NAVMIN 600     /* least content column for the nav panel */
+
+/* OpenMerc: the tabs and the footer buttons a finger hits on a touch screen, a little larger for the mouse too */
+static int
+MWD_TabH(void)
+{
+	return Touch_Enabled() ? 40 : 30;
+}
+
+static int
+MWD_FootH(void)
+{
+	return Touch_Enabled() ? 40 : 28;
+}
 
 enum
 {

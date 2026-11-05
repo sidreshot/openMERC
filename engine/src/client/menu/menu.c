@@ -16,6 +16,7 @@
 #include "header/menu.h"
 #include "../../common/header/om_version.h"
 #include "header/m_draw.h"
+#include "../header/sofclient.h" /* Touch_Enabled */
 #include "../../common/header/sof/engine.h"
 #include "../../common/header/gamespy_chat.h" /* OpenMerc (I2d): MC_ClearLobby */
 
@@ -2000,7 +2001,8 @@ M_DrawPointer(mscreen_t *scr, int setting)
 	float s = scr->scale;
 	int size = (int)(32 * s);
 
-	if (setting <= 0)
+	/* OpenMerc: no pointer on touch screens - the finger is the pointer */
+	if (setting <= 0 || Touch_Enabled())
 	{
 		return;
 	}

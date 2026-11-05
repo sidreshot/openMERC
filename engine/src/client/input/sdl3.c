@@ -807,7 +807,7 @@ IN_Update(void)
 						   clicks nothing */
 						static float y0, ylast;
 						static qboolean dragging;
-						float step = 0.045f, slop = 0.025f;
+						float step = 0.09f, slop = 0.025f; /* one wheel step per 9 % of the screen height */
 
 						if (type == 0)
 						{

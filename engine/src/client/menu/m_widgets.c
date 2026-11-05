@@ -15,6 +15,7 @@
 #include "header/m_draw.h"
 #include "../input/header/input.h"
 #include "../vid/header/vid.h"
+#include "../header/sofclient.h" /* Touch_Enabled */
 
 #define PIC(n) va("pics/menus/%s", n)
 
@@ -160,6 +161,46 @@ MW_LabelValue(mpage_t *pg, mwidget_t *w, int x, int y, const char *label, const 
 		MR_DrawString(x + T, y, value, vc, w->font, 0);
 		MR_Reclip();
 	}
+}
+
+/* OpenMerc: the extra height of an option row - a larger target for a finger or the mouse (touch screens: more) */
+int
+MW_RowPad(const mwidget_t *w)
+{
+	return MW_FH(w) * (Touch_Enabled() ? 7 : 4) / 10;
+}
+
+/* OpenMerc: an option row with its value between arrows ("«  value  »"): the left half of the value steps back,
+   the right half forward (List_Key); the row's hover bar covers the padded height */
+static void
+MW_LabelValueArrows(mpage_t *pg, mwidget_t *w, int x, int y, const char *label, const char *value, qboolean disabled)
+{
+	qboolean hover = MW_Hovered(w) && !disabled;
+	mcolor_t c = hover ? w->atint : w->tint, lc, vc, ac;
+	int gap = MW_SplitGap(w), ty = y + (w->h - MW_FH(w)) / 2, aw = MW_SW("\xab", w->font);
+	int vx0 = x + w->split + gap, vx1 = x + w->w;
+
+	lc = (w->flags & WF_NOSHADE) ? c : MW_Shade(c);
+	vc = c;
+	ac = (c & 0x00ffffff) | (hover ? 0xff000000 : 0x90000000);
+
+	if (disabled)
+	{
+		lc = vc = ac = (w->tint & 0x00ffffff) | 0x60000000;
+	}
+
+	MR_ClipRight(MW_ContentRight(pg));
+
+	if (hover)
+	{
+		MR_Fill(x, y, w->w, w->h, w->btint);
+	}
+
+	MR_DrawString(x + w->split - gap - MW_SW(label, w->font), ty, label, lc, w->font, 0);
+	MR_DrawString(vx0, ty, "\xab", ac, w->font, 0);
+	MR_DrawString(vx1 - aw, ty, "\xbb", ac, w->font, 0);
+	MR_DrawString((vx0 + vx1 - MW_SW(value, w->font)) / 2, ty, value, vc, w->font, 0);
+	MR_Reclip();
 }
 
 /* comma lists (SPEC-802): a comma is appended, every comma ends an item */
@@ -387,8 +428,28 @@ Text_Key(mpage_t *pg, mwidget_t *w, int key)
 	return true;
 }
 
+/* OpenMerc: bar buttons ("ombutton": Apply, Defaults, Back, the main menu) at least a finger's or a comfortable mouse
+   target tall - on touch screens 1.7 text lines */
+static qboolean
+Text_Finish(mparse_t *p, mwidget_t *w)
+{
+	(void)p;
+
+	if (w->data && ((texticon_t *)w->data)->button)
+	{
+		int fh = MW_FH(w), want = Touch_Enabled() ? fh * 17 / 10 : fh + fh * 7 / 10;
+
+		if (w->h < want)
+		{
+			w->h = want;
+		}
+	}
+
+	return true;
+}
+
 static const mwclass_t mw_text = {
-	"text", Text_Option, NULL, NULL, NULL, NULL, Text_Draw, Text_Key, NULL, Text_Free
+	"text", Text_Option, Text_Finish, NULL, NULL, NULL, Text_Draw, Text_Key, NULL, Text_Free
 };
 
 static mwidget_t *
@@ -684,6 +745,7 @@ typedef struct
 	int index;
 	qboolean applied;
 	qboolean fit; /* OpenMerc MENU2: labels shortened to the page width (snddevices) */
+	int drawx;    /* OpenMerc: x of the last draw (the value's back half, List_Key) */
 } list_t;
 
 static int
@@ -1172,8 +1234,14 @@ List_Finish(mparse_t *p, mwidget_t *w)
 		}
 	}
 
+	/* the arrows around the value need their room in its column */
+	if (w->split > 0 && !(w->flags & WF_TAB))
+	{
+		widest += 2 * MW_SW("\xab  ", w->font);
+	}
+
 	w->w = (w->split > 0) ? MW_SplitWidth(w, A, widest, ML_ContentW(p->page) - 2 * w->bpad) : A + widest;
-	w->h = MW_FH(w);
+	w->h = MW_FH(w) + ((w->split > 0 && !(w->flags & WF_TAB)) ? MW_RowPad(w) : 0);
 	w->flags |= WF_INTERACTIVE;
 	return true;
 }
@@ -1208,6 +1276,14 @@ List_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 		value = (i >= 0 && i < d->numlabels) ? d->labels[i] : "";
 	}
 
+	d->drawx = x;
+
+	if (w->split > 0 && !(w->flags & WF_TAB))
+	{
+		MW_LabelValueArrows(pg, w, x, y, d->atext ? d->atext : "", value, MW_Disabled(w));
+		return;
+	}
+
 	MW_LabelValue(pg, w, x, y, d->atext ? d->atext : "", value, false, MW_Disabled(w));
 }
 
@@ -1226,8 +1302,24 @@ List_Key(mpage_t *pg, mwidget_t *w, int key)
 	   step a list like the mouse buttons, so lists work without a mouse */
 	if (key == K_MOUSE1 || key == K_MOUSE2 || key == K_RIGHTARROW || key == K_LEFTARROW)
 	{
+		int dir = (key == K_MOUSE1 || key == K_RIGHTARROW) ? 1 : -1;
+
+		/* OpenMerc: a click on the left half of the value (its back arrow) steps back */
+		if (key == K_MOUSE1 && w->split > 0 && !(w->flags & WF_TAB))
+		{
+			float mx, my;
+			int vx0 = d->drawx + w->split + MW_SplitGap(w), vx1 = d->drawx + w->w;
+
+			ML_PageMouse(pg, w, &mx, &my);
+
+			if (mx >= vx0 && mx < (vx0 + vx1) / 2)
+			{
+				dir = -1;
+			}
+		}
+
 		old = List_Read(w);
-		i = old + ((key == K_MOUSE1 || key == K_RIGHTARROW) ? 1 : -1);
+		i = old + dir;
 
 		if (i >= d->numlabels)
 		{
