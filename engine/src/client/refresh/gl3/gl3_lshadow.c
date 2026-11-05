@@ -212,19 +212,43 @@ ParseEntities(const char *ents, int len, int *count)
 	return list;
 }
 
-/* the SURF_LIGHT face whose plane passes closest to a patch: its outward normal */
-static qboolean
-PatchNormal(const gl3model_t *mod, const vec3_t o, vec3_t n)
+/* the SURF_LIGHT faces of the map: centre, outward normal and distance, worked out once a map (a light patch
+   walked every face of the map and summed its vertices: thousands of patches x 12 000 faces at a load) */
+typedef struct
 {
-	float best = 1e9f;
+	vec3_t c, n;
+	float d;
+} lspface_t;
+
+static lspface_t *lspfaces;
+static int numlspfaces;
+static const gl3model_t *lspmod;
+
+static void
+PatchFaces(const gl3model_t *mod)
+{
 	int i;
+
+	if (lspmod == mod)
+	{
+		return;
+	}
+
+	free(lspfaces);
+	lspfaces = NULL;
+	numlspfaces = 0;
+	lspmod = mod;
+
+	if (!mod || !(lspfaces = malloc(sizeof(*lspfaces) * (size_t)(mod->numsurfaces > 0 ? mod->numsurfaces : 1))))
+	{
+		return;
+	}
 
 	for (i = 0; i < mod->numsurfaces; i++)
 	{
 		const msurface_t *s = &mod->surfaces[i];
 		const glpoly_t *p = s->polys;
-		vec3_t c = {0, 0, 0}, pn, dc;
-		float d;
+		lspface_t *f;
 		int k;
 
 		if (!s->texinfo || !(s->texinfo->flags & SURF_LIGHT) || (s->texinfo->flags & SURF_SKY) || !p ||
@@ -233,28 +257,48 @@ PatchNormal(const gl3model_t *mod, const vec3_t o, vec3_t n)
 			continue;
 		}
 
+		f = &lspfaces[numlspfaces++];
+		VectorClear(f->c);
+
 		for (k = 0; k < p->numverts; k++)
 		{
-			VectorAdd(c, p->vertices[k].pos, c);
+			VectorAdd(f->c, p->vertices[k].pos, f->c);
 		}
 
-		VectorScale(c, 1.0f / p->numverts, c);
-		VectorCopy(s->plane->normal, pn);
-		d = s->plane->dist;
+		VectorScale(f->c, 1.0f / p->numverts, f->c);
+		VectorCopy(s->plane->normal, f->n);
+		f->d = s->plane->dist;
 
 		if (s->flags & SURF_PLANEBACK)
 		{
-			VectorNegate(pn, pn);
-			d = -d;
+			VectorNegate(f->n, f->n);
+			f->d = -f->d;
 		}
+	}
+}
 
-		VectorSubtract(o, c, dc);
-		d = fabsf(DotProduct(o, pn) - d) + 0.01f * VectorLength(dc);
+/* the SURF_LIGHT face whose plane passes closest to a patch: its outward normal */
+static qboolean
+PatchNormal(const gl3model_t *mod, const vec3_t o, vec3_t n)
+{
+	float best = 1e9f;
+	int i;
+
+	PatchFaces(mod);
+
+	for (i = 0; i < numlspfaces; i++)
+	{
+		const lspface_t *f = &lspfaces[i];
+		vec3_t dc;
+		float d;
+
+		VectorSubtract(o, f->c, dc);
+		d = fabsf(DotProduct(o, f->n) - f->d) + 0.01f * VectorLength(dc);
 
 		if (d < best)
 		{
 			best = d;
-			VectorCopy(pn, n);
+			VectorCopy(f->n, n);
 		}
 	}
 
@@ -267,6 +311,7 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 	int i, j, nents = 0, n = len / 36, npatch = 0;
 	lsent_t *e = ParseEntities(ents, entlen, &nents);
 
+	lspmod = NULL; /* a new map may take the old model's slot */
 	free(lights);
 	lights = NULL;
 	numlights = 0;
@@ -807,6 +852,11 @@ GL3_LShadow_Init(void)
 void
 GL3_LShadow_Shutdown(void)
 {
+	free(lspfaces);
+	lspfaces = NULL;
+	numlspfaces = 0;
+	lspmod = NULL;
+
 	if (L.sampler && qglDeleteSamplers)
 	{
 		qglBindSampler(LS_RAWUNIT, 0);
