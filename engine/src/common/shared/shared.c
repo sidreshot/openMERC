@@ -1454,6 +1454,20 @@ Q_strchr0(const char *s, char c)
 /*
  * An unicode compatible fopen() Wrapper for Windows.
  */
+/* OpenMerc: told of every file opened for writing (the engine's file system keeps its directory index exact) */
+void (*q_fopen_writehook)(const char *file);
+
+static FILE *
+Q_fopen_noted(FILE *f, const char *file, const char *mode)
+{
+	if (f && q_fopen_writehook && (strchr(mode, 'w') || strchr(mode, 'a')))
+	{
+		q_fopen_writehook(file);
+	}
+
+	return f;
+}
+
 #ifdef _WIN32
 #include <windows.h>
 #include <sys/types.h>
@@ -1475,7 +1489,7 @@ FILE *Q_fopen(const char *file, const char *mode)
 			int statret = _wstat(wfile, &buf);
 			if((statret == 0 && (buf.st_mode & _S_IFREG) != 0) || (statret == -1 && errno == ENOENT))
 			{
-				return _wfopen(wfile, wmode);
+				return Q_fopen_noted(_wfopen(wfile, wmode), file, mode);
 			}
 		}
 	}
@@ -1495,7 +1509,7 @@ FILE *Q_fopen(const char *file, const char *mode)
 	{
 		return NULL;
 	}
-	return fopen(file, mode);
+	return Q_fopen_noted(fopen(file, mode), file, mode);
 }
 #endif
 

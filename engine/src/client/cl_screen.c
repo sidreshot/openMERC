@@ -707,8 +707,12 @@ SCR_EndLoadingPlaque(void)
 	/* OpenMerc: how long the map took, from the `map` command to its first frame */
 	if (om_loadstart)
 	{
-		Com_Printf("OMLOADTIME %s %d ms (server %d, client models/images %d)\n", cl.configstrings[CS_MODELS + 1],
-				Sys_Milliseconds() - om_loadstart, om_loadserver, om_loadprep);
+		extern long long fs_stat_us;
+		extern int fs_stat_opens, fs_stat_loosemiss;
+
+		Com_Printf("OMLOADTIME %s %d ms (server %d, client models/images %d; file lookups %d in %d ms, %d loose misses)\n",
+				cl.configstrings[CS_MODELS + 1], Sys_Milliseconds() - om_loadstart, om_loadserver, om_loadprep,
+				fs_stat_opens, (int)(fs_stat_us / 1000), fs_stat_loosemiss);
 		om_loadstart = 0;
 	}
 

@@ -73,11 +73,22 @@ typedef struct
 	int hash[FS_PACK_HASH];
 } fsPack_t;
 
+/* OpenMerc: the files under a directory mount (FS_DirIndex): the upper-case relative path and the path as on
+   disk, in an open-addressing table */
+typedef struct
+{
+	qboolean built, dirty;
+	int size;                     /* table slots, a power of two; 0 = no index */
+	int count;                    /* files in it */
+	char **upper, **actual;
+} fsDirIndex_t;
+
 typedef struct fsSearchPath_s
 {
 	char dirname[MAX_OSPATH];     /* directory mount, or "" */
 	fsPack_t *pack;               /* archive mount, or NULL */
 	qboolean hd;                  /* openmerc/hd mount, passed over while om_hdtextures is 0 */
+	fsDirIndex_t index;           /* directory mounts other than the user directory */
 	struct fsSearchPath_s *next;  /* lower priority */
 } fsSearchPath_t;
 
@@ -374,6 +385,20 @@ FS_CreatePath(const char *path)
 
 	/* no debug print here: the console log creates its path with this */
 
+	{
+		fsSearchPath_t *search;
+
+		for (search = fs_searchpaths; search; search = search->next)
+		{
+			size_t n = strlen(search->dirname);
+
+			if (n && search->index.built && !Q_strncasecmp(path, search->dirname, (int)n))
+			{
+				search->index.dirty = true;
+			}
+		}
+	}
+
 	if (strstr(path, "..") != NULL)
 	{
 		Com_Printf("WARNING: refusing to create relative path '%s'.\n", path);
@@ -593,8 +618,357 @@ FS_PackFind(const fsPack_t *pack, const char *normname)
  *   resolved: when not NULL receives the host path (loose file) or the
  *   normalised name (archive entry).
  */
+/* ---------------------------------------------------------------------
+ * OpenMerc: directory mount index. A lookup tried fopen in every directory
+ * mount before the archives below it - 3 to 4 failed opens per file, 25 000
+ * for a map (a second of a PC load; worse on a phone's FUSE storage, where a
+ * miss also walked the directories for a case-insensitive match). The files
+ * under a mount are listed once and a miss costs a hash probe. The user
+ * directory (config, saves, screenshots, lightmap caches written by omlight)
+ * is not indexed; FS_CreatePath under an indexed mount rebuilds its index.
+ * --------------------------------------------------------------------- */
+
+static unsigned
+FS_IndexHash(const char *s)
+{
+	unsigned h = 2166136261u;
+
+	while (*s)
+	{
+		h = (h ^ (byte)*s++) * 16777619u;
+	}
+
+	return h;
+}
+
+static void
+FS_IndexFree(fsDirIndex_t *ix)
+{
+	int i;
+
+	for (i = 0; i < ix->size; i++)
+	{
+		free(ix->upper[i]);
+		free(ix->actual[i]);
+	}
+
+	free(ix->upper);
+	free(ix->actual);
+	memset(ix, 0, sizeof(*ix));
+}
+
+static void
+FS_IndexInsert(fsDirIndex_t *ix, const char *rel)
+{
+	int *count = &ix->count;
+	char up[MAX_OSPATH];
+	unsigned h;
+	size_t i;
+
+	if ((*count + 1) * 2 > ix->size)
+	{
+		fsDirIndex_t big;
+		int k;
+
+		memset(&big, 0, sizeof(big));
+		big.size = ix->size ? ix->size * 2 : 1024;
+		big.upper = calloc(big.size, sizeof(char *));
+		big.actual = calloc(big.size, sizeof(char *));
+
+		if (!big.upper || !big.actual)
+		{
+			free(big.upper);
+			free(big.actual);
+			return;
+		}
+
+		for (k = 0; k < ix->size; k++)
+		{
+			if (ix->upper[k])
+			{
+				unsigned j = FS_IndexHash(ix->upper[k]) & (big.size - 1);
+
+				while (big.upper[j])
+				{
+					j = (j + 1) & (big.size - 1);
+				}
+
+				big.upper[j] = ix->upper[k];
+				big.actual[j] = ix->actual[k];
+			}
+		}
+
+		free(ix->upper);
+		free(ix->actual);
+		big.built = ix->built;
+		big.count = ix->count;
+		*ix = big;
+	}
+
+	for (i = 0; rel[i] && (i < sizeof(up) - 1); i++)
+	{
+		up[i] = (char)toupper((unsigned char)((rel[i] == '\\') ? '/' : rel[i]));
+	}
+
+	up[i] = 0;
+	h = FS_IndexHash(up) & (ix->size - 1);
+
+	while (ix->upper[h])
+	{
+		if (!strcmp(ix->upper[h], up))
+		{
+			return; /* the first one on disk wins, as the case-insensitive open */
+		}
+
+		h = (h + 1) & (ix->size - 1);
+	}
+
+	ix->upper[h] = strdup(up);
+	ix->actual[h] = strdup(rel);
+	(*count)++;
+}
+
+/* every file under dir/rel (rel "" or ending in '/'), at most 16 directories deep */
+static void
+FS_IndexWalk(fsDirIndex_t *ix, const char *dir, const char *rel, int depth)
+{
+	char sub[MAX_OSPATH], full[MAX_OSPATH];
+
+	if (depth > 16)
+	{
+		return;
+	}
+
+#ifdef _WIN32
+	{
+		WIN32_FIND_DATAW fd;
+		WCHAR wpath[MAX_OSPATH];
+		HANDLE h;
+
+		Com_sprintf(full, sizeof(full), "%s/%s*", dir, rel);
+		MultiByteToWideChar(CP_UTF8, 0, full, -1, wpath, MAX_OSPATH);
+		h = FindFirstFileW(wpath, &fd);
+
+		if (h == INVALID_HANDLE_VALUE)
+		{
+			return;
+		}
+
+		do
+		{
+			char name[MAX_OSPATH];
+
+			WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, name, sizeof(name), NULL, NULL);
+
+			if (!strcmp(name, ".") || !strcmp(name, ".."))
+			{
+				continue;
+			}
+
+			Com_sprintf(sub, sizeof(sub), "%s%s", rel, name);
+
+			if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			{
+				Q_strlcat(sub, "/", sizeof(sub));
+				FS_IndexWalk(ix, dir, sub, depth + 1);
+			}
+			else
+			{
+				FS_IndexInsert(ix, sub);
+			}
+		}
+		while (FindNextFileW(h, &fd));
+
+		FindClose(h);
+	}
+#else
+	{
+		DIR *d;
+		struct dirent *e;
+
+		Com_sprintf(full, sizeof(full), "%s/%s", dir, rel);
+
+		if (!(d = opendir(full)))
+		{
+			return;
+		}
+
+		while ((e = readdir(d)) != NULL)
+		{
+			qboolean isdir;
+
+			if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+			{
+				continue;
+			}
+
+			Com_sprintf(sub, sizeof(sub), "%s%s", rel, e->d_name);
+
+			if (e->d_type == DT_UNKNOWN)
+			{
+				struct stat st;
+
+				Com_sprintf(full, sizeof(full), "%s/%s", dir, sub);
+				isdir = !stat(full, &st) && S_ISDIR(st.st_mode);
+			}
+			else
+			{
+				isdir = (e->d_type == DT_DIR);
+			}
+
+			if (isdir)
+			{
+				Q_strlcat(sub, "/", sizeof(sub));
+				FS_IndexWalk(ix, dir, sub, depth + 1);
+			}
+			else
+			{
+				FS_IndexInsert(ix, sub);
+			}
+		}
+
+		closedir(d);
+	}
+#endif
+}
+
+static qboolean
+FS_SamePath(const char *a, const char *b)
+{
+	for (; *a && *b; a++, b++)
+	{
+		char x = (*a == '\\') ? '/' : *a, y = (*b == '\\') ? '/' : *b;
+
+		if (toupper((unsigned char)x) != toupper((unsigned char)y))
+		{
+			return false;
+		}
+	}
+
+	return !*a && !*b;
+}
+
+/* the index of a directory mount, built on first use; NULL: not indexed (the user directory) */
+static fsDirIndex_t *
+FS_DirIndex(fsSearchPath_t *search)
+{
+	fsDirIndex_t *ix = &search->index;
+	const char *udir;
+
+	if (!search->dirname[0])
+	{
+		return NULL;
+	}
+
+	if (ix->built && !ix->dirty)
+	{
+		return ix->size ? ix : NULL;
+	}
+
+	FS_IndexFree(ix);
+	ix->built = true;
+	udir = FS_Userdir();
+
+	if (udir && udir[0] && FS_SamePath(udir, search->dirname))
+	{
+		return NULL; /* written while the game runs */
+	}
+
+	{
+		FS_IndexWalk(ix, search->dirname, "", 0);
+
+		if (!ix->size)
+		{
+			/* an empty directory: a table of one free slot answers every lookup */
+			ix->size = 1;
+			ix->upper = calloc(1, sizeof(char *));
+			ix->actual = calloc(1, sizeof(char *));
+
+			if (!ix->upper || !ix->actual)
+			{
+				FS_IndexFree(ix);
+				ix->built = true;
+				return NULL;
+			}
+		}
+	}
+
+	return ix;
+}
+
+/* Q_fopen opened a file for writing: a new file under an indexed mount joins its index */
+static void
+FS_IndexNoteWrite(const char *path)
+{
+	fsSearchPath_t *search;
+
+	for (search = fs_searchpaths; search; search = search->next)
+	{
+		fsDirIndex_t *ix = &search->index;
+		size_t n = strlen(search->dirname), i;
+
+		if (!search->dirname[0] || !ix->built || !ix->size || (strlen(path) <= n + 1))
+		{
+			continue;
+		}
+
+		for (i = 0; i < n; i++)
+		{
+			char a = (path[i] == '\\') ? '/' : path[i], b = (search->dirname[i] == '\\') ? '/' : search->dirname[i];
+
+			if (toupper((unsigned char)a) != toupper((unsigned char)b))
+			{
+				break;
+			}
+		}
+
+		if ((i == n) && ((path[n] == '/') || (path[n] == '\\')))
+		{
+			FS_IndexInsert(ix, path + n + 1);
+		}
+	}
+}
+
+/* the path as on disk of the upper-case relative name, NULL when the mount has no such file */
+static const char *
+FS_IndexFind(const fsDirIndex_t *ix, const char *upper)
+{
+	unsigned h = FS_IndexHash(upper) & (ix->size - 1);
+
+	while (ix->upper[h])
+	{
+		if (!strcmp(ix->upper[h], upper))
+		{
+			return ix->actual[h];
+		}
+
+		h = (h + 1) & (ix->size - 1);
+	}
+
+	return NULL;
+}
+
+/* OpenMerc: file system time of a map load (OMLOADTIME): lookups, their time and the loose-file misses */
+long long fs_stat_us;
+int fs_stat_opens, fs_stat_loosemiss;
+
+static int FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only, char *resolved,
+		size_t resolvedsize);
+
 static int
 FS_OpenFileEx(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
+		char *resolved, size_t resolvedsize)
+{
+	long long t0 = Sys_Microseconds();
+	int r = FS_OpenFileExInner(rawname, f, gamedir_only, resolved, resolvedsize);
+
+	fs_stat_us += Sys_Microseconds() - t0;
+	fs_stat_opens++;
+	return r;
+}
+
+static int
+FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 		char *resolved, size_t resolvedsize)
 {
 	char upper[MAX_OSPATH], display[MAX_OSPATH], path[MAX_OSPATH];
@@ -705,15 +1079,36 @@ FS_OpenFileEx(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 		}
 
 		/* loose file */
+		{
+			fsDirIndex_t *ix = FS_DirIndex(search);
+
+			if (ix)
+			{
+				const char *actual = FS_IndexFind(ix, upper);
+
+				if (!actual)
+				{
+					fs_stat_loosemiss++;
+					continue; /* not in this mount: no open */
+				}
+
+				/* the name as on disk (no case-insensitive walk on case-sensitive hosts) */
+				Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, actual);
+			}
+			else
+			{
 #ifdef _WIN32
-		Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, upper);
+				Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, upper);
 #else
-		Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, display);
+				Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, display);
 #endif
+			}
+		}
 		file = FS_OpenHost(path);
 
 		if (!file)
 		{
+			fs_stat_loosemiss++;
 			continue;
 		}
 
@@ -1399,6 +1794,7 @@ FS_FreeSearchPaths(fsSearchPath_t *start, fsSearchPath_t *end)
 			Z_Free(cur->pack);
 		}
 
+		FS_IndexFree(&cur->index);
 		Z_Free(cur);
 		cur = next;
 	}
@@ -2084,6 +2480,13 @@ FS_InitFilesystem(void)
 	char path[MAX_OSPATH];
 	const char *bindir;
 	qboolean usergiven;
+
+	/* OpenMerc: files the engine writes join the directory index of their mount */
+	{
+		extern void (*q_fopen_writehook)(const char *file);
+
+		q_fopen_writehook = FS_IndexNoteWrite;
+	}
 
 	/* Register FS commands. */
 	Cmd_AddCommand("path", FS_Path_f);

@@ -682,6 +682,13 @@ SV_Map(qboolean attractloop, const char *levelstring, qboolean loadgame)
 
 	om_loadstart = Sys_Milliseconds();
 	om_loadserver = om_loadprep = 0;
+	{
+		extern long long fs_stat_us;
+		extern int fs_stat_opens, fs_stat_loosemiss;
+
+		fs_stat_us = 0;
+		fs_stat_opens = fs_stat_loosemiss = 0;
+	}
 	sv.loadgame = loadgame;
 	sv.attractloop = attractloop;
 
