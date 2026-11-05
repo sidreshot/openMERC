@@ -228,7 +228,12 @@ M_ScreenWantsRail(const char *name)
 		}
 	}
 
-	len = FS_LoadFile(va("menus/%s.rmf", name), (void **)&buf);
+	{
+		char mp[MAX_QPATH * 2];
+
+		M_MenuPath(mp, sizeof(mp), name);
+		len = FS_LoadFile(mp, (void **)&buf);
+	}
 
 	if (buf && len > 0)
 	{

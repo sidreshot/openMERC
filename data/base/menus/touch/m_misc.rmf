@@ -1,0 +1,16 @@
+<!-- OpenMerc: the mouse page on touch screens (menus/touch overrides menus/m_misc.rmf there): a gamepad only -->
+<stm>
+<strings menu_omset>
+
+<vbar tint vbargray>
+
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_SECTION_PAD^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<slider cvar joy_sensitivity min 0 max 8 step 1 atext "^MENU_OMSET_PAD_SENS^" split 230><hbr>
+<list "^MENU_OMSET_OFFON^" atext "^MENU_OMSET_INVERT_Y^" split 230 cvari m_invert_y><hbr>
+<hbr>
+<blank 16 16>
+</stm>

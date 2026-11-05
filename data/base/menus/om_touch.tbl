@@ -1,0 +1,10 @@
+# OpenMerc: rows of the touch controls page (menus/touch/m_keys.rmf, <omtable>), phones and tablets.
+# Same format as om_video.tbl.
+section | TOUCH CONTROLS | СЕНСОРНОЕ УПРАВЛЕНИЕ
+slider | touch_sens | 0.3 | 3 | 0.1 | Look Sensitivity | Чувствительность обзора | tip=How far the view turns for a finger drag on the right half/Насколько поворачивается обзор при движении пальца по правой половине
+slider | touch_size | 0.7 | 1.5 | 0.05 | Button Size | Размер кнопок
+slider | touch_alpha | 0.1 | 1 | 0.05 | Button Visibility | Заметность кнопок
+slider | touch_joyradius | 0.08 | 0.2 | 0.01 | Joystick Size | Размер джойстика | tip=The left-half joystick appears where the thumb lands/Джойстик левой половины появляется там, куда лёг палец
+list | touch_invert | 0,1 | Off,On | Выкл,Вкл | Invert Look Up/Down | Инверсия обзора по вертикали
+list | om_autouse | 0,1 | Off,On | Выкл,Вкл | Automatic Doors and Switches | Двери и переключатели автоматически | tip=Doors, buttons and switches in front of you work without a button/Двери, кнопки и переключатели перед вами срабатывают без кнопки
+list | in_touch | 0,1 | Off,On | Выкл,Вкл | Touch Controls | Сенсорное управление | tip=Off for a gamepad/Выключите для геймпада

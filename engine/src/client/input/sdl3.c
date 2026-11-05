@@ -803,21 +803,51 @@ IN_Update(void)
 
 					if (event.tfinger.fingerID == menufinger)
 					{
-						M_MouseAbs((int)(event.tfinger.x * viddef.width), (int)(event.tfinger.y * viddef.height));
+						/* a tap clicks where it lands; a vertical drag scrolls the list under it (wheel steps) and
+						   clicks nothing */
+						static float y0, ylast;
+						static qboolean dragging;
+						float step = 0.045f, slop = 0.025f;
 
-						/* the click goes in on the next frames: the menu finds the widget under the pointer when it
-						   draws - a click with the pointer just moved hit the widget under its old place */
 						if (type == 0)
 						{
-							touchclick_down = true;
+							y0 = ylast = event.tfinger.y;
+							dragging = false;
+							M_MouseAbs((int)(event.tfinger.x * viddef.width), (int)(event.tfinger.y * viddef.height));
 						}
-						else if (type == 2)
+						else if (type == 1)
 						{
-							touchclick_up = true;
-						}
+							if (!dragging && (fabsf(event.tfinger.y - y0) > slop))
+							{
+								dragging = true;
+							}
 
-						if (type == 2)
+							/* finger up: the content follows it down the list (as on a phone) */
+							while (dragging && (event.tfinger.y - ylast <= -step))
+							{
+								Key_Event(K_MWHEELDOWN, true, true);
+								Key_Event(K_MWHEELDOWN, false, true);
+								ylast -= step;
+							}
+
+							while (dragging && (event.tfinger.y - ylast >= step))
+							{
+								Key_Event(K_MWHEELUP, true, true);
+								Key_Event(K_MWHEELUP, false, true);
+								ylast += step;
+							}
+						}
+						else
 						{
+							/* the click goes in on the next frames: the menu finds the widget under the pointer
+							   when it draws - a click with the pointer just moved hit the widget under its old place */
+							if (!dragging)
+							{
+								M_MouseAbs((int)(event.tfinger.x * viddef.width), (int)(event.tfinger.y * viddef.height));
+								touchclick_down = true;
+								touchclick_up = true;
+							}
+
 							menufinger = 0;
 						}
 					}

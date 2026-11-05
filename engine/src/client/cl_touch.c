@@ -44,7 +44,7 @@ typedef struct
 	const char *label;
 } tbutton_t;
 
-static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_alpha;
+static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_alpha, *touch_size, *touch_invert;
 static finger_t fingers[TOUCH_FINGERS];
 static tbutton_t buttons[8];
 static int numbuttons;
@@ -73,6 +73,8 @@ Touch_Init(void)
 	touch_sens = Cvar_Get("touch_sens", "1", CVAR_ARCHIVE);           /* 1 = half a turn across the screen */
 	touch_joyradius = Cvar_Get("touch_joyradius", "0.13", CVAR_ARCHIVE); /* of the screen height */
 	touch_alpha = Cvar_Get("touch_alpha", "0.35", CVAR_ARCHIVE);
+	touch_size = Cvar_Get("touch_size", "1", CVAR_ARCHIVE);
+	touch_invert = Cvar_Get("touch_invert", "0", CVAR_ARCHIVE);
 	memset(fingers, 0, sizeof(fingers));
 }
 
@@ -99,15 +101,17 @@ Touch_HudTop(void)
 static void
 Layout(void)
 {
-	float h = H(), w = W();
+	/* after the big mobile shooters (Call of Duty Mobile, PUBG Mobile): the buttons sit in a tight cluster at the right
+	   edge and the bottom corner, the middle of the right half is free for turning the view - a look drag that
+	   started there never lands on a button. Sizes in screen heights, touch_size scales them. */
+	float h = H(), w = W(), k = Q_clamp(touch_size->value, 0.7f, 1.5f);
 	tbutton_t *b = buttons;
 
-	/* right thumb: fire big in the corner, the rest around it */
-	*b++ = (tbutton_t){R_FIRE, w - 0.17f * h, h - 0.21f * h, 0.12f * h, "FIRE"};
-	*b++ = (tbutton_t){R_ALT, w - 0.43f * h, h - 0.12f * h, 0.075f * h, "ALT"};
-	*b++ = (tbutton_t){R_JUMP, w - 0.13f * h, h - 0.50f * h, 0.075f * h, "JUMP"};
-	*b++ = (tbutton_t){R_CROUCH, w - 0.37f * h, h - 0.36f * h, 0.065f * h, "DUCK"};
-	*b++ = (tbutton_t){R_RELOAD, w - 0.63f * h, h - 0.09f * h, 0.055f * h, "R"};
+	*b++ = (tbutton_t){R_FIRE, w - 0.15f * h, h - 0.40f * h, 0.090f * h * k, "FIRE"};
+	*b++ = (tbutton_t){R_ALT, w - 0.10f * h, h - 0.64f * h, 0.055f * h * k, "ALT"};
+	*b++ = (tbutton_t){R_JUMP, w - 0.10f * h, h - 0.12f * h, 0.065f * h * k, "JUMP"};
+	*b++ = (tbutton_t){R_CROUCH, w - 0.29f * h, h - 0.09f * h, 0.060f * h * k, "DUCK"};
+	*b++ = (tbutton_t){R_RELOAD, w - 0.46f * h, h - 0.08f * h, 0.050f * h * k, "R"};
 	/* the menu between the item tray and the health bar */
 	*b++ = (tbutton_t){R_MENU, w * 0.5f - 0.36f * h, 0.06f * h, 0.045f * h, "II"};
 	numbuttons = (int)(b - buttons);
@@ -124,7 +128,7 @@ RoleAt(float x, float y)
 
 	for (i = 0; i < numbuttons; i++)
 	{
-		float dx = x - buttons[i].cx, dy = y - buttons[i].cy, r = buttons[i].r * 1.25f; /* a forgiving hit area */
+		float dx = x - buttons[i].cx, dy = y - buttons[i].cy, r = buttons[i].r; /* the drawn circle exactly */
 
 		if (dx * dx + dy * dy <= r * r)
 		{
@@ -313,7 +317,7 @@ Look(void)
 		}
 
 		cl.viewangles[YAW] -= (f->x - f->lx) * k;
-		cl.viewangles[PITCH] += (f->y - f->ly) * k;
+		cl.viewangles[PITCH] += (f->y - f->ly) * k * ((touch_invert && touch_invert->value) ? -1.0f : 1.0f);
 		f->lx = f->x;
 		f->ly = f->y;
 	}

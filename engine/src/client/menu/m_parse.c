@@ -12,6 +12,7 @@
 
 #include "header/menu.h"
 #include "header/m_draw.h"
+#include "../header/sofclient.h" /* Touch_Enabled */
 
 /* parse-test counters (m_test.c) */
 int mp_errorcount;
@@ -429,6 +430,24 @@ MP_KeyNum(const char *name)
 /* ------------------------------------------------------------------ */
 /* inclusion (SPEC-800 5.1)                                            */
 
+/* OpenMerc: touch screens (in_touch) read menus/touch/<name>.rmf where it exists - pages made for fingers (touch
+   controls instead of key bindings, no window or mouse settings) */
+void
+M_MenuPath(char *path, int size, const char *name)
+{
+	if (Touch_Enabled())
+	{
+		Com_sprintf(path, size, "menus/touch/%s.rmf", name);
+
+		if (FS_LoadFile(path, NULL) > 0)
+		{
+			return;
+		}
+	}
+
+	Com_sprintf(path, size, "menus/%s.rmf", name);
+}
+
 static void
 MP_IncludeFile(mparse_t *p, const char *name)
 {
@@ -436,7 +455,7 @@ MP_IncludeFile(mparse_t *p, const char *name)
 	char *text;
 	int len;
 
-	Com_sprintf(path, sizeof(path), "menus/%s.rmf", name);
+	M_MenuPath(path, sizeof(path), name);
 
 	if (!MP_ReadFile(path, &text, &len))
 	{
@@ -531,7 +550,8 @@ Tag_IncludeCvar(mparse_t *p)
    flags: "stage" (a staged menu_* cvar of the page: marks the page changed),
    "requires=cvar" (row left out while the cvar does not exist, so options of
    an optional renderer show up only where they are registered),
-   "tip=EN/RU" (a tip, EN and RU separated by '/'). */
+   "tip=EN/RU" (a tip, EN and RU separated by '/'),
+   "pc" (left out on touch screens), "mobile" (only on touch screens). */
 
 qboolean SP_RussianActive(void);
 cvar_t *Cvar_Find(const char *name);
@@ -646,10 +666,43 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 	fixed = !Q_stricmp(k, "list") ? 7 : !Q_stricmp(k, "slider") ? 7 :
 		(!Q_stricmp(k, "section") || !Q_stricmp(k, "note")) ? 3 : 0;
 
+	/* OpenMerc: "pc" rows (window, mouse, desktop-only options) are left out on touch screens, "mobile" rows
+	   everywhere else */
+	for (i = 1; i < n; i++)
+	{
+		if ((!Q_stricmp(f[i], "pc") && Touch_Enabled()) || (!Q_stricmp(f[i], "mobile") && !Touch_Enabled()))
+		{
+			return;
+		}
+	}
+
 	if (!Q_stricmp(k, "rmf"))
 	{
+		/* the raw text keeps every '|' after it: a trailing "| pc" / "| mobile" flag is read off its end */
 		if (n > 1)
 		{
+			char *bar = strrchr(f[1], '|');
+
+			if (bar)
+			{
+				const char *fl = bar + 1;
+
+				while (*fl == ' ' || *fl == '\t')
+				{
+					fl++;
+				}
+
+				if ((!Q_stricmp(fl, "pc") && Touch_Enabled()) || (!Q_stricmp(fl, "mobile") && !Touch_Enabled()))
+				{
+					return;
+				}
+
+				if (!Q_stricmp(fl, "pc") || !Q_stricmp(fl, "mobile"))
+				{
+					*bar = 0;
+				}
+			}
+
 			MT_Add(b, f[1]);
 			MT_Add(b, "\n");
 		}
@@ -1961,7 +2014,7 @@ MP_LoadPageZ(mscreen_t *scr, mframe_t *frame, const char *name, qboolean dry, fl
 	}
 	else
 	{
-		Com_sprintf(path, sizeof(path), "menus/%s.rmf", name);
+		M_MenuPath(path, sizeof(path), name);
 	}
 
 	if (!MP_ReadFile(path, &text, &len))

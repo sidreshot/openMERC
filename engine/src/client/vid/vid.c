@@ -618,6 +618,22 @@ VID_CheckChanges(void)
 
 	if (restart_state == RESTART_UNDEF)
 	{
+#ifdef __ANDROID__
+		/* the video menu's Screen Resolution (vid_surfacescale, glimp_sdl3.c): a new window surface */
+		static cvar_t *surfacescale;
+
+		if (!surfacescale)
+		{
+			surfacescale = Cvar_Get("vid_surfacescale", "0.6", CVAR_ARCHIVE);
+			surfacescale->modified = false;
+		}
+
+		if (surfacescale->modified)
+		{
+			surfacescale->modified = false;
+			vid_fullscreen->modified = true;
+		}
+#endif
 		if (vid_fullscreen->modified)
 		{
 			rs = RESTART_FULL;

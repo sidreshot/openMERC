@@ -443,4 +443,7 @@ void MT_Frame(qboolean drawn);
 
 int M_DialogCentreX(mscreen_t *scr); /* MENU-SCRATCH: x centre of the panel under a dialog */
 
+/* m_parse.c: menus/touch/<name>.rmf on touch screens where it exists, else menus/<name>.rmf */
+void M_MenuPath(char *path, int size, const char *name);
+
 #endif
