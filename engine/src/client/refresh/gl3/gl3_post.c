@@ -2982,6 +2982,71 @@ GL3_Post_EndView(void)
  * in the volume (they keep their SoF fog).
  * ------------------------------------------------------------------ */
 
+/* the value-noise lattice of the fog and beam shaders: their former hash h3 at every integer point of a 64^3
+   cell, repeated (every 64 noise cells: about 5800 units at the fog's noise scale), on unit 11 */
+#define POST_NOISEUNIT 11
+#define POST_NOISESIZE 64
+
+static GLuint post_noisetex;
+
+static void
+PostNoiseBind(void)
+{
+	GL3_SelectTMU(GL_TEXTURE0 + POST_NOISEUNIT);
+
+	if (!post_noisetex)
+	{
+		static byte lat[POST_NOISESIZE * POST_NOISESIZE * POST_NOISESIZE];
+		int x, y, z;
+
+		for (z = 0; z < POST_NOISESIZE; z++)
+		{
+			for (y = 0; y < POST_NOISESIZE; y++)
+			{
+				for (x = 0; x < POST_NOISESIZE; x++)
+				{
+					float px = x * 0.3183099f + 0.1f, py = y * 0.3183099f + 0.1f, pz = z * 0.3183099f + 0.1f, h;
+
+					px = (px - floorf(px)) * 17.0f;
+					py = (py - floorf(py)) * 17.0f;
+					pz = (pz - floorf(pz)) * 17.0f;
+					h = px * py * pz * (px + py + pz);
+					h -= floorf(h);
+					lat[(z * POST_NOISESIZE + y) * POST_NOISESIZE + x] = (byte)Q_min(255.0f, h * 256.0f);
+				}
+			}
+		}
+
+		glGenTextures(1, &post_noisetex);
+		glBindTexture(GL_TEXTURE_3D, post_noisetex);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		glTexImage3D(GL_TEXTURE_3D, 0, GL_R8, POST_NOISESIZE, POST_NOISESIZE, POST_NOISESIZE, 0, GL_RED,
+			GL_UNSIGNED_BYTE, lat);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+	}
+	else
+	{
+		glBindTexture(GL_TEXTURE_3D, post_noisetex);
+	}
+
+	GL3_SelectTMU(GL_TEXTURE0);
+}
+
+static void
+PostNoiseShutdown(void)
+{
+	if (post_noisetex)
+	{
+		glDeleteTextures(1, &post_noisetex);
+		post_noisetex = 0;
+	}
+}
+
 #define VOLFOG_MAXREGIONS 16
 
 static cvar_t *r_om_volfog, *r_om_volfog_quality, *r_om_volfog_intensity, *r_om_volfog_overlaydim;
@@ -3055,12 +3120,13 @@ static const char *volfog_fs =
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
 	"out vec4 outEmissive;\n"
-	"float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n"
+	/* value noise with smoothstep weights: the lattice hashes come from a 64^3 texture (PostNoiseBind) and the
+	   trilinear filter does the 7 mixes at the smoothstepped coordinate - one fetch instead of 8 hashes */
+	"uniform sampler3D noisetex;\n"
 	"float vnoise(vec3 x)\n"
 	"{\n"
 	"	vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);\n"
-	"	return mix(mix(mix(h3(i), h3(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h3(i + vec3(0.0, 1.0, 0.0)), h3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),\n"
-	"		mix(mix(h3(i + vec3(0.0, 0.0, 1.0)), h3(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h3(i + vec3(0.0, 1.0, 1.0)), h3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);\n"
+	"	return texture(noisetex, (i + f + 0.5) * (1.0 / 64.0)).r;\n"
 	"}\n"
 	"void main()\n"
 	"{\n"
@@ -3227,6 +3293,7 @@ VolFogProgram(void)
 	GL3_UseProgram(p);
 	GL3_CSM_BindProgram(p);
 	glUniform1i(V.u_depth, 3); /* the depth copy on unit 3: unit 7 may hold the lamp shadows' raw cubes (gl3_lshadow.c) */
+	glUniform1i(glGetUniformLocation(p, "noisetex"), POST_NOISEUNIT);
 
 	/* the upsampling pass of r_om_volfog_half (without it the fog is marched at full size) */
 	v = CompilePost(GL_VERTEX_SHADER, post_vs);
@@ -3351,6 +3418,7 @@ GL3_Post_VolFog(void)
 	GL3_SelectTMU(GL_TEXTURE7);
 	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
 	GL3_SelectTMU(GL_TEXTURE0);
+	PostNoiseBind();
 
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
@@ -3422,6 +3490,7 @@ VolFogShutdown(void)
 
 	if (V.halffbo) glDeleteFramebuffers(1, &V.halffbo);
 	if (V.halftex) glDeleteTextures(1, &V.halftex);
+	PostNoiseShutdown();
 	memset(&V, 0, sizeof(V));
 }
 
@@ -3640,12 +3709,13 @@ static const char *beam_fs =
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
 	"out vec4 outEmissive;\n"
-	"float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n"
+	/* value noise with smoothstep weights: the lattice hashes come from a 64^3 texture (PostNoiseBind) and the
+	   trilinear filter does the 7 mixes at the smoothstepped coordinate - one fetch instead of 8 hashes */
+	"uniform sampler3D noisetex;\n"
 	"float vnoise(vec3 x)\n"
 	"{\n"
 	"	vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);\n"
-	"	return mix(mix(mix(h3(i), h3(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h3(i + vec3(0.0, 1.0, 0.0)), h3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),\n"
-	"		mix(mix(h3(i + vec3(0.0, 0.0, 1.0)), h3(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h3(i + vec3(0.0, 1.0, 1.0)), h3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);\n"
+	"	return texture(noisetex, (i + f + 0.5) * (1.0 / 64.0)).r;\n"
 	"}\n"
 	"void main()\n"
 	"{\n"
@@ -4492,6 +4562,7 @@ BeamProgram(void)
 	GL3_UseProgram(p);
 	glUniform1i(B.u_depth, 7);
 	glUniform1i(B.u_shadow, BEAM_UNIT);
+	glUniform1i(glGetUniformLocation(p, "noisetex"), POST_NOISEUNIT);
 	return true;
 }
 
@@ -4891,6 +4962,7 @@ GL3_Post_Beams(void)
 	fw = (float)P.w;
 	fh = (float)P.h;
 
+	PostNoiseBind();
 	GL3_UseProgram(B.prog);
 	glUniform4f(B.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniformMatrix4fv(B.u_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
