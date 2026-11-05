@@ -1261,6 +1261,19 @@ M_MouseMove(int dx, int dy)
 	ms.my += dy / MR_Scale();
 }
 
+/* OpenMerc: a touch screen places the pointer where the finger is (window pixels) */
+void
+M_MouseAbs(int x, int y)
+{
+	if (!ms.active)
+	{
+		return;
+	}
+
+	ms.mx = x / MR_Scale();
+	ms.my = y / MR_Scale();
+}
+
 static void
 M_ClampPointer(void)
 {

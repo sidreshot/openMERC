@@ -334,9 +334,10 @@ typedef struct sof_pmove_s
 	int waterlevel;          /* 0xEC out */
 	/* callbacks (in): MSVC returns the 56-byte trace through a hidden
 	   first argument, as for the Quake II game source */
-#if defined(__i386__) && !defined(_MSC_VER)
-	/* GCC/Clang i386: the callee pops the hidden return pointer itself, so the call has to be declared by
-	   value or the caller's stack is 4 bytes off after every trace */
+#if !defined(_MSC_VER)
+	/* GCC/Clang: declared by value like the game's function. i386: the callee pops the hidden return pointer
+	   itself (the stack is 4 bytes off after every trace otherwise); AArch64: the result address goes in x8,
+	   not as the first argument (a trace through x0 crashed the open game on Android) */
 	sof_trace_t (*trace)(const float *start, const float *mins, const float *maxs,
 			const float *end);                      /* 0xF0 */
 #else

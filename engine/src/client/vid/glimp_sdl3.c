@@ -452,6 +452,8 @@ GLimp_Init(void)
 		/* openMERC Android: landscape only (SDL otherwise picks the orientation from the window's aspect, and the
 		   desktop mode of a phone held upright is portrait) */
 		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+		/* the back button / gesture is the Escape key (menu), not the end of the activity */
+		SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
 		if (!SDL_Init(SDL_INIT_VIDEO))
 		{

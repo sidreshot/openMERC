@@ -94,7 +94,7 @@ SVPM_Trace(void *ctx, sofpm_trace_t *out, const float *start, const float *mins,
 	}
 	else if (c->gametrace && c->block->trace)
 	{
-#if defined(__i386__) && !defined(_MSC_VER)
+#if !defined(_MSC_VER)
 		tr = c->block->trace(start, mins, maxs, end); /* see sof_pmove_t.trace */
 #else
 		c->block->trace(&tr, start, mins, maxs, end);

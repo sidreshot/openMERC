@@ -155,6 +155,16 @@ void HUD_LayoutText(const char *s);
 void HUD_DrawFontText(int x, int y, const char *s, const unsigned char *rgba, int font, int keep);
 int HUD_FontHeight(int font);
 int HUD_TextWidth(const char *s, int font);
+
+/* cl_touch.c: touch controls (in_touch) */
+void Touch_Init(void);
+qboolean Touch_Enabled(void);
+qboolean Touch_Active(void);
+qboolean Touch_HudTop(void);
+void Touch_Finger(long long id, int type, float nx, float ny);
+void Touch_Move(struct usercmd_s *cmd);
+void Touch_Draw(void);
+qboolean HUD_TrayRect(int which, float *x, float *y, float *w, float *h);
 void HUD_DrawColouredString(int x, int y, const char *s, const unsigned char *rgba);
 void HUD_DrawCharFloat(float x, float y, int ch, const unsigned char *rgba);
 void HUD_DrawFade(const unsigned char *rgba);

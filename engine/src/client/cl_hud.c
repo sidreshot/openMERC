@@ -694,6 +694,14 @@ HUD_RegisterMedia(void)
 		elems[i].y = (int)((HUD_H() - elems[i].h) * elems[i].py / 100);
 	}
 
+	/* OpenMerc touch controls (cl_touch.c): the thumbs hold the bottom corners - the trays and the health bar go
+	   to the top edge (the trays' 27 units of headroom for the opening lip are taken off) */
+	if (Touch_HudTop())
+	{
+		elems[E_ITEM].y = elems[E_WEAPON].y = -27;
+		elems[E_HEALTH].y = -8;
+	}
+
 	memset(trays, 0, sizeof(trays));
 }
 
@@ -1277,6 +1285,14 @@ HUD_DrawInterface(void)
 		elems[i].y = (int)((HUD_H() - elems[i].h) * elems[i].py / 100);
 	}
 
+	/* OpenMerc touch controls (cl_touch.c): the thumbs hold the bottom corners - the trays and the health bar go
+	   to the top edge (the trays' 27 units of headroom for the opening lip are taken off) */
+	if (Touch_HudTop())
+	{
+		elems[E_ITEM].y = elems[E_WEAPON].y = -27;
+		elems[E_HEALTH].y = -8;
+	}
+
 	/* 1 sniper scope */
 	if (HUD_StandardTest(&elems[E_SCOPE]))
 	{
@@ -1342,6 +1358,25 @@ HUD_DrawInterface(void)
 			HUD_DrawControl();
 		}
 	}
+}
+
+/* cl_touch.c: the window pixel rectangle of the item (0) or weapon (1) tray as last drawn; false when hidden */
+qboolean
+HUD_TrayRect(int which, float *x, float *y, float *w, float *h)
+{
+	const hudelem_t *e = &elems[which ? E_WEAPON : E_ITEM];
+	float s = HUD_Scale();
+
+	if (!HUD_Active() || !scr_interface || !scr_interface->value || !HUD_StandardTest(e))
+	{
+		return false;
+	}
+
+	*x = e->x * s;
+	*y = (e->y + 27) * s; /* the tray's frame, not the lip's headroom */
+	*w = e->w * s;
+	*h = (e->h - 27) * s;
+	return true;
 }
 
 /* ---------------------------------------------------------------------

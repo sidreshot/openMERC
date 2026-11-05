@@ -687,6 +687,7 @@ SCR_SoF_DrawOverlays(void)
 	}
 
 	SCR_SoF_DrawGraphs();
+	Touch_Draw(); /* OpenMerc: touch controls (cl_touch.c), window pixels */
 	HUD_BeginScaled();
 	SCR_SoF_DrawPause();
 	HUD_EndScaled();

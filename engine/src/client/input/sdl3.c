@@ -335,6 +335,7 @@ IN_TranslateScancode(SDL_Scancode sc, SDL_Keycode kc, qboolean *extended)
 		case SDL_SCANCODE_0: return '0';
 		case SDL_SCANCODE_RETURN: return K_ENTER;
 		case SDL_SCANCODE_ESCAPE: return K_ESCAPE;
+		case SDL_SCANCODE_AC_BACK: return K_ESCAPE; /* Android: the back button / gesture opens and closes the menu */
 		case SDL_SCANCODE_BACKSPACE: return K_BACKSPACE;
 		case SDL_SCANCODE_TAB: return K_TAB;
 		case SDL_SCANCODE_SPACE: return K_SPACE;
@@ -692,6 +693,12 @@ IN_Update(void)
 			case SDL_EVENT_MOUSE_BUTTON_UP :
 			{
 				static unsigned lastpress[6];
+
+				if (event.button.which == SDL_TOUCH_MOUSEID)
+				{
+					break; /* OpenMerc: fingers come as finger events (touch controls, menu pointer) */
+				}
+
 				unsigned now = (unsigned)(event.button.timestamp / 1000000);
 				int n;
 
@@ -735,6 +742,11 @@ IN_Update(void)
 			}
 
 			case SDL_EVENT_MOUSE_MOTION :
+				if (event.motion.which == SDL_TOUCH_MOUSEID)
+				{
+					break;
+				}
+
 				if (cls.key_dest == key_game && (int) cl_paused->value == 0)
 				{
 					mouse_x += event.motion.xrel;
@@ -746,6 +758,50 @@ IN_Update(void)
 					M_MouseMove((int)event.motion.xrel, (int)event.motion.yrel);
 				}
 				break;
+
+			/* OpenMerc: fingers - the touch controls in the game (cl_touch.c); in a menu the first finger is an
+			   absolute pointer that clicks where it lands and drags sliders */
+			case SDL_EVENT_FINGER_DOWN :
+			case SDL_EVENT_FINGER_MOTION :
+			case SDL_EVENT_FINGER_UP :
+			case SDL_EVENT_FINGER_CANCELED :
+			{
+				static SDL_FingerID menufinger;
+				int type = (event.type == SDL_EVENT_FINGER_DOWN) ? 0 : (event.type == SDL_EVENT_FINGER_MOTION) ? 1 : 2;
+
+				if (Touch_Active())
+				{
+					Touch_Finger((long long)event.tfinger.fingerID, type, event.tfinger.x, event.tfinger.y);
+				}
+				else if (cls.key_dest == key_menu)
+				{
+					if ((type == 0) && !menufinger)
+					{
+						menufinger = event.tfinger.fingerID;
+					}
+
+					if (event.tfinger.fingerID == menufinger)
+					{
+						M_MouseAbs((int)(event.tfinger.x * viddef.width), (int)(event.tfinger.y * viddef.height));
+
+						if (type != 1)
+						{
+							Key_Event(K_MOUSE1, type == 0, true);
+						}
+
+						if (type == 2)
+						{
+							menufinger = 0;
+						}
+					}
+				}
+				else if (type == 2)
+				{
+					menufinger = 0;
+				}
+
+				break;
+			}
 
 			case SDL_EVENT_TEXT_INPUT :
 				/* SoF types the characters of its own layout table; the
@@ -1643,6 +1699,8 @@ IN_Move(usercmd_t *cmd)
 			cmd->forwardmove = (short)(cmd->forwardmove - my * m_forward->value);
 		}
 	}
+
+	Touch_Move(cmd); /* OpenMerc: touch joystick and view (cl_touch.c) */
 
 	if (controller)
 	{
@@ -2680,6 +2738,7 @@ IN_Init(void)
 {
 	Com_Printf("------- input initialization -------\n");
 
+	Touch_Init(); /* OpenMerc: touch controls (cl_touch.c) */
 	mouse_x = mouse_y = 0;
 	joystick_left_x = joystick_left_y = joystick_right_x = joystick_right_y = 0;
 	joy_active_layout = LAYOUT_NONE;

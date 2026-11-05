@@ -542,6 +542,7 @@ void M_Menu_Main_f (void);
 void M_ForceMenuOff (void);
 void M_AddToServerList (netadr_t adr, char *info);
 void M_MouseMove (int dx, int dy); /* OpenMerc (I6m): menu pointer movement, raw pixels (SPEC-801 7.2) */
+void M_MouseAbs(int x, int y); /* OpenMerc: touch pointer, window pixels */
 
 void CL_ParseInventory (void);
 void CL_DrawInventory (void);
