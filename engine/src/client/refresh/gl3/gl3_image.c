@@ -1274,38 +1274,6 @@ UseOriginalSize(gl3image_t *image, const char *path)
  * walls and the network's exaggerated relief is calmed.
  */
 
-/* clamp-to-edge box blur of a w x h RGB float image along x (step 3) or y */
-static void
-HDSeamBox(const float *src, float *dst, int w, int h, int r, qboolean alongx)
-{
-	int n = alongx ? w : h, lines = alongx ? h : w, step = alongx ? 3 : 3 * w, lstep = alongx ? 3 * w : 3;
-	int j, i, c;
-
-	for (j = 0; j < lines; j++)
-	{
-		const float *l = src + j * lstep;
-		float *o = dst + j * lstep;
-
-		for (c = 0; c < 3; c++)
-		{
-			float s = 0;
-
-			for (i = -r; i <= r; i++)
-			{
-				s += l[((i < 0) ? 0 : (i >= n) ? n - 1 : i) * step + c];
-			}
-
-			for (i = 0; i < n; i++)
-			{
-				int add = i + r + 1, sub = i - r;
-
-				o[i * step + c] = s / (2 * r + 1);
-				s += l[((add >= n) ? n - 1 : add) * step + c] - l[((sub < 0) ? 0 : sub) * step + c];
-			}
-		}
-	}
-}
-
 static float
 HDSeamWeight(int x, int n, int full, int band)
 {
@@ -1314,86 +1282,256 @@ HDSeamWeight(int x, int n, int full, int band)
 	return (e <= full) ? 1.0f : (e >= band) ? 0.0f : 1.0f - (float)(e - full) / (float)(band - full);
 }
 
-/* level 0 of the HD image p (w x h RGBA), retail original o (ow x oh RGBA), integer scale s */
-static void
-HDSeamFix(byte *p, int w, int h, const byte *o, int ow, int oh, int s, qboolean tx, qboolean ty)
+/* HDSeamFix runs its passes on all cores (GL3_ParallelFor): rows, or blocks of columns for the vertical box
+   blur, which keeps one running sum per column and walks the rows in memory order (the column walk of
+   HDSeamBox missed the cache at every texel). Every texel gets the same operations in the same order as before:
+   the result is bit for bit the same. */
+#define HDS_ROWS 8       /* rows per job */
+#define HDS_COLS 64      /* columns per job of the vertical blur */
+
+typedef struct
 {
-	float *f = malloc(sizeof(float) * 3 * w * h * 3), *u, *t;
-	int x, y, c, ax;
+	byte *p;
+	const byte *o;
+	int w, h, ow, oh, s;
+	qboolean tx, ty;
+	float *f, *u, *t, *b;
+	const float *src;    /* the box pass */
+	float *dst;
+	int pass;
+} hdseam_t;
 
-	if (!f)
+enum { HDS_FILL, HDS_BOXX, HDS_BOXY, HDS_COMBINE, HDS_STORE };
+
+static void
+HDSeamJob(int job, void *ctx)
+{
+	hdseam_t *q = (hdseam_t *)ctx;
+	int w = q->w, h = q->h, s = q->s, x, y, c;
+
+	if (q->pass == HDS_BOXY)
 	{
-		return;
-	}
+		/* columns x0..x1-1, all rows: as HDSeamBox along y, one running sum per column and channel */
+		int x0 = job * HDS_COLS, x1 = (x0 + HDS_COLS < w) ? x0 + HDS_COLS : w, r = s, i;
+		float acc[HDS_COLS * 3];
 
-	u = f + 3 * w * h;
-	t = u + 3 * w * h;
-
-	for (y = 0; y < h; y++)
-	{
-		float v = (y + 0.5f) / s - 0.5f;
-		int y0 = (int)floorf(v), y1;
-		float fy = v - y0;
-
-		y1 = (y0 + 1 + oh) % oh;
-		y0 = (y0 + oh) % oh;
-
-		for (x = 0; x < w; x++)
+		for (x = x0; x < x1; x++)
 		{
-			float uu = (x + 0.5f) / s - 0.5f;
-			int x0 = (int)floorf(uu), x1;
-			float fx = uu - x0;
-
-			x1 = (x0 + 1 + ow) % ow;
-			x0 = (x0 + ow) % ow;
-
 			for (c = 0; c < 3; c++)
 			{
-				float a = o[(y0 * ow + x0) * 4 + c], b = o[(y0 * ow + x1) * 4 + c];
-				float d = o[(y1 * ow + x0) * 4 + c], e = o[(y1 * ow + x1) * 4 + c];
-
-				f[(y * w + x) * 3 + c] = p[(y * w + x) * 4 + c];
-				u[(y * w + x) * 3 + c] = (a + (b - a) * fx) * (1 - fy) + (d + (e - d) * fx) * fy;
+				acc[(x - x0) * 3 + c] = 0;
 			}
 		}
-	}
 
-	/* u = blur(upsampled original) - blur(HD) */
-	HDSeamBox(u, t, w, h, s, true);
-	HDSeamBox(t, u, w, h, s, false);
-	HDSeamBox(f, t, w, h, s, true);
-
-	{
-		float *b = malloc(sizeof(float) * 3 * w * h);
-
-		if (!b)
+		for (i = -r; i <= r; i++)
 		{
-			free(f);
-			return;
-		}
+			const float *l = q->src + (size_t)((i < 0) ? 0 : (i >= h) ? h - 1 : i) * 3 * w;
 
-		HDSeamBox(t, b, w, h, s, false);
-
-		for (y = 0; y < h; y++)
-		{
-			float wy = ty ? HDSeamWeight(y, h, s, (h / 8 > 3 * s) ? h / 8 : 3 * s) : 0;
-
-			for (x = 0; x < w; x++)
+			for (x = x0; x < x1; x++)
 			{
-				float wx = tx ? HDSeamWeight(x, w, s, (w / 8 > 3 * s) ? w / 8 : 3 * s) : 0;
-				float k = (r_om_hdseam->value >= 2) ? 1.0f : (wx > wy) ? wx : wy;
-
 				for (c = 0; c < 3; c++)
 				{
-					int i = (y * w + x) * 3 + c;
-
-					f[i] += k * (u[i] - b[i]);
+					acc[(x - x0) * 3 + c] += l[x * 3 + c];
 				}
 			}
 		}
 
-		free(b);
+		for (i = 0; i < h; i++)
+		{
+			int add = i + r + 1, sub = i - r;
+			const float *la = q->src + (size_t)((add >= h) ? h - 1 : add) * 3 * w;
+			const float *ls = q->src + (size_t)((sub < 0) ? 0 : sub) * 3 * w;
+			float *o = q->dst + (size_t)i * 3 * w;
+
+			for (x = x0; x < x1; x++)
+			{
+				for (c = 0; c < 3; c++)
+				{
+					float *a = &acc[(x - x0) * 3 + c];
+
+					o[x * 3 + c] = *a / (2 * r + 1);
+					*a += la[x * 3 + c] - ls[x * 3 + c];
+				}
+			}
+		}
+
+		return;
 	}
+
+	for (y = job * HDS_ROWS; (y < (job + 1) * HDS_ROWS) && (y < h); y++)
+	{
+		switch (q->pass)
+		{
+			case HDS_FILL:
+			{
+				float v = (y + 0.5f) / s - 0.5f;
+				int y0 = (int)floorf(v), y1;
+				float fy = v - y0;
+				const byte *o = q->o;
+				int ow = q->ow, oh = q->oh;
+
+				y1 = (y0 + 1 + oh) % oh;
+				y0 = (y0 + oh) % oh;
+
+				for (x = 0; x < w; x++)
+				{
+					float uu = (x + 0.5f) / s - 0.5f;
+					int x0 = (int)floorf(uu), x1;
+					float fx = uu - x0;
+
+					x1 = (x0 + 1 + ow) % ow;
+					x0 = (x0 + ow) % ow;
+
+					for (c = 0; c < 3; c++)
+					{
+						float a = o[(y0 * ow + x0) * 4 + c], b = o[(y0 * ow + x1) * 4 + c];
+						float d = o[(y1 * ow + x0) * 4 + c], e = o[(y1 * ow + x1) * 4 + c];
+
+						q->f[(y * w + x) * 3 + c] = q->p[(y * w + x) * 4 + c];
+						q->u[(y * w + x) * 3 + c] = (a + (b - a) * fx) * (1 - fy) + (d + (e - d) * fx) * fy;
+					}
+				}
+
+				break;
+			}
+
+			case HDS_BOXX:
+			{
+				/* as HDSeamBox along x for line y */
+				const float *l = q->src + (size_t)y * 3 * w;
+				float *o = q->dst + (size_t)y * 3 * w;
+				int r = s, i;
+
+				for (c = 0; c < 3; c++)
+				{
+					float sum = 0;
+
+					for (i = -r; i <= r; i++)
+					{
+						sum += l[((i < 0) ? 0 : (i >= w) ? w - 1 : i) * 3 + c];
+					}
+
+					for (i = 0; i < w; i++)
+					{
+						int add = i + r + 1, sub = i - r;
+
+						o[i * 3 + c] = sum / (2 * r + 1);
+						sum += l[((add >= w) ? w - 1 : add) * 3 + c] - l[((sub < 0) ? 0 : sub) * 3 + c];
+					}
+				}
+
+				break;
+			}
+
+			case HDS_COMBINE:
+			{
+				float wy = q->ty ? HDSeamWeight(y, h, s, (h / 8 > 3 * s) ? h / 8 : 3 * s) : 0;
+
+				for (x = 0; x < w; x++)
+				{
+					float wx = q->tx ? HDSeamWeight(x, w, s, (w / 8 > 3 * s) ? w / 8 : 3 * s) : 0;
+					float k = (r_om_hdseam->value >= 2) ? 1.0f : (wx > wy) ? wx : wy;
+
+					for (c = 0; c < 3; c++)
+					{
+						int i = (y * w + x) * 3 + c;
+
+						q->f[i] += k * (q->u[i] - q->b[i]);
+					}
+				}
+
+				break;
+			}
+
+			case HDS_STORE:
+				for (x = 0; x < w; x++)
+				{
+					for (c = 0; c < 3; c++)
+					{
+						float v = q->f[(y * w + x) * 3 + c];
+
+						q->p[(y * w + x) * 4 + c] = (byte)((v < 0) ? 0 : (v > 255) ? 255 : v + 0.5f);
+					}
+				}
+
+				break;
+		}
+	}
+}
+
+static void
+HDSeamPass(hdseam_t *q, int pass, const float *src, float *dst)
+{
+	q->pass = pass;
+	q->src = src;
+	q->dst = dst;
+
+	if (pass == HDS_BOXY)
+	{
+		GL3_ParallelFor((q->w + HDS_COLS - 1) / HDS_COLS, HDSeamJob, q);
+	}
+	else
+	{
+		GL3_ParallelFor((q->h + HDS_ROWS - 1) / HDS_ROWS, HDSeamJob, q);
+	}
+}
+
+/* the work buffer of the repair, kept across the textures of a registration (a fresh 48 MB per 1024x1024
+   texture paid its page faults every time) and freed at its end (GL3_Image_LoadDone) */
+static float *hds_buf;
+static size_t hds_cap;
+
+void
+GL3_Image_LoadDone(void)
+{
+	free(hds_buf);
+	hds_buf = NULL;
+	hds_cap = 0;
+}
+
+/* level 0 of the HD image p (w x h RGBA), retail original o (ow x oh RGBA), integer scale s */
+static void
+HDSeamFix(byte *p, int w, int h, const byte *o, int ow, int oh, int s, qboolean tx, qboolean ty)
+{
+	size_t need = (size_t)3 * w * h * 4;
+	float *f;
+	hdseam_t q;
+	int c, ax;
+
+	if (need > hds_cap)
+	{
+		free(hds_buf);
+		hds_buf = malloc(sizeof(float) * need);
+		hds_cap = hds_buf ? need : 0;
+	}
+
+	if (!(f = hds_buf))
+	{
+		return;
+	}
+
+	q.p = p;
+	q.o = o;
+	q.w = w;
+	q.h = h;
+	q.ow = ow;
+	q.oh = oh;
+	q.s = s;
+	q.tx = tx;
+	q.ty = ty;
+	q.f = f;
+	q.u = f + 3 * w * h;
+	q.t = q.u + 3 * w * h;
+	q.b = q.t + 3 * w * h;
+
+	HDSeamPass(&q, HDS_FILL, NULL, NULL);
+
+	/* u = blur(upsampled original), b = blur(HD) */
+	HDSeamPass(&q, HDS_BOXX, q.u, q.t);
+	HDSeamPass(&q, HDS_BOXY, q.t, q.u);
+	HDSeamPass(&q, HDS_BOXX, q.f, q.t);
+	HDSeamPass(&q, HDS_BOXY, q.t, q.b);
+	HDSeamPass(&q, HDS_COMBINE, NULL, NULL);
 
 	/* remaining wrap jump beyond the retail texels' own jump */
 	for (ax = 0; ax < 2; ax++)
@@ -1401,7 +1539,7 @@ HDSeamFix(byte *p, int w, int h, const byte *o, int ow, int oh, int s, qboolean 
 		int n = ax ? h : w, lines = ax ? w : h, step = ax ? 3 * w : 3, lstep = ax ? 3 : 3 * w;
 		int on = ax ? oh : ow, ostep = ax ? 4 * ow : 4, olstep = ax ? 4 : 4 * ow;
 		int band = 2 * s, j, i;
-		float *d = t;
+		float *d = q.t;
 
 		if (!(ax ? ty : tx))
 		{
@@ -1436,17 +1574,32 @@ HDSeamFix(byte *p, int w, int h, const byte *o, int ow, int oh, int s, qboolean 
 		}
 	}
 
-	for (y = 0; y < w * h; y++)
+	HDSeamPass(&q, HDS_STORE, NULL, NULL);
+}
+
+/* one row of a mip level: the 2x2 box of the level above (colour; alpha kept) */
+typedef struct
+{
+	byte *m;
+	int ofs, pofs, w, pw;
+} hdsmip_t;
+
+static void
+HDSeamMipRow(int y, void *ctx)
+{
+	const hdsmip_t *q = (const hdsmip_t *)ctx;
+	int x, c;
+
+	for (x = 0; x < q->w; x++)
 	{
+		const byte *a = q->m + q->pofs + ((2 * y) * q->pw + 2 * x) * 4, *b = a + q->pw * 4;
+		byte *d = q->m + q->ofs + (y * q->w + x) * 4;
+
 		for (c = 0; c < 3; c++)
 		{
-			float v = f[y * 3 + c];
-
-			p[y * 4 + c] = (byte)((v < 0) ? 0 : (v > 255) ? 255 : v + 0.5f);
+			d[c] = (byte)((a[c] + a[4 + c] + b[c] + b[4 + c] + 2) >> 2);
 		}
 	}
-
-	free(f);
 }
 
 /* does the retail texture tile along x (dx 1) or y? wrap jump against the busiest columns */
@@ -1571,7 +1724,7 @@ HDSeamRepair(byte *m, int size, const char *path)
 		int pw = M32Int(m, M32_OFS_WIDTHS + 4 * (level - 1)), ph = M32Int(m, M32_OFS_HEIGHTS + 4 * (level - 1));
 		int w = M32Int(m, M32_OFS_WIDTHS + 4 * level), h = M32Int(m, M32_OFS_HEIGHTS + 4 * level);
 		int ofs = M32Int(m, M32_OFS_OFFSETS + 4 * level), pofs = M32Int(m, M32_OFS_OFFSETS + 4 * (level - 1));
-		int x, y, c;
+		hdsmip_t mq;
 
 		if ((w <= 0) || (h <= 0) || (ofs <= 0) || ((size_t)ofs + (size_t)w * h * 4 > (size_t)size) ||
 			(pw != 2 * w) || (ph != 2 * h))
@@ -1579,17 +1732,23 @@ HDSeamRepair(byte *m, int size, const char *path)
 			break;
 		}
 
-		for (y = 0; y < h; y++)
-		{
-			for (x = 0; x < w; x++)
-			{
-				const byte *a = m + pofs + ((2 * y) * pw + 2 * x) * 4, *b = a + pw * 4;
-				byte *d = m + ofs + (y * w + x) * 4;
+		mq.m = m;
+		mq.ofs = ofs;
+		mq.pofs = pofs;
+		mq.w = w;
+		mq.pw = pw;
 
-				for (c = 0; c < 3; c++)
-				{
-					d[c] = (byte)((a[c] + a[4 + c] + b[c] + b[4 + c] + 2) >> 2);
-				}
+		if (w * h >= 64 * 64)
+		{
+			GL3_ParallelFor(h, HDSeamMipRow, &mq);
+		}
+		else
+		{
+			int y;
+
+			for (y = 0; y < h; y++)
+			{
+				HDSeamMipRow(y, &mq);
 			}
 		}
 	}

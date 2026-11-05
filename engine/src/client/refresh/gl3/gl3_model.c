@@ -1225,6 +1225,7 @@ GL3_EndRegistration(void)
 	gl3model_t *mod;
 
 	GL3_Mat_BatchEnd();
+	GL3_Image_LoadDone(); /* the seam repair's work buffer */
 	GL3_LoadMark("models, skins, images (precache)");
 	if (ri.Cvar_Get("r_om_loadtime", "0", 0)->value)
 	{

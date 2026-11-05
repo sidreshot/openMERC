@@ -755,6 +755,8 @@ GL3_Init(void)
 void
 GL3_Shutdown(void)
 {
+	GL3_Jobs_Shutdown(); /* the load workers run this library's code */
+	GL3_Image_LoadDone();
 	ri.Cmd_RemoveCommand("screenshot");
 	ri.Cmd_RemoveCommand("rawshot");
 	ri.Cmd_RemoveCommand("avi");

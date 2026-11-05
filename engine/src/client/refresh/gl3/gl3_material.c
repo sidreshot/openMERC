@@ -1180,10 +1180,17 @@ GL3_Mat_Flush(void)
 	}
 
 	GL3_ParallelFor(nmatjobs, MatJob, matjobs);
+	gl3_matt[2] += MatClock() - t0; /* r_om_loadtime "rest": the measuring on all cores */
 
-	for (i = 0; i < nmatjobs; i++)
 	{
-		MatUpload(&matjobs[i]);
+		double t1 = MatClock();
+
+		for (i = 0; i < nmatjobs; i++)
+		{
+			MatUpload(&matjobs[i]);
+		}
+
+		gl3_matt[3] += MatClock() - t1;
 	}
 
 	nmatjobs = 0;
