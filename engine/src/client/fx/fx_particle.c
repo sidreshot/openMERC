@@ -21,9 +21,61 @@
 
 #include "fx_local.h"
 
+#if defined(_MSC_VER)
+#include <intrin.h> /* _BitScanForward */
+#endif
+
 fx_part_t fx_parts[FX_MAX_PARTICLES];
 static int fx_free_list[FX_MAX_PARTICLES];
 static int fx_num_free;
+static qboolean fx_oneframe_drawn[FX_MAX_PARTICLES];
+
+/* OpenMerc: the pool grew to 8192 records; the per-frame passes (free, simulate, attach, submit) walk only the
+   live ones through this bit set, in index order as before (a record allocated during a pass at a higher index is
+   still reached by that pass). Walking all 8192 records 4-5 times a frame was 10% of a phone's CPU. */
+static unsigned int fx_live[FX_MAX_PARTICLES / 32];
+
+static int
+FX_Ctz(unsigned int v)
+{
+#if defined(_MSC_VER)
+	unsigned long r;
+
+	_BitScanForward(&r, v);
+	return (int)r;
+#else
+	return __builtin_ctz(v);
+#endif
+}
+
+/* the first live record at or after i, FX_MAX_PARTICLES when none */
+static int
+FX_NextLive(int i)
+{
+	int w = i >> 5;
+	unsigned int bits;
+
+	if (i >= FX_MAX_PARTICLES)
+	{
+		return FX_MAX_PARTICLES;
+	}
+
+	bits = fx_live[w] & (~0u << (i & 31));
+
+	while (!bits)
+	{
+		if (++w >= FX_MAX_PARTICLES / 32)
+		{
+			return FX_MAX_PARTICLES;
+		}
+
+		bits = fx_live[w];
+	}
+
+	return (w << 5) + FX_Ctz(bits);
+}
+
+#define FX_FOR_LIVE(i) for ((i) = FX_NextLive(0); (i) < FX_MAX_PARTICLES; (i) = FX_NextLive((i) + 1))
 static int fx_serial;
 int fx_stat_freed[3], fx_stat_chains, fx_stat_chainquads;
 
@@ -133,6 +185,8 @@ FX_ClearParticles(void)
 	}
 
 	memset(fx_parts, 0, sizeof(fx_parts));
+	memset(fx_live, 0, sizeof(fx_live));
+	memset(fx_oneframe_drawn, 0, sizeof(fx_oneframe_drawn));
 	fx_num_free = 0;
 
 	for (i = FX_MAX_PARTICLES - 1; i >= 0; i--)
@@ -158,6 +212,7 @@ FX_AllocParticle(void)
 	}
 
 	p = &fx_parts[fx_free_list[--fx_num_free]];
+	fx_live[(p - fx_parts) >> 5] |= 1u << ((p - fx_parts) & 31);
 	serial = ++fx_serial;
 
 	memset(p, 0, sizeof(*p));
@@ -218,6 +273,8 @@ FX_FreeParticle(fx_part_t *p)
 	p->ginst = NULL;
 	p->kind = FXK_FREE;
 	p->fx = -1;
+	fx_live[idx >> 5] &= ~(1u << (idx & 31));
+	fx_oneframe_drawn[idx] = false; /* a later record in this slot is not a drawn One Frame particle */
 	fx_free_list[fx_num_free++] = idx;
 }
 
@@ -234,14 +291,9 @@ FX_FreeDeadParticles(void)
 	int i;
 	fx_part_t *p;
 
-	for (i = 0; i < FX_MAX_PARTICLES; i++)
+	FX_FOR_LIVE(i)
 	{
 		p = &fx_parts[i];
-
-		if (p->kind == FXK_FREE)
-		{
-			continue;
-		}
 
 		if ((p->die <= fx_now) || (p->alpha < 2) ||
 			(p->noimage && (p->kind != FXK_TIMER) && (p->kind != FXK_GHOUL)))
@@ -961,7 +1013,7 @@ FX_RunParticles(float dt)
 	int i;
 	fx_part_t *p;
 
-	for (i = 0; i < FX_MAX_PARTICLES; i++)
+	FX_FOR_LIVE(i)
 	{
 		p = &fx_parts[i];
 
@@ -988,7 +1040,7 @@ FX_RunParticles(float dt)
 		}
 	}
 
-	for (i = 0; i < FX_MAX_PARTICLES; i++)
+	FX_FOR_LIVE(i)
 	{
 		p = &fx_parts[i];
 
@@ -1139,16 +1191,14 @@ FX_FillQuad(fx_part_t *p)
 	q->next = NULL;
 }
 
-static qboolean fx_oneframe_drawn[FX_MAX_PARTICLES];
-
 void
 FX_SubmitParticles(void)
 {
 	int i;
 	fx_part_t *p;
 
-	/* One Frame particles drawn in the previous frame die now */
-	for (i = 0; i < FX_MAX_PARTICLES; i++)
+	/* One Frame particles drawn in the previous frame die now (a freed record's mark went with it) */
+	FX_FOR_LIVE(i)
 	{
 		if (fx_oneframe_drawn[i])
 		{
@@ -1162,7 +1212,7 @@ FX_SubmitParticles(void)
 		}
 	}
 
-	for (i = 0; i < FX_MAX_PARTICLES; i++)
+	FX_FOR_LIVE(i)
 	{
 		p = &fx_parts[i];
 

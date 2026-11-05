@@ -255,7 +255,7 @@ GL3_Post_GpuTimer(qboolean begin)
 #define GL_TIMESTAMP 0x8E28
 #endif
 
-#define PROFMARKS 24
+#define PROFMARKS 40
 
 typedef void (APIENTRY *pfnQueryCounter)(GLuint, GLenum);
 
@@ -291,7 +291,7 @@ static struct
 static void
 SpotFlush(void)
 {
-	char line[1400];
+	char line[2400];
 	size_t len = 0;
 	int i;
 
@@ -384,7 +384,7 @@ ProfCollect(int f)
 
 	if (PR.mean > 0 && (gpu > PR.mean * 2.0 + 1.0 || cpu > PR.cmean * 2.0 + 1.0))
 	{
-		char line[1024];
+		char line[2400];
 		size_t len = 0;
 
 		len += snprintf(line + len, sizeof(line) - len, "OMSPIKE gpu %.2f (mean %.2f) cpu %.2f (mean %.2f):", gpu, PR.mean,
@@ -404,7 +404,7 @@ ProfCollect(int f)
 
 	if (++PR.frames >= 200)
 	{
-		char line[1024];
+		char line[2400];
 		size_t len = 0;
 
 		len += snprintf(line + len, sizeof(line) - len, "OMPROF gpu/cpu mean(worst):");
@@ -5741,6 +5741,7 @@ GL3_Post_SSAO(void)
 	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
 		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	P.depthfinal = true;
+	GL3_Post_ProfMark("ao_depth");
 
 	if (P.samples)
 	{
@@ -5775,6 +5776,7 @@ GL3_Post_SSAO(void)
 	glUniform4f(S.ln_proj, C, D, gl3depthmin, gl3depthmax);
 	BindTex(GL_TEXTURE0, P.texdepthcopy);
 	DrawQuad();
+	GL3_Post_ProfMark("ao_lin");
 
 	/* occlusion */
 	glBindFramebuffer(GL_FRAMEBUFFER, S.aofbo[0]);
@@ -5795,6 +5797,7 @@ GL3_Post_SSAO(void)
 	glUniform1f(S.ao_frame, S.frame);
 	BindTex(GL_TEXTURE0, S.lintex);
 	DrawQuad();
+	GL3_Post_ProfMark("ao_occ");
 
 	/* temporal accumulation into the next history texture: this view space -> last frame's clip space */
 	{
@@ -5818,6 +5821,7 @@ GL3_Post_SSAO(void)
 		S.havehist = true;
 		S.prevpv = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
 	}
+	GL3_Post_ProfMark("ao_temporal");
 
 	/* depth-aware blur, horizontal then vertical */
 	GL3_UseProgram(S.progblur);
@@ -5831,6 +5835,7 @@ GL3_Post_SSAO(void)
 	BindTex(GL_TEXTURE0, S.aotex[1]);
 	glUniform2f(S.bl_step, 0.0f, 1.0f / S.h);
 	DrawQuad();
+	GL3_Post_ProfMark("ao_blur");
 
 	/* a small copy of the scene colour for the multi-bounce tint (with MSAA resolved first) */
 	if (P.samples)
@@ -5849,6 +5854,7 @@ GL3_Post_SSAO(void)
 	}
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, S.colfbo);
 	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, 0, 0, S.w, S.h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	GL3_Post_ProfMark("ao_colour");
 
 	/* multiply the scene (not the weapon) */
 	if (P.samples)

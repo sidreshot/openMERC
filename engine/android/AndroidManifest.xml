@@ -30,6 +30,9 @@
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
         android:hardwareAccelerated="true">
 
+        <!-- CPU profiling from adb (simpleperf, Android Studio's profiler) without a debuggable build -->
+        <profileable android:shell="true" />
+
         <activity android:name="com.openmerc.game.OpenMercActivity"
             android:label="openMERC"
             android:alwaysRetainTaskState="true"
