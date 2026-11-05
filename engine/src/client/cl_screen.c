@@ -700,7 +700,7 @@ SCR_BeginLoadingPlaque(void)
 void
 SCR_EndLoadingPlaque(void)
 {
-	extern int om_loadstart, om_loadserver, om_loadprep;
+	extern int om_loadstart, om_loadserver, om_loadprep, om_loadcm, om_loadspawn;
 
 	cls.disable_screen = 0;
 
@@ -710,9 +710,10 @@ SCR_EndLoadingPlaque(void)
 		extern long long fs_stat_us;
 		extern int fs_stat_opens, fs_stat_loosemiss;
 
-		Com_Printf("OMLOADTIME %s %d ms (server %d, client models/images %d; file lookups %d in %d ms, %d loose misses)\n",
-				cl.configstrings[CS_MODELS + 1], Sys_Milliseconds() - om_loadstart, om_loadserver, om_loadprep,
-				fs_stat_opens, (int)(fs_stat_us / 1000), fs_stat_loosemiss);
+		Com_Printf("OMLOADTIME %s %d ms (server %d: collision %d, game spawn %d; client models/images %d; file lookups %d "
+				"in %d ms, %d directory misses)\n", cl.configstrings[CS_MODELS + 1], Sys_Milliseconds() - om_loadstart,
+				om_loadserver, om_loadcm, om_loadspawn, om_loadprep, fs_stat_opens, (int)(fs_stat_us / 1000),
+				fs_stat_loosemiss);
 		om_loadstart = 0;
 	}
 

@@ -485,6 +485,12 @@ SV_SpawnServer(const char *server, const char *spawnpoint, server_state_t server
 	   purge model files nobody references */
 	SV_Ghoul_ServerSpawn(clients);
 
+	{
+		extern int om_loadcm;
+
+		om_loadcm = Sys_Milliseconds();
+	}
+
 	if (serverstate != ss_game)
 	{
 		sv.models[1] = CM_LoadMap("", false, &checksum); /* no real map */
@@ -533,12 +539,19 @@ SV_SpawnServer(const char *server, const char *spawnpoint, server_state_t server
 		}
 
 		dments = SV_DeathmatchSpawnFallback(CM_EntityString());
-		ge->SpawnEntities(sv.name, dments ? dments : CM_EntityString(), spawnpoint);
+		{
+			extern int om_loadcm, om_loadspawn;
+			int t = Sys_Milliseconds();
+
+			om_loadcm = t - om_loadcm;
+			ge->SpawnEntities(sv.name, dments ? dments : CM_EntityString(), spawnpoint);
+			/* SPEC-001: RunFrame(0) and RunFrame(1) while still loading */
+			SV_GameRunFrame(0);
+			SV_GameRunFrame(1);
+			om_loadspawn = Sys_Milliseconds() - t;
+		}
 	}
 
-	/* SPEC-001: RunFrame(0) and RunFrame(1) while still loading */
-	SV_GameRunFrame(0);
-	SV_GameRunFrame(1);
 	/* the first server frame is frame 1 and passes counter 1, then 2, 3, ...
 	   (the original 1.07f: RunFrame 0, 1 while loading, then 1, 2, 3 with the
 	   wire frame number - logged by the I1b tracing proxy on kos1, 2026-10-25;
@@ -669,8 +682,9 @@ SV_InitGame(void)
  *
  * command from the console or progs.
  */
-/* OpenMerc: map load timing (the client prints OMLOAD when the loading plaque goes) */
-int om_loadstart, om_loadserver, om_loadprep;
+/* OpenMerc: map load timing (the client prints OMLOADTIME when the loading plaque goes): the whole, the server
+   (of it: the collision map and the game's spawn with its first two frames), the client's registration */
+int om_loadstart, om_loadserver, om_loadprep, om_loadcm, om_loadspawn;
 
 void
 SV_Map(qboolean attractloop, const char *levelstring, qboolean loadgame)
@@ -681,7 +695,7 @@ SV_Map(qboolean attractloop, const char *levelstring, qboolean loadgame)
 	char spawnpoint[MAX_QPATH];
 
 	om_loadstart = Sys_Milliseconds();
-	om_loadserver = om_loadprep = 0;
+	om_loadserver = om_loadprep = om_loadcm = om_loadspawn = 0;
 	{
 		extern long long fs_stat_us;
 		extern int fs_stat_opens, fs_stat_loosemiss;
