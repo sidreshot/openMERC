@@ -982,6 +982,24 @@ UploadM32(gl3image_t *image, byte *m, int size, int kind, int pictipskip)
 
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
+	/* OpenMerc: an error left by an earlier call is not this upload's (SPEC-413 §8 step 6 tests the upload): it was
+	   taken for one, the texture uploaded twice and "Unsupported format" printed for every texture of a map on the
+	   GLES build. Said once, with its code, so its source can be found. */
+	{
+		static qboolean said;
+		GLenum e;
+
+		while ((e = glGetError()) != GL_NO_ERROR)
+		{
+			if (!said)
+			{
+				said = true;
+				R_Printf(PRINT_DEVELOPER, "UploadM32: GL error 0x%x pending before %s (from an earlier call)\n", e,
+					image->name);
+			}
+		}
+	}
+
 	for (level = start; level < numlevels; level++)
 	{
 		int w = M32Int(m, M32_OFS_WIDTHS + 4 * level);
