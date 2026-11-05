@@ -2768,6 +2768,16 @@ GL3_BeginFrame(float camera_separation)
 				gl3_colorlight->modified = true;
 			}
 		}
+
+		/* and the dynamic light path of the views (r_om_pdlight, gl_dynamic, the world's format) */
+		{
+			extern int gl3_shader_pdl;
+
+			if (GL3_DynLight_ShaderWants() != gl3_shader_pdl)
+			{
+				gl3_colorlight->modified = true;
+			}
+		}
 	}
 
 	if (gl3_particle_square->modified || gl3_colorlight->modified)

@@ -272,6 +272,7 @@ void GL3_DynLight_Free(void);
 void GL3_DynLight_BindPage(int page);
 void GL3_DynLight_BeginFrame(void);
 void GL3_DynLight_Face(msurface_t *surf);
+int GL3_DynLight_ShaderWants(void);
 /* GFX-modern r_om_pdlight: SoF dlights per pixel instead of per lightmap sample this view */
 qboolean GL3_DynLight_PerPixel(void);
 unsigned GL3_DynLight_PixelFlags(msurface_t *surf);

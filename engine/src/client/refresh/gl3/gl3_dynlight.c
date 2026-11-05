@@ -340,6 +340,18 @@ GL3_DynLight_PerPixel(void)
 	return pdlview;
 }
 
+/* the omPdl.x of the world views from now on (GL3_DynLight_SetupView without the per-view no-world case, which
+   draws no world faces), folded into the world programs (gl3_shaders.c LmVariant); before a world is loaded a SoF
+   one is assumed */
+int
+GL3_DynLight_ShaderWants(void)
+{
+	PdlCvars();
+
+	return ((r_om_pdlight->value != 0) && (!gl3_worldmodel || (gl3_worldmodel->bspversion == BSPVERSION_SOF)) &&
+		(!gl_dynamic || gl_dynamic->value)) ? 1 : 0;
+}
+
 /* the vertex light flags of a face drawn this view (same exclusions as the sample layer) */
 unsigned
 GL3_DynLight_PixelFlags(msurface_t *surf)

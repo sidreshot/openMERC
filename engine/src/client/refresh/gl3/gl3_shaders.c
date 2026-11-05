@@ -2008,6 +2008,22 @@ qboolean gl3_world_lite = false; /* r_om_worldlite: the world shaders without su
    (Adreno 610: the seam path alone was 0.7 ms of a 28 ms frame). translucent: 0 or 1; seam: keep the seam path. */
 /* the gl_monolightmap mode folded into the world programs (0: the colour-table path alone), -1 = all modes */
 int gl3_shader_mono = -1;
+/* the dynamic light path folded into the world programs: 1 per pixel (r_om_pdlight on a SoF world), 0 the CPU
+   sample layer and the Quake II per-pixel loop; GL3_DynLight_ShaderWants tells which one the next views use */
+int gl3_shader_pdl = -1;
+
+static void
+FoldAll(char *out, const char *from, const char *to)
+{
+	char *at;
+	size_t ol = strlen(from), nl = strlen(to);
+
+	while ((at = strstr(out, from)) != NULL)
+	{
+		memcpy(at, to, nl);
+		memset(at + nl, ' ', ol - nl);
+	}
+}
 
 static char *
 LmVariant(const char *src, int translucent, qboolean seam)
@@ -2046,6 +2062,14 @@ LmVariant(const char *src, int translucent, qboolean seam)
 			memcpy(at, to, strlen(to));
 			memset(at + strlen(to), ' ', strlen(from) - strlen(to));
 		}
+	}
+
+	/* omPdl.x (per view: the per-pixel SoF dlights) as the constant the views will use: the path not taken - the
+	   32-light loop of Quake II maps and the CPU layer fetch, or the per-pixel SoF rule - goes */
+	if (gl3_shader_pdl >= 0)
+	{
+		FoldAll(out, "omPdl.x < 0.5", gl3_shader_pdl ? "false" : "true");
+		FoldAll(out, "omPdl.x > 0.5", gl3_shader_pdl ? "true" : "false");
 	}
 
 	if (!seam)
@@ -2163,6 +2187,7 @@ static qboolean createShaders(void)
 		extern int gl3_monolightmap_mode;
 
 		gl3_shader_mono = (gl3_monolightmap_mode == 0) ? 0 : -1;
+		gl3_shader_pdl = GL3_DynLight_ShaderWants();
 	}
 	lmMain = LmVariant(lmFragCsm, 0, false);
 	lmTrans = LmVariant(lmFragCsm, 1, false);
