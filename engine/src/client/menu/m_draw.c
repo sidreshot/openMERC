@@ -24,6 +24,7 @@
 #include "header/m_draw.h"
 #include "../../common/header/sof/refapi.h"
 #include "header/m_font.h"
+#include "../header/sofclient.h" /* Touch_Enabled */
 
 typedef struct mrimage_s
 {
@@ -1145,7 +1146,11 @@ MR_RailWanted(void)
 {
 	if (!mr_menurail)
 	{
+#ifdef __ANDROID__
+		mr_menurail = Cvar_Get("menu_rail", "0", CVAR_ARCHIVE); /* a phone: the room goes to large buttons */
+#else
 		mr_menurail = Cvar_Get("menu_rail", "1", CVAR_ARCHIVE);
+#endif
 	}
 
 	return mr_menurail->value != 0 && viddef.width * 2 >= viddef.height * 3;
@@ -1220,7 +1225,9 @@ MR_MenuScale(void)
 	   window height (m_font.c), so a fractional factor stays sharp. */
 	if (MR_WideLayout() && mr_uiscale->value <= 0.0f)
 	{
-		f = (float)viddef.height / 720.0f;
+		/* OpenMerc touch screens (in_touch): the window is 480 units tall instead of 720 - every button half as
+		   large again, a size a finger hits on a phone (the layout is kept at least 640x480 units) */
+		f = (float)viddef.height / (Touch_Enabled() ? 480.0f : 720.0f);
 
 		if (f > (float)viddef.width / 640.0f)
 		{

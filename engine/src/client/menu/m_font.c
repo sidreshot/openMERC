@@ -203,7 +203,11 @@ MF_Ready(const char *font)
 	if (!mf_cvar)
 	{
 		mf_cvar = Cvar_Get("menu_ttf", "1", CVAR_ARCHIVE);
+#ifdef __ANDROID__
+		mf_size = Cvar_Get("menu_textsize", "2.2", CVAR_ARCHIVE); /* a phone: text and rows a finger hits */
+#else
 		mf_size = Cvar_Get("menu_textsize", "1", CVAR_ARCHIVE);
+#endif
 	}
 
 	if (!mf_cvar->value || !mf_upload)
@@ -222,7 +226,7 @@ MF_Px(const mfstyle_t *st, float z)
 	float k = mf_size->value;
 	int px;
 
-	k = (k < 0.6f) ? 0.6f : ((k > 1.6f) ? 1.6f : k);
+	k = (k < 0.6f) ? 0.6f : ((k > 2.6f) ? 2.6f : k); /* up to 2.6: phones */
 	px = (int)(st->share * (float)viddef.height * k * z + 0.5f);
 	return (px < 8) ? 8 : ((px > 160) ? 160 : px);
 }

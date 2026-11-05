@@ -640,6 +640,8 @@ qboolean IN_NumpadIsOn()
  * frame by the client and does nearly all the
  * input magic.
  */
+static qboolean touchclick_down, touchclick_up;
+
 void
 IN_Update(void)
 {
@@ -672,6 +674,18 @@ IN_Update(void)
 				SDL_StopTextInput(tw);
 			}
 		}
+	}
+
+	/* OpenMerc: a menu tap's press, then its release, one frame apart after the pointer moved (see the finger events) */
+	if (touchclick_down)
+	{
+		touchclick_down = false;
+		Key_Event(K_MOUSE1, true, true);
+	}
+	else if (touchclick_up)
+	{
+		touchclick_up = false;
+		Key_Event(K_MOUSE1, false, true);
 	}
 
 	/* Get and process an event */
@@ -784,9 +798,15 @@ IN_Update(void)
 					{
 						M_MouseAbs((int)(event.tfinger.x * viddef.width), (int)(event.tfinger.y * viddef.height));
 
-						if (type != 1)
+						/* the click goes in on the next frames: the menu finds the widget under the pointer when it
+						   draws - a click with the pointer just moved hit the widget under its old place */
+						if (type == 0)
 						{
-							Key_Event(K_MOUSE1, type == 0, true);
+							touchclick_down = true;
+						}
+						else if (type == 2)
+						{
+							touchclick_up = true;
 						}
 
 						if (type == 2)
