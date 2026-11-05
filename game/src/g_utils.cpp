@@ -494,7 +494,8 @@ edict_t *G_FirstPlayer(void)
 G_UseKey (SPEC-760 B3.8, SPEC-780 5 "use key")
 =================
 */
-void G_UseKey(edict_t *player)
+/* what the use key would act on (SPEC: trigger at the eye, best facing user within 80 units, the view trace) */
+edict_t *G_UseTarget(edict_t *player)
 {
 	vec3_t eye, mins, maxs, fwd, flat;
 	edict_t *list[1024];
@@ -510,10 +511,8 @@ void G_UseKey(edict_t *player)
 	int n = gi.BoxEdicts(mins, maxs, list, 1024, 2);
 	for (int i = 0; i < n; i++) {
 		edict_t *e = list[i];
-		if (e->inuse && e->plUse && e->classname && strstr(e->classname, "trigger")) {
-			e->plUse(e, player, player);
-			return;
-		}
+		if (e->inuse && e->plUse && e->classname && strstr(e->classname, "trigger"))
+			return e;
 	}
 
 	// 2: solid entity with a use-key handler within 80 units, best horizontal facing
@@ -553,15 +552,60 @@ void G_UseKey(edict_t *player)
 		best = e;
 		bestdot = dot;
 	}
-	if (best) {
-		best->plUse(best, player, player);
-		return;
-	}
+	if (best)
+		return best;
 
 	// 3: 75-unit trace along the view
 	vec3_t end;
 	VectorMA(eye, 75, fwd, end);
 	trace_t tr = gi.trace(eye, NULL, NULL, end, player, MASK_PLAYERSOLID);
 	if (tr.ent && tr.ent->inuse && tr.ent->plUse)
-		tr.ent->plUse(tr.ent, player, player);
+		return tr.ent;
+	return NULL;
+}
+
+void G_UseKey(edict_t *player)
+{
+	edict_t *e = G_UseTarget(player);
+	if (e)
+		e->plUse(e, player, player);
+}
+
+/* om_autouse (on by default on Android: touch controls have no use key): doors, buttons, switches and use
+   triggers in front of a player are used without the key - once per approach (the same thing again only after
+   it was out of reach for a second); characters (talk, hostages) are left to the key */
+void G_AutoUse(edict_t *player)
+{
+	static cvar_t *autouse;
+	static edict_t *last[MAX_CLIENTS];
+	static float seen[MAX_CLIENTS], next[MAX_CLIENTS];
+	if (!autouse)
+#ifdef __ANDROID__
+		autouse = gi.cvar("om_autouse", "1", CVAR_ARCHIVE);
+#else
+		autouse = gi.cvar("om_autouse", "0", CVAR_ARCHIVE);
+#endif
+	int c = (int)(player - g_edicts) - 1;
+	if (!autouse->value || !player->client || c < 0 || c >= MAX_CLIENTS)
+		return;
+	if (level.time < next[c] - 1.0f || level.time < seen[c]) { /* a new level */
+		last[c] = NULL;
+		seen[c] = next[c] = 0;
+	}
+	if (level.time < next[c])
+		return;
+	next[c] = level.time + 0.2f;
+	edict_t *e = G_UseTarget(player);
+	if (e && (e->client || e->ai || (e->svflags & SVF_MONSTER)))
+		e = NULL;
+	if (!e) {
+		if (level.time - seen[c] > 1.0f)
+			last[c] = NULL;
+		return;
+	}
+	seen[c] = level.time;
+	if (e == last[c])
+		return;
+	last[c] = e;
+	e->plUse(e, player, player);
 }

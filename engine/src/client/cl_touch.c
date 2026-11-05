@@ -11,8 +11,8 @@
  *  - the HUD trays sit at the top (cl_hud.c): a tap on the item tray selects the next item (the ] key), a
  *    long press uses it; a tap on the weapon tray selects the next weapon, a long press the previous one;
  *  - a small button between the trays opens the menu (Escape);
- *  - automatic use: a door, button or lift (a brush model) right in front of the player gets +use without a
- *    button, once per approach.
+ *  - automatic use is the game's (om_autouse, game/src/g_utils.cpp): doors, buttons and switches in front are used
+ *    without a key, once per approach.
  * Menus get the finger as an absolute pointer (sdl3.c): the touch's mouse events place the menu cursor.
  */
 
@@ -44,12 +44,11 @@ typedef struct
 	const char *label;
 } tbutton_t;
 
-static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_autouse, *touch_alpha;
+static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_alpha;
 static finger_t fingers[TOUCH_FINGERS];
 static tbutton_t buttons[8];
 static int numbuttons;
 static qboolean crouched, firing;
-static int useheld, uselastent, uselasttime;
 
 static float
 W(void)
@@ -73,7 +72,6 @@ Touch_Init(void)
 #endif
 	touch_sens = Cvar_Get("touch_sens", "1", CVAR_ARCHIVE);           /* 1 = half a turn across the screen */
 	touch_joyradius = Cvar_Get("touch_joyradius", "0.13", CVAR_ARCHIVE); /* of the screen height */
-	touch_autouse = Cvar_Get("touch_autouse", "1", CVAR_ARCHIVE);
 	touch_alpha = Cvar_Get("touch_alpha", "0.35", CVAR_ARCHIVE);
 	memset(fingers, 0, sizeof(fingers));
 }
@@ -207,11 +205,6 @@ ReleaseAll(void)
 		Cbuf_AddText("-movedown\n");
 	}
 
-	if (useheld)
-	{
-		useheld = 0;
-		Cbuf_AddText("-use\n");
-	}
 }
 
 /* sdl3.c: a finger event, x / y normalized 0..1; type 0 down, 1 motion, 2 up */
@@ -335,56 +328,6 @@ Look(void)
 	}
 }
 
-/* a door, button or lift right in front: +use for a moment, once per thing until the player turns away */
-static void
-AutoUse(void)
-{
-	vec3_t fwd, end;
-	trace_t tr;
-	int num = 0;
-
-	if (useheld && (--useheld == 0))
-	{
-		Cbuf_AddText("-use\n");
-	}
-
-	if (!touch_autouse || !touch_autouse->value || useheld)
-	{
-		return;
-	}
-
-	AngleVectors(cl.viewangles, fwd, NULL, NULL);
-	VectorMA(cl.refdef.vieworg, 56, fwd, end);
-	tr = CL_PMTrace(cl.refdef.vieworg, vec3_origin, vec3_origin, end);
-
-	if (tr.ent && (tr.ent != (struct edict_s *)1) && (tr.fraction < 1.0f))
-	{
-		const entity_state_t *e = (const entity_state_t *)tr.ent;
-
-		if (e->solid == 31) /* brush model: door, button, lift */
-		{
-			num = e->number;
-		}
-	}
-
-	if (num && ((num != uselastent) || (cls.realtime - uselasttime > 3000)))
-	{
-		Cbuf_AddText("+use\n");
-		useheld = 3; /* frames */
-		uselasttime = cls.realtime;
-	}
-
-	if (num)
-	{
-		uselastent = num;
-		uselasttime = cls.realtime;
-	}
-	else if (cls.realtime - uselasttime > 1000)
-	{
-		uselastent = 0; /* turned away: the same door again later */
-	}
-}
-
 /* in_main / sdl3.c IN_Move: the joystick moves, the view turns */
 void
 Touch_Move(struct usercmd_s *cmd)
@@ -438,7 +381,7 @@ Touch_Move(struct usercmd_s *cmd)
 		}
 	}
 
-	AutoUse();
+	/* automatic use: the game does it (om_autouse, game/src/g_utils.cpp G_AutoUse) with the use key's own rules */
 }
 
 static void

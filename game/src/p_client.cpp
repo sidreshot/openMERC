@@ -1307,6 +1307,8 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 		TargetIdentification(ent);
 		if ((client->buttons & BUTTON_USE) && !(client->oldbuttons & BUTTON_USE))
 			G_UseKey(ent);
+		else
+			G_AutoUse(ent);
 	}
 
 	if (client->resp.spectator) {

@@ -717,6 +717,8 @@ char *vtos(const vec3_t v);
 float vectoyaw(const vec3_t vec);
 void vectoangles(const vec3_t vec, vec3_t angles);
 void G_UseKey(edict_t *player);
+edict_t *G_UseTarget(edict_t *player);
+void G_AutoUse(edict_t *player); /* om_autouse: touch controls */
 void G_MaterialFlags(int material, int surfacetype);
 void G_SetMaterialFlag(int pos, char c); // AMEND-005 G18.27 writers (bodies, props, remote cameras)
 qboolean G_IsClient(edict_t *e);

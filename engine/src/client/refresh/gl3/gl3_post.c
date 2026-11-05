@@ -6117,9 +6117,7 @@ WeatherWanted(void)
 
 	WX.rain = WX.storm = WX.aa = WX.snow = false;
 
-#ifdef YQ2_GL3_GLES3
-	return false;
-#else
+	/* GLES too (phones): the sky read-back (lightning zones) is skipped there, the rest is plain GLSL */
 	if (WX.failed || !gl3_worldmodel || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
 	{
 		return false;
@@ -6143,7 +6141,6 @@ WeatherWanted(void)
 	}
 
 	return WX.rain || WX.storm || WX.aa || WX.snow;
-#endif
 }
 
 /* 0..1 brightness of the lightning now */
