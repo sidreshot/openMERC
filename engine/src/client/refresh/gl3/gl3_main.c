@@ -2758,6 +2758,16 @@ GL3_BeginFrame(float camera_separation)
 		{
 			gl3_colorlight->modified = true;
 		}
+
+		/* the world programs fold gl_monolightmap 0 in (LmVariant): a map latched with another mode remakes them */
+		{
+			extern int gl3_monolightmap_mode, gl3_shader_mono;
+
+			if ((gl3_monolightmap_mode == 0) != (gl3_shader_mono == 0))
+			{
+				gl3_colorlight->modified = true;
+			}
+		}
 	}
 
 	if (gl3_particle_square->modified || gl3_colorlight->modified)

@@ -2001,6 +2001,67 @@ static void initUBOs(void)
 qboolean gl3_world_lamps = true;
 qboolean gl3_world_lite = false; /* r_om_worldlite: the world shaders without sun shadows, lightning, material, mirrors */
 
+
+/* OpenMerc: a variant of the lightmapped world shader with its per-program switches as constants. omTranslucent
+   (si3DlmTrans) and omSeam (si3DlmSeam) are set once per program and never change, but as uniforms every world
+   pixel carried the seam blend's code and registers: the compiler now drops the paths a program cannot take
+   (Adreno 610: the seam path alone was 0.7 ms of a 28 ms frame). translucent: 0 or 1; seam: keep the seam path. */
+/* the gl_monolightmap mode folded into the world programs (0: the colour-table path alone), -1 = all modes */
+int gl3_shader_mono = -1;
+
+static char *
+LmVariant(const char *src, int translucent, qboolean seam)
+{
+	static const char *const fold[2][2][2] = {
+		{{"omTranslucent == 0", "true "}, {"omTranslucent != 0", "false"}},
+		{{"omTranslucent == 0", "false"}, {"omTranslucent != 0", "true "}}};
+	char *out = strdup(src), *at;
+	int i;
+
+	if (!out)
+	{
+		return NULL;
+	}
+
+	/* same length replacements (padded): the source is edited in place */
+	for (i = 0; i < 2; i++)
+	{
+		size_t ol = strlen(fold[translucent][i][0]), nl = strlen(fold[translucent][i][1]);
+
+		while ((at = strstr(out, fold[translucent][i][0])) != NULL)
+		{
+			memcpy(at, fold[translucent][i][1], nl);
+			memset(at + nl, ' ', ol - nl);
+		}
+	}
+
+	/* gl_monolightmap 0 (latched at map load; the default, and night vision / r_fullbright use mode 0 too): the
+	   colour-table path alone - the other modes' code, and the discard by the lightmap alpha they need, go */
+	if (gl3_shader_mono == 0)
+	{
+		static const char *const from = "omMono == 0", *const to = "true";
+
+		while ((at = strstr(out, from)) != NULL)
+		{
+			memcpy(at, to, strlen(to));
+			memset(at + strlen(to), ' ', strlen(from) - strlen(to));
+		}
+	}
+
+	if (!seam)
+	{
+		static const char *const from = "if(omSeam != 0)", *const to = "if(false)";
+
+		while ((at = strstr(out, from)) != NULL)
+		{
+			memcpy(at, to, strlen(to));
+			memset(at + strlen(to), ' ', strlen(from) - strlen(to));
+		}
+	}
+
+	return out;
+}
+
 static qboolean createShaders(void)
 {
 	if (!initShader2D(&gl3state.si2D, vertexSrc2D, fragmentSrc2D, true))
@@ -2093,7 +2154,24 @@ static qboolean createShaders(void)
 	{
 		return false;
 	}
-	const char* lightmappedFrag = lmFragCsm;
+	/* the world programs' variants (LmVariant): opaque and flowing faces, translucent faces, seam strips */
+	static char *lmMain = NULL, *lmTrans = NULL, *lmSeamSrc = NULL;
+	free(lmMain);
+	free(lmTrans);
+	free(lmSeamSrc);
+	{
+		extern int gl3_monolightmap_mode;
+
+		gl3_shader_mono = (gl3_monolightmap_mode == 0) ? 0 : -1;
+	}
+	lmMain = LmVariant(lmFragCsm, 0, false);
+	lmTrans = LmVariant(lmFragCsm, 1, false);
+	lmSeamSrc = LmVariant(lmFragCsm, 0, true);
+	if(!lmMain || !lmTrans || !lmSeamSrc)
+	{
+		return false;
+	}
+	const char* lightmappedFrag = lmMain;
 
 	if(!initShader3D(&gl3state.si3Dlm, vertexSrc3Dlm, lightmappedFrag))
 	{
@@ -2150,7 +2228,7 @@ static qboolean createShaders(void)
 		return false;
 	}
 	// OpenMerc: same lightmapped shader, but blended with alpha and without alpha test
-	if(!initShader3D(&gl3state.si3DlmTrans, vertexSrc3Dlm, lightmappedFrag))
+	if(!initShader3D(&gl3state.si3DlmTrans, vertexSrc3Dlm, lmTrans))
 	{
 		Com_Printf("WARNING: Failed to create shader program for translucent 3D rendering with lightmap!\n");
 		return false;
@@ -2166,7 +2244,7 @@ static qboolean createShaders(void)
 		}
 	}
 	// OpenMerc GFX-modern r_om_seams: same lightmapped shader, its alpha the blend over a texture seam (gl3_surf.c)
-	if(!initShader3D(&gl3state.si3DlmSeam, vertexSrc3Dlm, lightmappedFrag))
+	if(!initShader3D(&gl3state.si3DlmSeam, vertexSrc3Dlm, lmSeamSrc))
 	{
 		Com_Printf("WARNING: Failed to create shader program for texture seam blending!\n");
 		return false;
