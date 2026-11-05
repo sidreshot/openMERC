@@ -594,18 +594,32 @@ SCR_SoF_DrawGraphs(void)
 void
 SCR_SoF_LoadingProgress(float f)
 {
+	static int last;
+	static float lastf;
+	qboolean every;
+	int now = Sys_Milliseconds();
+
 	Cvar_SetValue("menu_loading", f);
 
 	/* test aid: with cl_omshowframe each progress step is printed (SPEC-AMEND-005 I6h.5 frame count) */
-	if (Cvar_VariableValue("cl_omshowframe"))
+	every = Cvar_VariableValue("cl_omshowframe") != 0;
+
+	if (every)
 	{
 		Com_Printf("OMLOAD %.4f\n", f);
 	}
 
-	if (!dedicated->value)
+	/* OpenMerc: the original redraws the whole screen for 8 of every 16 configstrings and at each registration
+	   step - about 250 redraws for a single-player map, each ending in a vsync-bound swap (3-4 s of a 12 s load
+	   on a 60 Hz display). The bar is redrawn at most every 50 ms (20 times a second, the same motion to the eye),
+	   always at its first and last step; cl_omshowframe keeps every step for the frame-count tests */
+	if (!dedicated->value && (every || (f >= 1.0f) || (f < lastf) || (now - last >= 50) || (now < last)))
 	{
 		SCR_UpdateScreenForce();
+		last = Sys_Milliseconds();
 	}
+
+	lastf = f;
 }
 
 /* ---------------------------------------------------------------------

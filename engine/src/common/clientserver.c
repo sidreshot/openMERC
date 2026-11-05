@@ -93,6 +93,7 @@ Com_VPrintf(int print_level, const char *fmt, va_list argptr)
 	int i, msgLen;
 	char msg[MAXPRINTMSG];
 	char term[MAXPRINTMSG];
+	char stamp[16];
 
 	if ((print_level == PRINT_DEVELOPER) && !Com_DeveloperBit(1))
 	{
@@ -127,8 +128,27 @@ Com_VPrintf(int print_level, const char *fmt, va_list argptr)
 	}
 #endif
 
+	/* OpenMerc com_timestamps 1: the terminal and log copies start each message that begins a line with the
+	   milliseconds since the start (load and hitch analysis) */
+	msgLen = 0;
+
+	{
+		static qboolean linestart = true;
+
+		stamp[0] = 0;
+
+		if (linestart && Cvar_VariableValue("com_timestamps"))
+		{
+			Com_sprintf(stamp, sizeof(stamp), "[%7d] ", Sys_Milliseconds());
+			msgLen = (int)strlen(stamp);
+			memcpy(term, stamp, msgLen);
+		}
+
+		linestart = (msg[0] != 0) && (msg[strlen(msg) - 1] == '\n');
+	}
+
 	/* terminal copy: line characters mapped, colour bytes dropped */
-	for (i = 0, msgLen = 0; msg[i]; i++)
+	for (i = 0; msg[i] && (msgLen < MAXPRINTMSG - 1); i++)
 	{
 		char c = msg[i];
 
@@ -189,7 +209,7 @@ Com_VPrintf(int print_level, const char *fmt, va_list argptr)
 
 		if (logfile)
 		{
-			fprintf(logfile, "%s", term);
+			fprintf(logfile, "%s%s", stamp, term);
 
 			if (logfile_active->value >= 2)
 			{

@@ -243,6 +243,8 @@ V_TestLights(void)
 	}
 }
 
+extern int om_loadprep; /* server/sv_init.c: map load timing */
+
 /*
  * Call before entering a new level, or after changing dlls
  */
@@ -259,6 +261,8 @@ CL_PrepRefresh(void)
 	{
 		return;
 	}
+
+	int prepstart = Sys_Milliseconds();
 
 	SCR_AddDirtyPoint(0, 0);
 	SCR_AddDirtyPoint(viddef.width - 1, viddef.height - 1);
@@ -394,6 +398,7 @@ CL_PrepRefresh(void)
 	SCR_UpdateScreen();
 	cl.refresh_prepped = true;
 	cl.force_refdef = true; /* make sure we have a valid refdef */
+	om_loadprep += Sys_Milliseconds() - prepstart;
 }
 
 float

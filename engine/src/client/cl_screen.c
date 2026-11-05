@@ -700,7 +700,17 @@ SCR_BeginLoadingPlaque(void)
 void
 SCR_EndLoadingPlaque(void)
 {
+	extern int om_loadstart, om_loadserver, om_loadprep;
+
 	cls.disable_screen = 0;
+
+	/* OpenMerc: how long the map took, from the `map` command to its first frame */
+	if (om_loadstart)
+	{
+		Com_Printf("OMLOADTIME %s %d ms (server %d, client models/images %d)\n", cl.configstrings[CS_MODELS + 1],
+				Sys_Milliseconds() - om_loadstart, om_loadserver, om_loadprep);
+		om_loadstart = 0;
+	}
 
 	if (SCR_SoFMode())
 	{

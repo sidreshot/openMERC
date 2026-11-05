@@ -669,6 +669,9 @@ SV_InitGame(void)
  *
  * command from the console or progs.
  */
+/* OpenMerc: map load timing (the client prints OMLOAD when the loading plaque goes) */
+int om_loadstart, om_loadserver, om_loadprep;
+
 void
 SV_Map(qboolean attractloop, const char *levelstring, qboolean loadgame)
 {
@@ -677,6 +680,8 @@ SV_Map(qboolean attractloop, const char *levelstring, qboolean loadgame)
 	size_t l;
 	char spawnpoint[MAX_QPATH];
 
+	om_loadstart = Sys_Milliseconds();
+	om_loadserver = om_loadprep = 0;
 	sv.loadgame = loadgame;
 	sv.attractloop = attractloop;
 
@@ -732,6 +737,7 @@ SV_Map(qboolean attractloop, const char *levelstring, qboolean loadgame)
 	SV_BroadcastCommand("changing\n");
 	SV_SendClientMessages();
 	SV_SpawnServer(level, spawnpoint, ss_game, attractloop, loadgame);
+	om_loadserver = Sys_Milliseconds() - om_loadstart;
 
 	/* commands after `map` (command line or script) wait until the local
 	   client has entered (Quake II; SV_Begin_f inserts them again). The
