@@ -158,7 +158,7 @@ static_assert(offsetof(InvState, seqName) == 0x214, "seqName");
 static_assert(offsetof(InvState, spread) == 0x254, "spread");
 static_assert(offsetof(InvState, lastAutoShot) == 0x27C, "lastAutoShot");
 #elif defined(_M_X64) || defined(__x86_64__)
-/* the svc 30 full state is this block verbatim; the engine skips CLP_STATE_BYTES (cl_player.c) */
+/* svc 30 sends this block in the 640-byte 32-bit layout on every build (pm_inventory.cpp InvToWire) */
 static_assert(sizeof(InvState) == 656, "64-bit state block: 640 + 3 pointers of 8 bytes");
 #endif
 

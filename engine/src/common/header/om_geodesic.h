@@ -147,7 +147,11 @@ OM_BuildDirs(float (*out)[3])
 	{
 		for (c = 0; c < 3; c++)
 		{
-			out[i][c] = (float)pts[i + 2][c];
+			/* snapped to a 1e-6 grid first: the C libraries' acos / sin / cos differ in the last bit of a double
+			   (MSVC on a PC, bionic on a phone), which changed a float now and then - and these bytes salt the
+			   move checksum (SPEC-202 s6.3): a phone's commands failed on a PC server. Every build gets the same
+			   table now. */
+			out[i][c] = (float)(floor(pts[i + 2][c] * 1e6 + 0.5) / 1e6);
 		}
 	}
 }

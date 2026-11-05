@@ -232,8 +232,9 @@ SV_Ghoulstrings_f(void)
 
 	msg = &sv_client->netchan.message;
 
-	/* the chunk fills the remaining half-packet budget plus 8 bytes */
-	budget = SV_SIGNON_BATCH - msg->cursize + 8;
+	/* OpenMerc: the chunk fills the packet (the original stopped at half of it: twice the round trips - a client
+	   joining a phone's server waited 36 s for 74 chunks of 700 bytes) */
+	budget = SV_DATAGRAM_LIMIT - 64 - msg->cursize;
 
 	if (budget > SV_DATAGRAM_LIMIT - 64 - msg->cursize)
 	{

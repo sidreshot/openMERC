@@ -425,12 +425,40 @@ void Inventory::ReadSave()
     st.ctx = NULL;
 }
 
+/* The svc 30 wire block is the 640 bytes of the 32-bit SoF layout on every build: a PC (x86) and a phone (arm64) play
+   together. The three pointer words (the view instances, the owner context) go as zeros, the other fields keep
+   their 32-bit offsets. A 64-bit build packs and unpacks its own layout around them. */
+enum { INV_WIRE = 640, INV_W_PTR1 = 0x130, INV_W_SEG2 = 0x138, INV_W_CTX = 0x190, INV_W_SEG3 = 0x194 };
+#define INV_SEG1_LEN (offsetof(InvState, inst))
+#define INV_SEG2_LEN (offsetof(InvState, ctx) - offsetof(InvState, lastSlot))
+#define INV_SEG3_LEN (offsetof(InvState, lastAutoShot) + sizeof(float) - offsetof(InvState, selItem))
+static_assert(INV_SEG1_LEN == INV_W_PTR1, "svc 30: fields before the view instances");
+static_assert(INV_SEG2_LEN == INV_W_CTX - INV_W_SEG2, "svc 30: fields between the instances and the context");
+static_assert(INV_SEG3_LEN == INV_WIRE - INV_W_SEG3, "svc 30: fields after the context");
+
+static void InvToWire(const InvState &s, unsigned char *w)
+{
+    memset(w, 0, INV_WIRE);
+    memcpy(w, &s, INV_SEG1_LEN);
+    memcpy(w + INV_W_SEG2, &s.lastSlot, INV_SEG2_LEN);
+    memcpy(w + INV_W_SEG3, &s.selItem, INV_SEG3_LEN);
+}
+
+static void InvFromWire(InvState &s, const unsigned char *w)
+{
+    memcpy(&s, w, INV_SEG1_LEN);
+    memcpy(&s.lastSlot, w + INV_W_SEG2, INV_SEG2_LEN);
+    memcpy(&s.selItem, w + INV_W_SEG3, INV_SEG3_LEN);
+}
+
 void Inventory::ReadFullState(sizebuf_t *msg)
 {
     if (!g_haveCl || !g_cl.SZReadData || !msg)
         return;
     IGhoulInst *keep = st.inst, *keepNext = st.nextInst;
-    g_cl.SZReadData(msg, &st, sizeof(st));
+    unsigned char wire[INV_WIRE];
+    g_cl.SZReadData(msg, wire, INV_WIRE);
+    InvFromWire(st, wire);
     /* in-view instances are dropped: ours are destroyed, the received pointers are meaningless */
     st.inst = keep;
     st.nextInst = keepNext;
@@ -445,7 +473,9 @@ void Inventory::SendFullState(int clientIndex)
 {
     if (!g_haveSv || !g_sv.ReliableData)
         return;
-    g_sv.ReliableData(&st, sizeof(st), clientIndex);
+    unsigned char wire[INV_WIRE];
+    InvToWire(st, wire);
+    g_sv.ReliableData(wire, INV_WIRE, clientIndex);
 }
 
 } /* namespace om */

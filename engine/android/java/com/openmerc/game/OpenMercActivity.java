@@ -12,6 +12,36 @@ import java.util.ArrayList;
 import org.libsdl.app.SDLActivity;
 
 public class OpenMercActivity extends SDLActivity {
+    /* multiplayer: Android drops broadcast packets for apps without a multicast lock - a phone hosting a game would not
+       answer the LAN search of a PC (or another phone) */
+    private android.net.wifi.WifiManager.MulticastLock lanLock;
+
+    @Override
+    protected void onCreate(android.os.Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        try {
+            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+
+            if (wm != null) {
+                lanLock = wm.createMulticastLock("openmerc-lan");
+                lanLock.setReferenceCounted(false);
+                lanLock.acquire();
+            }
+        } catch (Exception e) {
+            // no Wi-Fi service: internet games still work
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (lanLock != null && lanLock.isHeld()) {
+            lanLock.release();
+        }
+
+        super.onDestroy();
+    }
+
     @Override
     protected String[] getLibraries() {
         // the C++ runtime and OpenAL first: libmain.so, OMsnd.so and the game modules need them
