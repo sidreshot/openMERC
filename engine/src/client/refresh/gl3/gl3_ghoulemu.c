@@ -56,6 +56,18 @@ typedef struct
 	qboolean on;
 } emulight_t;
 
+/* what the vertex lighting needs of one enabled light, worked out once per glBegin (lights cannot change inside a
+   primitive; materials and colours can): the per-vertex loop no longer takes square roots, a cosine and the spot
+   axis length of every light at every vertex */
+typedef struct
+{
+	const emulight_t *l;
+	float pos[3];        /* positional: the eye-space position; directional: the unit direction */
+	float spotdir[3];    /* unit spot axis */
+	float spotcos;       /* cosine of the cut-off */
+	qboolean positional, spot, specular;
+} emulightc_t;
+
 typedef struct
 {
 	float ambient[4], diffuse[4], specular[4], emission[4];
@@ -92,7 +104,10 @@ static struct
 
 	float lmambient[4];
 	qboolean localviewer, twoside;
+	qboolean lcdirty;   /* E.lc is worked out again before the next lit vertex */
 	emulight_t light[NUM_LIGHTS];
+	emulightc_t lc[NUM_LIGHTS];
+	int numlc;
 	emumaterial_t mat;
 
 	GLuint boundtex;
@@ -317,6 +332,65 @@ AmbFactor(const float *n, float *af)
 }
 
 static void
+LightCache(void)
+{
+	int i, k;
+
+	E.numlc = 0;
+	E.lcdirty = false;
+
+	for (i = 0; i < NUM_LIGHTS; i++)
+	{
+		const emulight_t *l = &E.light[i];
+		emulightc_t *lc;
+
+		if (!l->on)
+		{
+			continue;
+		}
+
+		lc = &E.lc[E.numlc++];
+		lc->l = l;
+		lc->positional = (l->position[3] != 0);
+
+		if (lc->positional)
+		{
+			for (k = 0; k < 3; k++)
+			{
+				lc->pos[k] = l->position[k] / l->position[3];
+			}
+		}
+		else
+		{
+			float len = sqrtf(l->position[0] * l->position[0] + l->position[1] * l->position[1] +
+				l->position[2] * l->position[2]);
+
+			for (k = 0; k < 3; k++)
+			{
+				lc->pos[k] = (len > 0) ? l->position[k] / len : 0;
+			}
+		}
+
+		lc->spot = (l->spotcut != 180);
+
+		if (lc->spot)
+		{
+			float sl = sqrtf(l->spotdir[0] * l->spotdir[0] + l->spotdir[1] * l->spotdir[1] +
+				l->spotdir[2] * l->spotdir[2]);
+
+			for (k = 0; k < 3; k++)
+			{
+				lc->spotdir[k] = (sl > 0) ? l->spotdir[k] / sl : 0;
+			}
+
+			lc->spotcos = cosf(l->spotcut * (float)M_PI / 180.0f);
+		}
+
+		lc->specular = (l->specular[0] != 0) || (l->specular[1] != 0) || (l->specular[2] != 0);
+	}
+}
+
+static void
 Lighting(const float *eye, float *rgba)
 {
 	float n[3], c[3], ma[4], md[4];
@@ -349,30 +423,33 @@ Lighting(const float *eye, float *rgba)
 		}
 	}
 
-	for (i = 0; i < NUM_LIGHTS; i++)
+	if (E.lcdirty)
 	{
-		const emulight_t *l = &E.light[i];
+		LightCache();
+	}
+
+	for (i = 0; i < E.numlc; i++)
+	{
+		const emulightc_t *lc = &E.lc[i];
+		const emulight_t *l = lc->l;
 		float L[3], d = 0, att = 1, spot = 1, ndotl, h[3], hl, spec = 0;
 
-		if (!l->on)
-		{
-			continue;
-		}
-
-		if (l->position[3] != 0)
+		if (lc->positional)
 		{
 			for (k = 0; k < 3; k++)
 			{
-				L[k] = l->position[k] / l->position[3] - eye[k];
+				L[k] = lc->pos[k] - eye[k];
 			}
 
 			d = sqrtf(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
 
 			if (d > 0)
 			{
-				L[0] /= d;
-				L[1] /= d;
-				L[2] /= d;
+				float id = 1.0f / d;
+
+				L[0] *= id;
+				L[1] *= id;
+				L[2] *= id;
 			}
 
 			att = l->k[0] + l->k[1] * d + l->k[2] * d * d;
@@ -380,22 +457,21 @@ Lighting(const float *eye, float *rgba)
 		}
 		else
 		{
-			float len = sqrtf(l->position[0] * l->position[0] + l->position[1] * l->position[1] +
-				l->position[2] * l->position[2]);
-
-			for (k = 0; k < 3; k++)
-			{
-				L[k] = (len > 0) ? l->position[k] / len : 0;
-			}
+			L[0] = lc->pos[0];
+			L[1] = lc->pos[1];
+			L[2] = lc->pos[2];
 		}
 
-		if (l->spotcut != 180)
+		if (lc->spot)
 		{
-			float sl = sqrtf(l->spotdir[0] * l->spotdir[0] + l->spotdir[1] * l->spotdir[1] +
-				l->spotdir[2] * l->spotdir[2]);
-			float cs = (sl > 0) ? -(L[0] * l->spotdir[0] + L[1] * l->spotdir[1] + L[2] * l->spotdir[2]) / sl : 0;
+			float cs = -(L[0] * lc->spotdir[0] + L[1] * lc->spotdir[1] + L[2] * lc->spotdir[2]);
 
-			spot = (cs < cosf(l->spotcut * (float)M_PI / 180.0f)) ? 0 : powf(cs > 0 ? cs : 0, l->spotexp);
+			spot = (cs < lc->spotcos) ? 0 : powf(cs > 0 ? cs : 0, l->spotexp);
+
+			if (spot == 0)
+			{
+				continue; /* every term of this light is scaled by spot */
+			}
 		}
 
 		ndotl = n[0] * L[0] + n[1] * L[1] + n[2] * L[2];
@@ -405,7 +481,8 @@ Lighting(const float *eye, float *rgba)
 			ndotl = 0;
 		}
 
-		if (ndotl > 0)
+		/* the half vector and its power only where they can add something */
+		if ((ndotl > 0) && lc->specular && (E.mat.specular[0] != 0 || E.mat.specular[1] != 0 || E.mat.specular[2] != 0))
 		{
 			if (E.localviewer)
 			{
@@ -1842,6 +1919,7 @@ EmulatedCap(GLenum cap, qboolean on, qboolean set, qboolean *result)
 			if ((cap >= GHL_GL_LIGHT0) && (cap < GHL_GL_LIGHT0 + NUM_LIGHTS))
 			{
 				flag = &E.light[cap - GHL_GL_LIGHT0].on;
+				E.lcdirty = true;
 				break;
 			}
 
@@ -1928,6 +2006,7 @@ Emu_Begin(GLenum mode)
 	E.inbegin = true;
 	E.prim = mode;
 	E.numverts = 0;
+	E.lcdirty = true;
 }
 
 static void GHLAPI
@@ -2600,6 +2679,7 @@ Light(GLenum light, GLenum pname, const GLfloat *v)
 	}
 
 	l = &E.light[light - GHL_GL_LIGHT0];
+	E.lcdirty = true;
 
 	switch (pname)
 	{
