@@ -967,8 +967,8 @@ static const char *post_comp_fs =
 	"		c = texture(scene, uv).rgb;\n"
 	"		if (mode == 1) c += texture(bloom, vuv).rgb * intensity;\n"
 	"		if (look != 0)\n"
-	"			c = Grade(c, hdr != 0 ? texture(exptex, vec2(0.5)).r : 1.0);\n"
-	"		else if (hdr != 0)\n"
+	"			c = Grade(c, hdr == 1 ? texture(exptex, vec2(0.5)).r : 1.0);\n"
+	"		else if (hdr == 1)\n"
 	"		{\n"
 	/* the scene is display-encoded (the shaders applied vid_gamma): to linear, expose, curve, back */
 	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r * grade.z * grade.w;\n"
@@ -977,6 +977,15 @@ static const char *post_comp_fs =
 	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
 	/* shadow gamma in display space: below 1 opens the dark tones, white stays white */
 	"			c = pow(pow(l, vec3(1.0 / 2.2)), vec3(grade.y));\n"
+	"		}\n"
+	/* r_om_vivid without HDR (phones): brightness, saturation and the shadow gamma on the finished picture - the bright,
+	   saturated look of the PlayStation ports at the cost of a few ALU per pixel */
+	"		else if (hdr == 2)\n"
+	"		{\n"
+	"			vec3 l = c * grade.z;\n"
+	"			float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
+	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
+	"			c = pow(l, vec3(grade.y));\n"
 	"		}\n"
 	"	}\n"
 	"	outColor = vec4(c, 1.0);\n"
@@ -2898,7 +2907,16 @@ GL3_Post_EndView(void)
 	glUniform4f(P.comp_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniform1f(P.comp_intensity, r_om_bloom_intensity->value * 2.0f / (float)Q_max(P.nlevels, 1));
 	glUniform1i(P.comp_mode, mode);
-	glUniform1i(P.comp_hdr, hdr ? 1 : 0);
+	{
+		static cvar_t *vivid;
+
+		if (!vivid)
+		{
+			vivid = ri.Cvar_Get("r_om_vivid", "0", CVAR_ARCHIVE);
+		}
+
+		glUniform1i(P.comp_hdr, hdr ? 1 : ((vivid->value != 0.0f) ? 2 : 0));
+	}
 	glUniform1i(P.comp_exp, 3);
 	glUniform1f(P.comp_sat, r_om_hdr_saturation->value);
 	{

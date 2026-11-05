@@ -78,6 +78,8 @@ list | r_om_pdlight | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Dynamic Lights 
 list | r_om_overbright | 0,1 | Off,On | Выкл,Вкл | Overbright Lighting (not original) | Пересвет (не как в оригинале) | requires=r_om_overbright | tip=Brighter lighting that the original game does not have/Более яркое освещение, которого нет в оригинальной игре
 
 section | COLOUR | ЦВЕТ
+list | r_om_vivid | 0,1 | Off,On | Выкл,Вкл | Bright Picture | Яркая картинка | mobile | tip=Dark corners lifted and colours stronger, as on the PlayStation ports/Тёмные углы светлее, цвета насыщеннее, как в версиях для PlayStation
+slider | r_om_hdr_shadows | 0.5 | 1 | 0.05 | Shadow Lift (lower is brighter) | Тени (меньше - светлее) | mobile
 slider | menu_gamma | 0 | 1 | 0.1 | Gamma | Гамма | stage
 slider | menu_contrast | 0 | 1 | 0.1 | Contrast | Контраст | stage
 slider | menu_brightness | 0 | 1 | 0.1 | Brightness | Яркость | stage

@@ -2524,7 +2524,7 @@ static void
 ApplyPreset(void)
 {
 	static cvar_t *preset;
-	static const char *const sets[3][24][2] = {
+	static const char *const sets[3][32][2] = {
 		{ /* low */
 			{"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
 			{"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
@@ -2534,7 +2534,12 @@ ApplyPreset(void)
 			/* measured on an Adreno 610 phone (2400x1080, arm1): lamp shadows 18 ms, seam strips 12 ms, look 8 ms */
 			{"r_om_lshadow", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"},
 			/* the light world shaders: 33 -> 23.5 ms per frame on the Adreno 610 phone (arm1) */
-			{"r_om_worldlite", "1"}, {NULL, NULL}},
+			{"r_om_worldlite", "1"},
+			/* a bright, saturated picture in the spirit of the PlayStation ports (Quake II PSX): dark corners lifted,
+			   colours stronger - a phone screen is small and often in daylight; the tone mapping pass does it for free */
+			{"r_om_hdr_shadows", "0.75"}, {"r_om_hdr_brightness", "1.25"}, {"r_om_hdr_saturation", "1.45"},
+			{"r_om_hdr_min", "1.0"}, {"r_om_hdr_max", "2.4"}, {"r_om_hdr_adapt_strength", "0.6"},
+			{"r_om_vivid", "1"}, {NULL, NULL}},
 		{ /* medium */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "3"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
@@ -2542,7 +2547,10 @@ ApplyPreset(void)
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"}, {"r_om_mirror_scale", "0.7"},
 			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
 			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"},
-			{"r_om_worldlite", "0"}, {NULL, NULL}},
+			{"r_om_worldlite", "0"},
+			{"r_om_hdr_shadows", "0.9"}, {"r_om_hdr_brightness", "1.1"}, {"r_om_hdr_saturation", "1.1"},
+			{"r_om_hdr_min", "0.7"}, {"r_om_hdr_max", "1.6"}, {"r_om_hdr_adapt_strength", "0.35"},
+			{"r_om_vivid", "0"}, {NULL, NULL}},
 		{ /* high: the build's defaults */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
@@ -2550,7 +2558,10 @@ ApplyPreset(void)
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"}, {"r_om_mirror_scale", "0.7"},
 			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
 			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"},
-			{"r_om_worldlite", "0"}, {NULL, NULL}}};
+			{"r_om_worldlite", "0"},
+			{"r_om_hdr_shadows", "0.9"}, {"r_om_hdr_brightness", "1.1"}, {"r_om_hdr_saturation", "1.1"},
+			{"r_om_hdr_min", "0.7"}, {"r_om_hdr_max", "1.6"}, {"r_om_hdr_adapt_strength", "0.35"},
+			{"r_om_vivid", "0"}, {NULL, NULL}}};
 	int p, i;
 
 	if (!preset)
@@ -2574,6 +2585,29 @@ ApplyPreset(void)
 	if ((p < 1) || (p > 3))
 	{
 		return;
+	}
+
+	/* applied once per change of the preset: the single settings a player tuned afterwards (the shadow lift of the
+	   bright phone picture, ...) are not put back at every start */
+	{
+		static cvar_t *applied;
+
+		if (!applied)
+		{
+			applied = ri.Cvar_Get("r_om_preset_applied", "0", CVAR_ARCHIVE);
+		}
+
+		if ((int)applied->value == p)
+		{
+			return;
+		}
+
+		{
+			char num[8];
+
+			Com_sprintf(num, sizeof(num), "%d", p);
+			ri.Cvar_Set("r_om_preset_applied", num);
+		}
 	}
 
 	for (i = 0; sets[p - 1][i][0]; i++)
