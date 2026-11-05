@@ -44,6 +44,74 @@
 
 float glimp_refreshRate = -1.0f;
 
+#ifdef __ANDROID__
+#include <jni.h>
+
+/* openMERC Android: vid_surfacescale (default 0.6) - the window surface is made that fraction of the panel and the
+   display hardware scales it up (OpenMercActivity.setSurfaceScale): every pixel pass, the HUD included, runs on
+   fewer pixels; on the Adreno 610 phone the passes at the panel's 2400x1080 cost 20-40 ms alone */
+static void
+AndroidSurfaceSize(int *width, int *height)
+{
+	static int aw = -1, ah = -1;
+	cvar_t *cv = Cvar_Get("vid_surfacescale", "0.6", CVAR_ARCHIVE);
+	float s = Q_clamp(cv->value, 0.3f, 1.0f);
+	int w = (s < 0.999f) ? Q_max((int)(*width * s + 0.5f), 16) : 0, h = (s < 0.999f) ? Q_max((int)(*height * s + 0.5f), 16) : 0;
+	JNIEnv *env;
+	jobject activity;
+
+	if (w)
+	{
+		*width = w;
+		*height = h;
+	}
+
+	if ((w == aw) && (h == ah))
+	{
+		return;
+	}
+
+	env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+	activity = (jobject)SDL_GetAndroidActivity();
+
+	if (env && activity)
+	{
+		jclass cls = (*env)->GetObjectClass(env, activity);
+		jmethodID m = cls ? (*env)->GetStaticMethodID(env, cls, "setSurfaceSize", "(II)V") : NULL;
+
+		if (m)
+		{
+			int i;
+
+			(*env)->CallStaticVoidMethod(env, cls, m, (jint)w, (jint)h);
+			Com_Printf("vid_surfacescale %.2f: surface %dx%d\n", s, w, h);
+
+			/* the UI thread resizes the surface; give it the time before the window is made on it */
+			for (i = 0; i < 25; i++)
+			{
+				SDL_PumpEvents();
+				SDL_Delay(20);
+			}
+		}
+
+		if ((*env)->ExceptionCheck(env))
+		{
+			(*env)->ExceptionClear(env);
+		}
+
+		if (cls)
+		{
+			(*env)->DeleteLocalRef(env, cls);
+		}
+
+		(*env)->DeleteLocalRef(env, activity);
+	}
+
+	aw = w;
+	ah = h;
+}
+#endif
+
 static cvar_t *vid_displayrefreshrate;
 static cvar_t *vid_displayindex;
 static cvar_t *vid_highdpiaware;
@@ -568,6 +636,7 @@ GLimp_InitGraphics(int fullscreen, int *pwidth, int *pheight)
 	int height = *pheight;
 
 #ifdef __ANDROID__
+
 	/* the desktop mode of a phone held upright is portrait; the game runs in landscape (SDL_HINT_ORIENTATIONS) */
 	if (width < height)
 	{
@@ -578,6 +647,11 @@ GLimp_InitGraphics(int fullscreen, int *pwidth, int *pheight)
 		*pwidth = width;
 		*pheight = height;
 	}
+
+	/* the window is the scaled surface (vid_surfacescale): the engine draws at its size */
+	AndroidSurfaceSize(&width, &height);
+	*pwidth = width;
+	*pheight = height;
 #endif
 
 	if (fullscreen == FULLSCREEN_EXCLUSIVE || fullscreen == FULLSCREEN_DESKTOP)

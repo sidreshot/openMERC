@@ -18,6 +18,32 @@ public class OpenMercActivity extends SDLActivity {
         return new String[] {"c++_shared", "SDL3", "openal", "main"};
     }
 
+    /* vid_surfacescale (engine, glimp_sdl3.c): the window surface gets a fixed size below the panel's and the display
+       hardware scales it up for free - the usual way a phone game renders below the panel resolution (2400x1080
+       here). w <= 0: the surface follows the layout again. */
+    public static void setSurfaceSize(final int w, final int h) {
+        final SDLActivity a = mSingleton;
+
+        if (a == null) {
+            return;
+        }
+
+        a.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (mSurface == null) {
+                    return;
+                }
+
+                if (w <= 0 || h <= 0) {
+                    mSurface.getHolder().setSizeFromLayout();
+                } else {
+                    mSurface.getHolder().setFixedSize(w, h);
+                }
+            }
+        });
+    }
+
     @Override
     protected String[] getArguments() {
         ArrayList<String> args = new ArrayList<String>();
