@@ -1999,6 +1999,7 @@ static void initUBOs(void)
 
 /* the world shaders were made with the lamp shadow receiver (r_om_lshadow on; gl3_main.c remakes them on a change) */
 qboolean gl3_world_lamps = true;
+qboolean gl3_world_lite = false; /* r_om_worldlite: the world shaders without sun shadows, lightning, material, mirrors */
 
 static qboolean createShaders(void)
 {
@@ -2035,6 +2036,7 @@ static qboolean createShaders(void)
 	/* GFX-modern: the lightmapped shaders receive the sun shadows (gl3_csm.c) */
 	static char* lmFragCsm = NULL;
 	cvar_t *r_om_lshadow_world = ri.Cvar_Get("r_om_lshadow", "1", CVAR_ARCHIVE);
+	cvar_t *r_om_worldlite_c = ri.Cvar_Get("r_om_worldlite", "0", CVAR_ARCHIVE);
 	gl3_world_lamps = r_om_lshadow_world->value != 0.0f;
 	free(lmFragCsm);
 	{
@@ -2055,6 +2057,37 @@ static qboolean createShaders(void)
 		/* r_om_lshadow 0: the world shaders without the lamp shadow receiver (gl3_main.c recompiles them on a change) */
 		lmFragCsm = GL3_CSM_PrependLamps(joined, gl3_world_lamps);
 		free(joined);
+
+		/* r_om_worldlite (the mobile preset): the world shaders without the sun shadows, the lightning light, the
+		   reflection material and the mirror faces - calls cut out of the source, so the compiler drops those paths and
+		   their registers too (gl3_main.c remakes the shaders on a change) */
+		gl3_world_lite = r_om_worldlite_c->value != 0.0f;
+
+		if (gl3_world_lite && lmFragCsm)
+		{
+			static const char *const cut[][2] = {
+				{"omCsmApply(lmTex.rgb, passWorldCoord, passNormal);", ""},
+				{"lmTex.rgb += omLightningLight(passWorldCoord, passNormal);", ""},
+				{"(omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0)", "vec4(0.0)"},
+				{"if(abs(omEmissive + 11.0) < 0.5 && (omMirror.x > 0.5 || omMirror.y > 0.5))", "if(false)"},
+			};
+			int c, done = 0;
+
+			for (c = 0; c < (int)(sizeof(cut) / sizeof(cut[0])); c++)
+			{
+				char *at;
+				size_t ol = strlen(cut[c][0]), nl = strlen(cut[c][1]);
+
+				while ((at = strstr(lmFragCsm, cut[c][0])) != NULL)
+				{
+					memmove(at + nl, at + ol, strlen(at + ol) + 1);
+					memcpy(at, cut[c][1], nl);
+					done++;
+				}
+			}
+
+			R_Printf(PRINT_DEVELOPER, "r_om_worldlite: %d cuts in the world shaders\n", done);
+		}
 	}
 	if(lmFragCsm == NULL)
 	{

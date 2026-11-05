@@ -24,7 +24,7 @@
 
 enum
 {
-	R_NONE, R_JOY, R_LOOK, R_FIRE, R_ALT, R_JUMP, R_CROUCH, R_RELOAD, R_ITEM, R_WEAPON, R_MENU
+	R_NONE, R_JOY, R_LOOK, R_FIRE, R_ALT, R_JUMP, R_CROUCH, R_RELOAD, R_ITEM, R_WEAPON, R_MENU, R_USE
 };
 
 typedef struct
@@ -46,7 +46,7 @@ typedef struct
 
 static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_alpha, *touch_size, *touch_invert;
 static finger_t fingers[TOUCH_FINGERS];
-static tbutton_t buttons[8];
+static tbutton_t buttons[10];
 static int numbuttons;
 static qboolean crouched, firing;
 
@@ -98,6 +98,15 @@ Touch_HudTop(void)
 	return Touch_Enabled();
 }
 
+/* looking through a remote camera (security monitors): the player stands at the terminal */
+static qboolean
+Remote(void)
+{
+	const sofps_t *ps = CL_SoF_CurrentPS();
+
+	return ps && ps->remote_type != 0;
+}
+
 static void
 Layout(void)
 {
@@ -112,6 +121,9 @@ Layout(void)
 	*b++ = (tbutton_t){R_JUMP, w - 0.10f * h, h - 0.12f * h, 0.065f * h * k, "JUMP"};
 	*b++ = (tbutton_t){R_CROUCH, w - 0.29f * h, h - 0.09f * h, 0.060f * h * k, "DUCK"};
 	*b++ = (tbutton_t){R_RELOAD, w - 0.46f * h, h - 0.08f * h, 0.050f * h * k, "R"};
+	/* the use key by hand (talk, a terminal again; automatic use covers doors and switches); in a remote camera view
+	   it is the way out */
+	*b++ = (tbutton_t){R_USE, w - 0.31f * h, h - 0.62f * h, 0.050f * h * k, Remote() ? "EXIT" : "USE"};
 	/* the menu between the item tray and the health bar */
 	*b++ = (tbutton_t){R_MENU, w * 0.5f - 0.36f * h, 0.06f * h, 0.045f * h, "II"};
 	numbuttons = (int)(b - buttons);
@@ -168,6 +180,9 @@ Press(int role, qboolean down)
 				crouched = !crouched;
 				Cbuf_AddText(crouched ? "+movedown\n" : "-movedown\n");
 			}
+			break;
+		case R_USE:
+			Cbuf_AddText(down ? "+use\n" : "-use\n");
 			break;
 		case R_RELOAD:
 			if (down)
@@ -292,6 +307,13 @@ Touch_Finger(long long id, int type, float nx, float ny)
 		else if (!f->longdone && (f->role == R_WEAPON))
 		{
 			Cbuf_AddText("weapnext\n");
+		}
+
+		/* a remote camera view: a short tap anywhere leaves it (the use key at the terminal) */
+		if (((f->role == R_LOOK) || (f->role == R_JOY)) && Remote() && (cls.realtime - f->t0 < 350) &&
+			(fabsf(f->x - f->x0) + fabsf(f->y - f->y0) < 0.04f * H()))
+		{
+			Cbuf_AddText("+use\n-use\n");
 		}
 
 		Press(f->role, false);

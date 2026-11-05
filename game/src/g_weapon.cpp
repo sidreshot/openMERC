@@ -1512,6 +1512,61 @@ void G_InstallAttackHooks(void)
 	fx::g_fire_attack = G_FireAttackFx;
 }
 
+/* om_aimassist (on by default on Android: thumbs aim less finely than a mouse): the shot of a player goes to the chest of
+   the hostile character closest to the crosshair when one is near it - within om_aimassist_dist units of the aim line
+   (and 10 degrees), in sight, alive. The weapon's own spread still applies afterwards. As the "bullet magnetism" of
+   the big mobile shooters: the view itself is not turned. */
+static void AimAssist(edict_t *ent, const vec3_t eye, vec3_t ang)
+{
+	static cvar_t *assist, *dist;
+	if (!assist) {
+#ifdef __ANDROID__
+		assist = gi.cvar("om_aimassist", "1", CVAR_ARCHIVE);
+#else
+		assist = gi.cvar("om_aimassist", "0", CVAR_ARCHIVE);
+#endif
+		dist = gi.cvar("om_aimassist_dist", "28", CVAR_ARCHIVE);
+	}
+	if (!assist->value || !ent->client || DM())
+		return;
+	vec3_t fwd;
+	AngleVectors(ang, fwd, NULL, NULL);
+	edict_t *best = NULL;
+	float bestoff = 1e9f;
+	vec3_t bestpt;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || e == ent || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0 || !e->takedamage)
+			continue;
+		if (om_ai::SameTeam(ent, e))
+			continue; /* hostages, allies */
+		vec3_t pt, d;
+		VectorCopy(e->s.origin, pt);
+		pt[2] += (e->mins[2] + e->maxs[2]) * 0.5f + 6; /* the chest */
+		VectorSubtract(pt, eye, d);
+		float along = DotProduct(d, fwd);
+		if (along < 16 || along > 3000)
+			continue;
+		float len = VectorLength(d);
+		float off = sqrtf(fmaxf(len * len - along * along, 0.0f));
+		if (off > dist->value + along * 0.01f || along / len < 0.985f) /* ~10 degrees */
+			continue;
+		if (off >= bestoff)
+			continue;
+		trace_t tr = gi.trace(eye, NULL, NULL, pt, ent, MASK_SHOT);
+		if (tr.fraction < 1.0f && tr.ent != e)
+			continue;
+		best = e;
+		bestoff = off;
+		VectorCopy(pt, bestpt);
+	}
+	if (best) {
+		vec3_t d;
+		VectorSubtract(bestpt, eye, d);
+		vectoangles(d, ang);
+	}
+}
+
 void WeaponFire(edict_t *ent, PlayerInventory *inv, int alt)
 {
 	if (!ent || !ent->client || !inv)
@@ -1536,6 +1591,8 @@ void WeaponFire(edict_t *ent, PlayerInventory *inv, int alt)
 		if (ang[PITCH] < -90)
 			ang[PITCH] = -90;
 	}
+
+	AimAssist(ent, eye, ang);
 
 	float per = *(float *)(wdb + (alt ? WDESC_SPREAD_ALT : WDESC_SPREAD_PRI));
 	float mx = *(float *)(wdb + (alt ? WDESC_MAXSPREAD_ALT : WDESC_MAXSPREAD_PRI));

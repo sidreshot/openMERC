@@ -880,6 +880,7 @@ extern void GL3_ShutdownMeshes(void);
 
 extern qboolean GL3_RecreateShaders(void);
 extern qboolean gl3_world_lamps; /* world shaders made with the lamp shadow receiver */
+extern qboolean gl3_world_lite;  /* world shaders made without sun shadows, lightning, material, mirrors */
 gl3ShaderInfo_t *GL3_WorldShaderFor(const gl3image_t *image); /* si3DlmOpaque or si3Dlm (gl3_shaders.c) */
 extern qboolean GL3_InitShaders(void);
 extern void GL3_ShutdownShaders(void);

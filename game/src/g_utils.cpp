@@ -586,8 +586,8 @@ void G_AutoUse(edict_t *player)
 		autouse = gi.cvar("om_autouse", "0", CVAR_ARCHIVE);
 #endif
 	int c = (int)(player - g_edicts) - 1;
-	if (!autouse->value || !player->client || c < 0 || c >= MAX_CLIENTS)
-		return;
+	if (!autouse->value || !player->client || c < 0 || c >= MAX_CLIENTS || player->client->ps.remote_type)
+		return; /* not while looking through a remote camera: the use key there leaves it */
 	if (level.time < next[c] - 1.0f || level.time < seen[c]) { /* a new level */
 		last[c] = NULL;
 		seen[c] = next[c] = 0;

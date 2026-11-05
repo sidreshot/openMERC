@@ -2532,21 +2532,25 @@ ApplyPreset(void)
 			{"r_om_mirror_scale", "0.5"}, {"r_om_renderscale", "0.67"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "0"},
 			{"r_om_beams_motes", "0"}, {"r_om_tess", "0"}, {"r_om_ppl_models", "0"},
 			/* measured on an Adreno 610 phone (2400x1080, arm1): lamp shadows 18 ms, seam strips 12 ms, look 8 ms */
-			{"r_om_lshadow", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"}, {NULL, NULL}},
+			{"r_om_lshadow", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"},
+			/* the light world shaders: 33 -> 23.5 ms per frame on the Adreno 610 phone (arm1) */
+			{"r_om_worldlite", "1"}, {NULL, NULL}},
 		{ /* medium */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "3"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "1"},
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"}, {"r_om_mirror_scale", "0.7"},
 			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
-			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {NULL, NULL}},
+			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"},
+			{"r_om_worldlite", "0"}, {NULL, NULL}},
 		{ /* high: the build's defaults */
 			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
 			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
 			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"}, {"r_om_mirror_scale", "0.7"},
 			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
-			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {NULL, NULL}}};
+			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"},
+			{"r_om_worldlite", "0"}, {NULL, NULL}}};
 	int p, i;
 
 	if (!preset)
@@ -2709,7 +2713,14 @@ GL3_BeginFrame(float camera_separation)
 			lshadow = ri.Cvar_Get("r_om_lshadow", "1", CVAR_ARCHIVE);
 		}
 
-		if ((lshadow->value != 0.0f) != gl3_world_lamps)
+		static cvar_t *lite;
+
+		if (!lite)
+		{
+			lite = ri.Cvar_Get("r_om_worldlite", "0", CVAR_ARCHIVE);
+		}
+
+		if (((lshadow->value != 0.0f) != gl3_world_lamps) || ((lite->value != 0.0f) != gl3_world_lite))
 		{
 			gl3_colorlight->modified = true;
 		}
