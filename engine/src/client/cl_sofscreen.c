@@ -701,7 +701,6 @@ SCR_SoF_DrawOverlays(void)
 	}
 
 	SCR_SoF_DrawGraphs();
-	Touch_Draw(); /* OpenMerc: touch controls (cl_touch.c), window pixels */
 	HUD_BeginScaled();
 	SCR_SoF_DrawPause();
 	HUD_EndScaled();
@@ -871,6 +870,11 @@ SCR_SoF_EndFrame(void)
 	   its thumbnail when the server asked for one (before the swap) */
 	SG_ClientEndFrame((cls.state == ca_active) && (cls.key_dest == key_game) &&
 			cl.refresh_prepped && !cls.disable_screen, MR_Thumbnail);
+
+	/* OpenMerc: the touch controls (cl_touch.c, window pixels) last, after the autosave's thumbnail was read - the
+	   buttons and the crosshair are not in the savegame pictures */
+	HUD_EndScaled();
+	Touch_Draw();
 }
 
 void

@@ -2110,7 +2110,30 @@ GL3_SoF_SetRawImage(const char *name, int w, int h, const byte *rgba)
 	GL3_SelectTMU(GL_TEXTURE0);
 	GL3_Bind(image->texnum);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+#ifdef YQ2_GL3_GLES3
+	/* GLES 3 takes GL_RGB8 only from GL_RGB data (an RGBA source is GL_INVALID_OPERATION and left the texture empty:
+	   no savegame pictures on the phone): the colour packed to RGB first */
+	{
+		byte *rgb = malloc((size_t)w * h * 3);
+
+		if (rgb)
+		{
+			size_t i, n = (size_t)w * h;
+
+			for (i = 0; i < n; i++)
+			{
+				rgb[i * 3] = rgba[i * 4];
+				rgb[i * 3 + 1] = rgba[i * 4 + 1];
+				rgb[i * 3 + 2] = rgba[i * 4 + 2];
+			}
+
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+			free(rgb);
+		}
+	}
+#else
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+#endif
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 	SetImageFilter(image);
 }
