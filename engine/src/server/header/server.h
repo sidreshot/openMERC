@@ -318,6 +318,7 @@ void SV_ImportTrace_HookVtable(int iface, void *object);
 void SV_ImportTrace_ScanEdicts(void);
 void SV_World_DumpLastFilter(void *file); /* FILE * */
 void SV_Ghoul_HookTraceInstance(void *inst);
+void SV_Ghoul_SeqPath(void *inst, char *out, int size); /* sv_animlog */
 int SV_GameCinematicState(void);
 void SV_GameClientCommand(edict_t *ent); /* context flag 0 around it, SPEC-602 s7 */
 void SV_GameClientThink(edict_t *ent, sof_usercmd_t *cmd);

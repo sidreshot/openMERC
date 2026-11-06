@@ -503,6 +503,12 @@ public:
 		*m = *r = 1;
 		if (cls == 1 && ends_with_anim && ai->body && (ai->body->AnimDone() || ai->body->pauseKind))
 			return true;
+		/* openMERC: an action that ends with its animation is not cut by a zero duration (a script command without
+		   0x40: SPEC-750 12.4 "the animation end counts"); a duration given stays its limit. The one-shot talk
+		   gestures (`std_etalkleft_n_a_n`, tsr1 swatleader) ended at their first think after 0.1 s - 1.3 s in the
+		   original module - and every scripted gesture without the finish-cycle flag jerked the same way */
+		if (cls == 1 && ends_with_anim && ai->body && end_time <= start_time)
+			return false;
 		return now >= end_time;
 	}
 };

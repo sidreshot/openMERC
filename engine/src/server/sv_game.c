@@ -1698,6 +1698,70 @@ SV_GameClientCommand(edict_t *ent)
 	}
 }
 
+/* OpenMerc test aid sv_animlog 1: every game frame, every character (SVF_MONSTER) with a Ghoul instance -
+   game time, entity number, origin, yaw, the sequence it plays, solid - into <user>/animlog.txt. The engine sees the
+   same through the original game module and openMERC's, so two runs of a scene diff animation by animation
+   (scratchpad animdiff.py) */
+static void
+SV_AnimLog(void)
+{
+	static cvar_t *cv;
+	static FILE *f;
+	static int lastmap;
+	int i;
+
+	if (!cv)
+	{
+		cv = Cvar_Get("sv_animlog", "0", 0);
+	}
+
+	if (!cv->value || !ge)
+	{
+		if (f)
+		{
+			fclose(f);
+			f = NULL;
+		}
+
+		return;
+	}
+
+	if (!f)
+	{
+		f = Q_fopen(va("%s/animlog.txt", FS_Userdir()), "w");
+
+		if (!f)
+		{
+			return;
+		}
+	}
+
+	if (lastmap != svs.spawncount)
+	{
+		lastmap = svs.spawncount;
+		fprintf(f, "MAP %s\n", sv.name);
+	}
+
+	fprintf(f, "T %.2f %d\n", sv.gametime, SV_GameCinematicState());
+
+	for (i = 1; i < ge->num_edicts; i++)
+	{
+		sof_edict_t *e = (sof_edict_t *)((byte *)ge->edicts + i * ge->edict_size);
+		char seq[96];
+
+		if (!e->inuse || !e->ghoulInst || !(e->svflags & 0x4)) /* SVF_MONSTER */
+		{
+			continue;
+		}
+
+		SV_Ghoul_SeqPath(e->ghoulInst, seq, sizeof(seq));
+		fprintf(f, "E %d %.1f %.1f %.1f %.0f %d %s\n", i, e->s.origin[0], e->s.origin[1], e->s.origin[2], e->s.angles[1],
+			e->solid, seq[0] ? seq : "-");
+	}
+
+	fflush(f);
+}
+
 /* one game frame with the given counter; stores the returned game time.
    The level start runs counters 0 and 1 while loading; then every server
    frame runs counter = wire frame number, starting at 1 (as the original;
@@ -1712,6 +1776,7 @@ SV_GameRunFrame(int counter)
 
 	sv.gameframe = counter;
 	sv.gametime = ge->RunFrame(counter);
+	SV_AnimLog();
 
 	if (sv_hostdebug && ((int)sv_hostdebug->value & SV_DBG_THINK))
 	{

@@ -912,6 +912,12 @@ bool MarkSpawnerMade(edict_t *e)
 		return false;
 	e->flags |= FL_SPAWNER_MADE;
 	e->ai->spawner_made = 1;
+	/* openMERC: a character made in the middle of the level stands on the floor and moves at once. The setup drops
+	   characters to the floor only in the first second of a level and gives them no step physics until they wake,
+	   so a world spawn (8 units above its navigation spot) hung in the air without moving (owner, kos3: "enemies in
+	   the air that spawned and stood still") */
+	DropToFloor(e, e->ai);
+	e->ai->Wake(e);
 	return true;
 }
 

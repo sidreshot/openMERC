@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "nav/nav_api.h" /* G5 */
 #include "bots/bot_api.h" /* G5 */
 #include "modes/g_modes.h" /* G9 */
+#include "damage/g3_local.h" /* G3: bolt positions for omaim head */
 
 int SP_Id(const char *package, const char *entry);
 void SP_PrintTo(edict_t *ent, const char *package, const char *entry);
@@ -77,13 +78,17 @@ static void Cmd_OmAim_f(edict_t *ent)
 {
 	if (!CheatsOK(ent) || !ent->client)
 		return;
-	/* "omaim [targetname]": the nearest living character, or the one with that targetname */
+	/* "omaim [targetname]": the nearest living character, or the one with that targetname; "omaim head": the nearest
+	   one's mouth bolt (point-blank head shot tests) */
 	const char *want = gi.argc() > 1 ? gi.argv(1) : NULL;
+	bool head = want && !Q_stricmp(want, "head");
+	if (head)
+		want = NULL;
 	edict_t *best = NULL;
 	float bd = 1e9f;
 	for (int i = 1; i < globals.num_edicts; i++) {
 		edict_t *e = &g_edicts[i];
-		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0)
+		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0 || (head && e->solid == SOLID_NOT))
 			continue;
 		if (want && (!e->targetname || Q_stricmp(e->targetname, want)))
 			continue;
@@ -103,6 +108,10 @@ static void Cmd_OmAim_f(edict_t *ent)
 	eye[2] += ent->viewheight;
 	VectorCopy(best->s.origin, to);
 	to[2] += (best->mins[2] + best->maxs[2]) * 0.5f + 8;
+	if (head && !G3G_BoltWorldByName(best, "sbolt_mouth", to)) {
+		VectorCopy(best->s.origin, to);
+		to[2] += best->maxs[2] - 8;
+	}
 	VectorSubtract(to, eye, to);
 	vectoangles(to, ang);
 	for (int k = 0; k < 2; k++) {

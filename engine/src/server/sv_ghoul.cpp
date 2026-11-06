@@ -1310,6 +1310,22 @@ void SV_Ghoul_Shutdown(void)
 
 void *SV_Ghoul_System(void) { return Sys(); }
 
+// test aid (sv_animlog): the path of the sequence an instance plays ("" none)
+void SV_Ghoul_SeqPath(void *inst, char *out, int size)
+{
+	char path[256];
+	IGhoulInst *in = static_cast<IGhoulInst *>(inst);
+	IGhoulObject *obj = in ? in->GetGhoulObject() : nullptr;
+	GhoulID seq = in ? in->GetPlayingSequence() : 0;
+	out[0] = 0;
+	if (!obj || !seq)
+		return;
+	path[0] = 0;
+	obj->GetSequencePath(seq, path);
+	const char *b = strrchr(path, '/');
+	snprintf(out, size, "%s", b ? b + 1 : path);
+}
+
 // test aid (sv_watchdog): trace the instance and object method tables
 void SV_Ghoul_HookTraceInstance(void *inst)
 {

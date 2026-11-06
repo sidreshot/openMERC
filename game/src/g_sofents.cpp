@@ -883,6 +883,8 @@ static void G_WorldSpawn(edict_t *p)
 		G_FreeEdict(e);
 		return;
 	}
+	/* the alarm that called it in reached the characters before it existed: it hears the player too */
+	om_ai::NoiseAlert(p, p->s.origin, 2048);
 	if (ei_show->value) {
 		gi.dprintf("World spawned in a guy\n");
 		gi.sound(e, CHAN_AUTO, gi.soundindex("Weapons/mpg/fire.wav"), 1, ATTN_NORM, 0);

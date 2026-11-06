@@ -90,6 +90,11 @@ public:
 			return true;
 		if (!lethal && anim_ended)
 			return true;
+		/* openMERC: a move command without a destination (no 0x4, no target) plays its movement for its duration -
+		   there is nothing to arrive at (tsr2 `hallbaddie3`, `lb_pcrawl_bk_p_n` for 999 s: the original crawls away,
+		   here it "arrived" where it lay at once and stood up) */
+		if (!(f.flags & 0x4) && !f.target)
+			return false;
 		return ScriptMoveArrived(ent, f.dest, f.start_pos, ArrivalRadius(ent));
 	}
 	void CompleteFront()
@@ -390,6 +395,20 @@ void ScriptedDecision::Plan(edict_t *ent, AI *ai)
 		dur = s.duration - (Now() - s.start_time);
 		if (dur < FRAMETIME)
 			dur = FRAMETIME;
+	}
+	/* openMERC: a move command without a destination heads on along its own animation - forwards, or behind the
+	   character for a backwards record (the turn keeps the facing then) - instead of towards the spot it stands on */
+	if (kind == 1 && keep && !(s.flags & 0x4) && !t && !items.empty()) {
+		ScriptAction &f = items.front();
+		if (!f.target && !(f.flags & 0x4) && VectorCompare(f.dest, f.start_pos)) {
+			vec3_t fwd;
+			AngleVectors(ent->s.angles, fwd, nullptr, nullptr);
+			fwd[2] = 0;
+			VectorNormalize(fwd);
+			float k = (rec && (rec->flags & ANIMF_BACKWARDS)) ? -2000.0f : 2000.0f;
+			VectorMA(ent->s.origin, k, fwd, f.dest);
+		}
+		VectorCopy(f.dest, dest);
 	}
 	Action *a = MakeAction(ai, cls, this, nullptr, rec, dest, IsZero(face) ? nullptr : face, dur, ends);
 	a->done_token = keep ? 0 : s.done_token; /* a move command reports its signal itself when it arrives */
