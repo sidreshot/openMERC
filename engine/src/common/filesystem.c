@@ -1078,6 +1078,13 @@ FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 				continue;
 			}
 
+			/* only the length (FS_LoadFile2 without a buffer): the archive's directory has it */
+			if (fs_lenonly && !resolved)
+			{
+				fs_lenonly_hit = true;
+				return pack->files[i].size;
+			}
+
 			file = pack->numspare ? pack->spare[--pack->numspare] : Q_fopen(pack->filename, "rb");
 
 			if (!file)
