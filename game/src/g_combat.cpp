@@ -115,7 +115,12 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
               const vec3_t normal, int damage, int knockback, int dflags, int mod)
 {
 	/* G3: the damage function of SPEC-720 (the 6th value is the shot start / explosion centre) */
+	int before = targ ? targ->health : 0;
+	bool character = targ && targ != attacker && ((targ->svflags & SVF_MONSTER) || (targ->client && deathmatch->value));
 	Dmg_Damage(targ, inflictor, attacker, dir_in, point, normal, damage, knockback, dflags, mod);
+	/* OpenMerc: the hit marker of the touch crosshair (p_hud.cpp) - a player's damage that reached a character */
+	if (character && attacker && attacker->client && before > 0 && targ->health < before)
+		OM_HitMark(attacker, targ->health <= 0);
 	return;
 	vec3_t dir;
 

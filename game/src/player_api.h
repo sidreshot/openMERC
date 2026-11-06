@@ -203,6 +203,7 @@ public:
 	virtual void ReadSave() = 0;                                               // 76
 	virtual void ReadFullState(sizebuf_t *sb) = 0;                             // 77
 	virtual void WriteFullState(int clientnum) = 0;                            // 78
+	virtual int ItemCount(int itemtype) = 0;                                   // 79 OpenMerc: how many of an item type (touch grenade button)
 
 protected:
 	~PlayerInventory() {}

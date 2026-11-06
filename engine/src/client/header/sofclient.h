@@ -164,6 +164,7 @@ qboolean Touch_HudTop(void);
 void Touch_Finger(long long id, int type, float nx, float ny);
 void Touch_Move(struct usercmd_s *cmd);
 void Touch_Draw(void);
+qboolean Touch_DrawCrosshair(void); /* true: drawn by the touch controls (or hidden by them) */
 qboolean HUD_TrayRect(int which, float *x, float *y, float *w, float *h);
 void HUD_DrawColouredString(int x, int y, const char *s, const unsigned char *rgba);
 void HUD_DrawCharFloat(float x, float y, int ch, const unsigned char *rgba);

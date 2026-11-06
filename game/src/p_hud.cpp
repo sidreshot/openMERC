@@ -185,6 +185,51 @@ void Cmd_Help_f(edict_t *ent)
 	ent->client->showhelp_time = level.time + 30;
 }
 
+/* OpenMerc: what the touch crosshair shows (engine cl_touch.c), in STAT_FLAGS bits SoF does not use:
+   0x1000 a hostile living character under the crosshair (it turns red; the touch aim slows down over it),
+   0x2000 the player's damage reached a character in the last 0.2 s (hit marker), 0x4000 it killed one in the last
+   0.4 s (kill marker) */
+namespace om_ai {
+bool SameTeam(edict_t *a, edict_t *b);
+}
+
+static float om_hit[MAX_CLIENTS], om_kill[MAX_CLIENTS];
+
+void OM_HitMark(edict_t *attacker, bool killed)
+{
+	int n = (int)(attacker - g_edicts) - 1;
+	if (n < 0 || n >= MAX_CLIENTS)
+		return;
+	om_hit[n] = level.time;
+	if (killed)
+		om_kill[n] = level.time;
+}
+
+static int OM_TouchFlags(edict_t *ent)
+{
+	int flags = 0, n = (int)(ent - g_edicts) - 1;
+	if (n >= 0 && n < MAX_CLIENTS) {
+		if (om_hit[n] > 0 && level.time >= om_hit[n] && level.time - om_hit[n] < 0.2f)
+			flags |= 0x2000;
+		if (om_kill[n] > 0 && level.time >= om_kill[n] && level.time - om_kill[n] < 0.4f)
+			flags |= 0x4000;
+	}
+	if (ent->health <= 0 || level.intermissiontime)
+		return flags;
+	vec3_t eye, fwd, end;
+	VectorCopy(ent->s.origin, eye);
+	eye[2] += ent->viewheight;
+	AngleVectors(ent->client->v_angle, fwd, NULL, NULL);
+	VectorMA(eye, 4096, fwd, end);
+	trace_t tr = gi.trace(eye, NULL, NULL, end, ent, MASK_SHOT);
+	edict_t *t = tr.ent;
+	if (t && t != world && t->inuse && t->health > 0 && t->takedamage &&
+	    (((t->svflags & SVF_MONSTER) && !om_ai::SameTeam(ent, t)) ||
+	     (t->client && deathmatch->value && !OnSameTeam(ent, t))))
+		flags |= 0x1000;
+	return flags;
+}
+
 // SPEC-780 3
 void G_SetStats(edict_t *ent)
 {
@@ -222,6 +267,7 @@ void G_SetStats(edict_t *ent)
 		if (tr.surface && (tr.surface->flags & 4))
 			flags |= 0x0004;
 	}
+	flags |= OM_TouchFlags(ent);
 	st[STAT_FLAGS] = (short)flags;
 	int layouts = 0;
 	if (deathmatch->value)
@@ -232,6 +278,8 @@ void G_SetStats(edict_t *ent)
 	st[STAT_FRAGS] = (short)c->resp.score;
 	st[STAT_FORCEHUD] = level.forcehud ? 1 : 0;
 	st[13] = st[14] = 0;
+	/* OpenMerc: the grenades carried, for the touch grenade button (stats 13 is unused by SoF) */
+	st[STAT_OM_GRENADES] = (short)(inv ? inv->ItemCount(IT_GRENADE) : 0);
 	st[STAT_DAMAGEDIR] = (short)c->damage_dir;
 }
 

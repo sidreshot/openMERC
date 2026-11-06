@@ -5,6 +5,14 @@ slider | touch_sens | 0.3 | 3 | 0.1 | Look Sensitivity | Чувствитель�
 slider | touch_size | 0.7 | 1.5 | 0.05 | Button Size | Размер кнопок
 slider | touch_alpha | 0.1 | 1 | 0.05 | Button Visibility | Заметность кнопок
 slider | touch_joyradius | 0.08 | 0.2 | 0.01 | Joystick Size | Размер джойстика | tip=The left-half joystick appears where the thumb lands/Джойстик левой половины появляется там, куда лёг палец
+section | AIMING | ПРИЦЕЛИВАНИЕ
+list | touch_crosshair | 0,1 | Off,On | Выкл,Вкл | Touch Crosshair | Сенсорный прицел | tip=Opens while moving and firing, red over an enemy, marks hits and kills/Раскрывается при движении и стрельбе, краснеет на враге, отмечает попадания и убийства
+slider | touch_aimslow | 0.3 | 1 | 0.05 | Aim Slowdown on Enemy | Замедление прицела на враге | tip=Turning slows down while the crosshair is on an enemy (1 = off)/Поворот замедляется, пока прицел на враге (1 = выкл)
+list | om_aimassist | 0,1 | Off,On | Выкл,Вкл | Aim Assist | Помощь в прицеливании | tip=Shots go to the enemy nearest the crosshair/Выстрелы идут в ближайшего к прицелу врага
+list | touch_autofire | 0,1 | Off,On | Выкл,Вкл | Automatic Fire | Автоматическая стрельба | tip=Fires by itself while the crosshair is on an enemy/Стреляет сам, пока прицел на враге
+list | touch_leftfire | 0,1 | Off,On | Выкл,Вкл | Left Fire Button | Левая кнопка огня | tip=A second fire button on the left: fire while the right thumb aims/Вторая кнопка огня слева: стрелять, пока правый палец целится
+list | om_throwprecise | 0,1 | Off,On | Выкл,Вкл | Precise Grenade Throw | Точный бросок гранаты | tip=The grenade flies exactly along the shown arc/Граната летит точно по показанной дуге
+section | CONTROLS | УПРАВЛЕНИЕ
 list | touch_invert | 0,1 | Off,On | Выкл,Вкл | Invert Look Up/Down | Инверсия обзора по вертикали
 list | om_autouse | 0,1 | Off,On | Выкл,Вкл | Automatic Doors and Switches | Двери и переключатели автоматически | tip=Doors, buttons and switches in front of you work without a button/Двери, кнопки и переключатели перед вами срабатывают без кнопки
 list | in_touch | 0,1 | Off,On | Выкл,Вкл | Touch Controls | Сенсорное управление | tip=Off for a gamepad/Выключите для геймпада

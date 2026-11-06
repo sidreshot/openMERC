@@ -1711,8 +1711,17 @@ int WeaponUseGrenade(edict_t *ent, ItemSlot *slot)
 	vec3_t fwd, right, up, vel, start;
 	AngleVectors(ent->client->v_angle, fwd, right, up);
 	VectorScale(fwd, 475, vel);
-	VectorMA(vel, gix.flrand(-15, 15), right, vel);
-	VectorMA(vel, gix.flrand(300, 350), up, vel);
+	/* om_throwprecise (on by default on Android): the middle of the original's random spread, so the throw lands where
+	   the touch grenade button's arc shows it (engine cl_touch.c simulates the same flight) */
+	static cvar_t *precise;
+	if (!precise)
+#ifdef __ANDROID__
+		precise = gi.cvar("om_throwprecise", "1", CVAR_ARCHIVE);
+#else
+		precise = gi.cvar("om_throwprecise", "0", CVAR_ARCHIVE);
+#endif
+	VectorMA(vel, (precise->value && !DM()) ? 0.0f : gix.flrand(-15, 15), right, vel);
+	VectorMA(vel, (precise->value && !DM()) ? 325.0f : gix.flrand(300, 350), up, vel);
 	VectorAdd(vel, ent->velocity, vel);
 	VectorCopy(ent->s.origin, start);
 	start[2] += ent->viewheight - 20;

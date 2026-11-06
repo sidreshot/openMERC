@@ -1395,6 +1395,12 @@ HUD_DrawCrosshair(void)
 		return;
 	}
 
+	/* OpenMerc: the touch controls draw their own crosshair (cl_touch.c, touch_crosshair) */
+	if (Touch_DrawCrosshair())
+	{
+		return;
+	}
+
 	/* SPEC-AMEND-005 I6h.2: when the cvar was modified since the last check (also once after its creation) and its
 	   value is non-zero, a value above 4 or below 0 becomes 4 - the NUMERIC value only, the string is never
 	   changed -, the mark is cleared and pics/menus/status/ch<trunc(value)> is looked up (missing: no

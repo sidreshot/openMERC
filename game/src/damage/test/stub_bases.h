@@ -228,4 +228,5 @@ public:
 	void ReadSave() override {}
 	void ReadFullState(sizebuf_t *sb) override {}
 	void WriteFullState(int clientnum) override {}
+	int ItemCount(int itemtype) override { return 0; }
 };

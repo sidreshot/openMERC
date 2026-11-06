@@ -187,6 +187,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define STAT_FRAGS 10
 #define STAT_METER 11
 #define STAT_FORCEHUD 12
+#define STAT_OM_GRENADES 13 /* OpenMerc: grenades carried (touch grenade button) */
 #define STAT_DAMAGEDIR 15
 
 typedef enum { DAMAGE_NO, DAMAGE_YES, DAMAGE_AIM } damage_t;
@@ -729,6 +730,7 @@ qboolean OnSameTeam(edict_t *ent1, edict_t *ent2);
 qboolean CanDamage(edict_t *targ, edict_t *inflictor);
 void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t dir, const vec3_t point,
               const vec3_t normal, int damage, int knockback, int dflags, int mod);
+void OM_HitMark(edict_t *attacker, bool killed); /* p_hud.cpp: the touch crosshair's hit / kill marker */
 void T_RadiusDamage(edict_t *inflictor, edict_t *attacker, float damage, edict_t *ignore, float radius, int mod,
                     int dflags = 0);
 void T_RadiusDamageMinMax(edict_t *inflictor, edict_t *attacker, const vec3_t center, float maxdmg, float mindmg,

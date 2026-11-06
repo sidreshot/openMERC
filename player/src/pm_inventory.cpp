@@ -314,6 +314,16 @@ int Inventory::HasItem(int type)
     return false;
 }
 
+/* OpenMerc (interface slot 79): all slots of a type together (the touch grenade button counts its grenades) */
+int Inventory::ItemCount(int type)
+{
+    int n = 0;
+    for (int i = 0; i < NUM_ISLOTS; i++)
+        if (st.items[i].type == type && st.items[i].count > 0)
+            n += st.items[i].count;
+    return n;
+}
+
 int Inventory::SelectedItemType()
 {
     if (st.selItem < 0 || st.selItem >= NUM_ISLOTS)

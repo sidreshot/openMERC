@@ -325,6 +325,7 @@ public:
     virtual void ReadSave();                                   /* 76 */
     virtual void ReadFullState(sizebuf_t *msg);                /* 77 */
     virtual void SendFullState(int clientIndex);               /* 78 */
+    virtual int ItemCount(int type);                           /* 79, OpenMerc: the count of an item type */
 
     /* ---------------- data, exact layout ---------------- */
     InvExtra *x;             /* 0x04 */
