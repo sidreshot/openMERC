@@ -77,11 +77,15 @@ static void Cmd_OmAim_f(edict_t *ent)
 {
 	if (!CheatsOK(ent) || !ent->client)
 		return;
+	/* "omaim [targetname]": the nearest living character, or the one with that targetname */
+	const char *want = gi.argc() > 1 ? gi.argv(1) : NULL;
 	edict_t *best = NULL;
 	float bd = 1e9f;
 	for (int i = 1; i < globals.num_edicts; i++) {
 		edict_t *e = &g_edicts[i];
 		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0)
+			continue;
+		if (want && (!e->targetname || Q_stricmp(e->targetname, want)))
 			continue;
 		vec3_t d;
 		VectorSubtract(e->s.origin, ent->s.origin, d);
@@ -90,8 +94,10 @@ static void Cmd_OmAim_f(edict_t *ent)
 			best = e;
 		}
 	}
-	if (!best)
+	if (!best) {
+		gi.dprintf("omaim: no living character%s%s\n", want ? " named " : "", want ? want : "");
 		return;
+	}
 	vec3_t eye, to, ang;
 	VectorCopy(ent->s.origin, eye);
 	eye[2] += ent->viewheight;

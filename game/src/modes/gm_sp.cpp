@@ -52,7 +52,7 @@ static const gm_spkit *gm_kitfor(const char *map)
 	return &gm_kit_default;
 }
 
-void GM_DefaultWeapons(edict_t *ent, int armor)
+void GM_DefaultWeapons(edict_t *ent, int armor, bool fresh)
 {
 	if (!GM_IsClient(ent))
 		return;
@@ -61,7 +61,11 @@ void GM_DefaultWeapons(edict_t *ent, int armor)
 		gi.dprintf("hey! no inventory!\n");
 		return;
 	}
-	GM_NewInventory(ent);
+	/* fresh: a new inventory object (the cheat command). The level kit (om_levelkit, ClientBegin) refills the one the
+	   client already mirrors: a replaced inventory left the client's view weapon without fire notes - no shot
+	   sound, flash or recoil, only the server's hits */
+	if (fresh)
+		GM_NewInventory(ent);
 	PlayerInventory *inv = cl->inv;
 	if (!inv)
 		return;
