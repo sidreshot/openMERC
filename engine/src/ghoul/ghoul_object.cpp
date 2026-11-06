@@ -519,6 +519,31 @@ void Object::Prepare(bool spec)
 		if (!sys->IsServer())
 			PreloadTexture(t, sys->role);
 	};
+	// openMERC: the entries below decoded at once on all cores first (DecodeAhead), then taken in order as before
+	{
+		std::vector<std::pair<ImageList *, int>> want;
+		for (GhbFile *f : files)
+			for (size_t fm = 0; fm < f->materials.size(); fm++)
+				for (int s = 0; s < 2; s++)
+				{
+					const GhbSlot &sl = f->materials[fm].slots[s];
+					ImageList *l;
+					if (!sl.hasTexture || sl.texture.empty() || !(l = SlotList(f, (int)fm, s)) || l->images.empty())
+						continue;
+					if (G().gs.precacheAll)
+						for (size_t i = 0; i < l->images.size(); i++)
+							want.push_back({l, (int)i});
+					else
+						want.push_back({l, 0});
+				}
+		for (auto &sk : skins)
+		{
+			ImageList *l = MaterialList(sk.material);
+			if (l && sk.image >= 0 && !l->images.empty())
+				want.push_back({l, sk.image});
+		}
+		DecodeAhead(want);
+	}
 	for (GhbFile *f : files)
 	{
 		for (size_t fm = 0; fm < f->materials.size(); fm++)

@@ -27,6 +27,8 @@ set(OMGHOUL_SOURCES
 
 add_library(omghoul STATIC ${OMGHOUL_SOURCES})
 target_include_directories(omghoul PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+find_package(Threads REQUIRED) # ghoul_texture.cpp: an object's textures decoded on all cores
+target_link_libraries(omghoul PUBLIC Threads::Threads)
 set_target_properties(omghoul PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
 	POSITION_INDEPENDENT_CODE ON)
 if(MSVC)

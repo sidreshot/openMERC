@@ -6,7 +6,9 @@
 //             40/41; SPEC-AMEND-002 item 6 (.ifl answers); SPEC-121 (.ifl use)
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <thread>
 
 #include "ghoul_gl.h"
 #include "ghoul_internal.h"
@@ -238,6 +240,75 @@ Texture *ListTexture(ImageList *l, int index, bool load)
 	}
 	t->refs = std::max(t->refs, 1);
 	return t;
+}
+
+// openMERC: the textures an object is about to decode one by one (Object::Prepare), decoded at once on all cores - a
+// character's first spawn was mostly its skins' decoding. The files are read here on the calling thread (the host's
+// file system is not shared), only the decoding runs on the workers, and only for files whose header DecodeTGA
+// accepts (its fatal errors stay on the calling thread, in ListTexture). Anything not decoded here is decoded by
+// ListTexture as before; the result is the same texture either way.
+static bool Pow2(int v);
+void DecodeAhead(const std::vector<std::pair<ImageList *, int>> &want)
+{
+	struct job_t
+	{
+		Texture *t;
+		void *data;
+		int n;
+	};
+	std::vector<job_t> jobs;
+	size_t texels = 0;
+
+	if (!G().gl || !Host().load_file)
+		return;
+	for (const auto &w : want)
+	{
+		Texture *t = ListTexture(w.first, w.second, false);
+		bool dup = false;
+		if (!t || t->decoded || t->missing)
+			continue;
+		for (const job_t &j : jobs)
+			dup |= (j.t == t);
+		if (dup)
+			continue;
+		void *d = nullptr;
+		int n = Host().load_file(Host().ctx, (t->name + ".TGA").c_str(), &d);
+		const uint8_t *h = (const uint8_t *)d;
+		if (n < 18 || !d || (h[2] != 2 && h[2] != 10) || h[1] != 0 || (h[16] != 24 && h[16] != 32) ||
+		    !Pow2(h[12] | (h[13] << 8)) || !Pow2(h[14] | (h[15] << 8)))
+		{
+			if (d && Host().free_file)
+				Host().free_file(Host().ctx, d);
+			continue; // ListTexture decides (default texture, fatal error) as before
+		}
+		texels += (size_t)(h[12] | (h[13] << 8)) * (h[14] | (h[15] << 8));
+		jobs.push_back({t, d, n});
+	}
+	if (jobs.empty())
+		return;
+
+	std::atomic<size_t> next(0);
+	auto work = [&]() {
+		for (size_t k; (k = next.fetch_add(1)) < jobs.size();)
+		{
+			job_t &j = jobs[k];
+			j.t->decoded = DecodeTGA((const uint8_t *)j.data, (size_t)j.n, j.t->name, *j.t);
+		}
+	};
+	// threads only where there is work for them (a thread costs some tens of microseconds)
+	unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+	unsigned nt = (unsigned)std::min<size_t>(std::min<size_t>(hw, 8), jobs.size());
+	if (texels < 256 * 256 * 2)
+		nt = 1;
+	std::vector<std::thread> pool;
+	for (unsigned i = 1; i < nt; i++)
+		pool.emplace_back(work);
+	work();
+	for (std::thread &th : pool)
+		th.join();
+	for (job_t &j : jobs)
+		if (Host().free_file)
+			Host().free_file(Host().ctx, j.data);
 }
 
 // ------------------------------------------------------------------ TGA (SPEC-012 TGA rules)
