@@ -1764,7 +1764,17 @@ public:
 			}
 			return ChooseStand(in);
 		}
-		if (dotMove < -0.75f && !in.running) {
+		/* openMERC (black box, sv_animlog over 30 level starts): walking away from the facing without a target turns
+		   the character round (std_wturn180_lt_mrs_2, 124 frames in the original module) - it never walks backwards
+		   then (std_wbackaim 0 frames there, 237 here: kos3 patrols walked every return leg backwards, aiming) */
+		if (dotMove < -0.75f && !in.target) {
+			a = Avail("std_wturn180_lt_mrs_2");
+			if (a)
+				return a;
+		}
+		/* a model without the turn (kos3 m_kos_mbrute1b on its t30-t40 patrol): the original turns it round at once and
+		   walks on forwards, so no backwards walk without a target either */
+		if (dotMove < -0.75f && !in.running && in.target) {
 			if (!Armed())
 				return First({"std_wnormal_n_pk_a"});
 			return First({(wc & WC_R) ? "std_wbackaim_n_r_2" : NULL, (wc & (WC_M | WC_S)) ? "std_wbackaim_n_ms_2" : NULL,
@@ -1772,7 +1782,7 @@ public:
 		}
 		bool right = DotProduct(in.moveDir, l) < 0;
 		if (in.running) {
-			if (dotMove < -0.75f)
+			if (dotMove < -0.75f && in.target)
 				return First({(wc & (WC_M | WC_R | WC_S)) ? "std_rbackaim_n_mrs_2" : NULL,
 					(wc & (WC_P | WC_MP)) ? "std_rbackaim_n_p_2" : NULL, (wc & WC_L) ? "std_rbackaim_n_l_2" : NULL,
 					"std_r_n_pk_n"});
@@ -1803,7 +1813,8 @@ public:
 				(wc & (WC_M | WC_S)) ? "std_waim_fwd_ms_2" : NULL, (wc & WC_L) ? "std_waim_fwd_l_2" : NULL,
 				"std_wnormal_n_pk_a"});
 		return First({(wc & (WC_M | WC_R | WC_S)) ? "std_wpatrol_n_mrs_2" : NULL, (wc & WC_L) ? "std_w_n_l_2" : NULL,
-			Armed() ? NULL : "std_wattitude_n_pk_a", "std_wnormal_n_pk_a"});
+			"std_wnormal_n_pk_a"}); /* the relaxed unarmed walk is the normal one (original: 2966 frames
+			                            std_wnormal against 18 std_wattitude; here 294 std_wattitude) */
 	}
 
 	void SetSpeed4(void)
