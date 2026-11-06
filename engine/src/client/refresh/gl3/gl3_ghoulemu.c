@@ -923,6 +923,95 @@ static const char *emu_fs =
 	"	else if (omEmis.w > 0.5) outEmissive = vec4(omPre * omEmis.x, c.a);\n"
 	"}\n";
 
+/* the per-primitive uniforms of E.prog are sent only when they change: every glBegin/glEnd primitive of a Ghoul
+   model is a draw of its own and set ~20 uniforms, among them the 8 lights x 6 vec4 of the per-pixel lighting,
+   mostly the same values as for the previous primitive of the same model */
+typedef struct
+{
+	unsigned gen;
+	int bytes, bigcap;
+	byte small[64];
+	byte *big;
+} emuucache_t;
+
+static emuucache_t ucache[256];
+static unsigned ucgen = 1;
+static int uccontext = -1;
+
+static qboolean
+USame(GLint loc, const void *p, int bytes)
+{
+	emuucache_t *e;
+	byte *buf;
+
+	if (loc < 0)
+	{
+		return true; /* not in the program: glUniform would do nothing */
+	}
+
+	if (uccontext != gl3_contextgen)
+	{
+		uccontext = gl3_contextgen;
+		ucgen++;
+	}
+
+	if (loc >= (GLint)(sizeof(ucache) / sizeof(ucache[0])))
+	{
+		return false;
+	}
+
+	e = &ucache[loc];
+
+	if (bytes <= (int)sizeof(e->small))
+	{
+		buf = e->small;
+	}
+	else
+	{
+		if (e->bigcap < bytes)
+		{
+			byte *b = realloc(e->big, bytes);
+
+			if (!b)
+			{
+				e->gen = 0;
+				return false;
+			}
+
+			e->big = b;
+			e->bigcap = bytes;
+		}
+
+		buf = e->big;
+	}
+
+	if ((e->gen == ucgen) && (e->bytes == bytes) && !memcmp(buf, p, bytes))
+	{
+		return true;
+	}
+
+	memcpy(buf, p, bytes);
+	e->gen = ucgen;
+	e->bytes = bytes;
+	return false;
+}
+
+static void U1i(GLint l, int v) { if (!USame(l, &v, sizeof(v))) glUniform1i(l, v); }
+static void U1f(GLint l, float v) { if (!USame(l, &v, sizeof(v))) glUniform1f(l, v); }
+static void U4f(GLint l, float a, float b, float c, float d)
+{
+	float v[4] = {a, b, c, d};
+
+	if (!USame(l, v, sizeof(v)))
+	{
+		glUniform4fv(l, 1, v);
+	}
+}
+static void U3fv(GLint l, int n, const float *v) { if (!USame(l, v, n * 3 * (int)sizeof(float))) glUniform3fv(l, n, v); }
+static void U4fv(GLint l, int n, const float *v) { if (!USame(l, v, n * 4 * (int)sizeof(float))) glUniform4fv(l, n, v); }
+static void UM3(GLint l, const float *v) { if (!USame(l, v, 9 * (int)sizeof(float))) glUniformMatrix3fv(l, 1, GL_FALSE, v); }
+static void UM4(GLint l, const float *v) { if (!USame(l, v, 16 * (int)sizeof(float))) glUniformMatrix4fv(l, 1, GL_FALSE, v); }
+
 static GLuint
 Compile(GLenum type, const char *src)
 {
@@ -986,6 +1075,7 @@ CreateObjects(void)
 	}
 
 	E.prog = glCreateProgram();
+	ucgen++; /* a new program: no uniform value is known */
 	glAttachShader(E.prog, vs);
 	glAttachShader(E.prog, fs);
 	glBindAttribLocation(E.prog, GL3_ATTRIB_POSITION, "position");
@@ -1628,9 +1718,9 @@ Flush(void)
 			E.tesstabL = gputess;
 		}
 
-		glUniform1i(E.u_tessL, gputess);
-		glUniform1f(E.u_tessK, E.tessk);
-		glUniformMatrix4fv(E.u_tessProj, 1, GL_FALSE, E.proj[E.projdepth]);
+		U1i(E.u_tessL, gputess);
+		U1f(E.u_tessK, E.tessk);
+		UM4(E.u_tessProj, E.proj[E.projdepth]);
 		n = (n / 3) * gputess * gputess * 3;
 	}
 	else
@@ -1638,7 +1728,7 @@ Flush(void)
 	{
 		if (E.u_tessL != -1)
 		{
-			glUniform1i(E.u_tessL, 0);
+			U1i(E.u_tessL, 0);
 		}
 
 		GL3_BindVAO(E.vao);
@@ -1699,13 +1789,13 @@ Flush(void)
 		gl3state.currenttexture = E.boundtex;
 	}
 
-	glUniform1i(E.u_tex, 0);
-	glUniform1i(E.u_texenv, TexEnvIndex());
-	glUniform1i(E.u_texswz, TexSwizzle(E.boundtex));
-	glUniform1i(E.u_alphafunc, E.alphatest ? AlphaFuncIndex(E.alphafunc) : 7);
-	glUniform1f(E.u_alpharef, Clamp01(E.alpharef));
-	glUniform1i(E.u_fog, E.fog ? 1 : 0);
-	glUniform4f(E.u_fogcolor, E.fogcolor[0], E.fogcolor[1], E.fogcolor[2], E.fogcolor[3]);
+	U1i(E.u_tex, 0);
+	U1i(E.u_texenv, TexEnvIndex());
+	U1i(E.u_texswz, TexSwizzle(E.boundtex));
+	U1i(E.u_alphafunc, E.alphatest ? AlphaFuncIndex(E.alphafunc) : 7);
+	U1f(E.u_alpharef, Clamp01(E.alpharef));
+	U1i(E.u_fog, E.fog ? 1 : 0);
+	U4f(E.u_fogcolor, E.fogcolor[0], E.fogcolor[1], E.fogcolor[2], E.fogcolor[3]);
 
 	/* GFX-modern bloom: Ghoul self-illumination / additive materials as drawn (SPEC-AMEND-016 R16.7),
 	   RF_FULLBRIGHT / RF_GLOW entities; multiplying blends keep what is behind */
@@ -1736,7 +1826,7 @@ Flush(void)
 			emis[3] = 2.0f;
 		}
 
-		glUniform4fv(E.u_emis, 1, emis);
+		U4fv(E.u_emis, 1, emis);
 	}
 
 	/* GFX-modern sun shadows: the ground shadow pass (blend 0, 1 - src alpha, ghoul_draw) gives way to the
@@ -1754,16 +1844,16 @@ Flush(void)
 
 			if (nbeam > 0)
 			{
-				glUniform4fv(E.u_beam, nbeam * 4, pools);
+				U4fv(E.u_beam, nbeam * 4, pools);
 			}
 		}
 
-		glUniform1i(E.u_csmrepl, repl);
-		glUniform1i(E.u_beamn, nbeam);
+		U1i(E.u_csmrepl, repl);
+		U1i(E.u_beamn, nbeam);
 
 		if (repl || nbeam)
 		{
-			glUniformMatrix4fv(E.u_invpv, 1, GL_FALSE, GL3_CSM_InvPV());
+			UM4(E.u_invpv, GL3_CSM_InvPV());
 		}
 
 		if (E.csmcapture && (mode == GL_TRIANGLES) && E.depthmask && !E.blendon && !E.alphatest)
@@ -1781,7 +1871,7 @@ Flush(void)
 	{
 		int ppl = (E.lighting && E.ppl) ? 1 : 0;
 
-		glUniform1i(E.u_ppl, ppl);
+		U1i(E.u_ppl, ppl);
 
 		if (ppl)
 		{
@@ -1813,14 +1903,14 @@ Flush(void)
 			M[18] = E.localviewer ? 1.0f : 0.0f;
 			M[19] = 0;
 			memcpy(M + 20, E.lmambient, 4 * sizeof(float));
-			glUniform4fv(E.u_pplL, NUM_LIGHTS * 6, L);
-			glUniform4fv(E.u_pplM, 6, M);
-			glUniform1i(E.u_ambon, E.ambon ? 1 : 0);
+			U4fv(E.u_pplL, NUM_LIGHTS * 6, L);
+			U4fv(E.u_pplM, 6, M);
+			U1i(E.u_ambon, E.ambon ? 1 : 0);
 
 			if (E.ambon)
 			{
-				glUniform3fv(E.u_amb, 6, E.amb);
-				glUniformMatrix3fv(E.u_e2w, 1, GL_FALSE, E.e2w);
+				U3fv(E.u_amb, 6, E.amb);
+				UM3(E.u_e2w, E.e2w);
 			}
 		}
 	}
@@ -1859,7 +1949,7 @@ Flush(void)
 			}
 		}
 
-		glUniform1i(E.u_a2c, a2c);
+		U1i(E.u_a2c, a2c);
 
 		if (a2c)
 		{
