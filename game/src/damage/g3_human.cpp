@@ -2440,6 +2440,17 @@ public:
 		return gore && gore->OwnerShown(GZ_HEAD_FRONT);
 	}
 
+	// the way out of a looping death (dance, autofire twitching, writhing): with room as Death() checks it, else
+	// without - the room check is OpenMerc's (DeathFits), and a loop that never ends stood as a frozen corpse (the
+	// original always takes the exit)
+	const G3Anim *LoopExit(const char *n)
+	{
+		const G3Anim *a = Death(n, NULL, 0, true, true);
+		if (!a && (a = Avail(n)))
+			committed = muted = true;
+		return a;
+	}
+
 	const G3Anim *DyingFollowUp(int dflags)
 	{
 		float since = G3_Time() - playStart;
@@ -2450,11 +2461,15 @@ public:
 					GeneralVoice(expr == EXPR_DEAD ? "Hit" : "Scream", expr == EXPR_DEAD ? 3 : 8, 0.8f);
 				return cur;
 			}
-			if ((a = Death("std_shead_2frnt_n_n", NULL, 0, true, true)))
+			/* the fall forward when there is room for it, else the in-place collapse. Before: a body danced against
+			   a wall or a prop had no room for `std_shead_2frnt`, kept the looping dance, and the corpse rule froze
+			   it standing (owner: "an NPC by a wall freezes in its death pose"; jpn2 save: two corpses on
+			   `std_sdance_n_n_n` with the standing box) */
+			if ((a = Death("std_shead_2frnt_n_n", NULL, 0, true, true)) ||
+			    (a = Death("std_sviolent_n_n_n", NULL, 0, true, true)) || (a = LoopExit("std_shead_2frnt_n_n")))
 				return a;
 		}
-		if (cur == Anim_Human("lb_sautofire_loop_n_n") && since > 0.3f &&
-		    (a = Death("lb_sautofire_end_n_n", NULL, 0, true, true)))
+		if (cur == Anim_Human("lb_sautofire_loop_n_n") && since > 0.3f && (a = LoopExit("lb_sautofire_end_n_n")))
 			return a;
 		if (cur && ((cur->flags & ANIMF_REHITTABLE) || AnimDone()) &&
 		    (cur->posture == POSTURE_ONBACK || cur->posture == POSTURE_ONSIDE) && since > 0.1f &&
@@ -2482,7 +2497,7 @@ public:
 		for (auto &w : writhe)
 			if (cur == Anim_Human(w.loop)) {
 				if (AnimDone() && since > writheTime)
-					if ((a = Death(w.die, NULL, 0, true, true)))
+					if ((a = LoopExit(w.die)))
 						return a;
 				return cur;
 			}
@@ -2545,7 +2560,9 @@ public:
 		   animation freezes: ChooseDeath runs this before the death is set, and a pre-death idle or walk that had
 		   just finished froze the instance at the moment of death - the death then played on a paused body, which
 		   stayed upright (owner: "characters hang in one pose, every second time") */
-		if (frozenAt == 0 && ((AnimDone() && cur && cur->cls == ANIMCLS_DEATH) ||
+		/* A looping death (dance, twitching, writhing) counts as "done" for AnimDone() from its first frame; it is not
+		   the end of the death - its exit follows (DyingFollowUp) - so it never freezes the corpse */
+		if (frozenAt == 0 && ((AnimDone() && cur && cur->cls == ANIMCLS_DEATH && !(cur->flags & ANIMF_LOOP)) ||
 		                      (!pauseKind && now - deathTime > 7.0f))) {
 			if (!G3_Cinematic())
 				for (int k = 0; k < 3; k++)

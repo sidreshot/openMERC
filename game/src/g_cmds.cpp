@@ -284,7 +284,11 @@ static void Cmd_OmKill_f(edict_t *ent)
 	vec3_t dir;
 	VectorSubtract(best->s.origin, ent->s.origin, dir);
 	VectorNormalize(dir);
-	T_Damage(best, ent, ent, dir, best->s.origin, ent->s.origin, best->health + 20, 0, DAMAGE_NO_PROTECTION, MOD_SUICIDE);
+	/* omkill dance: as a burst of an automatic weapon (the 0x10000 "dance" death flag, SPEC-722) */
+	int dflags = DAMAGE_NO_PROTECTION;
+	if (gi.argc() >= 2 && !Q_stricmp(gi.argv(1), "dance"))
+		dflags |= 0x10000;
+	T_Damage(best, ent, ent, dir, best->s.origin, ent->s.origin, best->health + 20, 0, dflags, MOD_SUICIDE);
 }
 
 static void Cmd_KillAllMonsters_f(edict_t *ent)
