@@ -353,8 +353,14 @@ static void Summarise(edict_t *ent, AI *ai)
 	 * "reaction age < 0.2 s", but the rule above moves the reaction moment to now at every think while the record
 	 * is stale, so a target seen intermittently made the body startle again every ~4 s (tsr2 `runner01/02`,
 	 * `sparkrunner*`: 6-8 `std_xstartled_n_a_a` in 20 s, the original aims and holds `std_ialert`, `fly4_tsr2`). */
-	if (first && p.ent && p.ent->inuse && p.ent->health > 0)
+	/* openMERC: only a character not alerted yet is startled, and only at that moment (0.3 s): the flag stayed set
+	   until the body next played an idle fidget, so characters that first saw the player while walking or already
+	   alerted startled later and froze in the startle during a cinematic (sv_animlog over the level scripts:
+	   std_xstartled 383 frames here against 60 in the original, the aims 433 against 2119; trn1 woodfall guards) */
+	if (first && p.ent && p.ent->inuse && p.ent->health > 0 && !ai->alerted) {
 		ai->just_noticed = 1;
+		ai->just_noticed_time = now;
+	}
 	ai->had_player_record = p.ent != nullptr;
 	(void)ent;
 }
@@ -513,6 +519,24 @@ void OmAI::Think(edict_t *ent)
 		if (!WakeChecks(ent, this))
 			return;
 		Wake(ent);
+		/* openMERC, black box (kos1 grunt -824 -1632, original module): a character that wakes while the player is
+		   in its line of sight knows him at once, whatever way it faces - the player standing 106, 125, 170 units
+		   behind it or 250 units at 120 degrees was aimed at on the wake think; the same player moved behind it after
+		   it woke out of his sight was not noticed (the view cone applies from then on). Here the sight sense
+		   records the player as seen at the wake think */
+		edict_t *sc = SightClient();
+		if (sc && PerceiveFilter(ent, this, sc) && RangeClass(Dist2(sc->s.origin, ent->s.origin)) != RANGE_FAR &&
+		    Visible(ent, sc, false)) {
+			for (Sense *s : senses) {
+				if (s->ClassCode() != 2 && s->ClassCode() != 3)
+					continue;
+				s->player.ent = sc;
+				VectorCopy(sc->s.origin, s->player.pos);
+				s->player.time = now;
+				s->player.kind = PK_SEEN;
+				break;
+			}
+		}
 	}
 	/* 8. senses */
 	if (!low_priority || sense_stamp <= now - 2) {
@@ -1109,6 +1133,8 @@ bool OmAI::JustNoticedEnemy(void)
 		just_noticed = 0; /* nothing to be startled by any more */
 		return false;
 	}
+	if (just_noticed && Now() - just_noticed_time > 0.3f)
+		just_noticed = 0;
 	return just_noticed != 0;
 }
 

@@ -161,18 +161,40 @@ public:
 	void Evaluate(edict_t *ent, AI *ai, edict_t *t)
 	{
 		float now = Now();
-		if (!PerceiveFilter(ent, ai, t))
+		static cvar_t *sightent = gi.cvar("ai_sightent", "0", 0); /* openMERC debug: sight steps of one character */
+		bool dbg = sightent && sightent->value && (int)sightent->value == (int)(ent - g_edicts) && t && t->client;
+		if (!PerceiveFilter(ent, ai, t)) {
+			if (dbg)
+				gi.dprintf("SIGHT %.1f ent %d filtered\n", now, (int)(ent - g_edicts));
 			return;
+		}
 		float mute = MuteLevel(now);
 		float d2 = Dist2(ent->s.origin, t->s.origin);
 		int rc = RangeClass(PerceivedD2(d2, mute));
-		if (rc == RANGE_FAR)
+		if (rc == RANGE_FAR) {
+			if (dbg)
+				gi.dprintf("SIGHT %.1f ent %d far d %.0f mute %.2f\n", now, (int)(ent - g_edicts), sqrtf(d2), mute);
 			return;
+		}
 		/* rule 2 */
 		bool in_view = rc == RANGE_MELEE;
 		if (!in_view) {
 			bool safe = (t->svflags & SVF_SAFEZONE) && !ai->alerted;
 			in_view = !safe && ConeTest(ent, ai, t);
+		}
+		if (dbg) {
+			vec3_t f;
+			AngleVectors(ai->look_angles, f, nullptr, nullptr);
+			gi.dprintf("SIGHT %.1f ent %d d %.0f rc %d inview %d vmode %d look %.0f yaw %.0f vis %d alerted %d v %.0f %.0f %.0f\n",
+			           now, (int)(ent - g_edicts), sqrtf(d2), rc, in_view, ai->view_mode, ai->look_angles[YAW],
+			           ent->s.angles[YAW], Visible(ent, t, false), ai->alerted, t->velocity[0], t->velocity[1],
+			           t->velocity[2]);
+			vec3_t a, b;
+			EyePoint(ent, a);
+			EyePoint(t, b);
+			trace_t tr = Trace(a, nullptr, nullptr, b, ent, 0x19);
+			gi.dprintf("SIGHT  eye %s -> %s frac %.2f hit %s pvs %d %d\n", vtos(a), vtos(b), tr.fraction,
+			           tr.ent ? (tr.ent->classname ? tr.ent->classname : "?") : "-", InPVS(a, b), InPVS(b, a));
 		}
 		if (!in_view) {
 			NotSeen(t, 4.0f, now);

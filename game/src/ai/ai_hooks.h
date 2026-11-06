@@ -22,6 +22,10 @@ void FlashMute(const float origin[3], float radius);                        /* W
 void ShotAtNotice(struct edict_s *shooter, const float start[3], const float end[3]); /* a bullet hit the world */
 /* world spawner (SPEC-761 8): true when e is a character; then it is marked spawner-made */
 bool MarkSpawnerMade(struct edict_s *e);
+/* level spawner flags 4/128 (SPEC-761 6.1): the character is alerted to the player */
+void AlertTo(struct edict_s *e, struct edict_s *player);
+/* bullet impacts (SPEC-701 6 table): an alert sound of kind 2 from the emitter at pos */
+void ImpactNoise(struct edict_s *emitter, const float pos[3], float radius, bool needs_sight);
 /* number of live characters within radius of p */
 int CharactersNear(const float p[3], float radius);
 /* savegames (SPEC-752 1.2 step 6), called by G10's level save/load after the script chunks, before

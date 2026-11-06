@@ -571,6 +571,17 @@ static void FireBullet(edict_t *ent, int a, const vec3_t start_in, const vec3_t 
 	    CharacterShotHurts(ent, tr.ent, start, tr.endpos))
 		T_Damage(tr.ent, ent, ent, dir, tr.endpos, start, dmg, dmg, flags | 0x200, attacks[a].mod);
 
+	/* SPEC-701 6 alert sounds of a bullet: a body hit alerts the characters within 300 units of the body (emitter
+	   the body: a guard next to a player under fire hears the player), a world hit those within 60 of the impact
+	   (emitter the shooter; needs sight when the damage is silent). openMERC had neither: kos1's grunt beside the
+	   player shot at by `newleanguy1` stood 5 s with its back to him, the original turns and fires at once */
+	if (tr.fraction < 1.0f && !DM()) {
+		if (tr.ent && tr.ent->inuse && (tr.ent->client || (tr.ent->svflags & SVF_MONSTER)))
+			om_ai::ImpactNoise(tr.ent, tr.ent->s.origin, 300, false);
+		else
+			om_ai::ImpactNoise(ent, tr.endpos, 60, (flags & 0x1000000) != 0);
+	}
+
 	if (tr.fraction < 1.0f && !DM()) {
 		if (!tr.ent || !(tr.ent->client || (tr.ent->svflags & SVF_MONSTER))) {
 			bool door = tr.ent && tr.ent->classname && strstr(tr.ent->classname, "door");

@@ -622,6 +622,9 @@ static void spawner_think(edict_t *self);
 
 static void spawner_use(edict_t *self, edict_t *other, edict_t *activator)
 {
+	// a team runs from its master: slaves never think (SPEC-761 6.1)
+	if ((self->flags & FL_TEAMSLAVE) && self->teammaster && self->teammaster->inuse)
+		self = self->teammaster;
 	if (self->spawnflags & 128) {
 		self->armed = 1;
 		return;
@@ -634,64 +637,162 @@ static void spawner_use(edict_t *self, edict_t *other, edict_t *activator)
 	self->nextthink = level.time + 1.0f;
 }
 
+/* the characters of a spawner team point at its master through teammaster (characters have no team of their own;
+   the field is saved as an entity reference) */
+static int spawner_alive(edict_t *master)
+{
+	int n = 0;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (e->inuse && (e->flags & FL_SPAWNED) && e->teammaster == master && e != master && e->health > 0 &&
+		    !e->deadflag)
+			n++;
+	}
+	return n;
+}
+
+/* SPEC-761 6.2 visible: in front of the player's view or within lip units, and in the player's PVS; in ambush mode
+   a line of sight is also needed and marks the spot as seen for good */
+static bool spawner_spot_visible(edict_t *spot, edict_t *p, bool ambush)
+{
+	if (!p || (spot->spawnflags & 8))
+		return false;
+	vec3_t d, fwd, eye;
+	VectorCopy(p->s.origin, eye);
+	eye[2] += p->viewheight;
+	VectorSubtract(spot->s.origin, eye, d);
+	AngleVectors(p->client ? p->client->v_angle : p->s.angles, fwd, NULL, NULL);
+	bool near = VectorLength(d) < (spot->speed > 0 ? spot->speed : 450);
+	if (!(DotProduct(d, fwd) > 0 || near) || !gi.inPVS(eye, spot->s.origin))
+		return false;
+	if (!ambush)
+		return true;
+	trace_t tr = gi.trace(eye, NULL, NULL, spot->s.origin, p, MASK_OPAQUE);
+	if (tr.fraction < 1.0f)
+		return false;
+	spot->gotsky = 1;
+	return true;
+}
+
+static edict_t *spawner_spot(edict_t *master, vec3_t out)
+{
+	edict_t *p = G_FirstPlayer();
+	int n = 0;
+	for (edict_t *m = master; m; m = m->teamchain)
+		n++;
+	int start = n > 1 ? rand() % n : 0;
+	bool ambush = (master->spawnflags & 128) != 0;
+	for (int k = 0; k < n; k++) {
+		edict_t *m = master;
+		for (int j = (start + k) % n; j > 0 && m; j--)
+			m = m->teamchain;
+		if (!m || !p)
+			continue;
+		if (ambush && m->gotsky)
+			continue;
+		vec3_t d;
+		VectorSubtract(p->s.origin, m->s.origin, d);
+		if (VectorLength(d) >= 769 || spawner_spot_visible(m, p, ambush))
+			continue;
+		vec3_t down, zero = {0, 0, 0};
+		VectorCopy(m->s.origin, down);
+		down[2] -= 256;
+		trace_t tr = gi.trace(m->s.origin, zero, zero, down, m, MASK_MONSTERSOLID);
+		VectorCopy(tr.endpos, out);
+		out[2] += 12;
+		vec3_t bmin = {-16, -16, 0}, bmax = {16, 16, 73};
+		tr = gi.trace(out, bmin, bmax, out, m, MASK_MONSTERSOLID);
+		if (tr.startsolid || tr.allsolid)
+			continue;
+		return m;
+	}
+	return NULL;
+}
+
 static void spawner_think(edict_t *self)
 {
+	if (self->flags & FL_TEAMSLAVE) // the master runs the team
+		return;
 	const char *classes[3] = {self->spawn1, self->spawn2, self->spawn3};
 	int nclasses = 0;
 	for (int i = 0; i < 3; i++)
 		if (classes[i] && classes[i][0])
 			nclasses++;
+	self->nextthink = level.time + 1.0f;
+	if (self->health <= 0 && self->itemcount) {
+		// exhausted: the members' kill targets fire once none of the team's characters is alive any more, then the
+		// whole team goes. openMERC used to fire them as soon as the last character was made: irq3a's countdown
+		// (Hawk defusing the bomb while three spawner teams attack) ran through in seconds and ended the mission
+		if (spawner_alive(self))
+			return;
+		for (edict_t *m = self; m; m = m->teamchain) {
+			if (!m->killtarget)
+				continue;
+			if (ei_show->value)
+				gi.dprintf("Level spawner running kill target\n");
+			const char *kt = m->killtarget;
+			m->killtarget = NULL;
+			m->delay = m->wait = 0;
+			edict_t *t = NULL;
+			while ((t = G_Find(t, FOFS(targetname), kt)))
+				if (t->use)
+					t->use(t, self, self);
+		}
+		for (edict_t *m = self->teamchain, *nx; m; m = nx) {
+			nx = m->teamchain;
+			G_FreeEdict(m);
+		}
+		G_FreeEdict(self);
+		return;
+	}
 	if (!nclasses) {
 		gi.dprintf("spawner set to spawn nothing!\n");
 		self->nextthink = level.time + 99999.9f;
 		return;
 	}
-	if (self->health == 0 && self->itemcount) {
-		// exhausted: kill target once the spawned characters are gone (characters are inert placeholders)
-		if (self->killtarget) {
-			if (ei_show->value)
-				gi.dprintf("Level spawner running kill target\n");
-			edict_t *t = NULL;
-			while ((t = G_Find(t, FOFS(targetname), self->killtarget)))
-				if (t->use)
-					t->use(t, self, self);
-		}
-		G_FreeEdict(self);
-		return;
-	}
+	bool ambush = (self->spawnflags & 128) != 0;
 	float interval = level.alarm ? self->wait : self->delay;
-	if (interval == -1) {
-		self->nextthink = level.time + 1.0f;
-		return;
+	if (!ambush) {
+		if (interval == -1)
+			return;
+		if (level.time - self->timestamp <= interval)
+			return;
 	}
-	if (!(self->spawnflags & 128) && level.time - self->timestamp <= interval) {
-		self->nextthink = level.time + 1.0f;
-		return;
-	}
-	if (game.cinematic) {
+	edict_t *p = G_FirstPlayer();
+	if (!(self->spawnflags & 16) && p && om_ai::CharactersNear(p->s.origin, 600) >= 7) {
 		if (ei_show->value)
-			gi.dprintf("Level spawner can't spawn - either has too many kids or is in cinematics\n");
-		self->nextthink = level.time + 1.0f;
+			gi.dprintf("Level spawner can't spawn - too many enemies nearby\n");
 		return;
 	}
+	int made = 0;
 	for (int k = 0; k < self->count; k++) {
 		if (self->itemcount && self->health <= 0)
 			break;
+		if (game.cinematic || (self->mass != -1 && spawner_alive(self) >= self->mass)) {
+			if (ei_show->value)
+				gi.dprintf("Level spawner can't spawn - either has too many kids or is in cinematics\n");
+			break;
+		}
+		vec3_t spot;
+		edict_t *m = spawner_spot(self, spot);
+		if (!m) {
+			if (ei_show->value)
+				gi.dprintf("Level spawner can't spawn - no valid spots\n");
+			break;
+		}
 		const char *cls = classes[0];
-		if (!(self->spawnflags & 2)) {
+		if (!(self->spawnflags & 2) || !cls || !cls[0]) {
 			int pick = rand() % 3;
 			for (int t = 0; t < 3 && !(classes[pick] && classes[pick][0]); t++)
 				pick = (pick + 1) % 3;
 			cls = classes[pick];
 		}
-		if (!cls || !cls[0])
-			cls = classes[0] ? classes[0] : classes[1] ? classes[1] : classes[2];
 		edict_t *e = G_Spawn();
 		e->classname = (char *)cls;
-		VectorCopy(self->s.origin, e->s.origin);
+		VectorCopy(spot, e->s.origin);
 		e->s.origin[2] += 35;
-		VectorCopy(self->s.angles, e->s.angles);
-		e->target = self->target;
+		VectorCopy(m->s.angles, e->s.angles);
+		e->target = m->target;
 		VectorSet(e->mins, -16, -16, -32);
 		VectorSet(e->maxs, 16, 16, 41);
 		trace_t tr = gi.trace(e->s.origin, e->mins, e->maxs, e->s.origin, e, MASK_MONSTERSOLID);
@@ -701,19 +802,28 @@ static void spawner_think(edict_t *self)
 				gi.dprintf("Level spawner can't spawn - space is occupied\n");
 			break;
 		}
+		spawn_temp_t save = st;
+		memset(&st, 0, sizeof(st));
 		ED_CallSpawn(e);
+		st = save;
 		if (!e->inuse) {
 			gi.dprintf("Couldn't spawn entity type %s!\n", cls);
 			break;
 		}
 		e->flags |= FL_SPAWNED;
+		e->teammaster = self;
+		om_ai::MarkSpawnerMade(e);
+		if ((self->spawnflags & (4 | 128)) && p)
+			om_ai::AlertTo(e, p);
 		if (self->itemcount)
 			self->health--;
 		self->timestamp = (float)(int)level.time;
+		made++;
 		if (ei_show->value)
 			gi.dprintf("Level spawner spawned a guy\n");
 	}
-	self->nextthink = level.time + (interval > 0 ? interval : 1.0f);
+	if (made && !ambush && interval > 1.0f)
+		self->nextthink = level.time + interval;
 }
 
 static void spawner_common(edict_t *ent)
@@ -747,8 +857,7 @@ static void spawner_common(edict_t *ent)
 		ent->count = 1;
 	if (!ent->mass)
 		ent->mass = 1;
-	if (!st.lip)
-		st.lip = 450;
+	ent->speed = st.lip ? st.lip : 450; // the "too close to be invisible" radius (6.2)
 	ent->itemcount = ent->health ? 1 : 0; // total limited
 	ent->use = spawner_use;
 	ent->think = spawner_think;

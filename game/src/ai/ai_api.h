@@ -324,6 +324,7 @@ public:
 	int spawner_made = 0;                /* created by a spawner (SPEC-701 rule 1: spawnflag 16384 targets) */
 	float alertradius = 75.0f;
 	int had_player_record = 0;           /* the previous perception summary had a player record (reaction moment) */
+	float just_noticed_time = 0;         /* openMERC: when it was set - the startle is a reaction of that moment */
 	int just_noticed = 0;                /* SPEC-722 startle: set at the first sighting, consumed by OnStartled (not saved) */
 
 	std::vector<om_ai::Sense *> senses;

@@ -557,6 +557,17 @@ void CinematicEndActors(void)
 	}
 }
 
+void ImpactNoise(edict_t *emitter, const vec3_t pos, float radius, bool needs_sight)
+{
+	if (emitter && emitter->inuse)
+		AlertSound(emitter, pos, PK_NOISE, nullptr, radius, needs_sight, false);
+}
+
+void AlertTo(edict_t *e, edict_t *player)
+{
+	if (e && e->inuse && e->ai && player && player->inuse && e->health > 0)
+		e->ai->HearEvent(player->s.origin, player, player->s.origin, PK_NOISE);
+}
 } /* namespace om_ai */
 
 namespace om_ai {
