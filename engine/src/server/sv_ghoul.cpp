@@ -38,6 +38,7 @@ extern "C" {
 void SV_GhoulHost_Print(const char *text);
 void SV_GhoulHost_Fatal(const char *text);
 int SV_GhoulHost_LoadFile(const char *path, void **data);
+int SV_GhoulHost_FileLength(const char *path);
 void SV_GhoulHost_FreeFile(void *data);
 int SV_GhoulHost_Debug(void);
 float SV_GhoulHost_Cvar(const char *name);
@@ -1259,6 +1260,13 @@ static int HostLoad(void *, const char *path, void **data)
 		RecordUsedFile(path);
 	return len;
 }
+static int HostLength(void *, const char *path)
+{
+	int len = SV_GhoulHost_FileLength(path);
+	if ((len >= 0) && path && path[0])
+		RecordUsedFile(path);
+	return len;
+}
 static void HostFree(void *, void *data) { SV_GhoulHost_FreeFile(data); }
 static void HostPrint(void *, const char *text) { SV_GhoulHost_Print(text); }
 static void HostFatal(void *, const char *text) { SV_GhoulHost_Fatal(text); }
@@ -1276,6 +1284,7 @@ void SV_Ghoul_Init(void)
 	done = true;
 	memset(&host, 0, sizeof(host));
 	host.load_file = HostLoad;
+	host.file_length = HostLength;
 	host.free_file = HostFree;
 	host.print = HostPrint;
 	host.fatal = HostFatal;

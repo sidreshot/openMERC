@@ -41,6 +41,10 @@ typedef struct om_ghoul_host_s
 
 	/* Real time in milliseconds (diagnostics only); may be NULL. */
 	double (*milliseconds)(void *ctx);
+
+	/* openMERC: the length of a file by game path without reading it, -1 when there is none; recorded as used like
+	   load_file. May be NULL (load_file is used). */
+	int (*file_length)(void *ctx, const char *path);
 } om_ghoul_host_t;
 
 /* Engine bit buffer passed to the engine-only network methods (system methods 16, 18, 24, 25).

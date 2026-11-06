@@ -77,14 +77,15 @@ typedef struct
 	int numspare;
 } fsPack_t;
 
-/* OpenMerc: the files under a directory mount (FS_DirIndex): the upper-case relative path and the path as on
-   disk, in an open-addressing table */
+/* OpenMerc: the files under a directory mount (FS_DirIndex): the upper-case relative path, the path as on
+   disk and the length, in an open-addressing table */
 typedef struct
 {
 	qboolean built, dirty;
 	int size;                     /* table slots, a power of two; 0 = no index */
 	int count;                    /* files in it */
 	char **upper, **actual;
+	int *length;                  /* bytes as listed by the walk; -1 unknown (written later, or not listed) */
 } fsDirIndex_t;
 
 typedef struct fsSearchPath_s
@@ -668,11 +669,12 @@ FS_IndexFree(fsDirIndex_t *ix)
 
 	free(ix->upper);
 	free(ix->actual);
+	free(ix->length);
 	memset(ix, 0, sizeof(*ix));
 }
 
 static void
-FS_IndexInsert(fsDirIndex_t *ix, const char *rel)
+FS_IndexInsert(fsDirIndex_t *ix, const char *rel, int length)
 {
 	int *count = &ix->count;
 	char up[MAX_OSPATH];
@@ -688,11 +690,13 @@ FS_IndexInsert(fsDirIndex_t *ix, const char *rel)
 		big.size = ix->size ? ix->size * 2 : 1024;
 		big.upper = calloc(big.size, sizeof(char *));
 		big.actual = calloc(big.size, sizeof(char *));
+		big.length = calloc(big.size, sizeof(int));
 
-		if (!big.upper || !big.actual)
+		if (!big.upper || !big.actual || !big.length)
 		{
 			free(big.upper);
 			free(big.actual);
+			free(big.length);
 			return;
 		}
 
@@ -709,11 +713,13 @@ FS_IndexInsert(fsDirIndex_t *ix, const char *rel)
 
 				big.upper[j] = ix->upper[k];
 				big.actual[j] = ix->actual[k];
+				big.length[j] = ix->length[k];
 			}
 		}
 
 		free(ix->upper);
 		free(ix->actual);
+		free(ix->length);
 		big.built = ix->built;
 		big.count = ix->count;
 		*ix = big;
@@ -731,6 +737,11 @@ FS_IndexInsert(fsDirIndex_t *ix, const char *rel)
 	{
 		if (!strcmp(ix->upper[h], up))
 		{
+			if (length < 0)
+			{
+				ix->length[h] = -1; /* rewritten: the listed length is stale */
+			}
+
 			return; /* the first one on disk wins, as the case-insensitive open */
 		}
 
@@ -739,6 +750,7 @@ FS_IndexInsert(fsDirIndex_t *ix, const char *rel)
 
 	ix->upper[h] = strdup(up);
 	ix->actual[h] = strdup(rel);
+	ix->length[h] = length;
 	(*count)++;
 }
 
@@ -788,7 +800,7 @@ FS_IndexWalk(fsDirIndex_t *ix, const char *dir, const char *rel, int depth)
 			}
 			else
 			{
-				FS_IndexInsert(ix, sub);
+				FS_IndexInsert(ix, sub, (fd.nFileSizeHigh || (fd.nFileSizeLow > 0x7fffffff)) ? -1 : (int)fd.nFileSizeLow);
 			}
 		}
 		while (FindNextFileW(h, &fd));
@@ -837,7 +849,7 @@ FS_IndexWalk(fsDirIndex_t *ix, const char *dir, const char *rel, int depth)
 			}
 			else
 			{
-				FS_IndexInsert(ix, sub);
+				FS_IndexInsert(ix, sub, -1); /* readdir has no length */
 			}
 		}
 
@@ -897,8 +909,9 @@ FS_DirIndex(fsSearchPath_t *search)
 			ix->size = 1;
 			ix->upper = calloc(1, sizeof(char *));
 			ix->actual = calloc(1, sizeof(char *));
+			ix->length = calloc(1, sizeof(int));
 
-			if (!ix->upper || !ix->actual)
+			if (!ix->upper || !ix->actual || !ix->length)
 			{
 				FS_IndexFree(ix);
 				ix->built = true;
@@ -938,14 +951,15 @@ FS_IndexNoteWrite(const char *path)
 
 		if ((i == n) && ((path[n] == '/') || (path[n] == '\\')))
 		{
-			FS_IndexInsert(ix, path + n + 1);
+			FS_IndexInsert(ix, path + n + 1, -1);
 		}
 	}
 }
 
-/* the path as on disk of the upper-case relative name, NULL when the mount has no such file */
+/* the path as on disk of the upper-case relative name, NULL when the mount has no such file; *length its listed
+   length (-1 unknown) */
 static const char *
-FS_IndexFind(const fsDirIndex_t *ix, const char *upper)
+FS_IndexFind(const fsDirIndex_t *ix, const char *upper, int *length)
 {
 	unsigned h = FS_IndexHash(upper) & (ix->size - 1);
 
@@ -953,6 +967,7 @@ FS_IndexFind(const fsDirIndex_t *ix, const char *upper)
 	{
 		if (!strcmp(ix->upper[h], upper))
 		{
+			*length = ix->length[h];
 			return ix->actual[h];
 		}
 
@@ -965,6 +980,10 @@ FS_IndexFind(const fsDirIndex_t *ix, const char *upper)
 /* OpenMerc: file system time of a map load (OMLOADTIME): lookups, their time and the loose-file misses */
 long long fs_stat_us;
 int fs_stat_opens, fs_stat_loosemiss;
+
+/* OpenMerc: FS_LoadFile2 without a buffer only wants the length: a loose file the index lists with its length is
+   answered without opening it (fs_lenonly in, fs_lenonly_hit out: no handle was allocated) */
+static qboolean fs_lenonly, fs_lenonly_hit;
 
 static int FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only, char *resolved,
 		size_t resolvedsize);
@@ -1099,12 +1118,20 @@ FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 
 			if (ix)
 			{
-				const char *actual = FS_IndexFind(ix, upper);
+				int listed;
+				const char *actual = FS_IndexFind(ix, upper, &listed);
 
 				if (!actual)
 				{
 					fs_stat_loosemiss++;
 					continue; /* not in this mount: no open */
+				}
+
+				if (fs_lenonly && (listed >= 0) && !fs_skipmatches && !resolved)
+				{
+					FS_RecordCreatePak(upper);
+					fs_lenonly_hit = true;
+					return listed;
 				}
 
 				/* the name as on disk (no case-insensitive walk on case-sensitive hosts) */
@@ -1350,7 +1377,10 @@ FS_LoadFile2(const char *path, void **buffer, int pad)
 
 	(void)pad;
 
+	fs_lenonly = !buffer;
+	fs_lenonly_hit = false;
 	size = FS_FOpenFile(path, &f, false);
+	fs_lenonly = false;
 
 	if (size < 0)
 	{
@@ -1364,7 +1394,11 @@ FS_LoadFile2(const char *path, void **buffer, int pad)
 
 	if (!buffer)
 	{
-		FS_FCloseFile(f);
+		if (!fs_lenonly_hit)
+		{
+			FS_FCloseFile(f);
+		}
+
 		return size;
 	}
 

@@ -88,6 +88,12 @@ SV_GhoulHost_LoadFile(const char *path, void **data)
 	return FS_LoadFile(path, data);
 }
 
+int
+SV_GhoulHost_FileLength(const char *path)
+{
+	return FS_LoadFile(path, NULL);
+}
+
 void
 SV_GhoulHost_FreeFile(void *data)
 {

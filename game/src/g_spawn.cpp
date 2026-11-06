@@ -28,6 +28,65 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "damage/damage_api.h" /* G3: bodies freed at level spawn */
 #include "modes/g_modes.h" /* G9 */
 #include "ghoulglue/gg_ghoul.h" /* G9 */
+#include <chrono>
+
+/* OpenMerc: g_om_spawntime 1 prints where a level spawn spent its time - the phases of SpawnEntities and the
+   classnames whose spawn functions took longest (their first spawn loads the character's models and skins) */
+namespace {
+struct spawnstat_t {
+	const char *name;
+	double ms;
+	int n;
+};
+spawnstat_t sp_stat[256];
+int sp_nstat;
+bool sp_on;
+std::chrono::steady_clock::time_point sp_t0;
+
+double SpawnMs(std::chrono::steady_clock::time_point a)
+{
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
+}
+
+void SpawnNote(const char *name, double ms)
+{
+	if (!sp_on)
+		return;
+	for (int i = 0; i < sp_nstat; i++)
+		if (!strcmp(sp_stat[i].name, name)) {
+			sp_stat[i].ms += ms;
+			sp_stat[i].n++;
+			return;
+		}
+	if (sp_nstat < 256)
+		sp_stat[sp_nstat++] = {name, ms, 1};
+}
+
+/* a phase of SpawnEntities: the time since the previous mark */
+void SpawnMark(const char *phase)
+{
+	if (!sp_on)
+		return;
+	SpawnNote(phase, SpawnMs(sp_t0));
+	sp_t0 = std::chrono::steady_clock::now();
+}
+
+void SpawnReport(double total)
+{
+	if (!sp_on)
+		return;
+	for (int i = 0; i < sp_nstat; i++) /* by time, longest first */
+		for (int j = i + 1; j < sp_nstat; j++)
+			if (sp_stat[j].ms > sp_stat[i].ms) {
+				spawnstat_t t = sp_stat[i];
+				sp_stat[i] = sp_stat[j];
+				sp_stat[j] = t;
+			}
+	gi.dprintf("OMSPAWN total %.1f ms\n", total);
+	for (int i = 0; i < sp_nstat && i < 16; i++)
+		gi.dprintf("OMSPAWN %8.1f ms %4d  %s\n", sp_stat[i].ms, sp_stat[i].n, sp_stat[i].name);
+}
+} // namespace
 #include "scriptglue/g_scriptglue.h" /* G6b */
 #include "nav/nav_api.h" /* G5 */
 #include "bots/bot_api.h" /* G5 */
@@ -555,6 +614,11 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	edict_t *ent;
 	int i;
 
+	auto spawn_start = std::chrono::steady_clock::now();
+	sp_on = gi.cvar("g_om_spawntime", "0", 0)->value != 0;
+	sp_nstat = 0;
+	sp_t0 = spawn_start;
+
 	SaveClientData();
 	ScriptGlue_LevelStart(); /* G6b: reset the level-script system (SPEC-760 B9 step 1) */
 
@@ -584,6 +648,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	{ extern void Gore_LevelStart(void); Gore_LevelStart(); } /* G3: gib counters, hint zone */
 	{ extern void Roster_LevelStart(void); Roster_LevelStart(); } /* G4: roster records, helicopter globals */
 	PlayerModuleForgetViewModels(); // the in-view model objects of the previous level are gone with the registries
+	SpawnMark("[phase] level reset, ghoul/gore");
 	gix.loadingprogress(0.075f, 1);
 	memset(level.materialflags, 'n', 25);
 	G_DebrisReset();
@@ -595,16 +660,20 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	gix.SP_Register("general");
 	Nav_LevelReset(); /* G5: reset navigation (SPEC-760 B1.3 step 3) */
 	om_ai::LevelStart(); /* G2: character manager reset, AI objects of the previous level released (SPEC-700) */
+	SpawnMark("[phase] string packages, nav, ai reset");
 	gix.loadingprogress(0.15f, 1);
 	// reset bodies and items (B1.3 step 3): the weapon/equipment precache, the deathmatch player models and their
 	// body precache temporaries (SPEC-780 16, AMEND-005 G18.25 rule 1), the item model records (AMEND-005 G18.28).
 	// Order observed on jpndm2 (OPEN_QUESTIONS G18 36): records 14-19 projectiles + armour and sounds 292-341 of the
 	// weapon precache come before the first player model (record 20, its voices from sound 353).
 	WeaponsLevelPrecache();
+	SpawnMark("[phase] weapon precache");
 	PModel_LevelStart();
+	SpawnMark("[phase] player models");
 	ItemsLevelStart();
 	G_PlaceholderReset();
 	G_MoverSoundsReset();
+	SpawnMark("[phase] items");
 	level.precache_all = fs_createpak->value != 0;
 
 	ent = NULL;
@@ -644,7 +713,14 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 			                     SPAWNFLAG_NOT_DEATHMATCH);
 		}
 
-		ED_CallSpawn(ent);
+		if (sp_on) {
+			const char *cn = ent->classname ? ent->classname : "(null)";
+			auto a = std::chrono::steady_clock::now();
+			ED_CallSpawn(ent);
+			SpawnNote(cn, SpawnMs(a));
+		} else {
+			ED_CallSpawn(ent);
+		}
 		if (ent->inuse) {
 			G_MaterialFlags(st.material ? st.material : ent->material,
 			                st.surfacetype ? st.surfacetype : ent->surfacetype);
@@ -663,8 +739,10 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 			G_SetMaterialFlag(10, 'y');
 	}
 
+	sp_t0 = std::chrono::steady_clock::now(); /* the entity loop is counted per classname */
 	ItemsFinalize();
 	GameRulesLevelStart();
+	SpawnMark("[phase] items finalize, game rules");
 	gix.loadingprogress(0.25f, 1);
 	gi.configstring(CS_MATERIALS, level.materialflags);
 
@@ -681,13 +759,18 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	G_MapFixes(mapname);
 	PlayerTrail_Init();
 	gix.loadingprogress(0.28f, 1);
+	SpawnMark("[phase] effects, teams, map fixes");
 	G_MarkSurfaceSounds(); // material sounds of the map's surfaces (SPEC-760 B1.3 step 3, g_material.cpp)
+	SpawnMark("[phase] surface sounds");
 	{ extern void G7_LevelSpawned(void); G7_LevelSpawned(); } /* G7: ambient sound init (SPEC-760 B1.3 step 5) */
+	SpawnMark("[phase] ambient sounds");
 	PlayerModuleLevelStart();
+	SpawnMark("[phase] player module");
 	if (deathmatch->value)
 		gix.ghoulregisterall();
 	gix.loadingprogress(0.33f, 1);
 	level.precache_all = 0;
+	SpawnReport(SpawnMs(spawn_start));
 }
 
 //===================================================================

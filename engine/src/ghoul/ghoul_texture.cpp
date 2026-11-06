@@ -120,7 +120,9 @@ static bool TryList(const std::string &dir, const std::string &n, ImageList &l)
 			return true;
 		}
 	}
-	if (LoadBytes(dir + n + ".TGA", d))
+	// openMERC: only whether the image is there - its length, not the whole file read and copied
+	if (Host().file_length ? Host().file_length(Host().ctx, (dir + n + ".TGA").c_str()) >= 0
+	                       : LoadBytes(dir + n + ".TGA", d))
 	{
 		l.images.assign(1, n);
 		l.dir = dir;
@@ -184,12 +186,17 @@ static Texture *GetTexture(const std::string &name)
 	return r;
 }
 
+// openMERC: decoded from the host's buffer (LoadBytes copied the whole file first)
 static bool DecodeFile(Texture *t)
 {
-	std::vector<uint8_t> d;
-	if (!LoadBytes(t->name + ".TGA", d))
+	if (!Host().load_file)
 		return false;
-	return DecodeTGA(d.data(), d.size(), t->name, *t);
+	void *d = nullptr;
+	int n = Host().load_file(Host().ctx, (t->name + ".TGA").c_str(), &d);
+	bool ok = n >= 0 && d && DecodeTGA((const uint8_t *)d, (size_t)n, t->name, *t);
+	if (d && Host().free_file)
+		Host().free_file(Host().ctx, d);
+	return ok;
 }
 
 Texture *ListTexture(ImageList *l, int index, bool load)
@@ -300,23 +307,25 @@ bool DecodeTGA(const uint8_t *d, size_t n, const std::string &name, Texture &out
 	// rows are always treated as stored bottom-up: the last stored row is the top (v = 0)
 	out.width = w;
 	out.height = h;
-	out.rgba.assign((size_t)w * h * 4, 0);
-	bool alpha = false;
+	out.rgba.resize((size_t)w * h * 4); // every texel written below
+	// openMERC: the gamma table read once - G() is a call into another unit (a guarded static) and was made three
+	// times per texel, most of a character's first spawn
+	const unsigned char *gamma = G().gamma;
+	unsigned opaque = 255;
 	for (int y = 0; y < h; y++)
 	{
 		const uint8_t *src = &px[(size_t)(h - 1 - y) * w * 4];
 		uint8_t *dst = &out.rgba[(size_t)y * w * 4];
-		for (int x = 0; x < w; x++)
+		for (int x = 0; x < w; x++, src += 4, dst += 4)
 		{
-			dst[x * 4 + 0] = G().gamma[src[x * 4 + 0]];
-			dst[x * 4 + 1] = G().gamma[src[x * 4 + 1]];
-			dst[x * 4 + 2] = G().gamma[src[x * 4 + 2]];
-			dst[x * 4 + 3] = src[x * 4 + 3];
-			if (src[x * 4 + 3] != 255)
-				alpha = true;
+			dst[0] = gamma[src[0]];
+			dst[1] = gamma[src[1]];
+			dst[2] = gamma[src[2]];
+			dst[3] = src[3];
+			opaque &= src[3];
 		}
 	}
-	out.hasAlpha = alpha;
+	out.hasAlpha = opaque != 255;
 	out.nomip = name.find("_NOMIP") != std::string::npos;
 	return true;
 }
