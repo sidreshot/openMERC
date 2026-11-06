@@ -1464,6 +1464,7 @@ FS_ReadOriginalHead(const char *rawname, void *buf, int len)
 	char upper[MAX_OSPATH], display[MAX_OSPATH], path[MAX_OSPATH];
 	char found[MAX_OSPATH];
 	fsSearchPath_t *search;
+	fsPack_t *foundpack = NULL;
 	long offset = 0;
 	int size = -1, got;
 	FILE *file;
@@ -1490,6 +1491,7 @@ FS_ReadOriginalHead(const char *rawname, void *buf, int len)
 			if (i >= 0)
 			{
 				Q_strlcpy(found, search->pack->filename, sizeof(found));
+				foundpack = search->pack;
 				offset = search->pack->files[i].offset;
 				size = search->pack->files[i].size;
 			}
@@ -1497,11 +1499,42 @@ FS_ReadOriginalHead(const char *rawname, void *buf, int len)
 			continue;
 		}
 
+		/* OpenMerc: an indexed mount answers from its index - a miss opens nothing, a listed length needs no open
+		   (the renderers ask three times per world texture) */
+		{
+			fsDirIndex_t *ix = FS_DirIndex(search);
+
+			if (ix)
+			{
+				int listed;
+				const char *actual = FS_IndexFind(ix, upper, &listed);
+
+				if (!actual)
+				{
+					continue;
+				}
+
+				Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, actual);
+
+				if (listed >= 0)
+				{
+					size = listed;
+					Q_strlcpy(found, path, sizeof(found));
+					foundpack = NULL;
+					offset = 0;
+					continue;
+				}
+			}
+			else
+			{
 #ifdef _WIN32
-		Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, upper);
+				Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, upper);
 #else
-		Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, display);
+				Com_sprintf(path, sizeof(path), "%s/%s", search->dirname, display);
 #endif
+			}
+		}
+
 		file = FS_OpenHost(path);
 
 		if (file)
@@ -1509,6 +1542,7 @@ FS_ReadOriginalHead(const char *rawname, void *buf, int len)
 			size = FS_FileLength(file);
 			fclose(file);
 			Q_strlcpy(found, path, sizeof(found));
+			foundpack = NULL;
 			offset = 0;
 		}
 	}
@@ -1518,7 +1552,8 @@ FS_ReadOriginalHead(const char *rawname, void *buf, int len)
 		return -1;
 	}
 
-	file = FS_OpenHost(found);
+	/* a pak's stream from its spares (FS_PACK_SPARES) instead of opening the archive again */
+	file = (foundpack && foundpack->numspare) ? foundpack->spare[--foundpack->numspare] : FS_OpenHost(found);
 
 	if (!file)
 	{
@@ -1527,7 +1562,15 @@ FS_ReadOriginalHead(const char *rawname, void *buf, int len)
 
 	fseek(file, offset, SEEK_SET);
 	got = (int)fread(buf, 1, (size < len) ? size : len, file);
-	fclose(file);
+
+	if (foundpack && (foundpack->numspare < FS_PACK_SPARES))
+	{
+		foundpack->spare[foundpack->numspare++] = file;
+	}
+	else
+	{
+		fclose(file);
+	}
 
 	return got;
 }
