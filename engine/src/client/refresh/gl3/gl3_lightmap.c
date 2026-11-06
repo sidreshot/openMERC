@@ -380,6 +380,405 @@ LMTaps(const msurface_t *s, const vec3_t p, int idx[4], float w[4])
 	w[3] = fx * fy;
 }
 
+/* the border stretch edges i < j of one plane share, along i: false when they do not share 2 units */
+static qboolean
+LMPairTest(const lmedge_t *ed, int i, int j, float *plo, float *phi)
+{
+	vec3_t t, r0, r1, off;
+	float len, s0, s1, lo, hi;
+
+	if (ed[i].face == ed[j].face)
+	{
+		return false;
+	}
+
+	/* a stretch of 2 units with both ends of j within 0.1 of i's line lies in both bounds */
+	if ((ed[j].mn[0] > ed[i].mx[0] + 0.25f) || (ed[j].mx[0] < ed[i].mn[0] - 0.25f) ||
+		(ed[j].mn[1] > ed[i].mx[1] + 0.25f) || (ed[j].mx[1] < ed[i].mn[1] - 0.25f) ||
+		(ed[j].mn[2] > ed[i].mx[2] + 0.25f) || (ed[j].mx[2] < ed[i].mn[2] - 0.25f))
+	{
+		return false;
+	}
+
+	VectorSubtract(ed[i].b, ed[i].a, t);
+	len = VectorNormalize(t);
+	VectorSubtract(ed[j].a, ed[i].a, r0);
+	VectorSubtract(ed[j].b, ed[i].a, r1);
+	s0 = DotProduct(r0, t);
+	s1 = DotProduct(r1, t);
+	VectorMA(r0, -s0, t, off);
+
+	if (DotProduct(off, off) > 0.01f)
+	{
+		return false;
+	}
+
+	VectorMA(r1, -s1, t, off);
+
+	if (DotProduct(off, off) > 0.01f)
+	{
+		return false;
+	}
+
+	lo = Q_max(0.0f, Q_min(s0, s1));
+	hi = Q_min(len, Q_max(s0, s1));
+
+	if (hi - lo < 2.0f)
+	{
+		return false;
+	}
+
+	*plo = lo;
+	*phi = hi;
+	return true;
+}
+
+/* the edges of a plane group by their low bound along the sweep axis */
+static const lmedge_t *lmsweep_ed;
+static int lmsweep_axis;
+
+static int
+LMSweepCmp(const void *x, const void *y)
+{
+	float a = lmsweep_ed[*(const int *)x].mn[lmsweep_axis], b = lmsweep_ed[*(const int *)y].mn[lmsweep_axis];
+
+	return (a < b) ? -1 : (a > b) ? 1 : (*(const int *)x - *(const int *)y);
+}
+
+static int
+LMPairCmp(const void *x, const void *y)
+{
+	const lmpair_t *p = x, *q = y;
+
+	return (p->i != q->i) ? p->i - q->i : p->j - q->j;
+}
+
+/* every shared stretch of the sorted edges, in the order of the pairs (i, j > i) of each plane group. OpenMerc: a
+   sweep along the group's longest axis (only the edges whose bounds overlap there are tested; a floor plane holds
+   thousands of edges, all pairs took most of the stitch time), then the pairs sorted back into that order, so the
+   rounds accumulate in the same order as before. */
+static int
+LMFindPairs(const lmedge_t *ed, int numed, lmpair_t **ppairs)
+{
+	lmpair_t *pairs = NULL;
+	int *ord = malloc(sizeof(int) * (size_t)(numed ? numed : 1));
+	int numpairs = 0, maxpairs = 0, g0, g1;
+
+	if (!ord)
+	{
+		*ppairs = NULL;
+		return 0;
+	}
+
+	for (g0 = 0; g0 < numed; g0 = g1)
+	{
+		vec3_t lo, hi;
+		int i, k, n, axis, first = numpairs;
+
+		for (g1 = g0 + 1; (g1 < numed) && !LMEdgeCmp(&ed[g0], &ed[g1]); g1++)
+		{
+		}
+
+		VectorCopy(ed[g0].mn, lo);
+		VectorCopy(ed[g0].mx, hi);
+
+		for (i = g0 + 1; i < g1; i++)
+		{
+			for (k = 0; k < 3; k++)
+			{
+				lo[k] = Q_min(lo[k], ed[i].mn[k]);
+				hi[k] = Q_max(hi[k], ed[i].mx[k]);
+			}
+		}
+
+		axis = ((hi[0] - lo[0] >= hi[1] - lo[1]) && (hi[0] - lo[0] >= hi[2] - lo[2])) ? 0 :
+			(hi[1] - lo[1] >= hi[2] - lo[2]) ? 1 : 2;
+		n = g1 - g0;
+
+		for (i = 0; i < n; i++)
+		{
+			ord[i] = g0 + i;
+		}
+
+		lmsweep_ed = ed;
+		lmsweep_axis = axis;
+		qsort(ord, n, sizeof(int), LMSweepCmp);
+
+		for (i = 0; i < n; i++)
+		{
+			int a = ord[i];
+
+			for (k = i + 1; (k < n) && (ed[ord[k]].mn[axis] <= ed[a].mx[axis] + 0.25f); k++)
+			{
+				int x = (a < ord[k]) ? a : ord[k], y = (a < ord[k]) ? ord[k] : a;
+				float plo, phi;
+
+				if (!LMPairTest(ed, x, y, &plo, &phi))
+				{
+					continue;
+				}
+
+				if (numpairs == maxpairs)
+				{
+					lmpair_t *np = realloc(pairs, sizeof(*pairs) * (size_t)(maxpairs ? maxpairs * 2 : 1024));
+
+					if (!np)
+					{
+						continue;
+					}
+
+					pairs = np;
+					maxpairs = maxpairs ? maxpairs * 2 : 1024;
+				}
+
+				pairs[numpairs].i = x;
+				pairs[numpairs].j = y;
+				pairs[numpairs].lo = plo;
+				pairs[numpairs].hi = phi;
+				numpairs++;
+			}
+		}
+
+		if (numpairs - first > 1)
+		{
+			qsort(pairs + first, numpairs - first, sizeof(*pairs), LMPairCmp);
+		}
+	}
+
+	free(ord);
+	*ppairs = pairs;
+	return numpairs;
+}
+
+/* the corrections of one face: full on the samples that make up the border, fading into the face over K samples
+   (each face only reads its own sums and writes its own samples: the faces run on all cores) */
+typedef struct
+{
+	float *D;
+	int *dist;
+	int cap;
+} lmcorrbuf_t;
+
+typedef struct
+{
+	gl3model_t *m;
+	float **acc;
+	const int *faces;
+	int numfaces, K;
+} lmcorr_t;
+
+#define LMCORR_FACES 32 /* faces per job */
+
+static void
+LMCorrectFace(msurface_t *s, const float *acc, int K, lmcorrbuf_t *b)
+{
+	int ns, k, n, W, H, it, x, y, c;
+	float *D;
+	int *dist;
+
+	W = s->lmsize[0];
+	H = s->lmsize[1];
+	n = W * H;
+
+	for (ns = 0; ns < MAX_LIGHTMAPS_PER_SURFACE && s->styles[ns] != 255; ns++)
+	{
+	}
+
+	/* the work buffers of the largest face so far of this job */
+	if (n > b->cap)
+	{
+		free(b->D);
+		free(b->dist);
+		b->D = malloc(sizeof(float) * 3 * n);
+		b->dist = malloc(sizeof(int) * n);
+		b->cap = (b->D && b->dist) ? n : 0;
+	}
+
+	if (!b->cap)
+	{
+		return;
+	}
+
+	D = b->D;
+	dist = b->dist;
+
+	for (k = 0; k < ns; k++)
+	{
+		const float *a = acc + (size_t)k * n * 4;
+		byte *smp = s->samples + (size_t)k * n * 3;
+		qboolean any = false;
+
+		for (x = 0; x < n; x++)
+		{
+			if (a[x * 4 + 3] > 0.05f)
+			{
+				for (c = 0; c < 3; c++)
+				{
+					D[x * 3 + c] = a[x * 4 + c] / a[x * 4 + 3];
+				}
+
+				dist[x] = 0;
+				any = true;
+			}
+			else
+			{
+				D[x * 3] = D[x * 3 + 1] = D[x * 3 + 2] = 0;
+				dist[x] = -1;
+			}
+		}
+
+		if (!any)
+		{
+			continue;
+		}
+
+		for (it = 1; it <= K; it++)
+		{
+			qboolean grew = false;
+
+			for (y = 0; y < H; y++)
+			{
+				for (x = 0; x < W; x++)
+				{
+					int l = y * W + x, nn = 0, d;
+					float sum[3] = {0, 0, 0};
+					static const int dx[4] = {1, -1, 0, 0}, dy[4] = {0, 0, 1, -1};
+
+					if (dist[l] >= 0)
+					{
+						continue;
+					}
+
+					for (d = 0; d < 4; d++)
+					{
+						int xx = x + dx[d], yy = y + dy[d], o;
+
+						if ((xx < 0) || (yy < 0) || (xx >= W) || (yy >= H))
+						{
+							continue;
+						}
+
+						o = yy * W + xx;
+
+						if ((dist[o] >= 0) && (dist[o] < it))
+						{
+							for (c = 0; c < 3; c++)
+							{
+								sum[c] += D[o * 3 + c];
+							}
+
+							nn++;
+						}
+					}
+
+					if (nn)
+					{
+						for (c = 0; c < 3; c++)
+						{
+							D[l * 3 + c] = sum[c] / nn * (1.0f - 1.0f / (K + 1 - it + 1));
+						}
+
+						dist[l] = it;
+						grew = true;
+					}
+				}
+			}
+
+			if (!grew)
+			{
+				break; /* nothing reached this time: neither will a later pass */
+			}
+		}
+
+		for (x = 0; x < n; x++)
+		{
+			if (dist[x] < 0)
+			{
+				continue; /* no correction: the sample stays as it is */
+			}
+
+			for (c = 0; c < 3; c++)
+			{
+				int v = (int)floorf(smp[x * 3 + c] + D[x * 3 + c] + 0.5f);
+
+				smp[x * 3 + c] = (byte)Q_clamp(v, 0, 255);
+			}
+		}
+	}
+}
+
+/* whether two of the faces' sample blocks overlap */
+typedef struct
+{
+	const byte *lo, *hi;
+} lmspan_t;
+
+static int
+LMSpanCmp(const void *x, const void *y)
+{
+	const lmspan_t *p = x, *q = y;
+
+	return (p->lo < q->lo) ? -1 : (p->lo > q->lo) ? 1 : 0;
+}
+
+static qboolean
+LMSamplesShared(const gl3model_t *m, const int *faces, int numfaces)
+{
+	lmspan_t *sp = malloc(sizeof(*sp) * (size_t)(numfaces ? numfaces : 1));
+	qboolean shared = false;
+	int f;
+
+	if (!sp)
+	{
+		return true;
+	}
+
+	for (f = 0; f < numfaces; f++)
+	{
+		const msurface_t *s = &m->surfaces[faces[f]];
+		int ns;
+
+		for (ns = 0; ns < MAX_LIGHTMAPS_PER_SURFACE && s->styles[ns] != 255; ns++)
+		{
+		}
+
+		sp[f].lo = s->samples;
+		sp[f].hi = s->samples + (size_t)3 * s->lmsize[0] * s->lmsize[1] * ns;
+	}
+
+	qsort(sp, numfaces, sizeof(*sp), LMSpanCmp);
+
+	for (f = 1; f < numfaces; f++)
+	{
+		if (sp[f].lo < sp[f - 1].hi)
+		{
+			shared = true;
+			break;
+		}
+	}
+
+	free(sp);
+	return shared;
+}
+
+static void
+LMCorrectJob(int job, void *ctx)
+{
+	lmcorr_t *q = (lmcorr_t *)ctx;
+	lmcorrbuf_t b = {NULL, NULL, 0};
+	int f;
+
+	for (f = job * LMCORR_FACES; (f < (job + 1) * LMCORR_FACES) && (f < q->numfaces); f++)
+	{
+		int i = q->faces[f];
+
+		LMCorrectFace(&q->m->surfaces[i], q->acc[i], q->K, &b);
+	}
+
+	free(b.D);
+	free(b.dist);
+}
+
 void
 GL3_LM_StitchSeams(gl3model_t *m)
 {
@@ -387,8 +786,9 @@ GL3_LM_StitchSeams(gl3model_t *m)
 	cvar_t *width = ri.Cvar_Get("r_om_lmstitch_width", "3", CVAR_ARCHIVE);
 	lmedge_t *ed;
 	lmpair_t *pairs = NULL;
+	int *corrfaces = NULL;
 	float **acc;   /* per face: per style per sample r g b weight */
-	int numed = 0, i, j, g0, g1, round, faces = 0, points = 0, K, numpairs = 0, maxpairs = 0, pi;
+	int numed = 0, i, j, round, faces = 0, points = 0, K, numpairs = 0, pi;
 
 	if (!on->value || (m->bspversion != BSPVERSION_SOF) || !m->numsurfaces)
 	{
@@ -470,82 +870,7 @@ GL3_LM_StitchSeams(gl3model_t *m)
 		   walked in every round - the rounds only change the samples */
 		if (round == 0)
 		{
-			for (g0 = 0; g0 < numed; g0 = g1)
-			{
-				for (g1 = g0 + 1; (g1 < numed) && !LMEdgeCmp(&ed[g0], &ed[g1]); g1++)
-				{
-				}
-
-				for (i = g0; i < g1; i++)
-				{
-					vec3_t t;
-					float len;
-
-					VectorSubtract(ed[i].b, ed[i].a, t);
-					len = VectorNormalize(t);
-
-					for (j = i + 1; j < g1; j++)
-					{
-						vec3_t r0, r1, off;
-						float s0, s1, lo, hi;
-
-						if (ed[i].face == ed[j].face)
-						{
-							continue;
-						}
-
-						/* a stretch of 2 units with both ends of j within 0.1 of i's line lies in both bounds */
-						if ((ed[j].mn[0] > ed[i].mx[0] + 0.25f) || (ed[j].mx[0] < ed[i].mn[0] - 0.25f) ||
-							(ed[j].mn[1] > ed[i].mx[1] + 0.25f) || (ed[j].mx[1] < ed[i].mn[1] - 0.25f) ||
-							(ed[j].mn[2] > ed[i].mx[2] + 0.25f) || (ed[j].mx[2] < ed[i].mn[2] - 0.25f))
-						{
-							continue;
-						}
-
-						VectorSubtract(ed[j].a, ed[i].a, r0);
-						VectorSubtract(ed[j].b, ed[i].a, r1);
-						s0 = DotProduct(r0, t);
-						s1 = DotProduct(r1, t);
-						VectorMA(r0, -s0, t, off);
-						if (DotProduct(off, off) > 0.01f)
-						{
-							continue;
-						}
-						VectorMA(r1, -s1, t, off);
-						if (DotProduct(off, off) > 0.01f)
-						{
-							continue;
-						}
-
-						lo = Q_max(0.0f, Q_min(s0, s1));
-						hi = Q_min(len, Q_max(s0, s1));
-
-						if (hi - lo < 2.0f)
-						{
-							continue;
-						}
-
-						if (numpairs == maxpairs)
-						{
-							lmpair_t *np = realloc(pairs, sizeof(*pairs) * (size_t)(maxpairs ? maxpairs * 2 : 1024));
-
-							if (!np)
-							{
-								continue;
-							}
-
-							pairs = np;
-							maxpairs = maxpairs ? maxpairs * 2 : 1024;
-						}
-
-						pairs[numpairs].i = i;
-						pairs[numpairs].j = j;
-						pairs[numpairs].lo = lo;
-						pairs[numpairs].hi = hi;
-						numpairs++;
-					}
-				}
-			}
+			numpairs = LMFindPairs(ed, numed, &pairs);
 		}
 
 		for (pi = 0; pi < numpairs; pi++)
@@ -647,130 +972,42 @@ GL3_LM_StitchSeams(gl3model_t *m)
 			}
 		}
 
-		/* the corrections: full on the samples that make up the border, fading into the face over K samples */
-		for (i = 0; i < m->numsurfaces; i++)
+		/* the corrections, the faces that got sums */
 		{
-			msurface_t *s = &m->surfaces[i];
-			int ns, k, n, W, H, it, x, y, c;
-			float *D;
-			int *dist;
+			lmcorr_t q;
 
-			if (!acc[i])
+			if (!corrfaces)
 			{
-				continue;
+				corrfaces = malloc(sizeof(int) * (size_t)m->numsurfaces);
 			}
 
-			W = s->lmsize[0];
-			H = s->lmsize[1];
-			n = W * H;
+			q.m = m;
+			q.acc = acc;
+			q.faces = corrfaces;
+			q.numfaces = 0;
+			q.K = K;
 
-			for (ns = 0; ns < MAX_LIGHTMAPS_PER_SURFACE && s->styles[ns] != 255; ns++)
+			for (i = 0; corrfaces && (i < m->numsurfaces); i++)
 			{
-			}
-
-			D = malloc(sizeof(float) * 3 * n);
-			dist = malloc(sizeof(int) * n);
-
-			if (!D || !dist)
-			{
-				free(D);
-				free(dist);
-				continue;
-			}
-
-			for (k = 0; k < ns; k++)
-			{
-				const float *a = acc[i] + (size_t)k * n * 4;
-				byte *smp = s->samples + (size_t)k * n * 3;
-				qboolean any = false;
-
-				for (x = 0; x < n; x++)
+				if (acc[i])
 				{
-					if (a[x * 4 + 3] > 0.05f)
-					{
-						for (c = 0; c < 3; c++)
-						{
-							D[x * 3 + c] = a[x * 4 + c] / a[x * 4 + 3];
-						}
-
-						dist[x] = 0;
-						any = true;
-					}
-					else
-					{
-						D[x * 3] = D[x * 3 + 1] = D[x * 3 + 2] = 0;
-						dist[x] = -1;
-					}
-				}
-
-				if (!any)
-				{
-					continue;
-				}
-
-				for (it = 1; it <= K; it++)
-				{
-					for (y = 0; y < H; y++)
-					{
-						for (x = 0; x < W; x++)
-						{
-							int l = y * W + x, nn = 0, d;
-							float sum[3] = {0, 0, 0};
-							static const int dx[4] = {1, -1, 0, 0}, dy[4] = {0, 0, 1, -1};
-
-							if (dist[l] >= 0)
-							{
-								continue;
-							}
-
-							for (d = 0; d < 4; d++)
-							{
-								int xx = x + dx[d], yy = y + dy[d], o;
-
-								if ((xx < 0) || (yy < 0) || (xx >= W) || (yy >= H))
-								{
-									continue;
-								}
-
-								o = yy * W + xx;
-
-								if ((dist[o] >= 0) && (dist[o] < it))
-								{
-									for (c = 0; c < 3; c++)
-									{
-										sum[c] += D[o * 3 + c];
-									}
-
-									nn++;
-								}
-							}
-
-							if (nn)
-							{
-								for (c = 0; c < 3; c++)
-								{
-									D[l * 3 + c] = sum[c] / nn * (1.0f - 1.0f / (K + 1 - it + 1));
-								}
-
-								dist[l] = it;
-							}
-						}
-					}
-				}
-
-				for (x = 0; x < n; x++)
-				{
-					for (c = 0; c < 3; c++)
-					{
-						int v = (int)floorf(smp[x * 3 + c] + D[x * 3 + c] + 0.5f);
-
-						smp[x * 3 + c] = (byte)Q_clamp(v, 0, 255);
-					}
+					corrfaces[q.numfaces++] = i;
 				}
 			}
 
-			free(D);
-			free(dist);
+			/* faces that share lightmap samples (a compiler may point two faces at one block) would be corrected at
+			   once by two threads: then one by one, in face order, as before */
+			if (LMSamplesShared(m, corrfaces, q.numfaces))
+			{
+				for (i = 0; i < (q.numfaces + LMCORR_FACES - 1) / LMCORR_FACES; i++)
+				{
+					LMCorrectJob(i, &q);
+				}
+			}
+			else
+			{
+				GL3_ParallelFor((q.numfaces + LMCORR_FACES - 1) / LMCORR_FACES, LMCorrectJob, &q);
+			}
 		}
 	}
 
@@ -782,6 +1019,7 @@ GL3_LM_StitchSeams(gl3model_t *m)
 	free(acc);
 	free(ed);
 	free(pairs);
+	free(corrfaces);
 	R_Printf(PRINT_DEVELOPER, "r_om_lmstitch: %d faces, %d border points\n", faces, points / 3);
 }
 
