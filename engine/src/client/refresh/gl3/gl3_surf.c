@@ -1941,10 +1941,13 @@ GL3_DrawWorld(void)
 
 	GL3_ClearSkyBox();
 	RecursiveWorldNode(&ent, gl3_worldmodel->nodes, r_nocull->value ? 0 : 15);
+	GL3_Post_ProfMark("wnodes");
 	DrawTextureChains(&ent);
 	GL3_Draw3DBatchesNow();
+	GL3_Post_ProfMark("wchains");
 	SeamDraw(); /* GFX-modern r_om_seams */
 	GL3_Detail_DrawPass();
+	GL3_Post_ProfMark("wseams");
 	GL3_DrawSkyBox();
 	GL3_Terrain_Draw(); /* I4c: SPEC-410 Terrain sets, after the sky box, before the outlines */
 	DrawTriangleOutlines();

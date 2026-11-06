@@ -2098,6 +2098,71 @@ Emu_DepthMask(GLboolean flag)
 	glDepthMask(flag);
 }
 
+/* the level-0 image last given to each texture by the Ghoul library (Emu_TexImage2D): the library re-specifies
+   some of its textures every frame - on tsr1 ~290 glTexImage2D a second, 33 alpha 64x64 images in rotation -
+   so an identical image is skipped and a new image of the same size and format goes through glTexSubImage2D
+   instead of reallocating the storage */
+typedef struct
+{
+	unsigned long long hash;
+	int w, h, valid;
+	GLint ifmt;
+	GLenum fmt, type;
+} emutexrec_t;
+
+static emutexrec_t *texrecs;
+static unsigned numtexrecs;
+static unsigned texstat[3]; /* full, sub, skipped (r_om_ghltexlog) */
+
+static emutexrec_t *
+TexRec(GLuint t)
+{
+	if (t >= numtexrecs)
+	{
+		unsigned n = numtexrecs ? numtexrecs : 1024;
+		emutexrec_t *r;
+
+		while (n <= t)
+		{
+			n *= 2;
+		}
+
+		if ((n > (1u << 20)) || !(r = realloc(texrecs, n * sizeof(*r))))
+		{
+			return NULL;
+		}
+
+		memset(r + numtexrecs, 0, (n - numtexrecs) * sizeof(*r));
+		texrecs = r;
+		numtexrecs = n;
+	}
+
+	return &texrecs[t];
+}
+
+static void
+TexRecForget(GLuint t)
+{
+	if (t < numtexrecs)
+	{
+		texrecs[t].valid = 0;
+	}
+}
+
+static unsigned long long
+HashBytes(const byte *p, size_t n)
+{
+	unsigned long long h = 1469598103934665603ULL;
+	size_t i;
+
+	for (i = 0; i < n; i++)
+	{
+		h = (h ^ p[i]) * 1099511628211ULL;
+	}
+
+	return h;
+}
+
 static void GHLAPI
 Emu_DeleteTextures(GLsizei n, const GLuint *textures)
 {
@@ -2116,6 +2181,7 @@ Emu_DeleteTextures(GLsizei n, const GLuint *textures)
 		}
 
 		SetTexSwizzle(textures[i], SWZ_RGBA);
+		TexRecForget(textures[i]);
 		GL3_Beam_ForgetTexture(textures[i]);
 		GlowMark(textures[i], false);
 
@@ -2150,7 +2216,14 @@ Emu_GetError(void)
 static void GHLAPI
 Emu_GenTextures(GLsizei n, GLuint *textures)
 {
+	GLsizei i;
+
 	glGenTextures(n, textures);
+
+	for (i = 0; i < n; i++)
+	{
+		TexRecForget(textures[i]); /* a name freed outside the library (vid_restart) holds no image */
+	}
 }
 
 static qboolean
@@ -2416,6 +2489,22 @@ Emu_TexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, 
 
 	(void)border;
 
+	{
+		/* r_om_ghltexlog 1: every texture the Ghoul library uploads, with the time: uploads during play are hitches */
+		static cvar_t *log;
+
+		if (!log)
+		{
+			log = ri.Cvar_Get("r_om_ghltexlog", "0", 0);
+		}
+
+		if (log->value && (level == 0))
+		{
+			R_Printf(PRINT_ALL, "GHLTEX %.0f ms tex %u %dx%d fmt 0x%x (full %u sub %u skipped %u)\n", GL3_LoadClockMs(),
+				E.boundtex, width, height, format, texstat[0], texstat[1], texstat[2]);
+		}
+	}
+
 	switch (format)
 	{
 		case GHL_GL_ALPHA:
@@ -2501,6 +2590,67 @@ Emu_TexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, 
 	if ((target == GL_TEXTURE_2D) && (level == 0))
 	{
 		SetTexSwizzle(E.boundtex, swz);
+	}
+
+	/* a repeated image: skipped, or the same storage refilled (TexRec) */
+	{
+		int c = 0;
+		emutexrec_t *rec = NULL;
+
+		switch (fmt)
+		{
+			case GL_RED: case GHL_GL_ALPHA: case GHL_GL_LUMINANCE: c = 1; break;
+			case GL_RG: c = 2; break;
+			case GL_RGB: c = 3; break;
+			case GL_RGBA: c = 4; break;
+			default: c = 0; break; /* BGR(A) and the rest: always the full upload */
+		}
+
+		if ((target == GL_TEXTURE_2D) && (level == 0) && pixels && (type == GL_UNSIGNED_BYTE) && c && E.boundtex &&
+			(width > 0) && (height > 0) && (rec = TexRec(E.boundtex)))
+		{
+			GLint align = 4;
+			size_t row, bytes;
+			unsigned long long hash;
+
+			glGetIntegerv(GL_UNPACK_ALIGNMENT, &align);
+			row = (((size_t)width * c) + (size_t)align - 1) / (size_t)align * (size_t)align;
+			bytes = row * (size_t)(height - 1) + (size_t)width * c;
+			hash = HashBytes((const byte *)pixels, bytes);
+
+			if (rec->valid && (rec->w == width) && (rec->h == height) && (rec->ifmt == ifmt) && (rec->fmt == fmt) &&
+				(rec->type == type))
+			{
+				if (rec->hash != hash)
+				{
+					glTexSubImage2D(target, 0, 0, 0, width, height, fmt, type, pixels);
+					rec->hash = hash;
+					texstat[1]++;
+				}
+				else
+				{
+					texstat[2]++;
+				}
+
+				return;
+			}
+
+			glTexImage2D(target, level, ifmt, width, height, 0, fmt, type, pixels);
+			texstat[0]++;
+			rec->valid = 1;
+			rec->w = width;
+			rec->h = height;
+			rec->ifmt = ifmt;
+			rec->fmt = fmt;
+			rec->type = type;
+			rec->hash = hash;
+			return;
+		}
+
+		if ((target == GL_TEXTURE_2D) && (level == 0))
+		{
+			TexRecForget(E.boundtex);
+		}
 	}
 
 #ifdef YQ2_GL3_GLES3

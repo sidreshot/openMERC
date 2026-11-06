@@ -2429,11 +2429,14 @@ GL3_RenderView(refdef_t *fd)
 	GL3_Post_ProfMark("csm");
 
 	SetupGL();
+	GL3_Post_ProfMark("setupgl");
 
 	GL3_MarkLeaves(); /* done here so we know if we're in water */
+	GL3_Post_ProfMark("leaves");
 
 	GL3_FX_BeginFrame3D();
 	GL3_Fog_BeginFrame();
+	GL3_Post_ProfMark("fogbegin");
 
 	/* SPEC-410: lightmaps through the colour table; none with r_fullbright or night vision */
 	GL3_SoF_BindLightTable((r_fullbright->value != 0) || (r_newrefdef.rdflags & RDF_IRGOGGLES));
