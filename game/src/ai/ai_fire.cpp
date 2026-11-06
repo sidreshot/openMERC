@@ -217,8 +217,10 @@ static bool ScriptedShot(edict_t *ent, int a, vec3_t start, vec3_t dir, edict_t 
 	else
 		/* the bolts sit on the skin (sbolt_mouth on the face): a ray aimed exactly at one grazed the mesh from the side
 		   and passed through (tsr1 intro: Sabre's shot at the kneeling hostage missed and the scene waited for a death
-		   that never came); a fifth of the way towards the body centre goes in */
-		for (int k = 0; k < 3; k++)
+		   that never came); a fifth of the way towards the body's axis goes in. Horizontally only: towards the origin
+		   (the waist) it also dropped, and the tsr1 executioner's shot at the mouth from behind went into the right
+		   shoulder - the SWAT officer was thrown back instead of the original's head death (clutch, knees, fall) */
+		for (int k = 0; k < 2; k++)
 			aim[k] += 0.2f * (target->s.origin[k] - aim[k]);
 	VectorSubtract(aim, start, dir);
 	VectorNormalize(dir);

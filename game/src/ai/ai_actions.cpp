@@ -858,10 +858,21 @@ public:
 	{
 		*m = *r = 0;
 		G3Body *b = ai->body;
-		/* a scripted fall: as the jump above (black-box: kos1 `std_jdrop` drops 190 units over 1.8 s in the original
-		 * while the script has gone on) */
+		/* a scripted fall completes when its drop animation ends, in the air or not, and the animation is not held
+		 * while airborne (black-box, original module: the AI-done of kos1 `introjohn2` (moved by a ROF, never
+		 * "lands") and sud1 `intplayer2` comes 2.0 / 1.75 s after the start, the length of `std_jdrop`; holding the
+		 * animation until the landing put irq2a's intro ~1 s behind) */
+		bool scripted = (script_flags & 0x80000000) != 0;
 		if (!Step(ent, ai, false, false))
 			return true;
+		/* the drop animation holds itself at its `inair` note until a landing; a character a ROF carries down (kos1
+		 * `introjohn2`) stays on the ground and never "lands", so on the ground the hold is released at once */
+		if (scripted && b && b->pauseKind && ent->groundentity)
+			b->Resume();
+		if (scripted && b && b->AnimDone()) {
+			*m = *r = 1;
+			return true;
+		}
 		if (!left_ground) {
 			if (ent->groundentity) {
 				vec3_t d;
@@ -877,7 +888,7 @@ public:
 			}
 			if (!ent->groundentity) {
 				left_ground = 1;
-				if (b)
+				if (b && !scripted)
 					b->Pause(1, Now());
 			}
 			return false;

@@ -393,8 +393,11 @@ void ScriptedDecision::Plan(edict_t *ent, AI *ai)
 	}
 	Action *a = MakeAction(ai, cls, this, nullptr, rec, dest, IsZero(face) ? nullptr : face, dur, ends);
 	a->done_token = keep ? 0 : s.done_token; /* a move command reports its signal itself when it arrives */
-	/* jump and fall commands complete for the script as soon as they start (SPEC-750 12.4); the AI action plays on */
-	bool done_at_start = (kind == 3 || kind == 4) && !lethal;
+	/* jump commands complete for the script as soon as they start (SPEC-750 12.4); the AI action plays on. A fall
+	 * command completes with its drop animation (FallAction; black-box, original module: kos1 `introjohn2` and sud1
+	 * `intplayer2` drop with a signal the script waits on, the original's signal comes 1.75-2.0 s after the start, and
+	 * both intros ended that much early when it was reported at the start) */
+	bool done_at_start = kind == 3 && !lethal;
 	if (done_at_start)
 		a->done_token = 0;
 	a->script_flags = s.flags | 0x80000000; /* marks a scripted action (SPEC-750 12.4 completion rules) */
