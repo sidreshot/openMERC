@@ -836,6 +836,13 @@ public:
 			}
 			return false;
 		}
+		/* openMERC: landed - the jump animation waits at its in-air note (body pause kind 1) and goes on to its landing
+		   now. Nothing resumed it: trn1's outro Mullins (std_jrun_fwd_a_a between the cars) hung in the air pose until
+		   the 3 s fallback, 4.0 s against the original's 2.0 (sv_animlog A/B) */
+		if (ai->body && ai->body->pauseKind == 1) {
+			ai->body->eventFlags |= BODYEV_THUD;
+			ai->body->Resume();
+		}
 		if ((ai->body && ai->body->AnimDone()) || now > landing_check + 3) {
 			VectorClear(ent->velocity);
 			*m = HDist(destination, ent->s.origin) <= 30 ? 1.0f : 0.0f;
