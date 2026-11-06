@@ -1866,24 +1866,6 @@ PostDiscard(GLenum attachment)
 #endif
 }
 
-/* the rectangle of the bound framebuffer an opaque full-rect pass is about to overwrite (the window for the last
-   pass of the view - composite, upscale, FXAA): a tiled GPU need not load the previous contents into the tiles.
-   Only the rectangle, so a viewport smaller than the window keeps the rest. GLES only, as PostDiscard */
-static void
-PostDiscardRect(GLuint fb, int x, int y, int w, int h)
-{
-#ifdef YQ2_GL3_GLES3
-	GLenum a = fb ? GL_COLOR_ATTACHMENT0 : GL_COLOR;
-
-	if ((w > 0) && (h > 0))
-	{
-		glInvalidateSubFramebuffer(GL_FRAMEBUFFER, 1, &a, x, y, w, h);
-	}
-#else
-	(void)fb; (void)x; (void)y; (void)w; (void)h;
-#endif
-}
-
 static void
 Bloom(void)
 {
@@ -2588,7 +2570,6 @@ FxaaEnd(GLuint dst, int vx, int vy, int vw, int vh)
 
 	glBindFramebuffer(GL_FRAMEBUFFER, dst);
 	glViewport(vx, vy, vw, vh);
-	PostDiscardRect(dst, vx, vy, vw, vh);
 	GL3_UseProgram(FA.prog);
 	glUniform1i(FA.u_tex, 0);
 	glUniform4f(FA.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
@@ -2831,7 +2812,6 @@ UpscaleEnd(void)
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(P.wx, P.wy, P.ww, P.wh);
-	PostDiscardRect(0, P.wx, P.wy, P.ww, P.wh);
 	GL3_UseProgram(UP.prog);
 	glUniform1i(UP.u_tex, 0);
 	glUniform4f(UP.u_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
@@ -2934,20 +2914,10 @@ GL3_Post_EndView(void)
 	if (fxaa || scaled || !P.scaled)
 	{
 		glViewport(P.vx, P.vy, P.vw, P.vh);
-
-		if (!fxaa && !scaled)
-		{
-			PostDiscardRect(0, P.vx, P.vy, P.vw, P.vh); /* the composite straight into the window */
-		}
 	}
 	else
 	{
 		glViewport(P.wx, P.wy, P.ww, P.wh); /* scaled without the upscale pass: a plain stretch to the window */
-
-		if (!fxaa)
-		{
-			PostDiscardRect(0, P.wx, P.wy, P.ww, P.wh);
-		}
 	}
 
 	fw = (float)P.w;
