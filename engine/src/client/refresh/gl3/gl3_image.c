@@ -1317,6 +1317,8 @@ typedef struct
 	const float *src;    /* the box pass */
 	float *dst;
 	int pass;
+	int *cx0, *cx1;      /* the fill's columns of the original for each x (the same for every row) */
+	float *cfx;
 } hdseam_t;
 
 enum { HDS_FILL, HDS_BOXX, HDS_BOXY, HDS_COMBINE, HDS_STORE };
@@ -1367,7 +1369,7 @@ HDSeamJob(int job, void *ctx)
 				{
 					float *a = &acc[(x - x0) * 3 + c];
 
-					o[x * 3 + c] = *a / (2 * r + 1);
+					o[x * 3 + c] = *a / (float)(2 * r + 1);
 					*a += la[x * 3 + c] - ls[x * 3 + c];
 				}
 			}
@@ -1391,22 +1393,22 @@ HDSeamJob(int job, void *ctx)
 				y1 = (y0 + 1 + oh) % oh;
 				y0 = (y0 + oh) % oh;
 
-				for (x = 0; x < w; x++)
-				{
-					float uu = (x + 0.5f) / s - 0.5f;
-					int x0 = (int)floorf(uu), x1;
-					float fx = uu - x0;
+				const byte *r0 = o + (size_t)y0 * ow * 4, *r1 = o + (size_t)y1 * ow * 4, *pp = q->p + (size_t)y * w * 4;
+				float *ff = q->f + (size_t)y * w * 3, *uf = q->u + (size_t)y * w * 3;
+				float gy = 1 - fy;
 
-					x1 = (x0 + 1 + ow) % ow;
-					x0 = (x0 + ow) % ow;
+				for (x = 0; x < w; x++, pp += 4, ff += 3, uf += 3)
+				{
+					const byte *a0 = r0 + q->cx0[x] * 4, *b0 = r0 + q->cx1[x] * 4;
+					const byte *d0 = r1 + q->cx0[x] * 4, *e0 = r1 + q->cx1[x] * 4;
+					float fx = q->cfx[x];
 
 					for (c = 0; c < 3; c++)
 					{
-						float a = o[(y0 * ow + x0) * 4 + c], b = o[(y0 * ow + x1) * 4 + c];
-						float d = o[(y1 * ow + x0) * 4 + c], e = o[(y1 * ow + x1) * 4 + c];
+						float a = a0[c], b = b0[c], d = d0[c], e = e0[c];
 
-						q->f[(y * w + x) * 3 + c] = q->p[(y * w + x) * 4 + c];
-						q->u[(y * w + x) * 3 + c] = (a + (b - a) * fx) * (1 - fy) + (d + (e - d) * fx) * fy;
+						ff[c] = pp[c];
+						uf[c] = (a + (b - a) * fx) * gy + (d + (e - d) * fx) * fy;
 					}
 				}
 
@@ -1420,21 +1422,45 @@ HDSeamJob(int job, void *ctx)
 				float *o = q->dst + (size_t)y * 3 * w;
 				int r = s, i;
 
+				float n = (float)(2 * r + 1);
+
 				for (c = 0; c < 3; c++)
 				{
 					float sum = 0;
+					const float *lc = l + c;
+					float *oc = o + c;
+					int mid0 = r, mid1 = w - r - 1; /* i in [mid0, mid1): neither index clamped */
 
 					for (i = -r; i <= r; i++)
 					{
-						sum += l[((i < 0) ? 0 : (i >= w) ? w - 1 : i) * 3 + c];
+						sum += lc[((i < 0) ? 0 : (i >= w) ? w - 1 : i) * 3];
 					}
 
-					for (i = 0; i < w; i++)
+					if (mid0 > mid1)
+					{
+						mid0 = mid1 = 0;
+					}
+
+					for (i = 0; i < mid0; i++)
 					{
 						int add = i + r + 1, sub = i - r;
 
-						o[i * 3 + c] = sum / (2 * r + 1);
-						sum += l[((add >= w) ? w - 1 : add) * 3 + c] - l[((sub < 0) ? 0 : sub) * 3 + c];
+						oc[i * 3] = sum / n;
+						sum += lc[((add >= w) ? w - 1 : add) * 3] - lc[((sub < 0) ? 0 : sub) * 3];
+					}
+
+					for (; i < mid1; i++)
+					{
+						oc[i * 3] = sum / n;
+						sum += lc[(i + r + 1) * 3] - lc[(i - r) * 3];
+					}
+
+					for (; i < w; i++)
+					{
+						int add = i + r + 1, sub = i - r;
+
+						oc[i * 3] = sum / n;
+						sum += lc[((add >= w) ? w - 1 : add) * 3] - lc[((sub < 0) ? 0 : sub) * 3];
 					}
 				}
 
@@ -1511,10 +1537,10 @@ GL3_Image_LoadDone(void)
 static void
 HDSeamFix(byte *p, int w, int h, const byte *o, int ow, int oh, int s, qboolean tx, qboolean ty)
 {
-	size_t need = (size_t)3 * w * h * 4;
+	size_t need = (size_t)3 * w * h * 4 + 3 * (size_t)w; /* f u t b, then the fill's column taps */
 	float *f;
 	hdseam_t q;
-	int c, ax;
+	int c, ax, x;
 
 	if (need > hds_cap)
 	{
@@ -1526,6 +1552,20 @@ HDSeamFix(byte *p, int w, int h, const byte *o, int ow, int oh, int s, qboolean 
 	if (!(f = hds_buf))
 	{
 		return;
+	}
+
+	q.cfx = f + (size_t)3 * w * h * 4;
+	q.cx0 = (int *)(q.cfx + w);
+	q.cx1 = q.cx0 + w;
+
+	for (x = 0; x < w; x++)
+	{
+		float uu = (x + 0.5f) / s - 0.5f;
+		int x0 = (int)floorf(uu);
+
+		q.cfx[x] = uu - x0;
+		q.cx1[x] = (x0 + 1 + ow) % ow;
+		q.cx0[x] = (x0 + ow) % ow;
 	}
 
 	q.p = p;
