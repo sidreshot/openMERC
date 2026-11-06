@@ -37,8 +37,11 @@
 #ifdef _MSC_VER
 #include <intrin.h> /* _InterlockedCompareExchange */
 #include <direct.h> /* _mkdir */
+#include <io.h>     /* _findfirst: the old cache's files */
 #else
 #include <sys/stat.h>
+#include <dirent.h>
+#include <unistd.h> /* rmdir */
 #endif
 #include "../../../common/unzip/miniz/miniz.h"
 
@@ -1275,33 +1278,108 @@ MatUpload(matjob_t *j)
 
 /* ------------------------------------------------------------------
  * the material maps on disk (r_om_matcache 1): a map depends only on the
- * texels it is measured from, so it is kept in <user dir>/matcache/ under a
+ * texels it is measured from, so it is kept in <user dir>/matcache<version>/ under a
  * 64-bit hash of those texels, their size and MAT_CACHE_VERSION, deflated
  * (miniz). A later load reads it instead of measuring (1.2 s of a PC load of
  * tsr1 with the HD pack). The jobs read and write the files themselves.
  * ------------------------------------------------------------------ */
 
-#define MAT_CACHE_VERSION 1   /* raise it with any change of MatCompute */
+#define MAT_CACHE_VERSION 2   /* raise it with any change of MatCompute (2: MurmurHash3 keys) */
 
 static char matcachedir[MAX_OSPATH]; /* "" = no cache this batch */
+
+static unsigned
+MatRotl(unsigned x, int r)
+{
+	return (x << r) | (x >> (32 - r));
+}
+
+static unsigned
+MatFmix(unsigned h)
+{
+	h ^= h >> 16;
+	h *= 0x85ebca6bu;
+	h ^= h >> 13;
+	h *= 0xc2b2ae35u;
+	h ^= h >> 16;
+	return h;
+}
+
+/* MurmurHash3 x86_128 (Austin Appleby, public domain), the low 64 bits. OpenMerc: the key was FNV-1a over every
+   byte with a 64-bit multiply - a library call per byte on the 32-bit build, 12 per texel; this one works on 32-bit
+   words in four lanes. */
+static unsigned long long
+MatMurmur(const unsigned char *data, size_t len, unsigned seed)
+{
+	const unsigned c1 = 0x239b961bu, c2 = 0xab0e9789u, c3 = 0x38b34ae5u, c4 = 0xa1e38b93u;
+	unsigned h1 = seed, h2 = seed, h3 = seed, h4 = seed, k1, k2, k3, k4;
+	size_t i, nblocks = len / 16;
+	const unsigned char *tail = data + nblocks * 16;
+
+	for (i = 0; i < nblocks; i++)
+	{
+		unsigned b[4];
+
+		memcpy(b, data + i * 16, 16);
+		k1 = b[0];
+		k2 = b[1];
+		k3 = b[2];
+		k4 = b[3];
+
+		k1 *= c1; k1 = MatRotl(k1, 15); k1 *= c2; h1 ^= k1;
+		h1 = MatRotl(h1, 19); h1 += h2; h1 = h1 * 5 + 0x561ccd1bu;
+		k2 *= c2; k2 = MatRotl(k2, 16); k2 *= c3; h2 ^= k2;
+		h2 = MatRotl(h2, 17); h2 += h3; h2 = h2 * 5 + 0x0bcaa747u;
+		k3 *= c3; k3 = MatRotl(k3, 17); k3 *= c4; h3 ^= k3;
+		h3 = MatRotl(h3, 15); h3 += h4; h3 = h3 * 5 + 0x96cd1c35u;
+		k4 *= c4; k4 = MatRotl(k4, 18); k4 *= c1; h4 ^= k4;
+		h4 = MatRotl(h4, 13); h4 += h1; h4 = h4 * 5 + 0x32ac3b17u;
+	}
+
+	k1 = k2 = k3 = k4 = 0;
+
+	switch (len & 15)
+	{
+		case 15: k4 ^= (unsigned)tail[14] << 16; /* fall through */
+		case 14: k4 ^= (unsigned)tail[13] << 8; /* fall through */
+		case 13: k4 ^= tail[12]; k4 *= c4; k4 = MatRotl(k4, 18); k4 *= c1; h4 ^= k4; /* fall through */
+		case 12: k3 ^= (unsigned)tail[11] << 24; /* fall through */
+		case 11: k3 ^= (unsigned)tail[10] << 16; /* fall through */
+		case 10: k3 ^= (unsigned)tail[9] << 8; /* fall through */
+		case 9: k3 ^= tail[8]; k3 *= c3; k3 = MatRotl(k3, 17); k3 *= c4; h3 ^= k3; /* fall through */
+		case 8: k2 ^= (unsigned)tail[7] << 24; /* fall through */
+		case 7: k2 ^= (unsigned)tail[6] << 16; /* fall through */
+		case 6: k2 ^= (unsigned)tail[5] << 8; /* fall through */
+		case 5: k2 ^= tail[4]; k2 *= c2; k2 = MatRotl(k2, 16); k2 *= c3; h2 ^= k2; /* fall through */
+		case 4: k1 ^= (unsigned)tail[3] << 24; /* fall through */
+		case 3: k1 ^= (unsigned)tail[2] << 16; /* fall through */
+		case 2: k1 ^= (unsigned)tail[1] << 8; /* fall through */
+		case 1: k1 ^= tail[0]; k1 *= c1; k1 = MatRotl(k1, 15); k1 *= c2; h1 ^= k1;
+	}
+
+	h1 ^= (unsigned)len;
+	h2 ^= (unsigned)len;
+	h3 ^= (unsigned)len;
+	h4 ^= (unsigned)len;
+	h1 += h2; h1 += h3; h1 += h4;
+	h2 += h1; h3 += h1; h4 += h1;
+	h1 = MatFmix(h1);
+	h2 = MatFmix(h2);
+	h3 = MatFmix(h3);
+	h4 = MatFmix(h4);
+	h1 += h2; h1 += h3; h1 += h4;
+	h2 += h1;
+
+	return ((unsigned long long)h2 << 32) | h1;
+}
 
 static unsigned long long
 MatCacheKey(const matjob_t *j)
 {
-	const unsigned char *b = (const unsigned char *)j->rgb;
-	size_t i, n = sizeof(float) * 3 * (size_t)j->w * j->h;
-	unsigned long long h = 14695981039346656037ull;
+	/* the texels, and their size and the version in the seed */
+	unsigned seed = (unsigned)MAT_CACHE_VERSION * 0x9e3779b1u ^ (unsigned)j->w * 0x85ebca77u ^ (unsigned)j->h * 0xc2b2ae3du;
 
-	h = (h ^ (unsigned long long)MAT_CACHE_VERSION) * 1099511628211ull;
-	h = (h ^ (unsigned long long)j->w) * 1099511628211ull;
-	h = (h ^ (unsigned long long)j->h) * 1099511628211ull;
-
-	for (i = 0; i < n; i++)
-	{
-		h = (h ^ b[i]) * 1099511628211ull;
-	}
-
-	return h;
+	return MatMurmur((const unsigned char *)j->rgb, sizeof(float) * 3 * (size_t)j->w * j->h, seed);
 }
 
 static void
@@ -1422,6 +1500,79 @@ MatComputeCached(matjob_t *j)
 	}
 }
 
+/* the maps of an older MAT_CACHE_VERSION (their own directory, "matcache" for version 1): deleted once per run */
+static void
+MatCachePurgeOld(void)
+{
+	static qboolean done;
+	char dir[MAX_OSPATH], path[MAX_OSPATH * 2];
+	int v;
+
+	if (done)
+	{
+		return;
+	}
+
+	done = true;
+
+	for (v = 1; v < MAT_CACHE_VERSION; v++)
+	{
+		if (v == 1)
+		{
+			Com_sprintf(dir, sizeof(dir), "%s/matcache", ri.FS_Gamedir());
+		}
+		else
+		{
+			Com_sprintf(dir, sizeof(dir), "%s/matcache%d", ri.FS_Gamedir(), v);
+		}
+
+#ifdef _MSC_VER
+		{
+			struct _finddata_t fd;
+			intptr_t h;
+
+			Com_sprintf(path, sizeof(path), "%s/*.omm", dir);
+
+			if ((h = _findfirst(path, &fd)) != -1)
+			{
+				do
+				{
+					Com_sprintf(path, sizeof(path), "%s/%s", dir, fd.name);
+					remove(path);
+				}
+				while (_findnext(h, &fd) == 0);
+
+				_findclose(h);
+			}
+
+			_rmdir(dir);
+		}
+#else
+		{
+			DIR *d = opendir(dir);
+			struct dirent *e;
+
+			if (d)
+			{
+				while ((e = readdir(d)) != NULL)
+				{
+					size_t n = strlen(e->d_name);
+
+					if ((n > 4) && !strcmp(e->d_name + n - 4, ".omm"))
+					{
+						Com_sprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+						remove(path);
+					}
+				}
+
+				closedir(d);
+				rmdir(dir);
+			}
+		}
+#endif
+	}
+}
+
 /* the cache directory of this registration (main thread: the engine's imports) */
 static void
 MatCacheBegin(void)
@@ -1440,7 +1591,8 @@ MatCacheBegin(void)
 		return;
 	}
 
-	Com_sprintf(matcachedir, sizeof(matcachedir), "%s/matcache", ri.FS_Gamedir());
+	MatCachePurgeOld();
+	Com_sprintf(matcachedir, sizeof(matcachedir), "%s/matcache%d", ri.FS_Gamedir(), MAT_CACHE_VERSION);
 #ifdef _WIN32
 	_mkdir(matcachedir);
 #else
