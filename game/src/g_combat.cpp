@@ -117,6 +117,29 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 	/* G3: the damage function of SPEC-720 (the 6th value is the shot start / explosion centre) */
 	int before = targ ? targ->health : 0;
 	bool character = targ && targ != attacker && ((targ->svflags & SVF_MONSTER) || (targ->client && deathmatch->value));
+	/* om_wallshot 1 (test aid): a character's damage to a player whose eyes the shooter cannot see - what lies
+	   between them (owner: "in Iraq characters shoot and kill through the wall") */
+	{
+		static cvar_t *ws;
+		if (!ws)
+			ws = gi.cvar("om_wallshot", "0", 0);
+		if (ws->value && targ && targ->client && attacker && attacker != targ && (attacker->svflags & SVF_MONSTER) &&
+		    damage > 0) {
+			vec3_t a, b;
+			VectorCopy(attacker->s.origin, a);
+			a[2] += attacker->viewheight ? attacker->viewheight : 30;
+			VectorCopy(targ->s.origin, b);
+			b[2] += targ->viewheight;
+			trace_t tr = gi.trace(a, NULL, NULL, b, attacker, MASK_SOLID);
+			trace_t t2 = gi.trace(point, NULL, NULL, a, targ, MASK_SOLID);
+			gi.dprintf("WALLSHOT %s %s mod %d dmg %d at %s -> %s: eye line %s %.2f (contents 0x%x), hit point to shooter %.2f "
+			           "(contents 0x%x), inflictor %s\n",
+			           tr.fraction < 1.0f ? "BLOCKED" : "clear", attacker->classname ? attacker->classname : "?", mod,
+			           damage, vtos(attacker->s.origin), vtos(targ->s.origin), tr.ent ? tr.ent->classname : "-",
+			           tr.fraction, (unsigned)tr.contents, t2.fraction,
+			           (unsigned)t2.contents, inflictor ? inflictor->classname : "-");
+		}
+	}
 	Dmg_Damage(targ, inflictor, attacker, dir_in, point, normal, damage, knockback, dflags, mod);
 	/* OpenMerc: the hit marker of the touch crosshair (p_hud.cpp) - a player's damage that reached a character */
 	if (character && attacker && attacker->client && before > 0 && targ->health < before)

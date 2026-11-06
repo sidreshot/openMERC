@@ -37,6 +37,7 @@ void PathCornerSpawn(edict_t *self)
 class PathDecision : public CombatDecision {
 public:
 	edict_t *corner = nullptr;   /* current corner (the one moved to or waited at) */
+	edict_t *left = nullptr;     /* openMERC: the corner left for it (its moveaction leads the way on) */
 	float wait_end = 0;
 	int wait_index = 0;   /* 1-based index of the waitaction requested (SPEC-AMEND-006 G2.12) */
 	int first_plan = 0;   /* set on arrival: the first wait plan never advances the index */
@@ -176,6 +177,7 @@ public:
 			ended = 1;
 			return;
 		}
+		left = corner;
 		corner = next;
 	}
 
@@ -287,13 +289,19 @@ public:
 			VectorMA(ent->s.origin, len < 10 ? len : 10, dir, goal);
 			VectorMA(ent->s.origin, 500, dir, face);
 			const G3Anim *a = nullptr;
-			if (corner->ai_moveaction)
-				a = Checked(ent, ai, corner->ai_moveaction, nullptr);
+			/* the moveaction of the corner just left leads to the next one (black box, arm1 `toiletguy`: toilet1's
+			   std_wnormal_n_pk_a carries him to toilet2, which has none), else the corner's own */
+			const G3Anim *mv = (left && left->inuse && left->ai_moveaction) ? left->ai_moveaction : corner->ai_moveaction;
+			if (mv)
+				a = Checked(ent, ai, mv, nullptr);
 			if (a) {
 				Action *act = MakeAction(ai, 7, this, nullptr, a, goal, face, 0.5f, false);
 				ai->QueueBack(act);
 			} else
-				PlanMove(ent, ai, goal, face, kind == DK_POINT && ai->alerted, false, false);
+				/* SPEC-710 C12: without the corner's moveaction the body's normal walk. The alerted combat point ran
+				   here: arm1 `toiletguy` (point_combat, used by the trigger) runs out of the restroom at 126-181 u/s,
+				   the original module walks him at 52 (sv_animlog A/B) */
+				PlanMove(ent, ai, goal, face, false, false, false);
 		}
 	}
 };

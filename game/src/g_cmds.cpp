@@ -128,6 +128,61 @@ static void Cmd_OmAim_f(edict_t *ent)
 		best->linkcount, best->areanum, tr.ent ? tr.ent->classname : "-", tr.fraction);
 }
 
+/* omnear [dist] (test aid, AI combat checks): the player is put dist units (default 300) from the nearest living
+   character not visited by an earlier omnear, on the line towards the player as far as the room allows, facing it */
+static void Cmd_OmNear_f(edict_t *ent)
+{
+	static int visited[64], nvisited, level_frame;
+	if (!CheatsOK(ent))
+		return;
+	if (level.framenum < level_frame)
+		nvisited = 0;
+	level_frame = level.framenum;
+	float dist = gi.argc() > 1 ? (float)atof(gi.argv(1)) : 300.0f;
+	edict_t *best = NULL;
+	float bd = 1e9f;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0 || e->solid == SOLID_NOT)
+			continue;
+		bool seen = false;
+		for (int k = 0; k < nvisited; k++)
+			if (visited[k] == i)
+				seen = true;
+		if (seen)
+			continue;
+		vec3_t d;
+		VectorSubtract(e->s.origin, ent->s.origin, d);
+		if (VectorLength(d) < bd) {
+			bd = VectorLength(d);
+			best = e;
+		}
+	}
+	if (!best) {
+		gi.dprintf("omnear: no character left\n");
+		return;
+	}
+	if (nvisited < 64)
+		visited[nvisited++] = (int)(best - g_edicts);
+	vec3_t dir, end, mins = {-16, -16, -24}, maxs = {16, 16, 32};
+	VectorSubtract(ent->s.origin, best->s.origin, dir);
+	dir[2] = 0;
+	if (VectorNormalize(dir) < 1)
+		VectorSet(dir, 1, 0, 0);
+	vec3_t from;
+	VectorCopy(best->s.origin, from);
+	from[2] += 8;
+	VectorMA(from, dist, dir, end);
+	trace_t tr = gi.trace(from, mins, maxs, end, best, MASK_PLAYERSOLID);
+	vec3_t o, to;
+	VectorCopy(tr.endpos, o);
+	VectorSubtract(best->s.origin, o, to);
+	float yaw = vectoyaw(to);
+	gi.dprintf("omnear: %s #%d at %s, player to %s (%.0f units)\n", best->classname, (int)(best - g_edicts),
+	           vtos(best->s.origin), vtos(o), tr.fraction * dist);
+	gi.AddCommandString(va("cmd omsetpos %.0f %.0f %.0f %.0f 0\n", o[0], o[1], o[2], yaw));
+}
+
 static void Cmd_OmSetPos_f(edict_t *ent)
 {
 	if (!CheatsOK(ent))
@@ -646,6 +701,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_Noclip_f(ent);
 	else if (Q_stricmp(cmd, "omsetpos") == 0)
 		Cmd_OmSetPos_f(ent);
+	else if (Q_stricmp(cmd, "omnear") == 0)
+		Cmd_OmNear_f(ent);
 	else if (Q_stricmp(cmd, "omaim") == 0)
 		Cmd_OmAim_f(ent);
 	else if (Q_stricmp(cmd, "gimme") == 0)
