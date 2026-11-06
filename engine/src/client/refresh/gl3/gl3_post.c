@@ -7687,6 +7687,18 @@ GL3_Post_Weather(void)
 	dens = Q_max(0.0f, Q_min(r_om_rain_density->value, 4.0f));
 	pv = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
 
+	/* the drops fade where they meet the world (the depth copy): without soft particles, volumetric fog, SSAO or
+	   SSR nothing had made that copy - the phone preset on jpn2 - and every drop read the empty copy as a wall at
+	   the near plane and was discarded (no rain at all). The finished view's depth, models included */
+	if (!P.depthfinal)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		P.depthfinal = P.depthcopied = true;
+	}
+
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
 	glViewport(P.vx, P.vy, P.vw, P.vh);
 	glDrawBuffers(1, one);
