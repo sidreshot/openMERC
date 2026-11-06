@@ -2868,6 +2868,8 @@ GL3_Post_EndView(void)
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 	}
 
+	GL3_Post_ProfMark("post_resolve");
+
 	/* r_om_ssr: this view for the reflections of the next frame */
 	if (P.mat)
 	{
@@ -2876,10 +2878,14 @@ GL3_Post_EndView(void)
 		SSRKeepColour();
 	}
 
+	GL3_Post_ProfMark("post_ssrkeep");
+
 	if (P.bloomthis)
 	{
 		Bloom();
 	}
+
+	GL3_Post_ProfMark("post_bloom");
 
 	hdr = P.hdr && P.lumfbo && !(r_newrefdef.rdflags & SOF_RDF_IRGOGGLES) && (r_fullbright->value == 0);
 
@@ -2887,6 +2893,8 @@ GL3_Post_EndView(void)
 	{
 		HDRExposure();
 	}
+
+	GL3_Post_ProfMark("post_hdr");
 
 	/* r_om_fxaa: the composite goes to the FXAA texture first */
 	fxaa = FxaaBegin();
@@ -2967,6 +2975,7 @@ GL3_Post_EndView(void)
 	BindTex(GL_TEXTURE1, P.nlevels ? P.leveltex[0] : P.texemis);
 	BindTex(GL_TEXTURE0, P.texcolor);
 	DrawQuad();
+	GL3_Post_ProfMark("post_composite");
 
 	if (fxaa)
 	{
