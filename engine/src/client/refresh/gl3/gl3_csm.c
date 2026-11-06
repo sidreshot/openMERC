@@ -80,6 +80,10 @@ static struct
 	const gl3model_t *built;
 	vec3_t wmins, wmaxs;     /* bounds of the static casters (the world model keeps none of its own) */
 	int numstatic;          /* vertices */
+	/* the static triangles sorted into cells of CSM_CHUNK units, each a vertex range with its bounds: a depth pass
+	   of a lamp, a beam or the rain draws only the cells in its frustum (GL3_CSM_DrawDepth) */
+	struct csmchunk_s { int first, count; float mins[3], maxs[3]; } *chunks;
+	int numchunks;
 	float *dyn;
 	int numdyn, maxdyn;     /* floats, 3 per vertex */
 	int capframe;
@@ -741,6 +745,7 @@ GL3_CSM_Shutdown(void)
 	if (C.dynvbo) glDeleteBuffers(1, &C.dynvbo);
 	if (C.ubo) glDeleteBuffers(1, &C.ubo);
 	free(C.dyn);
+	free(C.chunks);
 	memset(&C, 0, sizeof(C));
 	ri.Cmd_RemoveCommand("r_om_csm_info");
 	ri.Cmd_RemoveCommand("r_om_fog_regions");
@@ -839,6 +844,122 @@ CreateMap(int size, int ncasc)
 	return true;
 }
 
+#define CSM_CHUNK 384.0f
+
+typedef struct { int key, tri; } csmtrikey_t;
+
+static int
+CompareTriKey(const void *a, const void *b)
+{
+	const csmtrikey_t *x = a, *y = b;
+
+	return (x->key != y->key) ? ((x->key < y->key) ? -1 : 1) : (x->tri - y->tri);
+}
+
+/* reorders the triangle list (9 floats each) by the grid cell of each centroid and records the cells as chunks;
+   the order inside a cell is kept. On a failed allocation the list stays as it was with no chunks (drawn whole) */
+static void
+SortIntoChunks(float **pv, int n)
+{
+	int ntri = n / 9, i, k;
+	csmtrikey_t *keys;
+	float *v = *pv, *out;
+
+	free(C.chunks);
+	C.chunks = NULL;
+	C.numchunks = 0;
+
+	if (ntri <= 0)
+	{
+		return;
+	}
+
+	keys = malloc(ntri * sizeof(*keys));
+	out = malloc(n * sizeof(float));
+	C.chunks = malloc(ntri * sizeof(*C.chunks));
+
+	if (!keys || !out || !C.chunks)
+	{
+		free(keys);
+		free(out);
+		free(C.chunks);
+		C.chunks = NULL;
+		return;
+	}
+
+	for (i = 0; i < ntri; i++)
+	{
+		const float *t = v + i * 9;
+		int c[3];
+
+		for (k = 0; k < 3; k++)
+		{
+			c[k] = (int)floorf(((t[k] + t[3 + k] + t[6 + k]) / 3.0f - C.wmins[k]) / CSM_CHUNK);
+			c[k] = Q_max(0, Q_min(c[k], 1023));
+		}
+
+		keys[i].key = (c[2] << 20) | (c[1] << 10) | c[0];
+		keys[i].tri = i;
+	}
+
+	qsort(keys, ntri, sizeof(*keys), CompareTriKey);
+
+	for (i = 0; i < ntri; i++)
+	{
+		const float *t = v + keys[i].tri * 9;
+		struct csmchunk_s *ch;
+
+		memcpy(out + i * 9, t, 9 * sizeof(float));
+
+		if (!i || (keys[i].key != keys[i - 1].key))
+		{
+			ch = &C.chunks[C.numchunks++];
+			ch->first = i * 3;
+			ch->count = 0;
+			VectorSet(ch->mins, 1e30f, 1e30f, 1e30f);
+			VectorSet(ch->maxs, -1e30f, -1e30f, -1e30f);
+		}
+
+		ch = &C.chunks[C.numchunks - 1];
+		ch->count += 3;
+
+		for (k = 0; k < 9; k++)
+		{
+			ch->mins[k % 3] = Q_min(ch->mins[k % 3], t[k]);
+			ch->maxs[k % 3] = Q_max(ch->maxs[k % 3], t[k]);
+		}
+	}
+
+	free(keys);
+	free(v);
+	*pv = out;
+}
+
+/* true when the box is outside one of the six clip planes of the column-major view-projection vp
+   (Gribb-Hartmann: plane = row 3 +/- row i) */
+static qboolean
+BoxOutsideClip(const float *vp, const float *mins, const float *maxs)
+{
+	int p;
+
+	for (p = 0; p < 6; p++)
+	{
+		int r = p >> 1;
+		float s = (p & 1) ? -1.0f : 1.0f;
+		float a = vp[3] + s * vp[r], b = vp[7] + s * vp[4 + r], c = vp[11] + s * vp[8 + r];
+		float d = vp[15] + s * vp[12 + r];
+		/* the corner farthest along the plane normal */
+		float x = (a >= 0) ? maxs[0] : mins[0], y = (b >= 0) ? maxs[1] : mins[1], z = (c >= 0) ? maxs[2] : mins[2];
+
+		if (a * x + b * y + c * z + d < 0)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 /* the opaque faces of the world model (not brush entities) as one triangle list */
 static void
 BuildStatic(void)
@@ -934,6 +1055,8 @@ BuildStatic(void)
 		VectorClear(C.wmins);
 		VectorClear(C.wmaxs);
 	}
+
+	SortIntoChunks(&v, n);
 
 	GL3_BindVAO(C.vao);
 	GL3_BindVBO(C.vbo);
@@ -1518,7 +1641,44 @@ GL3_CSM_DrawDepth(const float *vp, const float *dyn, int numdynfloats, qboolean 
 		GL3_BindVAO(C.vao);
 		GL3_BindVBO(C.vbo);
 		qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
-		glDrawArrays(GL_TRIANGLES, 0, C.numstatic);
+
+		if (C.numchunks > 0)
+		{
+			/* only the cells inside the pass's frustum, adjacent ranges in one draw: a moving lamp (the tsr1
+			   subway car) redraws its beam's world depth every frame, and that drew the whole map each time */
+			int i, start = -1, end = -1;
+
+			for (i = 0; i < C.numchunks; i++)
+			{
+				const struct csmchunk_s *ch = &C.chunks[i];
+
+				if (BoxOutsideClip(vp, ch->mins, ch->maxs))
+				{
+					continue;
+				}
+
+				if (ch->first != end)
+				{
+					if (start >= 0)
+					{
+						glDrawArrays(GL_TRIANGLES, start, end - start);
+					}
+
+					start = ch->first;
+				}
+
+				end = ch->first + ch->count;
+			}
+
+			if (start >= 0)
+			{
+				glDrawArrays(GL_TRIANGLES, start, end - start);
+			}
+		}
+		else
+		{
+			glDrawArrays(GL_TRIANGLES, 0, C.numstatic);
+		}
 	}
 
 	if (dyn && (numdynfloats >= 9))
