@@ -848,6 +848,14 @@ BuildStatic(void)
 	int first = sub->firstmodelsurface, count = sub->nummodelsurfaces, i, n = 0, cap = 0;
 	float *v = NULL;
 
+	/* the buffer must exist first: GL3_CSM_Prewarm runs at the end of the first map's registration, before any
+	   frame has made the CSM objects - the triangles went into buffer 0 (GL_INVALID_OPERATION), C.built was set
+	   all the same, and every world depth pass (sun and lamp shadows, the rain's open sky) drew nothing */
+	if (!CreateObjects())
+	{
+		return;
+	}
+
 	if ((first < 0) || (first + count > w->numsurfaces))
 	{
 		first = 0;
