@@ -535,6 +535,9 @@ GL3_Seam_Invalidate(void)
 }
 static float seamwidth;
 
+/* the name test of SeamFace per image, for one SeamBuild: 0 not yet, 1 a plain texture, 2 a design one */
+static unsigned char seamname[MAX_GL3TEXTURES];
+
 static qboolean
 SeamFace(const msurface_t *s)
 {
@@ -560,17 +563,32 @@ SeamFace(const msurface_t *s)
 		return false;
 	}
 
-	name = s->texinfo->image->name;
-
-	for (i = 0; i < (int)(sizeof(design) / sizeof(design[0])); i++)
 	{
-		if (Q_strcasestr(name, design[i]))
-		{
-			return false;
-		}
-	}
+		ptrdiff_t img = s->texinfo->image - gl3textures;
+		unsigned char *known = ((img >= 0) && (img < MAX_GL3TEXTURES)) ? &seamname[img] : NULL;
 
-	return true;
+		if (known && *known)
+		{
+			return *known == 1;
+		}
+
+		name = s->texinfo->image->name;
+
+		for (i = 0; i < (int)(sizeof(design) / sizeof(design[0])); i++)
+		{
+			if (Q_strcasestr(name, design[i]))
+			{
+				break;
+			}
+		}
+
+		if (known)
+		{
+			*known = (i < (int)(sizeof(design) / sizeof(design[0]))) ? 2 : 1;
+		}
+
+		return known ? (*known == 1) : (i == (int)(sizeof(design) / sizeof(design[0])));
+	}
 }
 
 /* Sutherland-Hodgman: keep the part of the polygon with dot(p, n) <= dist */
@@ -1008,6 +1026,7 @@ SeamBuild(void)
 	int numed = 0, maxed = 0, i, j, g0, g1;
 
 	numseams = numseamverts = 0;
+	memset(seamname, 0, sizeof(seamname));
 	free(seamdrawn);
 	seamdrawn = calloc(mod->numsurfaces, sizeof(int));
 	seamsurfaces = mod->surfaces;
