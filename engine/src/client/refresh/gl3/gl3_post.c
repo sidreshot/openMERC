@@ -3555,7 +3555,7 @@ VolFogShutdown(void)
 #endif
 
 static cvar_t *r_om_beams, *r_om_beams_intensity, *r_om_beams_shadows, *r_om_beams_noise, *r_om_beams_debug;
-static cvar_t *r_om_beams_motes, *r_om_beams_groundshadow;
+static cvar_t *r_om_beams_motes, *r_om_beams_groundshadow, *r_om_beams_half;
 
 #define BEAM_MOTES 220      /* dust motes per beam at r_om_beams_motes 1 */
 
@@ -3598,6 +3598,12 @@ static struct
 	int worldgen[BEAM_DRAW];   /* and the static build / texture generation, 0 = none */
 	int texgen;
 	GLint u_depth, u_shadow, u_invpv, u_eye, u_prm, u_prm2, u_b0, u_b1, u_b2, u_b3, u_bvp, u_rect;
+
+	/* r_om_beams_half: the march at half size and its depth-aware upsample */
+	qboolean uptried;
+	GLuint progup, halftex, halffbo;
+	GLint up_rect, up_proj, up_size;
+	int hw, hh;
 
 	/* dust motes */
 	qboolean mtried;
@@ -3836,6 +3842,9 @@ BeamCvars(void)
 		r_om_beams_motes = ri.Cvar_Get("r_om_beams_motes", "1", CVAR_ARCHIVE); /* dust motes, 0 off */
 		/* how much a character's shadow takes from the lamp's pool on the ground, 0 off */
 		r_om_beams_groundshadow = ri.Cvar_Get("r_om_beams_groundshadow", "0.55", CVAR_ARCHIVE);
+		/* the beams marched at half size and brought up where the depth agrees (the light is smooth; the full-size
+		   march of four near beams took 20 of 48 ms of a frame on an Adreno 610 in the tsr1 subway car) */
+		r_om_beams_half = ri.Cvar_Get("r_om_beams_half", "1", CVAR_ARCHIVE);
 	}
 }
 
@@ -4601,6 +4610,93 @@ BeamProgram(void)
 	return true;
 }
 
+/* the half-size beam target and the upsample (volfog_up_fs: the march writes alpha 0, so added with GL_ONE, GL_ONE
+   it adds the light alone); false: march at full size */
+static qboolean
+BeamHalfTarget(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	int w = Q_max(P.vw / 2, 1), h = Q_max(P.vh / 2, 1);
+
+	if (!r_om_beams_half->value)
+	{
+		return false;
+	}
+
+	if (!B.uptried)
+	{
+		GLuint v = CompilePost(GL_VERTEX_SHADER, post_vs), f = CompilePost(GL_FRAGMENT_SHADER, volfog_up_fs);
+		GLint ok = 0;
+
+		B.uptried = true;
+
+		if (v && f)
+		{
+			GLuint p = glCreateProgram();
+
+			glAttachShader(p, v);
+			glAttachShader(p, f);
+			GL3_Post_BindOutputs(p);
+			glLinkProgram(p);
+			glGetProgramiv(p, GL_LINK_STATUS, &ok);
+
+			if (ok)
+			{
+				B.progup = p;
+				B.up_rect = glGetUniformLocation(p, "rect");
+				B.up_proj = glGetUniformLocation(p, "proj");
+				B.up_size = glGetUniformLocation(p, "size");
+				GL3_UseProgram(p);
+				glUniform1i(glGetUniformLocation(p, "fogtex"), 0);
+				glUniform1i(glGetUniformLocation(p, "depthtex"), 7);
+			}
+			else
+			{
+				glDeleteProgram(p);
+			}
+		}
+
+		if (v) glDeleteShader(v);
+		if (f) glDeleteShader(f);
+	}
+
+	if (!B.progup)
+	{
+		return false;
+	}
+
+	if (B.halftex && B.hw == w && B.hh == h)
+	{
+		return true;
+	}
+
+	if (B.halffbo) glDeleteFramebuffers(1, &B.halffbo);
+	if (B.halftex) glDeleteTextures(1, &B.halftex);
+	B.halffbo = B.halftex = 0;
+
+	B.halftex = NewTexture(OM_RT_FMT, GL_RGBA, OM_RT_TYPE, w, h, GL_NEAREST);
+	glGenFramebuffers(1, &B.halffbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, B.halffbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, B.halftex, 0);
+	glDrawBuffers(1, one);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		glDeleteFramebuffers(1, &B.halffbo);
+		glDeleteTextures(1, &B.halftex);
+		B.halffbo = B.halftex = 0;
+		glDeleteProgram(B.progup);
+		B.progup = 0;
+		return false;
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	B.hw = w;
+	B.hh = h;
+	return true;
+}
+
 static qboolean
 MoteProgram(void)
 {
@@ -4782,7 +4878,7 @@ GL3_Post_Beams(void)
 	beam_t bl[BEAM_MAXCAP];
 	float b0[BEAM_DRAW * 4], b1[BEAM_DRAW * 4], b2[BEAM_DRAW * 4], b3[BEAM_DRAW * 4], vps[BEAM_DRAW * 16];
 	int nb = 0, i, j;
-	qboolean shadows = false;
+	qboolean shadows = false, half;
 	float fw, fh, gshadow;
 
 	B.npools = 0;
@@ -5025,6 +5121,22 @@ GL3_Post_Beams(void)
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
 	glDisable(GL_CULL_FACE);
+
+	/* the march at half size first: the scene framebuffer is left once, before the pool shadows and the light
+	   are drawn into it */
+	half = BeamHalfTarget();
+
+	if (half)
+	{
+		glDisable(GL_BLEND);
+		glBindFramebuffer(GL_FRAMEBUFFER, B.halffbo);
+		PostDiscard(GL_COLOR_ATTACHMENT0); /* the march writes every texel */
+		glViewport(0, 0, B.hw, B.hh);
+		DrawQuad();
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		glViewport(P.vx, P.vy, P.vw, P.vh);
+	}
+
 	glEnable(GL_BLEND);
 
 	/* the characters' shadows in the lamps' pools first (multiplied), then the light of the beams */
@@ -5056,6 +5168,17 @@ GL3_Post_Beams(void)
 	}
 
 	glBlendFunc(GL_ONE, GL_ONE);
+
+	if (half)
+	{
+		GL3_UseProgram(B.progup);
+		glUniform4f(B.up_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(B.up_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin,
+			gl3depthmax);
+		glUniform4f(B.up_size, (float)B.hw, (float)B.hh, 1.0f / B.hw, 1.0f / B.hh);
+		BindTex(GL_TEXTURE0, B.halftex);
+	}
+
 	DrawQuad();
 
 	/* dust motes in the beams, depth-tested against the scene (the view's depth function and range stay) */
@@ -5132,6 +5255,18 @@ BeamShutdown(void)
 		glDeleteProgram(B.sprog);
 	}
 
+	if (B.progup)
+	{
+		if (gl3state.currentShaderProgram == B.progup)
+		{
+			gl3state.currentShaderProgram = 0;
+		}
+
+		glDeleteProgram(B.progup);
+	}
+
+	if (B.halffbo) glDeleteFramebuffers(1, &B.halffbo);
+	if (B.halftex) glDeleteTextures(1, &B.halftex);
 	if (B.shadowfbo) glDeleteFramebuffers(1, &B.shadowfbo);
 	if (B.readfbo) glDeleteFramebuffers(1, &B.readfbo);
 	if (B.shadowtex) glDeleteTextures(1, &B.shadowtex);
