@@ -2628,6 +2628,19 @@ public:
 		return G3_Time() - lastShot > d * F * h * p;
 	}
 
+	/* solid world or brush-entity geometry (a door, a func_wall) between two points; glass does not count */
+	bool WallBetween(const vec3_t a, const vec3_t b)
+	{
+		trace_t t;
+		memset(&t, 0, sizeof t);
+		gix.trace(a, vec3_origin, vec3_origin, b, ent, CONTENTS_SOLID, &t);
+		if (t.startsolid)
+			return true;
+		if (t.fraction >= 1.0f || (t.contents & CONTENTS_WINDOW))
+			return false;
+		return !t.ent || t.ent == &g_edicts[0] || t.ent->solid == SOLID_BSP;
+	}
+
 	bool Fire(edict_t *target, const vec3_t targetPoint, bool paced, int targetBolt) override
 	{
 		(void)targetBolt;
@@ -2662,6 +2675,17 @@ public:
 			float dot = (fl > 1e-4f && hl > 1e-4f) ? (f[0] * dir[0] + f[1] * dir[1]) / (fl * hl) : 1.0f;
 			if (dot < 0 || (dot < 0.717f && rightType != 18))
 				return false; // facing away: no shot, the round is kept
+		}
+		/* no shots into a wall: an attack animation started while the target was in sight goes on firing its burst
+		 * after the target stepped behind cover (the decision's clear-shot test runs only when the attack is planned).
+		 * The round is kept while solid geometry (not glass) stands between the muzzle and both the aim point and the
+		 * target's eyes; a muzzle poking through a thin wall at a corner (start inside solid) holds fire too. */
+		if (target && target->inuse && target != ent && !(owner && owner->FiresBlind())) {
+			vec3_t eye;
+			VectorCopy(target->s.origin, eye);
+			eye[2] += target->viewheight ? target->viewheight : 20;
+			if (WallBetween(start, targetPoint) && WallBetween(start, eye))
+				return false;
 		}
 		float s = AimSpread(rightType);
 		if (s > 0) {
