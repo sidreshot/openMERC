@@ -116,6 +116,7 @@ static struct
 
 	/* the primitive being built */
 	qboolean inbegin;
+	qboolean texident; /* the texture matrix is the identity for this primitive (set at Begin) */
 	GLenum prim;
 	emuvtx_t *verts;
 	int numverts, maxverts;
@@ -635,9 +636,18 @@ Emit(float x, float y, float z)
 		}
 	}
 
-	MatVec(E.tex[E.texdepth], st, out);
-	v->st[0] = (out[3] != 0) ? out[0] / out[3] : out[0];
-	v->st[1] = (out[3] != 0) ? out[1] / out[3] : out[1];
+	if (E.texident)
+	{
+		/* the identity gives the same coordinates (w = 1) without the matrix */
+		v->st[0] = st[0];
+		v->st[1] = st[1];
+	}
+	else
+	{
+		MatVec(E.tex[E.texdepth], st, out);
+		v->st[0] = (out[3] != 0) ? out[0] / out[3] : out[0];
+		v->st[1] = (out[3] != 0) ? out[1] / out[3] : out[1];
+	}
 
 	if (E.fog)
 	{
@@ -2097,7 +2107,10 @@ Emu_AlphaFunc(GLenum func, GLfloat ref)
 static void GHLAPI
 Emu_Begin(GLenum mode)
 {
+	static const float ident[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+
 	E.inbegin = true;
+	E.texident = !memcmp(E.tex[E.texdepth], ident, sizeof(ident));
 	E.prim = mode;
 	E.numverts = 0;
 	E.lcdirty = true;
