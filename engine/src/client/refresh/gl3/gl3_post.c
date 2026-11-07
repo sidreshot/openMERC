@@ -1034,7 +1034,8 @@ CompilePost(GLenum type, const char *src)
 #else
 	const char *version = "#version 150\n";
 #endif
-	const char *srcs[2] = {version, src};
+	const char *srcs[3] = {version, src, NULL};
+	int nsrc = 2;
 	GLuint s = glCreateShader(type);
 	GLint ok = 0;
 #ifdef YQ2_GL3_GLES3
@@ -1073,7 +1074,29 @@ CompilePost(GLenum type, const char *src)
 	}
 #endif
 
-	glShaderSource(s, 2, srcs, NULL);
+#ifdef YQ2_GL3_GLES3
+	/* r_om_fs_mediump bit 2 (measurement aid): post fragment shaders in half precision, r_om_fs_mpmask picks them by
+	   their compile order (printed as OMPOSTFS). Phone (Adreno 610, tsr1 standard view 26.4 ms): the volfog march
+	   -1.9 ms but its world positions need highp, EASU -1.2 ms, the volfog upsample +5.6 ms, composite 0 */
+	if ((type == GL_FRAGMENT_SHADER) && ((int)ri.Cvar_Get("r_om_fs_mediump", "0", 0)->value & 2))
+	{
+		static int fsn;
+		int idx = fsn++;
+		const char *u = strstr(src, "uniform sampler");
+		unsigned mask = (unsigned)ri.Cvar_Get("r_om_fs_mpmask", "16777215", 0)->value;
+		qboolean on = idx < 24 && ((mask >> idx) & 1);
+
+		R_Printf(PRINT_ALL, "OMPOSTFS %d %s len %d %.48s\n", idx, on ? "mediump" : "highp", (int)strlen(src),
+			u ? u : src);
+		if (on)
+		{
+			srcs[2] = srcs[1];
+			srcs[1] = "precision mediump float;\n";
+			nsrc = 3;
+		}
+	}
+#endif
+	glShaderSource(s, nsrc, srcs, NULL);
 	glCompileShader(s);
 #ifdef YQ2_GL3_GLES3
 	free(fix);
@@ -3575,7 +3598,20 @@ typedef struct
 	vec3_t apex, axis, color;
 	float len, r0, r1, dist;
 	float hs, he;   /* where the painted light starts and ends, as fractions of len */
+	float score, fade; /* BeamSelect: the rank (distance, kept beams favoured) and the fade-in */
+	int hist;          /* its beamhist entry, -1 = a lamp not seen in the last second */
 } beam_t;
+
+/* the beams drawn in the last frames, by their lamp (a rotating light keeps its apex): a beam that was drawn keeps its
+   slot until another is clearly nearer (hysteresis), a new one fades in - with more painted cones in view than
+   BEAM_DRAW, nearly equally distant lamps took the slots in turns frame by frame and blinked (tsr1 police car) */
+#define BEAM_HIST 16
+static struct
+{
+	vec3_t apex;
+	float fade, time;
+	qboolean drawn;
+} beamhist[BEAM_HIST];
 
 static struct
 {
@@ -4936,6 +4972,114 @@ BeamShadowTargets(void)
 	return true;
 }
 
+/* the BEAM_DRAW beams drawn of the nb fitted (bl sorted, *nb clamped): the nearest, a beam drawn last frame counting
+   as a quarter nearer (and 32 units) so that a near tie cannot swap the slots every frame; a beam that wins a slot back
+   from another fades in over 0.25 s, a lamp just come into view is there at once */
+static void
+BeamSelect(beam_t *bl, int *nb)
+{
+	static float last = -1;
+	float now = r_newrefdef.time, dt = Q_clamp(now - last, 0.0f, 0.1f);
+	int n = *nb, i, j;
+
+	if ((last < 0) || (now < last))
+	{
+		memset(beamhist, 0, sizeof(beamhist)); /* a new level or a loaded game */
+
+		for (j = 0; j < BEAM_HIST; j++)
+		{
+			beamhist[j].time = -1000;
+		}
+	}
+
+	last = now;
+
+	for (j = 0; j < BEAM_HIST; j++)
+	{
+		if (now - beamhist[j].time > 1.0f)
+		{
+			beamhist[j].time = -1000; /* not seen for a second: forgotten */
+			beamhist[j].drawn = false;
+		}
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		bl[i].hist = -1;
+		bl[i].score = bl[i].dist;
+
+		for (j = 0; j < BEAM_HIST; j++)
+		{
+			vec3_t d;
+
+			VectorSubtract(bl[i].apex, beamhist[j].apex, d);
+
+			if ((beamhist[j].time > -1000) && (DotProduct(d, d) < 24 * 24))
+			{
+				bl[i].hist = j;
+				break;
+			}
+		}
+
+		if ((bl[i].hist >= 0) && beamhist[bl[i].hist].drawn)
+		{
+			bl[i].score = bl[i].dist * 0.75f - 32;
+		}
+	}
+
+	for (i = 1; i < n; i++)
+	{
+		for (j = i; (j > 0) && (bl[j].score < bl[j - 1].score); j--)
+		{
+			beam_t t = bl[j];
+
+			bl[j] = bl[j - 1];
+			bl[j - 1] = t;
+		}
+	}
+
+	if (r_om_beams_debug->value >= 3)
+	{
+		R_Printf(PRINT_ALL, "OMBEAMN fitted %d of %d cones\n", n, B.ncap);
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		int h = bl[i].hist;
+		qboolean drawn = i < BEAM_DRAW;
+
+		if (h < 0)
+		{
+			/* a free entry (or the oldest one) */
+			for (j = 0, h = 0; j < BEAM_HIST; j++)
+			{
+				if (beamhist[j].time < beamhist[h].time)
+				{
+					h = j;
+				}
+			}
+
+			beamhist[h].fade = 1.0f; /* new in view: at once */
+		}
+		else if (drawn && !beamhist[h].drawn)
+		{
+			beamhist[h].fade = 0.0f; /* the slot won back from another lamp */
+		}
+
+		if (drawn)
+		{
+			beamhist[h].fade = Q_min(1.0f, beamhist[h].fade + dt * 4.0f);
+		}
+
+		VectorCopy(bl[i].apex, beamhist[h].apex);
+		beamhist[h].time = now;
+		beamhist[h].drawn = drawn;
+		bl[i].fade = beamhist[h].fade;
+	}
+
+	*nb = Q_min(n, BEAM_DRAW);
+}
+
 /* before the end of the view: the volumetric beams of the cones captured this view */
 void
 GL3_Post_Beams(void)
@@ -4969,19 +5113,7 @@ GL3_Post_Beams(void)
 		return;
 	}
 
-	/* the nearest ones */
-	for (i = 1; i < nb; i++)
-	{
-		for (j = i; (j > 0) && (bl[j].dist < bl[j - 1].dist); j--)
-		{
-			beam_t t = bl[j];
-
-			bl[j] = bl[j - 1];
-			bl[j - 1] = t;
-		}
-	}
-
-	nb = Q_min(nb, BEAM_DRAW);
+	BeamSelect(bl, &nb);
 
 	if (r_om_beams_debug->value >= 4)
 	{
@@ -5039,7 +5171,7 @@ GL3_Post_Beams(void)
 		p0[3] = bl[i].len;
 		VectorCopy(bl[i].axis, p1);
 		p1[3] = bl[i].r0;
-		VectorCopy(bl[i].color, p2);
+		VectorScale(bl[i].color, bl[i].fade, p2);
 		p2[3] = bl[i].r1;
 		b3[i * 4] = bl[i].hs;
 		b3[i * 4 + 1] = bl[i].he;

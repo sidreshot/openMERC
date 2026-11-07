@@ -49,6 +49,22 @@ CompileShader(GLenum shaderType, const char* shaderSrc, const char* shaderSrc2)
 #else // Desktop GL
 	const char* version = "#version 150\n";
 #endif
+	char* mp = NULL;
+#ifdef YQ2_GL3_GLES3
+	/* r_om_fs_mediump bit 1 (measurement): the fragment body after the shared uniform blocks in half precision */
+	if ((shaderType == GL_FRAGMENT_SHADER) && shaderSrc2 &&
+		((int)ri.Cvar_Get("r_om_fs_mediump", "0", 0)->value & 1))
+	{
+		size_t l = strlen(shaderSrc2) + 32;
+
+		mp = malloc(l);
+		if (mp)
+		{
+			snprintf(mp, l, "precision mediump float;\n%s", shaderSrc2);
+			shaderSrc2 = mp;
+		}
+	}
+#endif
 	const char* sources[3] = { version, shaderSrc, shaderSrc2 };
 	int numSources = shaderSrc2 != NULL ? 3 : 2;
 	/* OpenMerc GFX-modern: every fragment shader also writes the emissive target of the post path */
@@ -63,6 +79,7 @@ CompileShader(GLenum shaderType, const char* shaderSrc, const char* shaderSrc2)
 	glShaderSource(shader, numSources, sources, NULL);
 	glCompileShader(shader);
 	free(wrapped);
+	free(mp);
 	GLint status;
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
 	if(status != GL_TRUE)
