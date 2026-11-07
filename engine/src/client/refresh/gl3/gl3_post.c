@@ -4610,6 +4610,70 @@ BeamProgram(void)
 	return true;
 }
 
+/* the part of the view the beams can touch: the boxes around their cylinders (radius of the wide end and of the
+   ground pool, from the lamp to 1.3 lengths: the pool shader's reach) projected into the view, in view pixels.
+   false: a box reaches behind the eye, the whole view. The passes outside it computed nothing (the rays miss
+   every cylinder, the pool test fails) - only the cost of rejecting each pixel. */
+static qboolean
+BeamsScreenRect(const beam_t *bl, int nb, int rect[4])
+{
+	const float *m = &gl3state.uni3DData.transProjViewMat4.Elements[0][0];
+	float x0 = 1, y0 = 1, x1 = -1, y1 = -1;
+	int i, c;
+
+	for (i = 0; i < nb; i++)
+	{
+		const beam_t *b = &bl[i];
+		float r = Q_max(b->r1, b->r0 + (b->r1 - b->r0) * 1.3f) + 2.0f;
+		vec3_t u, v, tmp = {0, 0, 1};
+
+		if (fabsf(b->axis[2]) > 0.9f)
+		{
+			VectorSet(tmp, 1, 0, 0);
+		}
+
+		CrossProduct(b->axis, tmp, u);
+		VectorNormalize(u);
+		CrossProduct(b->axis, u, v);
+
+		for (c = 0; c < 8; c++)
+		{
+			float h = (c & 1) ? b->len * 1.3f + 2.0f : -2.0f, su = (c & 2) ? r : -r, sv = (c & 4) ? r : -r;
+			float p[3], cx, cy, cw;
+			int k;
+
+			for (k = 0; k < 3; k++)
+			{
+				p[k] = b->apex[k] + b->axis[k] * h + u[k] * su + v[k] * sv;
+			}
+
+			cx = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+			cy = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+			cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+
+			if (cw < 1.0f)
+			{
+				return false;
+			}
+
+			x0 = Q_min(x0, cx / cw);
+			x1 = Q_max(x1, cx / cw);
+			y0 = Q_min(y0, cy / cw);
+			y1 = Q_max(y1, cy / cw);
+		}
+	}
+
+	x0 = Q_clamp(x0, -1.0f, 1.0f);
+	x1 = Q_clamp(x1, -1.0f, 1.0f);
+	y0 = Q_clamp(y0, -1.0f, 1.0f);
+	y1 = Q_clamp(y1, -1.0f, 1.0f);
+	rect[0] = Q_max(0, (int)floorf((x0 * 0.5f + 0.5f) * P.vw) - 2);
+	rect[1] = Q_max(0, (int)floorf((y0 * 0.5f + 0.5f) * P.vh) - 2);
+	rect[2] = Q_min(P.vw, (int)ceilf((x1 * 0.5f + 0.5f) * P.vw) + 2) - rect[0];
+	rect[3] = Q_min(P.vh, (int)ceilf((y1 * 0.5f + 0.5f) * P.vh) + 2) - rect[1];
+	return true;
+}
+
 /* the half-size beam target and the upsample (volfog_up_fs: the march writes alpha 0, so added with GL_ONE, GL_ONE
    it adds the light alone); false: march at full size */
 static qboolean
@@ -4879,6 +4943,7 @@ GL3_Post_Beams(void)
 	float b0[BEAM_DRAW * 4], b1[BEAM_DRAW * 4], b2[BEAM_DRAW * 4], b3[BEAM_DRAW * 4], vps[BEAM_DRAW * 16];
 	int nb = 0, i, j;
 	qboolean shadows = false, half;
+	int sr[4];
 	float fw, fh, gshadow;
 
 	B.npools = 0;
@@ -5122,21 +5187,43 @@ GL3_Post_Beams(void)
 	glDepthMask(GL_FALSE);
 	glDisable(GL_CULL_FACE);
 
+	/* every pass below only where the beams can reach */
+	if (!BeamsScreenRect(bl, nb, sr))
+	{
+		sr[0] = sr[1] = 0;
+		sr[2] = P.vw;
+		sr[3] = P.vh;
+	}
+
+	if ((sr[2] <= 0) || (sr[3] <= 0))
+	{
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_TRUE);
+		return;
+	}
+
+	glEnable(GL_SCISSOR_TEST);
+
 	/* the march at half size first: the scene framebuffer is left once, before the pool shadows and the light
 	   are drawn into it */
 	half = BeamHalfTarget();
 
 	if (half)
 	{
+		int hx = Q_max(sr[0] / 2 - 2, 0), hy = Q_max(sr[1] / 2 - 2, 0);
+
 		glDisable(GL_BLEND);
 		glBindFramebuffer(GL_FRAMEBUFFER, B.halffbo);
-		PostDiscard(GL_COLOR_ATTACHMENT0); /* the march writes every texel */
+		PostDiscard(GL_COLOR_ATTACHMENT0); /* the march writes every texel the upsample reads */
 		glViewport(0, 0, B.hw, B.hh);
+		/* the upsample's taps reach one texel out of the rect */
+		glScissor(hx, hy, Q_min(B.hw - hx, sr[2] / 2 + 5), Q_min(B.hh - hy, sr[3] / 2 + 5));
 		DrawQuad();
 		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
 		glViewport(P.vx, P.vy, P.vw, P.vh);
 	}
 
+	glScissor(P.vx + sr[0], P.vy + sr[1], sr[2], sr[3]);
 	glEnable(GL_BLEND);
 
 	/* the characters' shadows in the lamps' pools first (multiplied), then the light of the beams */
@@ -5155,14 +5242,8 @@ GL3_Post_Beams(void)
 		glUniform4f(B.s_eye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2], 0.0f);
 		glBlendFunc(GL_ZERO, GL_SRC_COLOR);
 		DrawQuad();
-
-		/* inside the pools the lamp fills the sun's character shadow: dst * (1 + src) */
-		if (GL3_CSM_Active())
-		{
-			glUniform4f(B.s_eye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2], 1.0f);
-			glBlendFunc(GL_DST_COLOR, GL_ONE);
-			DrawQuad();
-		}
+		/* (the second pass that lit the sun's character shadow inside the pools, dst * (1 + src), is gone: the
+		   world shaders take away only the sun's part of the light now and the pass added 0 at every pixel) */
 
 		GL3_UseProgram(B.prog);
 	}
@@ -5180,6 +5261,7 @@ GL3_Post_Beams(void)
 	}
 
 	DrawQuad();
+	glDisable(GL_SCISSOR_TEST);
 
 	/* dust motes in the beams, depth-tested against the scene (the view's depth function and range stay) */
 	if ((r_om_beams_motes->value > 0) && MoteProgram())
