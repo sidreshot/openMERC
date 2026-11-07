@@ -2460,6 +2460,7 @@ GL3_RenderView(refdef_t *fd)
 
 	/* fog overlay for the faces collected by the world walk, with shimmer and far wall */
 	GL3_Fog_DrawPass(true);
+	GL3_Post_ProfMark("fogov");
 
 	/* GFX-modern: volumetric fog in the fog regions, over the world and its overlay */
 	GL3_Post_VolFog();

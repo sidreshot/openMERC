@@ -3474,6 +3474,7 @@ GL3_Post_VolFog(void)
 		PostDiscard(GL_COLOR_ATTACHMENT0); /* the march writes every texel */
 		glViewport(0, 0, V.hw, V.hh);
 		DrawQuad();
+		GL3_Post_ProfMark("vf_march");
 
 		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 		glViewport(vp[0], vp[1], vp[2], vp[3]);
