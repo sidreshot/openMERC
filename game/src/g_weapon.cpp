@@ -1910,7 +1910,13 @@ int WeaponUseFlashpack(edict_t *ent, ItemSlot *slot)
 	vec3_t fwd, up, vel, start;
 	AngleVectors(ent->client->v_angle, fwd, NULL, up);
 	VectorScale(fwd, 400, vel);
-	VectorMA(vel, gix.flrand(200, 400), up, vel);
+	/* om_throwprecise: the middle of the random lift, where the touch item button's arc shows the flash pack landing */
+#ifdef __ANDROID__
+	cvar_t *precise = gi.cvar("om_throwprecise", "1", CVAR_ARCHIVE);
+#else
+	cvar_t *precise = gi.cvar("om_throwprecise", "0", CVAR_ARCHIVE);
+#endif
+	VectorMA(vel, (precise->value && !DM()) ? 300.0f : gix.flrand(200, 400), up, vel);
 	VectorCopy(ent->s.origin, start);
 	start[2] += ent->viewheight;
 	vec3_t mins = {-2, -2, -3}, maxs = {2, 2, 3};

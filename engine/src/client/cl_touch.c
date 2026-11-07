@@ -39,6 +39,7 @@ enum
 /* the selected inventory item (game STAT_ITEMTYPE 0, STAT_ITEMCOUNT 7; player_api.h IT_*) */
 #define STAT_ITEMTYPE 0
 #define STAT_ITEMCOUNT 7
+#define IT_FLASHPACK 1
 #define IT_GRENADE 6
 
 /* game STAT_FLAGS bits of OpenMerc (game/src/p_hud.cpp) and the grenade count (stats 13) */
@@ -56,6 +57,7 @@ typedef struct
 	int t0;             /* cls.realtime at the press */
 	qboolean longdone;
 	qboolean cancelled; /* a grenade aim given up */
+	int item;           /* the item being aimed (IT_GRENADE, IT_FLASHPACK) */
 } finger_t;
 
 typedef struct
@@ -415,10 +417,11 @@ Touch_Finger(long long id, int type, float nx, float ny)
 			}
 		}
 
-		/* the item button with a grenade selected: the finger aims the throw */
-		if ((f->role == R_INV) && (Stat(STAT_ITEMTYPE) == IT_GRENADE))
+		/* the item button with a grenade or a flash pack selected: the finger aims the throw */
+		if ((f->role == R_INV) && ((Stat(STAT_ITEMTYPE) == IT_GRENADE) || (Stat(STAT_ITEMTYPE) == IT_FLASHPACK)))
 		{
 			f->role = R_GRENADE;
+			f->item = Stat(STAT_ITEMTYPE);
 		}
 
 		/* another finger on CANCEL gives the grenade aim up */
@@ -462,10 +465,16 @@ Touch_Finger(long long id, int type, float nx, float ny)
 		{
 			float cx = W() - 0.31f * H(), cy = H() - 0.62f * H(), r = 0.075f * H();
 
-			if (!f->cancelled && ((f->x - cx) * (f->x - cx) + (f->y - cy) * (f->y - cy) > r * r) &&
-				(Stat(STAT_OM_GRENADES) > 0))
+			if (!f->cancelled && ((f->x - cx) * (f->x - cx) + (f->y - cy) * (f->y - cy) > r * r))
 			{
-				Cbuf_AddText("itemuse grenade\n");
+				if (f->item == IT_FLASHPACK)
+				{
+					Cbuf_AddText("itemuse fpak\n");
+				}
+				else if (Stat(STAT_OM_GRENADES) > 0)
+				{
+					Cbuf_AddText("itemuse grenade\n");
+				}
 			}
 		}
 
@@ -694,27 +703,31 @@ Project(const vec3_t p, float *sx, float *sy)
 #define ARC_MAX 64
 
 static int
-GrenadeFlight(vec3_t *pts, int max)
+GrenadeFlight(vec3_t *pts, int max, int item)
 {
 	static const vec3_t mins = {-2, -2, -3}, maxs = {2, 2, 3};
 	vec3_t f, r, u, pos, vel;
 	float g = cl.frame.playerstate.pmove.gravity > 0 ? cl.frame.playerstate.pmove.gravity : 800.0f;
-	qboolean ground = false;
-	int n = 0, step, i;
+	/* a flash pack (WeaponUseFlashpack): from the eye at 400 forward + 300 up (the middle of 200..400), without the
+	   player's velocity, a bounce keeps 0.7, it goes off after 1.5 s */
+	qboolean flash = item == IT_FLASHPACK, ground = false;
+	float keep = flash ? 0.7f : 0.5f;
+	int n = 0, step, i, steps = flash ? 15 : 20;
 
 	AngleVectors(cl.refdef.viewangles, f, r, u);
 	VectorCopy(cl.refdef.vieworg, pos);
-	pos[2] -= 20;
+	pos[2] -= flash ? 0 : 20;
 
 	for (i = 0; i < 3; i++)
 	{
-		vel[i] = f[i] * 475.0f + u[i] * 325.0f + cl.frame.playerstate.pmove.velocity[i] * 0.125f;
+		vel[i] = flash ? (f[i] * 400.0f + u[i] * 300.0f) :
+			(f[i] * 475.0f + u[i] * 325.0f + cl.frame.playerstate.pmove.velocity[i] * 0.125f);
 	}
 
 	VectorCopy(pos, pts[n]);
 	n++;
 
-	for (step = 0; step < 20 && n < max; step++)
+	for (step = 0; step < steps && n < max; step++)
 	{
 		float left = 0.1f;
 		int bump;
@@ -755,7 +768,7 @@ GrenadeFlight(vec3_t *pts, int max)
 
 			for (i = 0; i < 3; i++)
 			{
-				vel[i] = 0.5f * (vel[i] - 1.8f * vn * tr.plane.normal[i]);
+				vel[i] = keep * (vel[i] - 1.8f * vn * tr.plane.normal[i]);
 			}
 
 			if (fabsf(vel[0]) < 1)
@@ -821,14 +834,22 @@ GrenadeArc(void)
 	unsigned char arc[4] = {255, 255, 255, 220}, ring[4] = {255, 120, 60, 120}, core[4] = {255, 60, 40, 255};
 	float lw = Q_max(2.0f, H() / 300.0f), px = 0, py = 0;
 	qboolean had = false;
-	int n, i;
+	int n, i, item = IT_GRENADE;
 
 	if (!GrenadeAiming())
 	{
 		return;
 	}
 
-	n = GrenadeFlight(pts, ARC_MAX);
+	for (i = 0; i < TOUCH_FINGERS; i++)
+	{
+		if ((fingers[i].role == R_GRENADE) && !fingers[i].cancelled)
+		{
+			item = fingers[i].item;
+		}
+	}
+
+	n = GrenadeFlight(pts, ARC_MAX, item);
 
 	for (i = 0; i < n; i++)
 	{
@@ -854,7 +875,7 @@ GrenadeArc(void)
 	/* the blast circle and its centre, on the ground plane */
 	{
 		const vec3_t *end = &pts[n - 1];
-		float rr[2] = {200.0f, 24.0f};
+		float rr[2] = {(item == IT_FLASHPACK) ? 100.0f : 200.0f, 24.0f}; /* the damage radius */
 		int k;
 
 		for (k = 0; k < 2; k++)
