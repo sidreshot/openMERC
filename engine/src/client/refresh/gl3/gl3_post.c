@@ -2748,6 +2748,46 @@ UpShutdown(void)
 	memset(&UP, 0, sizeof(UP));
 }
 
+#ifdef YQ2_GL3_GLES3
+/* a shader source with a prefix and the first occurrence of each pair's text replaced (precision qualifiers of a
+   half precision variant); NULL when a text is missing or out of memory */
+static char *
+PostSubst(const char *src, const char *prefix, const char *const (*pairs)[2], int npairs)
+{
+	size_t n = strlen(prefix) + strlen(src) + 1;
+	char *out, *at;
+	int k;
+
+	for (k = 0; k < npairs; k++)
+	{
+		n += strlen(pairs[k][1]);
+	}
+
+	if ((out = malloc(n)) == NULL)
+	{
+		return NULL;
+	}
+
+	snprintf(out, n, "%s%s", prefix, src);
+
+	for (k = 0; k < npairs; k++)
+	{
+		size_t ol = strlen(pairs[k][0]), nl = strlen(pairs[k][1]);
+
+		if ((at = strstr(out, pairs[k][0])) == NULL)
+		{
+			free(out);
+			return NULL;
+		}
+
+		memmove(at + nl, at + ol, strlen(at + ol) + 1);
+		memcpy(at, pairs[k][1], nl);
+	}
+
+	return out;
+}
+#endif
+
 /* the scene-size LDR target the composite (and FXAA) draw into when the view is scaled; false: draw straight */
 static qboolean
 UpTarget(void)
@@ -2775,6 +2815,24 @@ UpTarget(void)
 			}
 
 			snprintf(src, n, "#define OM_UP_MODE %d\n%s", mode, upscale_fs);
+#ifdef YQ2_GL3_GLES3
+			/* EASU in half precision except the positions (FSR's FP16 path): the texel coordinate, the texture size
+			   and Easu's position stay highp - a mediump uv shifted the whole picture by up to half a pixel. Phone
+			   (Adreno 610, tsr1 standard view): -1.2 ms of 26.4 */
+			if ((mode == 2) && ri.Cvar_Get("r_om_up_mediump", "1", 0)->value)
+			{
+				static const char *const subst[][2] = {{"uniform vec4 size;", "uniform highp vec4 size;"},
+					{"in vec2 uv;", "in highp vec2 uv;"}, {"in vec2 vuv;", "in highp vec2 vuv;"},
+					{"vec3 Easu(vec2 p)", "vec3 Easu(highp vec2 p)"}};
+				char *mp = PostSubst(src, "precision mediump float;\n", subst, sizeof(subst) / sizeof(subst[0]));
+
+				if (mp)
+				{
+					free(src);
+					src = mp;
+				}
+			}
+#endif
 			UP.progs[mode] = LinkPost(src);
 			free(src);
 
