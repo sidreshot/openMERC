@@ -453,6 +453,7 @@ float GL3_LShadow_BlobKeep(const vec3_t origin);
    The Ghoul system marks a texture whose name ends in "/BEAM" with TexParameteri(OM_GHL_BEAM_HINT, 1). */
 #define OM_GHL_BEAM_HINT 0x7EA0
 void GL3_Beam_MarkTexture(GLuint tex);
+qboolean GL3_Ghoul_TexSize(GLuint t, int *w, int *h);
 void GL3_Beam_ForgetTexture(GLuint tex);
 qboolean GL3_Beam_IsBeam(GLuint tex);
 qboolean GL3_Beam_Capture(const float *clip, const float *st, int numverts, int stride, GLuint tex);

@@ -3967,26 +3967,68 @@ GL3_Beam_MarkTexture(GLuint tex)
 		B.marked[idx] = tex;
 	}
 
-#ifndef YQ2_GL3_GLES3
 	{
 		GLint w = 0, h = 0;
 
+#ifndef YQ2_GL3_GLES3
 		GL3_SelectTMU(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, tex);
 		gl3state.currenttexture = tex;
 		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
 		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+#else
+		/* GLES has neither glGetTexLevelParameteriv (3.0) nor glGetTexImage: the size from the Ghoul emulator's
+		   record, the texels read back through a framebuffer - without them the colour and the light profile stayed
+		   at their defaults on the phone and a street lamp's beam started at the pyramid tip above the lamp */
+		if (!GL3_Ghoul_TexSize(tex, &w, &h))
+		{
+			w = h = 0;
+		}
+#endif
 
 		if ((w > 0) && (h > 0) && (w * h <= (1 << 20)))
 		{
 			byte *px = malloc((size_t)w * h * 4);
+
+#ifdef YQ2_GL3_GLES3
+			if (px)
+			{
+				GLuint fb = 0;
+				GLint oldread = 0;
+				qboolean ok;
+
+				glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldread);
+				glGenFramebuffers(1, &fb);
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, fb);
+				glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+				ok = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+
+				if (ok)
+				{
+					glPixelStorei(GL_PACK_ALIGNMENT, 1);
+					glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+					glPixelStorei(GL_PACK_ALIGNMENT, 4);
+				}
+
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)oldread);
+				glDeleteFramebuffers(1, &fb);
+
+				if (!ok)
+				{
+					free(px);
+					px = NULL;
+				}
+			}
+#endif
 
 			if (px)
 			{
 				double s[3] = {0, 0, 0}, ws = 0;
 				int i;
 
+#ifndef YQ2_GL3_GLES3
 				glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+#endif
 
 				for (i = 0; i < w * h; i++)
 				{
@@ -4046,7 +4088,6 @@ GL3_Beam_MarkTexture(GLuint tex)
 			}
 		}
 	}
-#endif
 
 	VectorCopy(col, B.markcol[idx]);
 	memcpy(B.markprof[idx], prof, sizeof(prof));
@@ -5246,6 +5287,21 @@ GL3_Post_Beams(void)
 					}
 				}
 
+#ifdef YQ2_GL3_GLES3
+				/* GLES (Adreno 610): the depth blit of the cached layer did not arrive - with shadows of the world
+				   (r_om_beams_shadows 1 or 2) only the beam in slot 0 was lit, the others were shadowed by stale
+				   layers and a lamp blinked whenever the slots changed (tsr1 intro street lamp; characters only,
+				   drawn straight into the layer, was fine). The world is drawn into layer i itself; the cached
+				   world-only layer stays for the characters' shadows in the pools. */
+				glBindFramebuffer(GL_FRAMEBUFFER, B.shadowfbo);
+				glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, B.shadowtex, 0, i);
+				glClearBufferfv(GL_DEPTH, 0, &one);
+
+				if (!GL3_CSM_DrawDepth(vps + i * 16, NULL, 0, true))
+				{
+					shadows = false;
+				}
+#else
 				if (!B.readfbo)
 				{
 					glGenFramebuffers(1, &B.readfbo);
@@ -5259,6 +5315,7 @@ GL3_Post_Beams(void)
 				glBlitFramebuffer(0, 0, BEAM_SHADOW, BEAM_SHADOW, 0, 0, BEAM_SHADOW, BEAM_SHADOW, GL_DEPTH_BUFFER_BIT,
 					GL_NEAREST);
 				glBindFramebuffer(GL_FRAMEBUFFER, B.shadowfbo);
+#endif
 
 				if ((nf >= 9) && !GL3_CSM_DrawDepth(vps + i * 16, B.flt, nf, false))
 				{
@@ -5326,6 +5383,11 @@ GL3_Post_Beams(void)
 		sr[0] = sr[1] = 0;
 		sr[2] = P.vw;
 		sr[3] = P.vh;
+	}
+
+	if (r_om_beams_debug->value >= 3)
+	{
+		R_Printf(PRINT_ALL, "OMBEAMR %d %d %d %d of %d %d\n", sr[0], sr[1], sr[2], sr[3], P.vw, P.vh);
 	}
 
 	if ((sr[2] <= 0) || (sr[3] <= 0))

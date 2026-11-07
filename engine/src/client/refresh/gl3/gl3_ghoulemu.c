@@ -2211,6 +2211,7 @@ typedef struct
 	int w, h, valid;
 	GLint ifmt;
 	GLenum fmt, type;
+	int sw, sh; /* the size of the last level-0 image, whatever its path */
 } emutexrec_t;
 
 static emutexrec_t *texrecs;
@@ -2241,6 +2242,20 @@ TexRec(GLuint t)
 	}
 
 	return &texrecs[t];
+}
+
+/* the size of a Ghoul texture's level-0 image (the beam pass reads its painted cones back on GLES) */
+qboolean
+GL3_Ghoul_TexSize(GLuint t, int *w, int *h)
+{
+	if ((t >= numtexrecs) || (texrecs[t].sw <= 0) || (texrecs[t].sh <= 0))
+	{
+		return false;
+	}
+
+	*w = texrecs[t].sw;
+	*h = texrecs[t].sh;
+	return true;
 }
 
 static void
@@ -2591,6 +2606,18 @@ Emu_TexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, 
 	int channels, swz;
 
 	(void)border;
+
+	/* the size of every level-0 image, for GL3_Ghoul_TexSize (GLES cannot ask the texture) */
+	if ((target == GL_TEXTURE_2D) && (level == 0))
+	{
+		emutexrec_t *rec = TexRec(E.boundtex);
+
+		if (rec)
+		{
+			rec->sw = width;
+			rec->sh = height;
+		}
+	}
 
 	{
 		/* r_om_ghltexlog 1: every texture the Ghoul library uploads, with the time: uploads during play are hitches */
