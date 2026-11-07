@@ -13,8 +13,9 @@
  *  - a small button between the trays opens the menu (Escape);
  *  - automatic use is the game's (om_autouse, game/src/g_utils.cpp): doors, buttons and switches in front are used
  *    without a key, once per approach;
- *  - a second fire button on the left (touch_leftfire) for firing while the right thumb aims;
- *  - the grenade button (shown while grenades are carried, with their count): hold to aim - the arc of the throw and
+ *  - the item button on the left (touch_leftitem; touch_leftitem 0 + touch_leftfire 1 puts a second fire button
+ *    there instead): it uses the item selected in the item tray and shows its name and count;
+ *  - with a grenade selected the item button is held to aim - the arc of the throw and
  *    the blast circle where it ends are drawn, the finger keeps turning the view - and release to throw; releasing on
  *    the CANCEL circle (where USE sits) or tapping it with another finger keeps the grenade;
  *  - the crosshair of the touch controls (touch_crosshair): four ticks whose gap follows movement and firing, red over
@@ -32,8 +33,13 @@
 enum
 {
 	R_NONE, R_JOY, R_LOOK, R_FIRE, R_ALT, R_JUMP, R_CROUCH, R_RELOAD, R_ITEM, R_WEAPON, R_MENU, R_USE, R_GRENADE,
-	R_LFIRE, R_CANCEL
+	R_LFIRE, R_CANCEL, R_INV
 };
+
+/* the selected inventory item (game STAT_ITEMTYPE 0, STAT_ITEMCOUNT 7; player_api.h IT_*) */
+#define STAT_ITEMTYPE 0
+#define STAT_ITEMCOUNT 7
+#define IT_GRENADE 6
 
 /* game STAT_FLAGS bits of OpenMerc (game/src/p_hud.cpp) and the grenade count (stats 13) */
 #define OMF_HOSTILE 0x1000
@@ -61,7 +67,7 @@ typedef struct
 
 static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_alpha, *touch_size, *touch_invert;
 static finger_t fingers[TOUCH_FINGERS];
-static cvar_t *touch_crosshair, *touch_aimslow, *touch_autofire, *touch_leftfire;
+static cvar_t *touch_crosshair, *touch_aimslow, *touch_autofire, *touch_leftfire, *touch_leftitem;
 static tbutton_t buttons[12];
 static int numbuttons;
 static qboolean crouched, firing, autofiring;
@@ -111,6 +117,8 @@ Touch_Init(void)
 	touch_aimslow = Cvar_Get("touch_aimslow", "0.55", CVAR_ARCHIVE); /* turning over a hostile, 1 = no slowdown */
 	touch_autofire = Cvar_Get("touch_autofire", "0", CVAR_ARCHIVE);
 	touch_leftfire = Cvar_Get("touch_leftfire", "1", CVAR_ARCHIVE);
+	/* the left button uses the selected inventory item (1, the default) or fires (0 and touch_leftfire 1) */
+	touch_leftitem = Cvar_Get("touch_leftitem", "1", CVAR_ARCHIVE);
 	memset(fingers, 0, sizeof(fingers));
 	Cmd_AddCommand("touch_fake", Touch_Fake_f);
 }
@@ -158,6 +166,16 @@ Held(int role);
 static qboolean
 GrenadeAiming(void);
 
+/* the item button's label: the selected item (player_api.h IT_*) */
+static const char *
+ItemLabel(void)
+{
+	static const char *const names[] = {"ITEM", "FLASH", "C4", "GOGGLES", "MINE", "MEDKIT", "GREN", "FLAG"};
+	int t = Stat(STAT_ITEMTYPE);
+
+	return (t > 0 && t < (int)(sizeof(names) / sizeof(names[0]))) ? names[t] : names[0];
+}
+
 static void
 Layout(void)
 {
@@ -184,14 +202,18 @@ Layout(void)
 		*b++ = (tbutton_t){R_USE, w - 0.31f * h, h - 0.62f * h, 0.050f * h * k, Remote() ? "EXIT" : "USE"};
 	}
 
-	/* the grenade button between fire and the use circle, while grenades are carried (or one is being aimed) */
-	if ((Stat(STAT_OM_GRENADES) > 0 && !Remote()) || Held(R_GRENADE))
+	/* the left button: the selected inventory item (the item tray at the top selects it) - a grenade is held to aim
+	   (the arc of the throw is drawn) and thrown on release, anything else is used at the press; shown while an item
+	   is selected or a grenade is being aimed */
+	if (touch_leftitem->value)
 	{
-		*b++ = (tbutton_t){R_GRENADE, w - 0.31f * h, h - 0.33f * h, 0.058f * h * k, "GREN"};
+		if ((Stat(STAT_ITEMTYPE) > 0 && Stat(STAT_ITEMCOUNT) > 0 && !Remote()) || Held(R_GRENADE) || Held(R_INV))
+		{
+			*b++ = (tbutton_t){R_INV, 0.14f * h, h - 0.62f * h, 0.065f * h * k, ItemLabel()};
+		}
 	}
-
-	/* the left fire button: firing while the right thumb aims (the big mobile shooters have one) */
-	if (touch_leftfire->value && !Remote())
+	/* or the left fire button: firing while the right thumb aims (the big mobile shooters have one) */
+	else if (touch_leftfire->value && !Remote())
 	{
 		*b++ = (tbutton_t){R_LFIRE, 0.14f * h, h - 0.62f * h, 0.065f * h * k, "FIRE"};
 	}
@@ -281,6 +303,12 @@ Press(int role, qboolean down)
 			if (down)
 			{
 				Cbuf_AddText("reload\n");
+			}
+			break;
+		case R_INV:
+			if (down)
+			{
+				Cbuf_AddText("itemuse\n");
 			}
 			break;
 		case R_MENU:
@@ -385,6 +413,12 @@ Touch_Finger(long long id, int type, float nx, float ny)
 					f->role = R_LOOK;
 				}
 			}
+		}
+
+		/* the item button with a grenade selected: the finger aims the throw */
+		if ((f->role == R_INV) && (Stat(STAT_ITEMTYPE) == IT_GRENADE))
+		{
+			f->role = R_GRENADE;
 		}
 
 		/* another finger on CANCEL gives the grenade aim up */
@@ -984,7 +1018,7 @@ Touch_Draw(void)
 	for (i = 0; i < numbuttons; i++)
 	{
 		const tbutton_t *b = &buttons[i];
-		qboolean on = Held(b->role) || ((b->role == R_CROUCH) && crouched);
+		qboolean on = Held(b->role) || ((b->role == R_CROUCH) && crouched) || ((b->role == R_INV) && Held(R_GRENADE));
 		int tw = HUD_TextWidth(b->label, 2), th = HUD_FontHeight(2);
 
 		Disc(b->cx, b->cy, b->r, (b->role == R_CANCEL) ? warnfill : fill);
@@ -992,12 +1026,12 @@ Touch_Draw(void)
 		HUD_DrawFontText((int)(b->cx - tw / 2), (int)(b->cy - th / 2), b->label,
 			(b->role == R_CANCEL) ? warn : (on ? lit : line), 2, 0);
 
-		/* the grenades left, under the label */
-		if (b->role == R_GRENADE)
+		/* how many of the selected item are left, under the label */
+		if (b->role == R_INV)
 		{
 			char n[8];
 
-			Com_sprintf(n, sizeof(n), "%d", Stat(STAT_OM_GRENADES));
+			Com_sprintf(n, sizeof(n), "%d", Stat(STAT_ITEMCOUNT));
 			HUD_DrawFontText((int)(b->cx - HUD_TextWidth(n, 2) / 2), (int)(b->cy + th * 0.6f), n, on ? lit : line, 2, 0);
 		}
 	}
