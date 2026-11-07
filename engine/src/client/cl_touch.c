@@ -69,7 +69,7 @@ typedef struct
 
 static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_alpha, *touch_size, *touch_invert;
 static finger_t fingers[TOUCH_FINGERS];
-static cvar_t *touch_crosshair, *touch_aimslow, *touch_autofire, *touch_leftfire, *touch_leftitem;
+static cvar_t *touch_crosshair, *touch_aimslow, *touch_autofire, *touch_leftfire, *touch_leftitem, *touch_autoaim;
 static tbutton_t buttons[12];
 static int numbuttons;
 static qboolean crouched, firing, autofiring;
@@ -121,6 +121,7 @@ Touch_Init(void)
 	touch_leftfire = Cvar_Get("touch_leftfire", "1", CVAR_ARCHIVE);
 	/* the left button uses the selected inventory item (1, the default) or fires (0 and touch_leftfire 1) */
 	touch_leftitem = Cvar_Get("touch_leftitem", "1", CVAR_ARCHIVE);
+	touch_autoaim = Cvar_Get("touch_autoaim", "0.5", CVAR_ARCHIVE); /* auto aim strength, 0 off */
 	memset(fingers, 0, sizeof(fingers));
 	Cmd_AddCommand("touch_fake", Touch_Fake_f);
 }
@@ -490,6 +491,63 @@ Touch_Finger(long long id, int type, float nx, float ny)
 	}
 }
 
+/* touch_autoaim (0..1): the auto aim of console and mobile shooters ("rotational assist") - while a finger moves or
+   turns the player, the view is turned towards the hostile character the game picked near the crosshair (stats 14,
+   game/src/p_hud.cpp OM_AimTarget: om_autoaim_angle degrees around it, in sight), at its chest as it moves now
+   (the client's interpolated entity). The pull approaches the target exponentially, 1 = fast; nothing while the
+   thumbs rest, so the view never drifts on its own */
+static void
+AutoAim(void)
+{
+	static int last;
+	int s = Stat(14) & 0xFFFF, num = (s & 0x7FF) - 1, i;
+	float dt = Q_clamp((cls.realtime - last) / 1000.0f, 0.0f, 0.1f), k;
+	qboolean steering = false;
+	const centity_t *c;
+	vec3_t pos, d;
+	float want[2], diff[2];
+
+	last = cls.realtime;
+
+	if ((num <= 0) || (num >= MAX_EDICTS) || (touch_autoaim->value <= 0) || Remote() || GrenadeAiming())
+	{
+		return;
+	}
+
+	for (i = 0; i < TOUCH_FINGERS; i++)
+	{
+		if ((fingers[i].role == R_LOOK) || (fingers[i].role == R_FIRE) || (fingers[i].role == R_JOY))
+		{
+			steering = true;
+		}
+	}
+
+	c = &cl_entities[num];
+
+	if (!steering || (c->serverframe != cl.frame.serverframe))
+	{
+		return;
+	}
+
+	for (i = 0; i < 3; i++)
+	{
+		pos[i] = c->prev.origin[i] + cl.lerpfrac * (c->current.origin[i] - c->prev.origin[i]);
+	}
+
+	pos[2] += ((s >> 11) & 31) * 2.0f - 32.0f;
+	VectorSubtract(pos, cl.refdef.vieworg, d);
+	want[0] = -atan2f(d[2], sqrtf(d[0] * d[0] + d[1] * d[1])) * (180.0f / (float)M_PI); /* pitch, down positive */
+	want[1] = atan2f(d[1], d[0]) * (180.0f / (float)M_PI);
+	k = 1.0f - expf(-dt * 10.0f * Q_clamp(touch_autoaim->value, 0.0f, 1.0f));
+
+	for (i = 0; i < 2; i++)
+	{
+		/* against the view as drawn: cl.viewangles lack the server's delta_angles (a teleport, a spawn) */
+		diff[i] = fmodf(want[i] - cl.refdef.viewangles[i] + 540.0f, 360.0f) - 180.0f;
+		cl.viewangles[i] += diff[i] * k;
+	}
+}
+
 /* the view turns by the movement of the look fingers and of the fire button's finger */
 static void
 Look(void)
@@ -551,6 +609,7 @@ Touch_Move(struct usercmd_s *cmd)
 	was = true;
 	Layout();
 	Look();
+	AutoAim();
 
 	for (i = 0; i < TOUCH_FINGERS; i++)
 	{

@@ -230,6 +230,52 @@ static int OM_TouchFlags(edict_t *ent)
 	return flags;
 }
 
+/* OpenMerc: the target of the touch auto aim (engine cl_touch.c touch_autoaim) in stats 14 - the hostile character
+   nearest to the crosshair within om_autoaim_angle degrees (12; 0 off), in sight, alive, up to 3000 units, single
+   player only. Bits 0-10: its entity number + 1, bits 11-15: the height of its chest above its origin, (z + 32) / 2.
+   The client turns the view towards its interpolated position itself (a fresh angle each frame, no lag of the
+   10 Hz server frames). */
+static int OM_AimTarget(edict_t *ent)
+{
+	static cvar_t *angle;
+	if (!angle)
+		angle = gi.cvar("om_autoaim_angle", "12", CVAR_ARCHIVE);
+	if (deathmatch->value || angle->value <= 0 || ent->health <= 0 || level.intermissiontime || !ent->client)
+		return 0;
+	vec3_t eye, fwd;
+	VectorCopy(ent->s.origin, eye);
+	eye[2] += ent->viewheight;
+	AngleVectors(ent->client->v_angle, fwd, NULL, NULL);
+	float deg = angle->value < 1.0f ? 1.0f : (angle->value > 45.0f ? 45.0f : angle->value);
+	float cosmax = cosf(deg * (float)M_PI / 180.0f), best = cosmax;
+	int found = 0;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || e == ent || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0 || !e->takedamage ||
+		    om_ai::SameTeam(ent, e))
+			continue;
+		float zoff = (e->mins[2] + e->maxs[2]) * 0.5f + 6; /* the chest, as om_aimassist */
+		vec3_t pt, d;
+		VectorCopy(e->s.origin, pt);
+		pt[2] += zoff;
+		VectorSubtract(pt, eye, d);
+		float dist = VectorNormalize(d);
+		if (dist < 32 || dist > 3000)
+			continue;
+		float c = DotProduct(d, fwd);
+		if (c <= best)
+			continue;
+		trace_t tr = gi.trace(eye, NULL, NULL, pt, ent, MASK_SHOT);
+		if (tr.fraction < 1.0f && tr.ent != e)
+			continue;
+		best = c;
+		float zc = zoff < -32.0f ? -32.0f : (zoff > 30.0f ? 30.0f : zoff);
+		int zq = (int)((zc + 32.0f) * 0.5f);
+		found = (i + 1) | (zq << 11);
+	}
+	return found;
+}
+
 // SPEC-780 3
 void G_SetStats(edict_t *ent)
 {
@@ -277,7 +323,8 @@ void G_SetStats(edict_t *ent)
 	st[STAT_LAYOUTS] = (short)layouts;
 	st[STAT_FRAGS] = (short)c->resp.score;
 	st[STAT_FORCEHUD] = level.forcehud ? 1 : 0;
-	st[13] = st[14] = 0;
+	st[13] = 0;
+	st[14] = (short)OM_AimTarget(ent); /* OpenMerc: the touch auto aim target */
 	/* OpenMerc: the grenades carried, for the touch grenade button (stats 13 is unused by SoF) */
 	st[STAT_OM_GRENADES] = (short)(inv ? inv->ItemCount(IT_GRENADE) : 0);
 	st[STAT_DAMAGEDIR] = (short)c->damage_dir;
