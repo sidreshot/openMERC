@@ -393,7 +393,11 @@ S_Init(void)
 {
 	/* registered so retail configs and command lines parse; ignored */
 	snd_dll = Cvar_Get("snd_dll", "", CVAR_ARCHIVE);
+#ifdef __ANDROID__
+	Cvar_Get("s_volume", "1", CVAR_ARCHIVE); /* the module's Android default (snd_dma.c) */
+#else
 	Cvar_Get("s_volume", "0.7", CVAR_ARCHIVE);
+#endif
 
 	SNDH_InitStruct();
 	SNDH_CopyConfigStrings();

@@ -2,7 +2,7 @@ VERSION 1
 ID 197
 REFERENCE MENU_OMSET
 DESCRIPTION "OpenMerc audio, controls, gameplay and multiplayer pages"
-COUNT 128
+COUNT 130
 INDEX 0
 {
    REFERENCE OFFON
@@ -678,8 +678,8 @@ INDEX 111
 INDEX 112
 {
    REFERENCE HOME_TICKER
-   TEXT_ENGLISH "openMERC  -  an open-source engine for Soldier of Fortune  -  your game data stays yours"
-   TEXT_RUSSIAN "openMERC  -  открытый движок для Soldier of Fortune  -  нужны файлы вашей копии игры"
+   TEXT_ENGLISH "openMERC  -  open-source engine for Soldier of Fortune  -  github.com/sidreshot/openMERC"
+   TEXT_RUSSIAN "openMERC  -  открытый движок для Soldier of Fortune  -  github.com/sidreshot/openMERC"
 }
 INDEX 113
 {
@@ -770,4 +770,16 @@ INDEX 127
    REFERENCE PG_TOUCH_TICK
    TEXT_ENGLISH "*** TAP AN OPTION TO CHANGE IT: THE LEFT ARROW STEPS BACK *** SWIPE UP OR DOWN TO SCROLL ***"
    TEXT_RUSSIAN "*** НАЖМИТЕ НА ПАРАМЕТР, ЧТОБЫ ИЗМЕНИТЬ ЕГО: ЛЕВАЯ СТРЕЛКА - НАЗАД *** ПРОВЕДИТЕ ВВЕРХ ИЛИ ВНИЗ, ЧТОБЫ ЛИСТАТЬ ***"
+}
+INDEX 128
+{
+   REFERENCE HOME_SAVE
+   TEXT_ENGLISH "SAVE GAME"
+   TEXT_RUSSIAN "СОХРАНИТЬ ИГРУ"
+}
+INDEX 129
+{
+   REFERENCE HOME_LINK_TIP
+   TEXT_ENGLISH "Opens the project page on GitHub"
+   TEXT_RUSSIAN "Открывает страницу проекта на GitHub"
 }

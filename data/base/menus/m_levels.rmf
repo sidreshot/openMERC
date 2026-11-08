@@ -1,7 +1,6 @@
-<!-- OpenMerc: level select (screen "levels", from the New Game page): every campaign level except the armory
-     briefings between missions (arm1-3, cut scenes) and the tutorial (own button on the New Game page); a button
-     starts a new campaign there with that mission's weapons (menus/om_startlevel.cfg). One row per mission: name,
-     then a large button per level, for fingers and the mouse -->
+<!-- OpenMerc: level select (screen "levels", from the New Game page): every campaign level as a picture tile (levelbox:
+     the level's own maps/<map>.raw of the game data), the armory briefings (arm1-3) as a group of their own; a tile starts
+     a new campaign there with that mission's weapons (menus/om_startlevel.cfg), and the campaign goes on from it -->
 <stm>
 <set menu_skill $skill>
 <vbar tint vbargray>
@@ -9,26 +8,6 @@
 <font type title tint normaltext atint hilitetext>
 <list "^MENU_OMSET_PG_LEVELS_SKILLS^" atext "^MENU_OMSET_PG_LEVELS_SKILL^" split 200 cvari menu_skill><hbr>
 <hr width 460 tint gray>
-<hbr>
-<left>
-<blank 12 28><font type title tint orange atint orange><text "1. ^MENU_OMSET_PG_LV_TSR^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap tsr1;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap tsr2;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "2. ^MENU_OMSET_PG_LV_TRN^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap trn1;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "3. ^MENU_OMSET_PG_LV_KOS^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap kos1;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap kos2;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap kos3;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "4. ^MENU_OMSET_PG_LV_SIB^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap sib1;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap sib2;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap sib3;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "5. ^MENU_OMSET_PG_LV_IRQA^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap irq1a;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap irq2a;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap irq3a;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "6. ^MENU_OMSET_PG_LV_NYC^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap nyc1;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap nyc2;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap nyc3;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "7. ^MENU_OMSET_PG_LV_SUD^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap sud1;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap sud2;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap sud3;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "8. ^MENU_OMSET_PG_LV_JPN^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap jpn1;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap jpn2;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap jpn3;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "9. ^MENU_OMSET_PG_LV_IRQB^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap irq1b;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap irq2b;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap irq3b;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
-<blank 12 28><font type title tint orange atint orange><text "10. ^MENU_OMSET_PG_LV_GER^" width 196><font type interface tint normaltext atint hilitetext><text "1" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap ger1;exec menus/om_startlevel.cfg"><blank 6 6><text "2" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap ger2;exec menus/om_startlevel.cfg"><blank 6 6><text "3" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap ger3;exec menus/om_startlevel.cfg"><blank 6 6><text "4" ombutton btint transgray width 56 height 28 key mouse1 "set om_startmap ger4;exec menus/om_startlevel.cfg"><blank 6 6><br>
-<blank 4 4><br>
+<font type small tint normaltext atint hilitetext>
+<levelbox cvar om_startmap key mouse1 "exec menus/om_startlevel.cfg" spacing 12>
 </stm>

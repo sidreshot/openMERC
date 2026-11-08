@@ -1797,6 +1797,25 @@ IN_Move(usercmd_t *cmd)
 /*
  * Look down
  */
+/* OpenMerc: om_url <address> opens a web page in the system's browser (the project link of the main menu); only
+   http and https addresses */
+static void
+IN_OpenURL_f(void)
+{
+	const char *u = Cmd_Argv(1);
+
+	if ((Cmd_Argc() != 2) || (Q_strncasecmp(u, "https://", 8) && Q_strncasecmp(u, "http://", 7)))
+	{
+		Com_Printf("usage: om_url <http(s) address>\n");
+		return;
+	}
+
+	if (!SDL_OpenURL(u))
+	{
+		Com_Printf("om_url: %s\n", SDL_GetError());
+	}
+}
+
 static void
 IN_MLookDown(void)
 {
@@ -2895,6 +2914,7 @@ IN_Init(void)
 	windowed_mouse = Cvar_Get("windowed_mouse", "1", CVAR_ARCHIVE);
 
 
+	Cmd_AddCommand("om_url", IN_OpenURL_f);
 	Cmd_AddCommand("+mlook", IN_MLookDown);
 	Cmd_AddCommand("-mlook", IN_MLookUp);
 

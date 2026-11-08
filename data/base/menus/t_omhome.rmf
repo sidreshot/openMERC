@@ -13,5 +13,6 @@
 <text "^MENU_OMSET_HOME_TITLE^" bbolt "NULL_HEADER">
 
 <font type title tint orange>
-<ticker "^MENU_OMSET_HOME_TICKER^" bbolt "null_ticker_tape" speed 10 width 336 xoff -160 yoff -11>
+<!-- the project link at the bottom edge (the landing page has no control row: the ticker sits where it would be) -->
+<ticker "^MENU_OMSET_HOME_TICKER^" bbolt "null_ticker_tape" speed 10 width 336 xoff -160 yoff 22 key mouse1 "om_url https://github.com/sidreshot/openMERC" tip "^MENU_OMSET_HOME_LINK_TIP^">
 </stm>

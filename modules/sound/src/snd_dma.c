@@ -234,11 +234,20 @@ void S_Init(void)
     if (!s_initsound->value)
         Snd_Printf("not initializing.\n");
     else {
+#ifdef __ANDROID__
+        // a phone speaker is quiet: every volume starts at the top on Android (the owner turned them all up)
+        s_volume = eng.Cvar_Get("s_volume", "1", CVAR_ARCHIVE, NULL);
+#else
         s_volume = eng.Cvar_Get("s_volume", "0.7", CVAR_ARCHIVE, NULL);
+#endif
         s_nosound = eng.Cvar_Get("s_nosound", "0", CVAR_ARCHIVE, NULL);
         s_disable = eng.Cvar_Get("s_disable", "0", 0, NULL);
         s_musicenabled = eng.Cvar_Get("s_musicenabled", "1", CVAR_ARCHIVE, NULL);
+#ifdef __ANDROID__
+        s_musicvolume = eng.Cvar_Get("s_musicvolume", "1", CVAR_ARCHIVE, NULL);
+#else
         s_musicvolume = eng.Cvar_Get("s_musicvolume", "0.7", CVAR_ARCHIVE, NULL);
+#endif
         s_show = eng.Cvar_Get("s_show", "0", 0, NULL);
         s_testsound = eng.Cvar_Get("s_testsound", "0", 0, NULL);
         // legacy mixer cvars, kept so configs and menus that set them still work; no effect since OMsnd 1.0

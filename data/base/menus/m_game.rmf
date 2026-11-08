@@ -1,6 +1,7 @@
 <!-- OpenMerc MENU-SCRATCH (owner t95u/t104u): new game: name, difficulty, level select, tutorial. Own page in the openMERC
      style: no stock backdrop, folder model, icons or stock strings -->
 <stm>
+<columns 2>
 <set menu_skill $skill>
 <vbar tint vbargray>
 <center>

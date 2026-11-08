@@ -1681,6 +1681,7 @@ typedef struct
 	msave_t *saves;
 	int numsaves;
 	int c, k, m, r;
+	int tw, th; /* OpenMerc: tile picture size (scaled with the width, 4:3) */
 } loadbox_t;
 
 static int lb_sortsign;
@@ -1933,16 +1934,43 @@ LB_List(mpage_t *pg, mwidget_t *w)
 	{
 		int L = MD_FH(w);
 
-		d->c = d->spacing + 128;
-		d->k = w->w / d->c;
+		/* OpenMerc: tiles scaled to the page - pictures up to 260 units wide (4:3), never so tall that a row with its
+		   three lines does not fit the visible height (a phone's short screen), as many columns as the width takes
+		   (2 to 6); the shot is readable on a phone as well as on a wide screen */
+		const mpage_t *page = pg ? pg : w->page;
+		int vis = page ? ML_ContentH(page) : 0;
+		int maxth = (vis > 0) ? (int)((vis - 3 * L - 2 * d->spacing) * 0.85f) : 195;
+		int want = (maxth * 4 / 3 < 260) ? maxth * 4 / 3 : 260;
 
-		if (d->k < 1)
+		if (want < 96)
 		{
-			d->k = 1;
+			want = 96;
 		}
 
+		d->k = (w->w - d->spacing) / (want + d->spacing);
+		d->k = (d->k < 2) ? 2 : (d->k > 6) ? 6 : d->k;
+		d->tw = (w->w - d->spacing * (d->k + 1)) / d->k;
+
+		if (d->tw > want)
+		{
+			d->tw = want;
+		}
+
+		if (d->tw < 64)
+		{
+			d->tw = 64;
+		}
+
+		d->th = d->tw * 3 / 4;
+		d->c = d->spacing + d->tw;
 		d->m = (w->w - d->c * d->k) / (d->k + 1);
-		d->r = 3 * L + 96 + d->spacing;
+
+		if (d->m < 0)
+		{
+			d->m = 0;
+		}
+
+		d->r = 3 * L + d->th + d->spacing;
 		w->h = w->minh = ((d->numsaves + d->k - 1) / d->k) * d->r;
 
 		if (pg && w->y + w->h > pg->contenth)
@@ -2003,6 +2031,12 @@ LB_Finish(mparse_t *p, mwidget_t *w)
 	}
 
 	w->w = (int)(w->w * p->screen->scale);
+
+	/* OpenMerc: the box takes the page's whole width (the tiles scale to it, LB_List) */
+	if (p->page && p->page->frame && ML_ContentW(p->page) - 8 > w->w)
+	{
+		w->w = ML_ContentW(p->page) - 8;
+	}
 
 	if (!p->dry)
 	{
@@ -2071,7 +2105,7 @@ LB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 		int cy = y + d->spacing + row * d->r;
 		mcolor_t c = (i == hover) ? w->atint : w->tint;
 		const msave_t *s = &d->saves[i];
-		int center = cx + 64;
+		int center = cx + d->tw / 2;
 
 		if (s->blocked)
 		{
@@ -2079,10 +2113,20 @@ LB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 		}
 
 		/* SPEC-803 open question 4: last argument 6 (passed through) */
-		MR_StretchPic(cx, cy, 128, 96, s->blocked ? 0xFF505050u : 0xFFFFFFFFu, va("save/%s", s->name), 6);
-		MR_DrawString(center - MR_StringWidth(s->level, w->font) / 2, cy + 96, s->level, c, w->font, 0);
-		MR_DrawString(center - MR_StringWidth(s->time, w->font) / 2, cy + 96 + L, s->time, c, w->font, 0);
-		MR_DrawString(center - MR_StringWidth(s->skill, w->font) / 2, cy + 96 + 2 * L, s->skill, c, w->font, 0);
+		MR_StretchPic(cx, cy, d->tw, d->th, s->blocked ? 0xFF505050u : 0xFFFFFFFFu, va("save/%s", s->name), 6);
+
+		/* the hovered tile framed (fingers and mouse) */
+		if (i == hover)
+		{
+			MR_Fill(cx - 2, cy - 2, d->tw + 4, 2, w->atint);
+			MR_Fill(cx - 2, cy + d->th, d->tw + 4, 2, w->atint);
+			MR_Fill(cx - 2, cy, 2, d->th, w->atint);
+			MR_Fill(cx + d->tw, cy, 2, d->th, w->atint);
+		}
+
+		MR_DrawString(center - MR_StringWidth(s->level, w->font) / 2, cy + d->th + 2, s->level, c, w->font, 0);
+		MR_DrawString(center - MR_StringWidth(s->time, w->font) / 2, cy + d->th + 2 + L, s->time, c, w->font, 0);
+		MR_DrawString(center - MR_StringWidth(s->skill, w->font) / 2, cy + d->th + 2 + 2 * L, s->skill, c, w->font, 0);
 	}
 }
 
@@ -2139,6 +2183,235 @@ LB_Free(mwidget_t *w)
 
 static const mwclass_t md_loadbox = {
 	"loadbox", LB_Option, LB_Finish, NULL, LB_Refresh, NULL, LB_Draw, LB_Key, NULL, LB_Free
+};
+
+/* ------------------------------------------------------------------ */
+/* OpenMerc levelbox: the campaign's levels as picture tiles             */
+
+/* every level of the campaign in its order, the armory briefings as a group of their own (owner: "add the ARM
+   levels"); the picture is the level's own maps/<map>.raw of the game data (the autosave thumbnail, 128 x 128) */
+static const struct
+{
+	const char *map;
+	const char *mission; /* string reference of the mission name */
+	int number;
+} lvb_levels[] = {
+	{"tsr1", "MENU_OMSET_PG_LV_TSR", 1}, {"tsr2", "MENU_OMSET_PG_LV_TSR", 2},
+	{"trn1", "MENU_OMSET_PG_LV_TRN", 1},
+	{"kos1", "MENU_OMSET_PG_LV_KOS", 1}, {"kos2", "MENU_OMSET_PG_LV_KOS", 2}, {"kos3", "MENU_OMSET_PG_LV_KOS", 3},
+	{"sib1", "MENU_OMSET_PG_LV_SIB", 1}, {"sib2", "MENU_OMSET_PG_LV_SIB", 2}, {"sib3", "MENU_OMSET_PG_LV_SIB", 3},
+	{"irq1a", "MENU_OMSET_PG_LV_IRQA", 1}, {"irq2a", "MENU_OMSET_PG_LV_IRQA", 2}, {"irq3a", "MENU_OMSET_PG_LV_IRQA", 3},
+	{"nyc1", "MENU_OMSET_PG_LV_NYC", 1}, {"nyc2", "MENU_OMSET_PG_LV_NYC", 2}, {"nyc3", "MENU_OMSET_PG_LV_NYC", 3},
+	{"sud1", "MENU_OMSET_PG_LV_SUD", 1}, {"sud2", "MENU_OMSET_PG_LV_SUD", 2}, {"sud3", "MENU_OMSET_PG_LV_SUD", 3},
+	{"jpn1", "MENU_OMSET_PG_LV_JPN", 1}, {"jpn2", "MENU_OMSET_PG_LV_JPN", 2}, {"jpn3", "MENU_OMSET_PG_LV_JPN", 3},
+	{"irq1b", "MENU_OMSET_PG_LV_IRQB", 1}, {"irq2b", "MENU_OMSET_PG_LV_IRQB", 2}, {"irq3b", "MENU_OMSET_PG_LV_IRQB", 3},
+	{"ger1", "MENU_OMSET_PG_LV_GER", 1}, {"ger2", "MENU_OMSET_PG_LV_GER", 2}, {"ger3", "MENU_OMSET_PG_LV_GER", 3},
+	{"ger4", "MENU_OMSET_PG_LV_GER", 4},
+	{"arm1", "MENU_OMSET_PG_LV_ARM", 1}, {"arm2", "MENU_OMSET_PG_LV_ARM", 2}, {"arm3", "MENU_OMSET_PG_LV_ARM", 3},
+};
+
+#define LVB_COUNT ((int)(sizeof(lvb_levels) / sizeof(lvb_levels[0])))
+
+typedef struct
+{
+	int spacing;
+	int c, k, m, r, tw, th;
+	qboolean pics[LVB_COUNT];
+} levelbox_t;
+
+static void
+LVB_Grid(const mpage_t *pg, mwidget_t *w)
+{
+	levelbox_t *d = w->data;
+	int L = MD_FH(w);
+	int vis = pg ? ML_ContentH(pg) : 0;
+	/* as the save tiles (LB_List), smaller: up to 170 units wide, a row with its two lines within the visible height */
+	int maxth = (vis > 0) ? (int)((vis - 2 * L - 2 * d->spacing) * 0.85f) : 165;
+	int want = (maxth * 4 / 3 < 170) ? maxth * 4 / 3 : 170;
+
+	if (want < 80)
+	{
+		want = 80;
+	}
+
+	d->k = (w->w - d->spacing) / (want + d->spacing);
+	d->k = (d->k < 2) ? 2 : (d->k > 8) ? 8 : d->k;
+	d->tw = (w->w - d->spacing * (d->k + 1)) / d->k;
+	d->tw = (d->tw > want) ? want : (d->tw < 64) ? 64 : d->tw;
+	d->th = d->tw * 3 / 4;
+	d->c = d->spacing + d->tw;
+	d->m = (w->w - d->c * d->k) / (d->k + 1);
+	d->m = (d->m < 0) ? 0 : d->m;
+	d->r = 2 * L + d->th + d->spacing;
+	w->h = w->minh = ((LVB_COUNT + d->k - 1) / d->k) * d->r;
+}
+
+static qboolean
+LVB_Option(mparse_t *p, mwidget_t *w, const char *kw)
+{
+	levelbox_t *d = w->data;
+	char a[1][MENU_MAX_TOKEN];
+
+	if (!Q_stricmp(kw, "spacing"))
+	{
+		MP_Args(p, a, 1);
+		d->spacing = atoi(a[0]);
+		return true;
+	}
+
+	return false;
+}
+
+static qboolean
+LVB_Finish(mparse_t *p, mwidget_t *w)
+{
+	levelbox_t *d = w->data;
+	int i;
+
+	if (w->w <= 0)
+	{
+		w->w = 520;
+	}
+
+	w->w = (int)(w->w * p->screen->scale);
+
+	if (p->page && p->page->frame && ML_ContentW(p->page) - 8 > w->w)
+	{
+		w->w = ML_ContentW(p->page) - 8;
+	}
+
+	if (!p->dry)
+	{
+		for (i = 0; i < LVB_COUNT; i++)
+		{
+			byte *raw = NULL;
+			int len = FS_LoadFile(va("maps/%s.raw", lvb_levels[i].map), (void **)&raw);
+
+			d->pics[i] = (len == 128 * 128 * 4);
+
+			if (d->pics[i])
+			{
+				MR_RawPic(va("om/lv_%s", lvb_levels[i].map), 128, 128, raw);
+			}
+
+			if (len >= 0)
+			{
+				FS_FreeFile(raw);
+			}
+		}
+	}
+
+	LVB_Grid(p->page, w);
+	w->flags |= WF_INTERACTIVE;
+	return true;
+}
+
+static int
+LVB_Cell(mpage_t *pg, mwidget_t *w)
+{
+	levelbox_t *d = w->data;
+	int x, y, mx, my, col, row, i;
+	float fx, fy;
+
+	ML_WidgetScreenPos(pg, w, &x, &y);
+	ML_PageMouse(pg, w, &fx, &fy);
+	mx = (int)fx - x - (d->m + d->spacing) / 2;
+	my = (int)fy - y - d->spacing / 2;
+
+	if (mx < 0 || my < 0 || d->c + d->m <= 0 || d->r <= 0)
+	{
+		return -1;
+	}
+
+	col = mx / (d->c + d->m);
+	row = my / d->r;
+
+	if (col >= d->k)
+	{
+		return -1;
+	}
+
+	i = row * d->k + col;
+	return (i < LVB_COUNT) ? i : -1;
+}
+
+static void
+LVB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
+{
+	levelbox_t *d = w->data;
+	int i, L = MD_FH(w);
+	int hover = (w->flags & WF_HOVER) ? LVB_Cell(pg, w) : -1;
+
+	for (i = 0; i < LVB_COUNT; i++)
+	{
+		int col = i % d->k, row = i / d->k;
+		int cx = x + d->spacing + d->m + col * (d->c + d->m);
+		int cy = y + d->spacing + row * d->r;
+		int center = cx + d->tw / 2;
+		mcolor_t c = (i == hover) ? w->atint : w->tint;
+		const char *name = MSP_Find(lvb_levels[i].mission);
+		char line[80];
+
+		/* (own buffer: va() is reused by the picture name below) */
+		Com_sprintf(line, sizeof(line), "%s %d", name ? name : lvb_levels[i].map, lvb_levels[i].number);
+
+		if (d->pics[i])
+		{
+			MR_StretchPic(cx, cy, d->tw, d->th, 0xFFFFFFFFu, va("om/lv_%s", lvb_levels[i].map), 6);
+		}
+		else
+		{
+			MR_Fill(cx, cy, d->tw, d->th, 0xFF202020u);
+		}
+
+		if (i == hover)
+		{
+			MR_Fill(cx - 2, cy - 2, d->tw + 4, 2, w->atint);
+			MR_Fill(cx - 2, cy + d->th, d->tw + 4, 2, w->atint);
+			MR_Fill(cx - 2, cy, 2, d->th, w->atint);
+			MR_Fill(cx + d->tw, cy, 2, d->th, w->atint);
+		}
+
+		MR_DrawString(center - MR_StringWidth(line, w->font) / 2, cy + d->th + 2, line, c, w->font, 0);
+	}
+}
+
+static qboolean
+LVB_Key(mpage_t *pg, mwidget_t *w, int key)
+{
+	int i = LVB_Cell(pg, w);
+
+	if (key != K_MOUSE1 || i < 0)
+	{
+		return false;
+	}
+
+	if (w->cvar)
+	{
+		Cvar_Set(w->cvar->name, lvb_levels[i].map);
+	}
+
+	M_PlaySound("menu/small/select.wav");
+	return true;
+}
+
+static void
+LVB_Refresh(mpage_t *pg, mwidget_t *w)
+{
+	LVB_Grid(pg, w);
+}
+
+static void
+LVB_Free(mwidget_t *w)
+{
+	if (w->data)
+	{
+		Z_Free(w->data);
+	}
+}
+
+static const mwclass_t md_levelbox = {
+	"levelbox", LVB_Option, LVB_Finish, NULL, LVB_Refresh, NULL, LVB_Draw, LVB_Key, NULL, LVB_Free
 };
 
 /* ------------------------------------------------------------------ */
@@ -2558,6 +2831,12 @@ MD_DataTag(mparse_t *p, const char *tag)
 	{
 		w = ML_NewWidget(p, &md_loadbox, true);
 		w->data = Z_Malloc(sizeof(loadbox_t));
+	}
+	else if (!Q_stricmp(tag, "levelbox"))
+	{
+		w = ML_NewWidget(p, &md_levelbox, true);
+		w->data = Z_Malloc(sizeof(levelbox_t));
+		((levelbox_t *)w->data)->spacing = 12;
 	}
 	else if (!Q_stricmp(tag, "listfile"))
 	{

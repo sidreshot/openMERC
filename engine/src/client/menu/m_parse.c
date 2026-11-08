@@ -1142,6 +1142,18 @@ Tag_HBr(mparse_t *p)
 	ML_BreakLine(p->page, true);
 }
 
+/* OpenMerc: <columns 2> - the page folds into two columns where it is taller than its view and its rows fit half the
+   width (a phone held sideways: no scrolling down while the right half is empty) */
+static void
+Tag_Columns(mparse_t *p)
+{
+	char a[1][MENU_MAX_TOKEN];
+
+	MP_Args(p, a, 1);
+	MP_EndTag(p);
+	p->page->columns = atoi(a[0]);
+}
+
 static void
 Tag_Normal(mparse_t *p)
 {
@@ -1771,6 +1783,7 @@ static const mtag_t mp_tags[] = {
 	{"font", Tag_Font},
 	{"br", Tag_Br},
 	{"hbr", Tag_HBr},
+	{"columns", Tag_Columns},
 	{"normal", Tag_Normal},
 	{"center", Tag_Center},
 	{"left", Tag_Left},
@@ -2100,6 +2113,11 @@ MP_LoadPageZ(mscreen_t *scr, mframe_t *frame, const char *name, qboolean dry, fl
 
 	pg->numwidgets = j;
 	scr->opentime = M_Time();
+
+	if (pg->columns >= 2 && !dry)
+	{
+		ML_FoldColumns(pg);
+	}
 
 	if (pg->zframe)
 	{

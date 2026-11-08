@@ -2,7 +2,7 @@ VERSION 1
 ID 201
 REFERENCE MENU_OMSET_PG
 DESCRIPTION "OpenMerc folder pages, dialogs and key actions"
-COUNT 182
+COUNT 183
 INDEX 0
 {
    REFERENCE HOME_TIP
@@ -1094,4 +1094,10 @@ INDEX 181
    REFERENCE LV_TUT
    TEXT_ENGLISH "Training"
    TEXT_RUSSIAN "Обучение"
+}
+INDEX 182
+{
+   REFERENCE LV_ARM
+   TEXT_ENGLISH "Armory"
+   TEXT_RUSSIAN "Оружейная"
 }

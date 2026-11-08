@@ -122,6 +122,15 @@ Touch_Init(void)
 	/* the left button uses the selected inventory item (1, the default) or fires (0 and touch_leftfire 1) */
 	touch_leftitem = Cvar_Get("touch_leftitem", "1", CVAR_ARCHIVE);
 	touch_autoaim = Cvar_Get("touch_autoaim", "0.5", CVAR_ARCHIVE); /* auto aim strength, 0 off */
+	/* the game module's aim helpers (g_weapon.cpp AimAssist, p_hud.cpp OM_AimTarget), created here with the same
+	   defaults so the menu shows them before a level has loaded the module (it showed "Off" until the first shot) */
+#ifdef __ANDROID__
+	Cvar_Get("om_aimassist", "1", CVAR_ARCHIVE);
+#else
+	Cvar_Get("om_aimassist", "0", CVAR_ARCHIVE);
+#endif
+	Cvar_Get("om_aimassist_dist", "28", CVAR_ARCHIVE);
+	Cvar_Get("om_autoaim_angle", "12", CVAR_ARCHIVE);
 	memset(fingers, 0, sizeof(fingers));
 	Cmd_AddCommand("touch_fake", Touch_Fake_f);
 }
@@ -188,7 +197,9 @@ Layout(void)
 	float h = H(), w = W(), k = Q_clamp(touch_size->value, 0.7f, 1.5f);
 	tbutton_t *b = buttons;
 
-	*b++ = (tbutton_t){R_FIRE, w - 0.15f * h, h - 0.40f * h, 0.090f * h * k, "FIRE"};
+	/* FIRE at the very right edge, in the column of ALT and JUMP (owner: a look drag in the middle of the right half
+	   often caught it when it stood further in) */
+	*b++ = (tbutton_t){R_FIRE, w - (0.090f * k + 0.012f) * h, h - 0.40f * h, 0.090f * h * k, "FIRE"};
 	*b++ = (tbutton_t){R_ALT, w - 0.10f * h, h - 0.64f * h, 0.055f * h * k, "ALT"};
 	*b++ = (tbutton_t){R_JUMP, w - 0.10f * h, h - 0.12f * h, 0.065f * h * k, "JUMP"};
 	*b++ = (tbutton_t){R_CROUCH, w - 0.29f * h, h - 0.09f * h, 0.060f * h * k, "DUCK"};
@@ -540,11 +551,40 @@ AutoAim(void)
 	want[1] = atan2f(d[1], d[0]) * (180.0f / (float)M_PI);
 	k = 1.0f - expf(-dt * 10.0f * Q_clamp(touch_autoaim->value, 0.0f, 1.0f));
 
-	for (i = 0; i < 2; i++)
+	/* filter (owner, ger2 corridors: the view sometimes swung round 180 degrees in a fire fight): the target is chosen by
+	   the server a frame or more ago, within om_autoaim_angle of the crosshair; after a fast turn, or with an entity
+	   that just reappeared (its previous position stale), the correction pointed far away. Only a target within one
+	   and a half times the cone is followed, never one that jumped, and the pull turns at most 90 degrees a second. */
 	{
-		/* against the view as drawn: cl.viewangles lack the server's delta_angles (a teleport, a spawn) */
-		diff[i] = fmodf(want[i] - cl.refdef.viewangles[i] + 540.0f, 360.0f) - 180.0f;
-		cl.viewangles[i] += diff[i] * k;
+		float lim = Q_clamp(Cvar_VariableValue("om_autoaim_angle"), 1.0f, 45.0f) * 1.5f, jump = 0;
+
+		for (i = 0; i < 3; i++)
+		{
+			jump += (c->current.origin[i] - c->prev.origin[i]) * (c->current.origin[i] - c->prev.origin[i]);
+		}
+
+		if (jump > 64.0f * 64.0f)
+		{
+			return;
+		}
+
+		for (i = 0; i < 2; i++)
+		{
+			/* against the view as drawn: cl.viewangles lack the server's delta_angles (a teleport, a spawn) */
+			diff[i] = fmodf(want[i] - cl.refdef.viewangles[i] + 540.0f, 360.0f) - 180.0f;
+
+			if (fabsf(diff[i]) > lim)
+			{
+				return;
+			}
+		}
+
+		for (i = 0; i < 2; i++)
+		{
+			float step = diff[i] * k, cap = 90.0f * dt;
+
+			cl.viewangles[i] += Q_clamp(step, -cap, cap);
+		}
 	}
 }
 

@@ -594,6 +594,27 @@ Key_Console(int key)
 
 			return;
 
+		/* OpenMerc: the mouse wheel scrolls the console back and forth, three lines a notch */
+		case K_MWHEELUP:
+			con.display -= 3;
+
+			if (con.display < con.current - con.totallines + 10)
+			{
+				con.display = con.current - con.totallines + 10;
+			}
+
+			return;
+
+		case K_MWHEELDOWN:
+			con.display += 3;
+
+			if (con.display > con.current)
+			{
+				con.display = con.current;
+			}
+
+			return;
+
 		case K_HOME:
 			con.display = con.current - con.totallines + 10;
 			return;
@@ -1535,7 +1556,8 @@ Key_EventEx(int key, qboolean down, qboolean extended, unsigned time)
 			break;
 
 		case key_console:
-			if (flags & KEYF_TEXT)
+			/* OpenMerc: the wheel scrolls the console (it ran its bindings: weapon switches behind the console) */
+			if ((flags & KEYF_TEXT) || (key == K_MWHEELUP) || (key == K_MWHEELDOWN))
 			{
 				Key_Console(key);
 			}

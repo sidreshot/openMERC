@@ -1,0 +1,3 @@
+<!-- OpenMerc: "save game" on the landing page while a single player level runs (menu.c sets menu_cansave) -->
+<text "^MENU_OMSET_HOME_SAVE^" ombutton btint transgray width 280 height 28 key mouse1 "menu save"><br>
+<blank 3 3><br>

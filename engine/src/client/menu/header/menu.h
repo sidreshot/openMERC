@@ -123,6 +123,7 @@ struct mwidget_s
 	qboolean boltfacing;
 	void *data;         /* class specific */
 	int omslot;         /* MENU-SCRATCH: slot of the wide layout (m_wide.c), 0 = none */
+	int colx, colw;     /* OpenMerc: its column after a two-column fold (ML_FoldColumns), colw 0 = whole width */
 	int omrect[4];      /* its rectangle this frame */
 };
 
@@ -143,6 +144,7 @@ struct mpage_s
 
 	/* flow layout */
 	int penx, peny, linetop, linebottom, anchor, contenth;
+	int columns;        /* OpenMerc <columns 2>: fold into two columns when taller than the view (ML_FoldColumns) */
 	int align;
 	int tabs[MENU_MAX_TABS];
 	int numtabs;
@@ -352,6 +354,7 @@ int ML_TotalW(const mwidget_t *w);
 int ML_TotalH(const mwidget_t *w);
 int ML_ContentW(const mpage_t *pg);
 int ML_ContentH(const mpage_t *pg);
+void ML_FoldColumns(mpage_t *pg);
 int ML_FontHeight(const char *font);
 void ML_WidgetScreenPos(const mpage_t *pg, const mwidget_t *w, int *x, int *y);
 void ML_PageMouse(const mpage_t *pg, const mwidget_t *w, float *mx, float *my);

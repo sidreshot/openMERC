@@ -799,12 +799,159 @@ ML_Reposition(mpage_t *pg, mwidget_t *w)
 
 	if (w->align == MA_CENTER)
 	{
-		w->x = (ML_ContentW(pg) - tw) / 2;
+		w->x = w->colw ? w->colx + (w->colw - tw) / 2 : (ML_ContentW(pg) - tw) / 2;
 	}
 	else if (w->align == MA_RIGHT)
 	{
-		w->x = ML_ContentW(pg) - tw;
+		w->x = w->colw ? w->colx + w->colw - tw : ML_ContentW(pg) - tw;
 	}
+}
+
+/* OpenMerc: two columns for a page that is taller than its view (<columns 2>, a phone held sideways). The flow is cut
+   at a gap between rows near half its height - never through a widget - and the lower part moves to the right half:
+   centred widgets centre in their column, left and pen-placed ones keep their distance from its left edge, right
+   ones from its right edge. Nothing happens if a widget is wider than half the width or would leave its column. */
+void
+ML_FoldColumns(mpage_t *pg)
+{
+	int A = ML_ContentW(pg), V = ML_ContentH(pg), half = A / 2, i, split = -1, best = 1 << 30, H = 0;
+
+	Com_DPrintf("menu fold %s: width %d view %d content %d\n", pg->name, A, V, pg->contenth);
+
+	if (A <= 0 || V <= 0 || pg->contenth <= V)
+	{
+		return;
+	}
+
+	for (i = 0; i < pg->numwidgets; i++)
+	{
+		const mwidget_t *w = pg->widgets[i];
+
+		/* rules (hr) span what they are given: shortened to the column below */
+		if (ML_Placed(w) && ML_TotalW(w) > half - 8 && Q_stricmp(w->cls->name, "hr"))
+		{
+			Com_DPrintf("menu fold %s: widget %s %d wide\n", pg->name, w->cls->name, ML_TotalW(w));
+			return;
+		}
+
+		if (ML_Placed(w) && w->y + ML_TotalH(w) > H)
+		{
+			H = w->y + ML_TotalH(w);
+		}
+	}
+
+	/* the candidate cuts: the tops of the widgets; one no widget crosses, nearest to half the height */
+	for (i = 0; i < pg->numwidgets; i++)
+	{
+		const mwidget_t *c = pg->widgets[i];
+		int y = c->y, j, d;
+		qboolean crossed = false;
+
+		if (!ML_Placed(c) || y <= 0)
+		{
+			continue;
+		}
+
+		for (j = 0; j < pg->numwidgets && !crossed; j++)
+		{
+			const mwidget_t *o = pg->widgets[j];
+
+			crossed = ML_Placed(o) && o->y < y && o->y + ML_TotalH(o) > y;
+		}
+
+		d = abs(2 * y - H);
+
+		/* a section boundary is the better cut: before a heading or a rule (not interactive), not inside a run of
+		   buttons; and the column stays within the view where it can */
+		if (!Q_stricmp(c->cls->name, "hr") || (!(c->flags & WF_INTERACTIVE) && (c->flags & WF_TEXTLIKE)))
+		{
+			d -= H / 3;
+		}
+		else if ((c->flags & WF_INTERACTIVE) || !Q_stricmp(c->cls->name, "blank"))
+		{
+			d += H / 4; /* inside a run of buttons (the blanks are the gaps between them) */
+		}
+
+		if (y > V || H - y > V)
+		{
+			d += H;
+		}
+
+		if (!crossed && d < best)
+		{
+			best = d;
+			split = y;
+		}
+	}
+
+	if (split <= 0)
+	{
+		Com_DPrintf("menu fold %s: no cut\n", pg->name);
+		return;
+	}
+
+	/* every widget must stay inside its column (one centred on the page - by its align or by where it stands - is
+	   centred in its column) */
+	for (i = 0; i < pg->numwidgets; i++)
+	{
+		const mwidget_t *w = pg->widgets[i];
+		int tw = ML_TotalW(w), x;
+
+		if (!ML_Placed(w) || w->align == MA_CENTER || abs(2 * w->x + tw - A) <= 4)
+		{
+			continue;
+		}
+
+		x = (w->align == MA_RIGHT) ? half - (A - w->x) : w->x;
+
+		if (x < 0 || x + tw > half)
+		{
+			Com_DPrintf("menu fold %s: %s at %d (%d wide) leaves its column\n", pg->name, w->cls->name, w->x, tw);
+			return;
+		}
+	}
+
+	for (i = 0; i < pg->numwidgets; i++)
+	{
+		mwidget_t *w = pg->widgets[i];
+		int tw = ML_TotalW(w), col = (w->y >= split) ? 1 : 0;
+
+		if (!ML_Placed(w))
+		{
+			continue;
+		}
+
+		qboolean centred = (w->align == MA_CENTER) || (abs(2 * w->x + tw - A) <= 4);
+
+		w->colx = col * half;
+		w->colw = half;
+
+		if (!Q_stricmp(w->cls->name, "hr") && tw > half - 16)
+		{
+			w->w = (int)((half - 16 - 2 * w->bpad) / (w->scale > 0 ? w->scale : 1.0f));
+			tw = ML_TotalW(w);
+		}
+
+		if (centred)
+		{
+			w->x = w->colx + (half - tw) / 2;
+		}
+		else if (w->align == MA_RIGHT)
+		{
+			w->x = w->colx + half - (A - w->x);
+		}
+		else
+		{
+			w->x = w->colx + w->x;
+		}
+
+		if (col)
+		{
+			w->y -= split;
+		}
+	}
+
+	pg->contenth = (split > H - split) ? split : H - split;
 }
 
 void

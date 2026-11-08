@@ -1,11 +1,13 @@
 <!-- OpenMerc: the main menu's landing page on touch screens (menus/touch overrides menus/m_omhome.rmf there): the main
      actions as large buttons, no title block (the version is on the tab bar's page title) -->
 <stm>
+<columns 2>
 <strings menu_omset>
 
 <center>
 <font type interface tint normaltext atint hilitetext>
 <cinclude menu_cancontinue om_home_cont>
+<cinclude menu_cansave om_home_save>
 <text "^MENU_OMSET_HOME_NEWGAME^" ombutton btint transgray width 300 height 28 key mouse1 "menu game"><br>
 <blank 3 3><br>
 <text "^MENU_OMSET_HOME_LOAD^" ombutton btint transgray width 300 height 28 key mouse1 "menu load"><br>
