@@ -7,7 +7,13 @@
 #include "save/save_local.h"
 
 void WriteGame(qboolean autosave) { G10_WriteGame(autosave); }
-qboolean ReadGame(int unused) { return G10_ReadGame(unused); }
+qboolean ReadGame(int unused)
+{
+	/* OpenMerc level select: a kit still pending from a start on a no-weapons map (om_levelkit, ClientBegin) never
+	   applies to a loaded game */
+	gi.cvar_set("om_levelkit", "0");
+	return G10_ReadGame(unused);
+}
 void WriteLevel(void) { G10_WriteLevel(); }
 void ReadLevel(void) { G10_ReadLevel(); }
 qboolean SaveAllowed(void) { return G10_SaveAllowed(); }

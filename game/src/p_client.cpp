@@ -880,10 +880,14 @@ void ClientBegin(edict_t *ent)
 		gix.welcomeprint(ent);
 
 	/* OpenMerc level select (menus "startlevel <map>"): a campaign started at a later level gets that mission's
-	   weapons and items instead of the first mission's knife, pistol and shotgun; once, on that first spawn */
+	   weapons and items instead of the first mission's knife, pistol and shotgun; once, on that first spawn. A map
+	   whose worldspawn says `noweapons` (arm1-3, tut1: weapon mode 0) stays empty-handed as in the original - the kit
+	   waits for the next mission of the campaign (a loaded game drops it: ReadGame) */
 	{
 		cvar_t *kit = gi.cvar("om_levelkit", "0", 0);
-		if (kit->value && !level.intermissiontime && ent->client->inv) {
+		if (kit->value && !level.intermissiontime && level.weaponmode == 0)
+			gi.cvar_set("om_levelkit", "2"); /* waits for the next mission (dropped by a new game: InitGame) */
+		else if (kit->value && !level.intermissiontime && ent->client->inv) {
 			gi.cvar_set("om_levelkit", "0");
 			GM_DefaultWeapons(ent, 100, false);
 		}

@@ -291,6 +291,10 @@ static void InitGame(void)
 {
 	gi.dprintf("==== InitGame ====\n");
 	G_InstallG3Hooks();
+	/* OpenMerc level select: a kit left waiting by a start on a no-weapons map (om_levelkit 2, ClientBegin) belongs
+	   to that campaign only - a new game (every `map` reinitialises the game) drops it; a fresh start (1) stays */
+	if (gi.cvar("om_levelkit", "0", 0)->value == 2)
+		gi.cvar_set("om_levelkit", "0");
 
 	gi.cvar("hostname", "", 0);
 	ctf_flag_respawn_time = gi.cvar("ctf_flag_respawn_time", "90", CVAR_ARCHIVE);
