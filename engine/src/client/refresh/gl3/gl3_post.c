@@ -3443,6 +3443,7 @@ VolFogProgram(void)
 
 	if (v) glDeleteShader(v);
 	if (f) glDeleteShader(f);
+
 	return true;
 }
 
@@ -3896,29 +3897,38 @@ static const char *beam_fs =
 	"		}\n"
 	"		if (t1 <= t0) continue;\n"
 	"		float ds = (t1 - t0) / float(steps);\n"
+	/* every per-step quantity is affine in the step's ray parameter, so it is a start value plus fs times a
+	   delta (fs = s, not accumulated, so there is no drift): the height on the axis, the offset from the axis,
+	   the noise coordinate and the shadow map's homogeneous position (no mat4 per step) */
+	"		float tq = t0 + jit * ds;\n"
+	"		float h0 = ho + hd * tq, dh = hd * ds;\n"
+	"		vec3 v0 = o2 + d2 * tq, dv = d2 * ds;\n"
+	"		vec3 pb = ro + rd * tq, dp = rd * ds;\n"
+	"		vec3 n0 = pb * 0.045 + vec3(eye.w * 0.11, eye.w * 0.07, -eye.w * 0.15), dn = dp * 0.045;\n"
+	"		vec4 S0 = bvp[i] * vec4(pb, 1.0), dS = bvp[i] * vec4(dp, 0.0);\n"
+	"		float iL = 1.0 / L, fx = b3[i].x, iw = 1.0 / max(b3[i].y - b3[i].x, 0.05);\n"
 	"		float sum = 0.0;\n"
 	"		for (int s = 0; s < 48; s++)\n"
 	"		{\n"
 	"			if (s >= steps) break;\n"
-	"			vec3 p = ro + rd * (t0 + (float(s) + jit) * ds);\n"
-	"			vec3 q = p - A;\n"
-	"			float h = dot(q, ax);\n"
-	"			float hn = clamp(h / L, 0.0, 1.0);\n"
+	"			float fs = float(s);\n"
+	"			float hn = clamp((h0 + fs * dh) * iL, 0.0, 1.0);\n"
+	"			float fall = (hn - fx) * iw;\n"
+	"			if (fall <= 0.0 || fall >= 1.0) continue;\n"
 	"			float R = max(mix(r0, r1, hn), 0.5);\n"
-	"			float d = 1.0 - smoothstep(0.45, 1.0, length(q - h * ax) / R);\n"
-	"			float fall = (hn - b3[i].x) / max(b3[i].y - b3[i].x, 0.05);\n"
-	"			if (d <= 0.0 || fall <= 0.0 || fall >= 1.0) continue;\n"
+	"			float d = 1.0 - smoothstep(0.45, 1.0, length(v0 + fs * dv) / R);\n"
+	"			if (d <= 0.0) continue;\n"
 	"			d *= smoothstep(0.0, 0.12, fall) * pow(1.0 - fall, 1.3);\n"
-	"			if (prm.w > 0.0) d *= 1.0 + prm.w * (vnoise(p * 0.045 + vec3(eye.w * 0.11, eye.w * 0.07, -eye.w * 0.15)) * 2.0 - 1.0);\n"
+	"			if (prm.w > 0.0) d *= 1.0 + prm.w * (vnoise(n0 + fs * dn) * 2.0 - 1.0);\n"
 	"			if (prm2.z > 0.5)\n"
 	"			{\n"
-	"				vec4 sp = bvp[i] * vec4(p, 1.0);\n"
+	"				vec4 sp = S0 + fs * dS;\n"
 	"				vec3 sc = sp.xyz / sp.w * 0.5 + 0.5;\n"
 	"				d *= texture(beamshadow, vec4(sc.xy, float(i), sc.z - 0.0015));\n"
 	"			}\n"
-	"			sum += d * ds / (2.0 * max(R, 1.0));\n"
+	"			sum += d / max(R, 1.0);\n"
 	"		}\n"
-	"		acc += b2[i].rgb * sum;\n"
+	"		acc += b2[i].rgb * (sum * ds * 0.5);\n"
 	"	}\n"
 	"	outColor = vec4(acc * prm.z, 0.0);\n"
 	"	outEmissive = vec4(0.0);\n"
