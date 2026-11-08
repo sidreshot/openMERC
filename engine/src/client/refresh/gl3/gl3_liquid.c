@@ -17,6 +17,12 @@
 
 #define LIQUID_MAX_VERTS 64
 
+/* GFX-modern r_om_water: 1 (default) per-pixel ripples moving the texture, a highlight of the light on them, the
+   Fresnel term (grazing angles reflect and hide more) and, on translucent water over the scene depth, soft edges
+   where it meets the ground and walls and more opacity where it is deep; 0 the original's liquids.
+   r_om_water_glint: strength of the highlight. Lava and molten metal keep the original look. */
+static cvar_t *r_om_water, *r_om_water_glint;
+
 /* the warp table in world units: 8 sin(2 pi k / 256), halved at every renderer start */
 static float turbtable[256];
 static int turbstarts;
@@ -30,6 +36,8 @@ GL3_Liquid_Init(void)
 
 	turbstarts++;
 	amp = 8.0f;
+	r_om_water = ri.Cvar_Get("r_om_water", "1", CVAR_ARCHIVE);
+	r_om_water_glint = ri.Cvar_Get("r_om_water_glint", "1", CVAR_ARCHIVE);
 
 	for (k = 0; k < turbstarts; k++)
 	{
@@ -199,6 +207,23 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 		}
 
 		sphere = false; /* the traced reflection replaces the sphere-mapped second pass */
+	}
+
+	/* the ripples lie in the horizontal plane: level surfaces only (no walls of falling water or steam sheets) */
+	if (r_om_water && r_om_water->value && (fabsf(normal[2]) > 0.7f) && !image->is_lava &&
+		!Q_strcasestr(image->name, "molten") && !Q_strcasestr(image->name, "lava") &&
+		!Q_strcasestr(image->name, "steam"))
+	{
+		st.liq[0] = 1;
+		st.liq[1] = clock;
+		st.liq[2] = Q_clamp(r_om_water_glint->value, 0.0f, 4.0f);
+		st.liq[3] = GL3_Post_SSRActive() ? 1.0f : 0.0f;
+
+		/* translucent water over the depth of the scene drawn so far (soft particles' copy) */
+		if (translucent && GL3_Post_DepthReady())
+		{
+			st.soft = 3;
+		}
 	}
 
 	/* pass 0: the liquid; pass 1 (image with an environment second-pass texture): the base texture again,

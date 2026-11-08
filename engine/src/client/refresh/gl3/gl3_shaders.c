@@ -1639,6 +1639,31 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 		uniform vec4 omFxMat; // GFX-modern r_om_ssr: reflectivity, roughness of liquids (0 = the default material)
 
+		// GFX-modern r_om_water (gl3_liquid.c): x mode (0 off, 1 water), y time (s), z highlight strength,
+		// w 1 = the traced reflection (r_om_ssr) reflects; eye xyz, w 1 = depth effects (translucent, soft mode 3)
+		uniform vec4 omLiq;
+		uniform vec4 omLiqEye;
+
+		// a directional wave's slope: direction d, frequency f (rad / unit), speed s (rad / s), height a
+		vec2 omLiqWave(vec2 p, vec2 d, float f, float s, float a, float t)
+		{
+			return d * (f * a * cos(dot(d, p) * f + t * s));
+		}
+
+		// the ripple normal of the water at world xy p: five waves in different directions and sizes
+		vec3 omLiqNormal(vec2 p, float t)
+		{
+			vec2 g = omLiqWave(p, vec2(0.866, 0.5), 0.050, 1.10, 1.2, t);
+			g += omLiqWave(p, vec2(-0.342, 0.940), 0.071, 1.45, 0.85, t);
+			g += omLiqWave(p, vec2(-0.906, -0.423), 0.113, 1.90, 0.55, t);
+			g += omLiqWave(p, vec2(0.574, -0.819), 0.179, 2.60, 0.35, t);
+			g += omLiqWave(p, vec2(0.995, 0.105), 0.283, 3.30, 0.2, t);
+			// fine chop: small sharp sparkles of the highlight
+			g += omLiqWave(p, vec2(-0.707, 0.707), 0.47, 4.70, 0.11, t);
+			g += omLiqWave(p, vec2(0.259, -0.966), 0.73, 6.10, 0.07, t);
+			return normalize(vec3(-g, 1.0));
+		}
+
 		float omEyeDist(float z)
 		{
 			float ndc = (z - omSoftP.z) / (omSoftP.w - omSoftP.z) * 2.0 - 1.0;
@@ -1648,6 +1673,15 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		void main()
 		{
 			vec4 c;
+			vec3 liqN = vec3(0.0, 0.0, 1.0);
+			vec3 liqV = vec3(0.0, 0.0, 1.0);
+
+			if(omLiq.x > 0.5)
+			{
+				liqN = omLiqNormal(passFxWorld.xy, omLiq.y);
+				liqV = normalize(omLiqEye.xyz - passFxWorld);
+				if(liqV.z < 0.0) liqN.z = -liqN.z; // seen from below (under water): the side toward the eye
+			}
 
 			if(omPF0.w > 1.5)
 			{
@@ -1663,12 +1697,48 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			}
 			else
 			{
-				vec4 t = texture(tex, passTexCoord);
+				// r_om_water: the texture moves with the ripples per pixel (the warp only moves the vertices)
+				vec4 t = texture(tex, passTexCoord + liqN.xy * 0.03);
 				c = (texmode == 1) ? t : t * passColor;
 			}
 
 			if(alphatest != 0 && c.a <= 0.05)
 				discard;
+
+			if(omLiq.x > 0.5)
+			{
+				vec3 lit = passColor.rgb; // the light at the water (vertex samples)
+				float ndv = max(dot(liqN, liqV), 0.0);
+				float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+				// the light: above the view and a little ahead (the map's sun is not used - most water is under a
+				// roof the sun does not reach); its strength is the light the water really gets (the vertex samples)
+				vec3 L = normalize(vec3(-liqV.xy, liqV.z + 0.6));
+				float spec = pow(max(dot(reflect(-liqV, liqN), L), 0.0), 220.0);
+
+				// the ripples catch the light: slopes facing the viewer a little brighter, the others darker
+				vec2 toEye = liqV.xy / max(length(liqV.xy), 0.001);
+				c.rgb *= 1.0 + dot(liqN.xy, toEye) * 0.9;
+
+				// no traced reflection: a hint of the lit surroundings at grazing angles
+				if(omLiq.w < 0.5)
+					c.rgb = mix(c.rgb, c.rgb * 0.7 + lit * 0.35, fres * 0.5);
+
+				c.rgb += spec * omLiq.z * lit * 0.8;
+
+				if(omLiqEye.w > 0.5 && liqV.z > 0.0)
+				{
+					// translucent water over the scene depth (seen from above: from below it is the air): soft where it meets the ground and walls, more opaque
+					// and darker where it is deep
+					float scene = omEyeDist(texture(omDepth, gl_FragCoord.xy * omSoftV.xy).r);
+					float thick = max(scene - omEyeDist(gl_FragCoord.z), 0.0);
+					float deep = clamp(thick / 320.0, 0.0, 1.0);
+					c.a = mix(c.a, max(c.a, 0.9), deep);
+					c.rgb *= mix(1.0, 0.8, deep);
+					c.a *= clamp(thick / 14.0, 0.0, 1.0);
+				}
+
+				c.a = mix(c.a, 1.0, fres * 0.6); // less see-through at grazing angles
+			}
 
 			if(fogmode != 0)
 			{
@@ -1676,7 +1746,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 				c.rgb = mix(fogcolor.rgb, c.rgb, f);
 			}
 
-			if(omSoftV.w > 0.5)
+			if(omSoftV.w > 0.5 && omSoftV.w < 2.5)
 			{
 				float scene = omEyeDist(texture(omDepth, gl_FragCoord.xy * omSoftV.xy).r);
 				float fade = clamp((scene - omEyeDist(gl_FragCoord.z)) / omSoftV.z, 0.0, 1.0);

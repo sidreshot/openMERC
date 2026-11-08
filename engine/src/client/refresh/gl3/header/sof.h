@@ -193,6 +193,8 @@ typedef struct
 	float pf2[4];        /* maxs z, size z, alpha scale, number of planes */
 	float pfpl[5][4];    /* boundary planes still shortening: normal, dist */
 	float matrefl, matrough; /* GFX-modern r_om_ssr: material of liquids (0 = default) */
+	/* GFX-modern r_om_water (gl3_liquid.c): mode (0 off, 1 water), time, highlight strength, 1 = SSR reflects */
+	float liq[4];
 } gl3fxstate_t;
 qboolean GL3_Post_SSRActive(void);
 qboolean GL3_Post_SSAOActive(void);

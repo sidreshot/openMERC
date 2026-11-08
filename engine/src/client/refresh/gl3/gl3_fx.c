@@ -41,6 +41,7 @@ static qboolean fxstate_valid;
 
 static GLint u_texmode, u_alphatest, u_fogmode, u_fogstart, u_fogend, u_fogcolor, u_fogplane;
 static GLint u_emis, u_softp, u_softv, u_depth, u_fxmat; /* GFX-modern (gl3_post.c) */
+static GLint u_liq, u_liqeye; /* GFX-modern r_om_water (gl3_liquid.c) */
 static GLint u_pf0, u_pf1, u_pf2, u_pfpl; /* GFX-modern r_om_ppfog (gl3_fog.c) */
 static GLint u_fogtab; /* r_om_ppfog region table (GL_TEXTURE4) */
 
@@ -61,6 +62,8 @@ QueryUniforms(void)
 	u_fogplane = glGetUniformLocation(prog, "fogplane");
 	u_emis = glGetUniformLocation(prog, "omEmis");
 	u_fxmat = glGetUniformLocation(prog, "omFxMat");
+	u_liq = glGetUniformLocation(prog, "omLiq");
+	u_liqeye = glGetUniformLocation(prog, "omLiqEye");
 	u_softp = glGetUniformLocation(prog, "omSoftP");
 	u_softv = glGetUniformLocation(prog, "omSoftV");
 	u_depth = glGetUniformLocation(prog, "omDepth");
@@ -242,6 +245,13 @@ uploaded:
 		GL3_Post_FxEmis(st->blend, emis);
 		glUniform4fv(u_emis, 1, emis);
 		glUniform4f(u_fxmat, st->matrefl, st->matrough, 0, 0);
+		glUniform4fv(u_liq, 1, st->liq);
+
+		if (st->liq[0] > 0)
+		{
+			glUniform4f(u_liqeye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2],
+				(soft == 3) ? 1.0f : 0.0f);
+		}
 
 		if (soft)
 		{
