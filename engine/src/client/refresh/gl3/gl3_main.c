@@ -868,9 +868,10 @@ static void
 A2CForDraw(const gl3ShaderInfo_t *shader, int flags)
 {
 	static cvar_t *r_om_a2c;
-	static GLuint prog[2];
-	static GLint loc[2];
-	int k = (shader == &gl3state.si3Dlm) ? 0 : (shader == &gl3state.si3DlmFlow) ? 1 : -1;
+	static GLuint prog[3];
+	static GLint loc[3];
+	int k = (shader == &gl3state.si3Dlm) ? 0 : (shader == &gl3state.si3DlmFlow) ? 1 :
+		(shader == &gl3state.si3DlmNoDl) ? 2 : -1;
 	int on = 0;
 
 	if (!r_om_a2c)
@@ -1547,6 +1548,13 @@ GL3_World_AddPoly(const msurface_t *fa, gl3drawCmd_t drawCmd)
 	}
 
 	assert(drawCmd.shaderIdx != -1);
+
+	/* no light flags here: the program without the dynamic light code */
+	if ((drawCmd.shaderIdx == (int)(&gl3state.si3Dlm - &gl3state.si2D)) && gl3state.si3DlmNoDl.shaderProgram)
+	{
+		GL3_SetDrawCmdShader(&drawCmd, &gl3state.si3DlmNoDl);
+	}
+
 	n = p->numverts;
 	drawCmd.src = 1;
 	drawCmd.idxBufOffset = da_count(worldIdx);

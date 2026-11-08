@@ -2242,6 +2242,27 @@ static qboolean createShaders(void)
 
 		free(opq);
 	}
+	/* OpenMerc: the variant for faces without dynamic light this frame (the static world VBO, GL3_World_AddPoly:
+	   those faces carry no light flags). The per-pixel light code is folded out, its texture-axis derivatives
+	   included - compilers hoist derivatives out of the branch, so every world pixel paid for them (Adreno 610). */
+	{
+		char *nodl = strdup(lightmappedFrag);
+
+		if(nodl == NULL)
+		{
+			return false;
+		}
+
+		FoldAll(nodl, "passLightFlags != 0u", "false");
+
+		if(!initShader3D(&gl3state.si3DlmNoDl, vertexSrc3Dlm, nodl))
+		{
+			Com_Printf("WARNING: Failed to create the lightmapped shader without dynamic lights\n");
+			gl3state.si3DlmNoDl.shaderProgram = 0;
+		}
+
+		free(nodl);
+	}
 	if(!initShader3D(&gl3state.si3Dtrans, vertexSrc3D, fragmentSrc3D))
 	{
 		Com_Printf("WARNING: Failed to create shader program for rendering translucent 3D things!\n");
@@ -2592,10 +2613,10 @@ void GL3_UpdateUBOLights(void)
 /* GFX-modern r_om_rain (gl3_post.c): the strike's shadow map (texture unit 9) and its view-projection */
 void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
 {
-	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
+	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 6; i++)
 	{
 		GLint loc;
 
@@ -2621,10 +2642,10 @@ void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
    and strength (w 0 = none), colour, the top-down depth map (texture unit 12) and its view-projection */
 void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const float *occvp, GLuint occtex)
 {
-	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
+	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 6; i++)
 	{
 		GLint loc;
 
@@ -2657,10 +2678,10 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
 	GLuint tex2)
 {
-	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
+	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 6; i++)
 	{
 		GLint loc;
 
@@ -2696,10 +2717,10 @@ void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *pl
 /* GFX-modern r_om_ssr: the parameters of the material classes (gl3_material.c) */
 void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 {
-	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
+	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 6; i++)
 	{
 		GLint loc;
 
@@ -2717,10 +2738,10 @@ void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 /* GFX-modern r_om_ssr: reflections on, rain wetness (gl3_post.c) */
 void GL3_SoF_SSRUniforms(const float *ssr)
 {
-	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
+	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 6; i++)
 	{
 		GLint loc;
 
@@ -2758,13 +2779,13 @@ GL3_WorldShaderFor(const gl3image_t *image)
 void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 {
 	extern int gl3_monolightmap_mode;
-	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque};
+	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int mode = fullbright ? 0 : gl3_monolightmap_mode;
 	int i;
 
 	worldmono = mode;
 
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 6; i++)
 	{
 		GLint loc;
 

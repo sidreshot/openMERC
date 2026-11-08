@@ -477,6 +477,7 @@ typedef struct
 	gl3ShaderInfo_t si2DpostProcessWater; // shader to apply water-warp postprocess effect
 
 	gl3ShaderInfo_t si3Dlm;        // a regular opaque face (e.g. from brush) with lightmap (alpha tested: grates, fences)
+	gl3ShaderInfo_t si3DlmNoDl;    // OpenMerc: si3Dlm without the dynamic light code (faces no light reaches)
 	gl3ShaderInfo_t si3DlmOpaque;  // OpenMerc: the same without discard - a texture without alpha keeps early depth / LRZ
 	// TODO: lm-only variants for gl_lightmap 1
 	gl3ShaderInfo_t si3Dtrans;     // transparent is always w/o lightmap
