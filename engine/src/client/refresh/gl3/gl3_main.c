@@ -1167,7 +1167,11 @@ void GL3_Draw3DBatchesNow()
 			updateUni3D = true;
 		}
 
-		if((flags & DCFlag_UseLmStyles) && !lmstylesEqual(cmd->styles, curState.styles))
+		/* the light style scales are a uniform of each program (UpdateLMscales skips unchanged values): sent again
+		   when the program changes too, or a world program taking over with the same styles kept stale scales
+		   (si3DlmNoDl after si3Dlm: white floors through the reflection material) */
+		if((flags & DCFlag_UseLmStyles) &&
+		   (cmd->shaderIdx != curState.shaderIdx || !lmstylesEqual(cmd->styles, curState.styles)))
 		{
 			hmm_vec4 lmScales[MAX_LIGHTMAPS_PER_SURFACE] = {0};
 			lmScales[0] = HMM_Vec4(1.0f, 1.0f, 1.0f, 1.0f);
