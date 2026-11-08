@@ -297,11 +297,15 @@ public:
 			if (a) {
 				Action *act = MakeAction(ai, 7, this, nullptr, a, goal, face, 0.5f, false);
 				ai->QueueBack(act);
-			} else
-				/* SPEC-710 C12: without the corner's moveaction the body's normal walk. The alerted combat point ran
-				   here: arm1 `toiletguy` (point_combat, used by the trigger) runs out of the restroom at 126-181 u/s,
-				   the original module walks him at 52 (sv_animlog A/B) */
-				PlanMove(ent, ai, goal, face, false, false, false);
+			} else {
+				/* SPEC-710 C12: without the corner's moveaction the body's normal walk - but an alerted fighter runs to
+				   its combat point. sv_animlog A/B: tsr1 `camdoorkicker` (skinhead, point_combat t212 without a
+				   moveaction) runs at ~210 u/s in the original module and walked at ~50 in B, so the door was kicked
+				   7 s late while the other two stood aiming at it; arm1 `toiletguy` (tourist) walks at 52 in both */
+				TypeInfo ti;
+				bool fighter = !(GetTypeInfo(ai->type_code, &ti) && (ti.innocent || ti.family == FAMILY_CIVILIAN));
+				PlanMove(ent, ai, goal, face, kind == DK_POINT && ai->alerted && fighter, false, false);
+			}
 		}
 	}
 };
