@@ -3175,6 +3175,7 @@ static struct
 	GLint up_fog, up_depth, up_rect, up_proj, up_size;
 	GLuint halftex, halffbo;   /* the fog at half size (r_om_volfog_half) */
 	int hw, hh;
+	qboolean marched; /* GL3_Post_VolFogMarch filled halftex this view */
 	float vr[VOLFOG_MAXREGIONS * 32];
 } V;
 
@@ -3493,9 +3494,9 @@ VolFogHalfTarget(void)
 	return true;
 }
 
-/* after the overlay pass of the opaque world */
-void
-GL3_Post_VolFog(void)
+/* the march's uniforms and state; false: no fog this view */
+static qboolean
+VolFogBegin(void)
 {
 	static const int stepsof[4] = {6, 10, 16, 28};
 	int n, q;
@@ -3503,14 +3504,14 @@ GL3_Post_VolFog(void)
 
 	if (!P.bound || !gl3post.volfog || !P.depthcopied)
 	{
-		return;
+		return false;
 	}
 
 	n = GL3_Fog_VolumeRegions(V.vr, VOLFOG_MAXREGIONS);
 
 	if ((n <= 0) || !VolFogProgram())
 	{
-		return;
+		return false;
 	}
 
 	GL3_Draw3DBatchesNow();
@@ -3539,48 +3540,102 @@ GL3_Post_VolFog(void)
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
 	glDisable(GL_CULL_FACE);
+	return true;
+}
+
+static void
+VolFogEnd(void)
+{
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+}
+
+/* right after the depth copy: the half-size march. It needs only the depth copy, so it runs before the fog
+   overlay - on a tiled GPU (Adreno) the copy and the march then break the scene's render pass once instead of
+   twice (each break stores and reloads the whole scene framebuffer); the upsample follows the overlay
+   (GL3_Post_VolFog). Adreno 610, tsr1 standard view: 25.5 -> 25.0 ms. */
+void
+GL3_Post_VolFogMarch(void)
+{
+	qboolean cull;
+
+	V.marched = false;
+	cull = glIsEnabled(GL_CULL_FACE);
+
+	if (!VolFogBegin())
+	{
+		return;
+	}
 
 	if (VolFogHalfTarget())
 	{
-		GLint fbo = 0, vp[4];
-
-		/* marched at half size, then over the view where the depth agrees (the scene framebuffer and the view are
-		   known: no driver query every frame) */
-		fbo = (GLint)P.fbo;
-		vp[0] = P.vx;
-		vp[1] = P.vy;
-		vp[2] = P.vw;
-		vp[3] = P.vh;
 		glDisable(GL_BLEND);
 		glBindFramebuffer(GL_FRAMEBUFFER, V.halffbo);
 		PostDiscard(GL_COLOR_ATTACHMENT0); /* the march writes every texel */
 		glViewport(0, 0, V.hw, V.hh);
 		DrawQuad();
 		GL3_Post_ProfMark("vf_march");
+		/* the scene framebuffer and the view are known: no driver query every frame */
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		glViewport(P.vx, P.vy, P.vw, P.vh);
+		V.marched = true;
+	}
 
-		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-		glViewport(vp[0], vp[1], vp[2], vp[3]);
+	VolFogEnd();
+
+	if (cull)
+	{
+		glEnable(GL_CULL_FACE);
+	}
+}
+
+/* after the overlay pass of the opaque world: the fog over the view where the depth agrees (or, without the
+   half-size target, marched here at full size) */
+void
+GL3_Post_VolFog(void)
+{
+	float fw = (float)P.w, fh = (float)P.h;
+
+	if (V.marched)
+	{
+		V.marched = false;
+
+		if (!P.bound || !gl3post.volfog)
+		{
+			return;
+		}
+
+		GL3_Draw3DBatchesNow();
+		GL3_FX_Flush();
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+		glDisable(GL_CULL_FACE);
 		GL3_UseProgram(V.progup);
 		glUniform4f(V.up_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 		glUniform4f(V.up_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin,
 			gl3depthmax);
 		glUniform4f(V.up_size, (float)V.hw, (float)V.hh, 1.0f / V.hw, 1.0f / V.hh);
+		GL3_SelectTMU(GL_TEXTURE7);
+		glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
 		BindTex(GL_TEXTURE0, V.halftex);
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_ONE, GL_SRC_ALPHA);
 		DrawQuad();
-	}
-	else
-	{
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_ONE, GL_SRC_ALPHA);
-		DrawQuad();
+		VolFogEnd();
+		return;
 	}
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDisable(GL_BLEND);
-	glEnable(GL_DEPTH_TEST);
-	glDepthMask(GL_TRUE);
+	if (!VolFogBegin())
+	{
+		return;
+	}
+
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_SRC_ALPHA);
+	DrawQuad();
+	VolFogEnd();
 }
 
 static void

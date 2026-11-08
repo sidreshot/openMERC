@@ -2457,6 +2457,8 @@ GL3_RenderView(refdef_t *fd)
 
 	/* GFX-modern: depth of the world for soft particles */
 	GL3_Post_DepthCopy();
+	/* the volumetric fog's half-size march while the scene pass is broken for the copy anyway */
+	GL3_Post_VolFogMarch();
 
 	/* fog overlay for the faces collected by the world walk, with shimmer and far wall */
 	GL3_Fog_DrawPass(true);
