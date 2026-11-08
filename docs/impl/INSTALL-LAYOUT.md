@@ -57,11 +57,21 @@ then used.
 
 ## Game data from a disc image (2026-11-08)
 
-When no folder with `base/pak0.pak` is found at start (the folders listed above), openMERC asks for the disc image
-(`.iso`) of the player's own Soldier of Fortune copy (`client/om_import.c`). The installer on the disc is an
-InstallShield 5 cabinet (`SETUP/DATA1.HDR` + `SETUP/DATA1.CAB`, the Platinum edition layout); every file of it that
-belongs in a `base` folder (all `.pak` files, never `.exe`/`.dll`) is unpacked into `<game folder>/base`:
-Windows - the folder of `openMerc.exe`, Android - the app's data folder (`basedir`). Nothing is downloaded.
+When no folder with `base/pak0.pak` is found at start (the folders listed above), openMERC asks what to do
+(`client/om_import.c`): choose the disc image (`.iso`) of the player's own Soldier of Fortune copy, or quit. With game
+data present the game simply starts. The installer on the disc is an InstallShield 5 cabinet (`SETUP/DATA1.HDR` +
+`SETUP/DATA1.CAB`, the Platinum edition layout); every file of it that belongs in a `base` folder (all `.pak` files,
+never `.exe`/`.dll`) is unpacked into `<game folder>/base`: Windows - the folder of `openMerc.exe`, Android - the
+app's external files folder (`Sys_GetBinaryDir`). A window shows the stage, a bar, the percentage and the megabytes.
 `om_importiso <image> [folder]` does the same from the console; `+set om_noimport 1` skips the question.
-The cabinet reader follows the layout unshield documents; it is tested on a synthetic image
-(scratch generator: IS5 header/cabinet with stored and deflate-chunked files), not yet on a real disc.
+
+A private build may also download its owner's image: when an address is known the dialog offers "Download" first.
+The address is never in the sources - it comes from a file `om_image.url` (one line) in the game folder, or is built
+in from the untracked `engine/om_image.url` (or `-DOM_IMAGE_URL=...`). The image goes to
+`<game folder>/openmerc_image.iso.part` (WinHTTP on Windows, `java.net.HttpURLConnection` through JNI on Android;
+an interrupted download resumes with a Range request), is unpacked and then deleted. `om_fetchiso <url> <file>` runs
+the downloader alone.
+
+Checked 2026-11-08 with the Platinum disc image: all five paks (`gs.pak`, `pak0-3.pak`) unpacked bit-identical
+(SHA-256) to an installed copy, on Windows both from a local image and by the automatic download into an empty
+folder; on Android by the automatic download (resumed after a restart).

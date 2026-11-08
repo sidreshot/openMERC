@@ -4,8 +4,12 @@
  *
  * openMERC: game data from the player's own Soldier of Fortune disc image. When no folder with base/pak0.pak is found
  * at start, the player may pick a disc image (.iso) of the game; the files of its installer (an InstallShield 5
- * cabinet, SETUP/DATA1.HDR + SETUP/DATA1.CAB) that belong in base/ are unpacked into <game folder>/base. Nothing is
- * downloaded: the image is a file the player owns.
+ * cabinet, SETUP/DATA1.HDR + SETUP/DATA1.CAB) that belong in base/ are unpacked into <game folder>/base.
+ *
+ * A private build may also fetch its owner's image: when an address is given (a file om_image.url next to the game or
+ * in its folder, or OM_IMAGE_URL built in from the untracked engine/om_image.url), the image is downloaded first
+ * (WinHTTP on Windows, java.net.HttpURLConnection on Android; resumed after a break), unpacked and deleted. The
+ * sources name no address.
  *
  * Formats: ISO 9660 (primary volume descriptor, 2048-byte sectors, directory records); InstallShield 5 cabinet as
  * the open-source unshield reads it (common header "ISc(", cabinet descriptor, file table of directory name offsets
@@ -13,6 +17,15 @@
  */
 
 #include <SDL3/SDL.h>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <winhttp.h>
+#endif
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
 
 #include "header/client.h"
 #include "../common/unzip/miniz/miniz.h"
@@ -155,23 +168,37 @@ ISO_Find(iso_t *iso, const char *path, Uint32 *ext, Uint32 *size)
 
 static SDL_Window *imp_win;
 static SDL_Renderer *imp_ren;
+static const char *imp_stage = "openMERC"; /* line above the bar (SDL debug font: ASCII only) */
+static Sint64 imp_done, imp_total;         /* bytes shown under the bar when imp_total > 0 */
+
+static void
+IMP_Text(float cx, float y, float sc, const char *txt)
+{
+	SDL_SetRenderScale(imp_ren, sc, sc);
+	SDL_RenderDebugText(imp_ren, (cx - strlen(txt) * SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * sc / 2) / sc, y / sc, txt);
+	SDL_SetRenderScale(imp_ren, 1, 1);
+}
 
 static void
 IMP_Progress(float f)
 {
 	static int last = -1;
+	static Uint64 lastms;
 	int pc = (int)(f * 100);
 	SDL_FRect r;
 	int w = 0, h = 0;
+	float sc, ch;
+	char line[96];
 
 	SDL_PumpEvents();
 
-	if (pc == last)
+	if (pc == last && SDL_GetTicks() - lastms < 300)
 	{
 		return;
 	}
 
 	last = pc;
+	lastms = SDL_GetTicks();
 
 	if (imp_win)
 	{
@@ -184,17 +211,34 @@ IMP_Progress(float f)
 	}
 
 	SDL_GetCurrentRenderOutputSize(imp_ren, &w, &h);
+	sc = (float)(int)(h / 70 > 2 ? (h / 70 < (w / 50) ? h / 70 : w / 50) : 2);
+	sc = sc > 6 ? 6 : sc;
+	ch = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * sc;
 	SDL_SetRenderDrawColor(imp_ren, 18, 22, 28, 255);
 	SDL_RenderClear(imp_ren);
 	r.x = w * 0.08f;
 	r.w = w * 0.84f;
-	r.h = h * 0.12f;
+	r.h = ch * 1.6f;
 	r.y = (h - r.h) / 2;
+	SDL_SetRenderDrawColor(imp_ren, 230, 232, 236, 255);
+	IMP_Text(w / 2.0f, r.y - ch * 2.2f, sc, imp_stage);
 	SDL_SetRenderDrawColor(imp_ren, 60, 66, 76, 255);
 	SDL_RenderFillRect(imp_ren, &r);
 	r.w *= f;
 	SDL_SetRenderDrawColor(imp_ren, 240, 130, 30, 255);
 	SDL_RenderFillRect(imp_ren, &r);
+
+	if (imp_total > 0)
+	{
+		Com_sprintf(line, sizeof(line), "%d%%   %d / %d MB", pc, (int)(imp_done >> 20), (int)(imp_total >> 20));
+	}
+	else
+	{
+		Com_sprintf(line, sizeof(line), "%d%%", pc);
+	}
+
+	SDL_SetRenderDrawColor(imp_ren, 200, 204, 212, 255);
+	IMP_Text(w / 2.0f, r.y + r.h + ch * 1.2f, sc, line);
 	SDL_RenderPresent(imp_ren);
 }
 
@@ -602,35 +646,50 @@ IMP_Picked(void *user, const char *const *files, int filter)
 	SDL_SetAtomicInt(&p->done, 1);
 }
 
+/* Message box with up to three buttons; returns 1..3 for the button, 0 when closed otherwise. */
 static int
-IMP_Ask(const char *title, const char *text, const char *b1, const char *b2)
+IMP_Ask3(const char *title, const char *text, const char *b1, const char *b2, const char *b3)
 {
-	SDL_MessageBoxButtonData bt[2];
+	SDL_MessageBoxButtonData bt[3];
 	SDL_MessageBoxData d;
-	int hit = -1;
+	const char *b[3] = {b1, b2, b3};
+	int hit = 0, n = 0, i;
 
 	memset(bt, 0, sizeof(bt));
 	memset(&d, 0, sizeof(d));
+
+	for (i = 0; i < 3; i++)
+	{
+		if (b[i])
+		{
+			bt[n].buttonID = i + 1;
+			bt[n].text = b[i];
+			n++;
+		}
+	}
+
 	bt[0].flags = SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT;
-	bt[0].buttonID = 1;
-	bt[0].text = b1;
-	bt[1].flags = SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;
-	bt[1].buttonID = 0;
-	bt[1].text = b2;
+	bt[n - 1].flags |= n > 1 ? SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT : 0;
 	d.flags = SDL_MESSAGEBOX_INFORMATION;
 	d.title = title;
 	d.message = text;
-	d.numbuttons = b2 ? 2 : 1;
+	d.numbuttons = n;
 	d.buttons = bt;
-	SDL_ShowMessageBox(&d, &hit);
+
+	if (!SDL_ShowMessageBox(&d, &hit) || hit < 0)
+	{
+		hit = 0;
+	}
+
 	return hit;
 }
 
-/*
- * Called before the filesystem starts. With game data in one of the folders the filesystem looks in, nothing
- * happens; otherwise the player may pick the disc image to unpack into the game folder (Windows: the folder of
- * openMerc.exe, Android: the app's data folder), or quit.
- */
+static int
+IMP_Ask(const char *title, const char *text, const char *b1, const char *b2)
+{
+	return IMP_Ask3(title, text, b1, b2, NULL);
+}
+
 /* om_importiso <image> [folder]: unpack a disc image by hand (default folder: the game folder of this start) */
 static void
 IMP_Import_f(void)
@@ -658,17 +717,553 @@ IMP_Import_f(void)
 	}
 }
 
+/* ------------------------------------------------------------------ */
+/* Fetching the owner's image (private builds)                        */
+
+#ifndef OM_IMAGE_URL
+#define OM_IMAGE_URL ""
+#endif
+
+#define DL_BUF (256 * 1024)
+
+/* The file grows at path.part; a later call resumes it (Range) and renames it to path when complete. */
+typedef struct
+{
+	SDL_IOStream *out;
+	Sint64 have, total;
+} dl_t;
+
+static qboolean
+DL_Write(dl_t *d, const void *buf, size_t n)
+{
+	if (SDL_WriteIO(d->out, buf, n) != n)
+	{
+		return false;
+	}
+
+	d->have += n;
+
+	imp_done = d->have;
+	imp_total = d->total;
+
+	if (d->total > 0)
+	{
+		IMP_Progress((float)((double)d->have / (double)d->total));
+	}
+	else
+	{
+		SDL_PumpEvents();
+	}
+
+	return true;
+}
+
+#ifdef _WIN32
+static qboolean
+DL_Http(const char *url, dl_t *d, char *part, char *err, size_t errsize)
+{
+	wchar_t wurl[2048], host[256], upath[2048], range[64];
+	URL_COMPONENTS uc;
+	HINTERNET ses = NULL, con = NULL, req = NULL;
+	DWORD status = 0, sz = sizeof(status), got;
+	wchar_t lenbuf[32];
+	DWORD lensz = sizeof(lenbuf);
+	byte *buf = NULL;
+	qboolean ok = false;
+
+	MultiByteToWideChar(CP_UTF8, 0, url, -1, wurl, 2048);
+	memset(&uc, 0, sizeof(uc));
+	uc.dwStructSize = sizeof(uc);
+	uc.lpszHostName = host;
+	uc.dwHostNameLength = 256;
+	uc.lpszUrlPath = upath;
+	uc.dwUrlPathLength = 2048;
+
+	if (!WinHttpCrackUrl(wurl, 0, 0, &uc))
+	{
+		Com_sprintf(err, errsize, "bad address");
+		return false;
+	}
+
+	ses = WinHttpOpen(L"openMERC", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
+			WINHTTP_NO_PROXY_BYPASS, 0);
+
+	if (!ses)
+	{
+		ses = WinHttpOpen(L"openMERC", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
+				WINHTTP_NO_PROXY_BYPASS, 0);
+	}
+
+	con = ses ? WinHttpConnect(ses, host, uc.nPort, 0) : NULL;
+	req = con ? WinHttpOpenRequest(con, L"GET", upath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+			uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0) : NULL;
+
+	if (!req)
+	{
+		Com_sprintf(err, errsize, "no connection (%lu)", GetLastError());
+		goto done;
+	}
+
+	if (d->have > 0)
+	{
+		swprintf(range, 64, L"Range: bytes=%lld-", (long long)d->have);
+		WinHttpAddRequestHeaders(req, range, (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD);
+	}
+
+	if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+			!WinHttpReceiveResponse(req, NULL))
+	{
+		Com_sprintf(err, errsize, "request failed (%lu)", GetLastError());
+		goto done;
+	}
+
+	WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+			&status, &sz, WINHTTP_NO_HEADER_INDEX);
+
+	if (status != 200 && status != 206)
+	{
+		Com_sprintf(err, errsize, "server answered %lu", status);
+		goto done;
+	}
+
+	if (status == 200 && d->have > 0) /* no resume: start over */
+	{
+		SDL_CloseIO(d->out);
+		d->out = SDL_IOFromFile(part, "wb");
+		d->have = 0;
+
+		if (!d->out)
+		{
+			Com_sprintf(err, errsize, "cannot write %s", part);
+			goto done;
+		}
+	}
+
+	if (WinHttpQueryHeaders(req, WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX, lenbuf, &lensz,
+			WINHTTP_NO_HEADER_INDEX))
+	{
+		d->total = d->have + _wtoi64(lenbuf);
+	}
+
+	buf = malloc(DL_BUF);
+
+	for (;;)
+	{
+		if (!WinHttpReadData(req, buf, DL_BUF, &got))
+		{
+			Com_sprintf(err, errsize, "connection lost (%lu)", GetLastError());
+			goto done;
+		}
+
+		if (!got)
+		{
+			break;
+		}
+
+		if (!DL_Write(d, buf, got))
+		{
+			Com_sprintf(err, errsize, "cannot write %s (disk full?)", part);
+			goto done;
+		}
+	}
+
+	ok = d->total <= 0 || d->have == d->total;
+
+	if (!ok)
+	{
+		Com_sprintf(err, errsize, "transfer cut short");
+	}
+
+done:
+	free(buf);
+
+	if (req)
+	{
+		WinHttpCloseHandle(req);
+	}
+
+	if (con)
+	{
+		WinHttpCloseHandle(con);
+	}
+
+	if (ses)
+	{
+		WinHttpCloseHandle(ses);
+	}
+
+	return ok;
+}
+#elif defined(__ANDROID__)
+static qboolean
+DL_JniFailed(JNIEnv *env)
+{
+	if ((*env)->ExceptionCheck(env))
+	{
+		(*env)->ExceptionClear(env);
+		return true;
+	}
+
+	return false;
+}
+
+static qboolean
+DL_Http(const char *url, dl_t *d, char *part, char *err, size_t errsize)
+{
+	JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+	jclass cu, cc, ci;
+	jobject u, c, in = NULL;
+	jbyteArray arr;
+	jint status, n;
+	jlong len;
+	char range[64];
+	byte *buf = NULL;
+	qboolean ok = false;
+
+	if (!env || (*env)->PushLocalFrame(env, 32) < 0)
+	{
+		Com_sprintf(err, errsize, "no Java environment");
+		return false;
+	}
+
+	cu = (*env)->FindClass(env, "java/net/URL");
+	cc = (*env)->FindClass(env, "java/net/HttpURLConnection");
+	ci = (*env)->FindClass(env, "java/io/InputStream");
+
+	if (DL_JniFailed(env) || !cu || !cc || !ci)
+	{
+		Com_sprintf(err, errsize, "no java.net");
+		goto done;
+	}
+
+	u = (*env)->NewObject(env, cu, (*env)->GetMethodID(env, cu, "<init>", "(Ljava/lang/String;)V"),
+			(*env)->NewStringUTF(env, url));
+	c = DL_JniFailed(env) ? NULL : (*env)->CallObjectMethod(env, u,
+			(*env)->GetMethodID(env, cu, "openConnection", "()Ljava/net/URLConnection;"));
+
+	if (DL_JniFailed(env) || !c)
+	{
+		Com_sprintf(err, errsize, "bad address");
+		goto done;
+	}
+
+	(*env)->CallVoidMethod(env, c, (*env)->GetMethodID(env, cc, "setConnectTimeout", "(I)V"), 30000);
+	(*env)->CallVoidMethod(env, c, (*env)->GetMethodID(env, cc, "setReadTimeout", "(I)V"), 60000);
+
+	if (d->have > 0)
+	{
+		Com_sprintf(range, sizeof(range), "bytes=%lld-", (long long)d->have);
+		(*env)->CallVoidMethod(env, c, (*env)->GetMethodID(env, cc, "setRequestProperty",
+				"(Ljava/lang/String;Ljava/lang/String;)V"), (*env)->NewStringUTF(env, "Range"),
+				(*env)->NewStringUTF(env, range));
+	}
+
+	status = (*env)->CallIntMethod(env, c, (*env)->GetMethodID(env, cc, "getResponseCode", "()I"));
+
+	if (DL_JniFailed(env))
+	{
+		Com_sprintf(err, errsize, "no connection");
+		goto done;
+	}
+
+	if (status != 200 && status != 206)
+	{
+		Com_sprintf(err, errsize, "server answered %d", (int)status);
+		goto done;
+	}
+
+	if (status == 200 && d->have > 0)
+	{
+		SDL_CloseIO(d->out);
+		d->out = SDL_IOFromFile(part, "wb");
+		d->have = 0;
+
+		if (!d->out)
+		{
+			Com_sprintf(err, errsize, "cannot write %s", part);
+			goto done;
+		}
+	}
+
+	len = (*env)->CallLongMethod(env, c, (*env)->GetMethodID(env, cc, "getContentLengthLong", "()J"));
+
+	if (!DL_JniFailed(env) && len > 0)
+	{
+		d->total = d->have + len;
+	}
+
+	in = (*env)->CallObjectMethod(env, c, (*env)->GetMethodID(env, cc, "getInputStream", "()Ljava/io/InputStream;"));
+	arr = (DL_JniFailed(env) || !in) ? NULL : (*env)->NewByteArray(env, DL_BUF);
+
+	if (!in || !arr)
+	{
+		in = NULL;
+		Com_sprintf(err, errsize, "no data stream");
+		goto done;
+	}
+
+	buf = malloc(DL_BUF);
+
+	{
+		jmethodID rd = (*env)->GetMethodID(env, ci, "read", "([B)I");
+
+		for (;;)
+		{
+			n = (*env)->CallIntMethod(env, in, rd, arr);
+
+			if (DL_JniFailed(env))
+			{
+				Com_sprintf(err, errsize, "connection lost");
+				goto done;
+			}
+
+			if (n < 0)
+			{
+				break;
+			}
+
+			(*env)->GetByteArrayRegion(env, arr, 0, n, (jbyte *)buf);
+
+			if (n && !DL_Write(d, buf, n))
+			{
+				Com_sprintf(err, errsize, "cannot write %s (storage full?)", part);
+				goto done;
+			}
+		}
+	}
+
+	ok = d->total <= 0 || d->have == d->total;
+
+	if (!ok)
+	{
+		Com_sprintf(err, errsize, "transfer cut short");
+	}
+
+done:
+	free(buf);
+
+	if (in)
+	{
+		(*env)->CallVoidMethod(env, in, (*env)->GetMethodID(env, ci, "close", "()V"));
+		DL_JniFailed(env);
+	}
+
+	(*env)->PopLocalFrame(env, NULL);
+	return ok;
+}
+#else
+static qboolean
+DL_Http(const char *url, dl_t *d, char *part, char *err, size_t errsize)
+{
+	Com_sprintf(err, errsize, "downloading is not built for this system");
+	return false;
+}
+#endif
+
+/* Downloads url to path (via path.part, resumed after a break, up to 5 tries per call). */
+static qboolean
+DL_Fetch(const char *url, const char *path, char *err, size_t errsize)
+{
+	char part[MAX_OSPATH];
+	dl_t d;
+	int tries;
+	qboolean ok = false;
+
+	Com_sprintf(part, sizeof(part), "%s.part", path);
+
+	for (tries = 0; tries < 5 && !ok; tries++)
+	{
+		memset(&d, 0, sizeof(d));
+		d.out = SDL_IOFromFile(part, "ab");
+
+		if (!d.out)
+		{
+			Com_sprintf(err, errsize, "cannot write %s", part);
+			return false;
+		}
+
+		d.have = SDL_GetIOSize(d.out);
+		Com_Printf("download: %s (%lld bytes here)\n", url, (long long)d.have);
+		ok = DL_Http(url, &d, part, err, errsize);
+
+		if (d.out)
+		{
+			SDL_CloseIO(d.out);
+		}
+
+		if (!ok)
+		{
+			Com_Printf("download: %s\n", err);
+		}
+	}
+
+	if (!ok)
+	{
+		return false;
+	}
+
+	SDL_RemovePath(path);
+
+	if (!SDL_RenamePath(part, path))
+	{
+		Com_sprintf(err, errsize, "cannot rename %s", part);
+		return false;
+	}
+
+	Com_Printf("download: %lld bytes -> %s\n", (long long)d.have, path);
+	return true;
+}
+
+/* The owner's image address: om_image.url (first line) in one of the folders, else the built-in one. */
+static qboolean
+DL_ImageUrl(const char *const *dirs, int ndirs, char *out, size_t size)
+{
+	char path[MAX_OSPATH];
+	int i;
+
+	for (i = 0; i < ndirs; i++)
+	{
+		size_t len = 0;
+		char *txt;
+
+		if (!dirs[i] || !dirs[i][0])
+		{
+			continue;
+		}
+
+		Com_sprintf(path, sizeof(path), "%s/om_image.url", dirs[i]);
+		txt = SDL_LoadFile(path, &len);
+
+		if (txt)
+		{
+			char *e = txt;
+
+			while (*e && *e != '\r' && *e != '\n')
+			{
+				e++;
+			}
+
+			*e = 0;
+			Q_strlcpy(out, txt, size);
+			SDL_free(txt);
+
+			if (out[0])
+			{
+				return true;
+			}
+		}
+	}
+
+	Q_strlcpy(out, OM_IMAGE_URL, size);
+	return out[0] != 0;
+}
+
+/* om_fetchiso <url> <file>: the downloader alone */
+static void
+DL_Fetch_f(void)
+{
+	char err[256];
+
+	if (Cmd_Argc() < 3)
+	{
+		Com_Printf("Usage: om_fetchiso <url> <file>\n");
+		return;
+	}
+
+	if (!DL_Fetch(Cmd_Argv(1), Cmd_Argv(2), err, sizeof(err)))
+	{
+		Com_Printf("download failed: %s\n", err);
+	}
+}
+
+/* progress window for a download and/or an unpack */
+static void
+IMP_WinOpen(void)
+{
+	imp_win = SDL_CreateWindow("openMERC", 640, 200, 0);
+	imp_ren = imp_win ? SDL_CreateRenderer(imp_win, NULL) : NULL;
+}
+
+static void
+IMP_WinClose(void)
+{
+	if (imp_ren)
+	{
+		SDL_DestroyRenderer(imp_ren);
+	}
+
+	if (imp_win)
+	{
+		SDL_DestroyWindow(imp_win);
+	}
+
+	imp_ren = NULL;
+	imp_win = NULL;
+	imp_stage = "openMERC";
+	imp_total = 0;
+}
+
+/* Unpacks image into gamedir with the progress window; the number of files, or 0 (err set) */
+static int
+IMP_Unpack(const char *image, const char *gamedir, char *err, size_t errsize)
+{
+	imp_stage = "Unpacking the game files";
+	imp_total = 0;
+	IMP_Progress(0);
+	return IMP_FromImage(image, gamedir, err, errsize);
+}
+
+/* Download + unpack + delete; true when the game data is in place. */
+static qboolean
+DL_AutoImport(const char *url, const char *gamedir)
+{
+	char iso[MAX_OSPATH], err[256];
+	int n = 0;
+
+	Com_sprintf(iso, sizeof(iso), "%s/openmerc_image.iso", gamedir);
+	Com_Printf("import: fetching the disc image -> %s\n", iso);
+	IMP_WinOpen();
+	imp_stage = "Downloading the disc image";
+	IMP_Progress(0);
+
+	if (DL_Fetch(url, iso, err, sizeof(err)))
+	{
+		n = IMP_Unpack(iso, gamedir, err, sizeof(err));
+	}
+
+	IMP_WinClose();
+
+	if (n > 0)
+	{
+		Com_Printf("import: %d files unpacked, image removed\n", n);
+		SDL_RemovePath(iso);
+		return true;
+	}
+
+	Com_Printf("auto import failed: %s\n", err);
+	IMP_Ask("openMERC", va("The disc image could not be downloaded / \xD0\x9E\xD0\xB1\xD1\x80\xD0\xB0\xD0\xB7 \xD0\xBD\xD0\xB5 \xD0\xB7\xD0\xB0\xD0\xB3\xD1\x80\xD1\x83\xD0\xB6\xD0\xB5\xD0\xBD:\n%s", err), "OK", NULL);
+	return false;
+}
+
+/*
+ * Called before the filesystem starts. With game data in one of the folders the filesystem looks in, the game just
+ * starts. Otherwise the player is asked: download the image (when an address is known), pick a disc image to unpack
+ * into the game folder (Windows: the folder of openMerc.exe, Android: the app's data folder), or quit.
+ */
 void
 CL_OM_EnsureGameData(void)
 {
 	const char *bin = Sys_GetBinaryDir();
 	const char *basedir = Cvar_VariableString("basedir");
-	char cand[MAX_OSPATH], gamedir[MAX_OSPATH], err[256];
+	char cand[MAX_OSPATH], gamedir[MAX_OSPATH], err[256], url[1024];
+	const char *dirs[3];
 	imp_pick_t pick;
 	static const SDL_DialogFileFilter filt[] = {{"Disc image (ISO)", "iso"}, {"All files", "*"}};
-	int n;
+	qboolean haveurl;
+	int n, choice;
 
 	Cmd_AddCommand("om_importiso", IMP_Import_f);
+	Cmd_AddCommand("om_fetchiso", DL_Fetch_f);
 
 	if (Cvar_VariableValue("dedicated") || Cvar_VariableValue("om_noimport"))
 	{
@@ -709,26 +1304,41 @@ CL_OM_EnsureGameData(void)
 		}
 	}
 
-#ifdef __ANDROID__
-	Q_strlcpy(gamedir, basedir, sizeof(gamedir));
-#else
+	/* next to the executable; on Android Sys_GetBinaryDir is the app's external files folder (base/, openmerc/) -
+	   basedir is "." there and the process cwd is not that folder */
 	Com_sprintf(gamedir, sizeof(gamedir), "%s.", (bin && bin[0]) ? bin : "./");
-#endif
+	dirs[0] = gamedir;
+	dirs[1] = basedir;
+	dirs[2] = bin;
+	haveurl = DL_ImageUrl(dirs, 3, url, sizeof(url));
 
 	SDL_InitSubSystem(SDL_INIT_VIDEO);
 
 	for (;;)
 	{
-		if (IMP_Ask("openMERC",
-				"Soldier of Fortune game data (base/pak0.pak) was not found.\n"
-				"Choose the disc image (.iso) of your Soldier of Fortune copy: the game files are unpacked from it.\n\n"
-				"\xD0\x9D\xD0\xB5 \xD0\xBD\xD0\xB0\xD0\xB9\xD0\xB4\xD0\xB5\xD0\xBD\xD1\x8B \xD0\xB4\xD0\xB0\xD0\xBD\xD0\xBD\xD1\x8B\xD0\xB5 "
-				"\xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B Soldier of Fortune (base/pak0.pak).\n"
-				"\xD0\x92\xD1\x8B\xD0\xB1\xD0\xB5\xD1\x80\xD0\xB8\xD1\x82\xD0\xB5 \xD0\xBE\xD0\xB1\xD1\x80\xD0\xB0\xD0\xB7 "
-				"\xD0\xB4\xD0\xB8\xD1\x81\xD0\xBA\xD0\xB0 (.iso) \xD0\xB2\xD0\xB0\xD1\x88\xD0\xB5\xD0\xB9 \xD0\xBA\xD0\xBE\xD0\xBF\xD0\xB8\xD0\xB8 "
-				"\xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B: \xD1\x84\xD0\xB0\xD0\xB9\xD0\xBB\xD1\x8B \xD0\xB1\xD1\x83\xD0\xB4\xD1\x83\xD1\x82 "
-				"\xD1\x80\xD0\xB0\xD1\x81\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xBE\xD0\xB2\xD0\xB0\xD0\xBD\xD1\x8B \xD0\xB8\xD0\xB7 \xD0\xBD\xD0\xB5\xD0\xB3\xD0\xBE.",
-				"ISO...", "Quit / \xD0\x92\xD1\x8B\xD1\x85\xD0\xBE\xD0\xB4") != 1)
+		if (haveurl)
+		{
+			choice = IMP_Ask3("openMERC", "Soldier of Fortune game data (base/pak0.pak) was not found.\nDownload the disc image of your copy and unpack the game files from it, or choose a disc image (.iso) on this device.\n\n\xD0\x9D\xD0\xB5 \xD0\xBD\xD0\xB0\xD0\xB9\xD0\xB4\xD0\xB5\xD0\xBD\xD1\x8B \xD0\xB4\xD0\xB0\xD0\xBD\xD0\xBD\xD1\x8B\xD0\xB5 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B Soldier of Fortune (base/pak0.pak).\n\xD0\x97\xD0\xB0\xD0\xB3\xD1\x80\xD1\x83\xD0\xB7\xD0\xB8\xD1\x82\xD1\x8C \xD0\xBE\xD0\xB1\xD1\x80\xD0\xB0\xD0\xB7 \xD0\xB4\xD0\xB8\xD1\x81\xD0\xBA\xD0\xB0 \xD0\xB2\xD0\xB0\xD1\x88\xD0\xB5\xD0\xB9 \xD0\xBA\xD0\xBE\xD0\xBF\xD0\xB8\xD0\xB8 \xD0\xB8 \xD1\x80\xD0\xB0\xD1\x81\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xBE\xD0\xB2\xD0\xB0\xD1\x82\xD1\x8C \xD0\xB8\xD0\xB7 \xD0\xBD\xD0\xB5\xD0\xB3\xD0\xBE \xD1\x84\xD0\xB0\xD0\xB9\xD0\xBB\xD1\x8B \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B \xD0\xB8\xD0\xBB\xD0\xB8 \xD0\xB2\xD1\x8B\xD0\xB1\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C \xD0\xBE\xD0\xB1\xD1\x80\xD0\xB0\xD0\xB7 \xD0\xB4\xD0\xB8\xD1\x81\xD0\xBA\xD0\xB0 (.iso) \xD0\xBD\xD0\xB0 \xD1\x8D\xD1\x82\xD0\xBE\xD0\xBC \xD1\x83\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD1\x81\xD1\x82\xD0\xB2\xD0\xB5?",
+					"\xD0\xA1\xD0\xBA\xD0\xB0\xD1\x87\xD0\xB0\xD1\x82\xD1\x8C", "\xD0\x92\xD1\x8B\xD0\xB1\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C ISO", "\xD0\x92\xD1\x8B\xD1\x85\xD0\xBE\xD0\xB4");
+		}
+		else
+		{
+			choice = IMP_Ask3("openMERC", "Soldier of Fortune game data (base/pak0.pak) was not found.\nChoose the disc image (.iso) of your Soldier of Fortune copy: the game files are unpacked from it.\n\n\xD0\x9D\xD0\xB5 \xD0\xBD\xD0\xB0\xD0\xB9\xD0\xB4\xD0\xB5\xD0\xBD\xD1\x8B \xD0\xB4\xD0\xB0\xD0\xBD\xD0\xBD\xD1\x8B\xD0\xB5 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B Soldier of Fortune (base/pak0.pak).\n\xD0\x92\xD1\x8B\xD0\xB1\xD0\xB5\xD1\x80\xD0\xB8\xD1\x82\xD0\xB5 \xD0\xBE\xD0\xB1\xD1\x80\xD0\xB0\xD0\xB7 \xD0\xB4\xD0\xB8\xD1\x81\xD0\xBA\xD0\xB0 (.iso) \xD0\xB2\xD0\xB0\xD1\x88\xD0\xB5\xD0\xB9 \xD0\xBA\xD0\xBE\xD0\xBF\xD0\xB8\xD0\xB8 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B: \xD1\x84\xD0\xB0\xD0\xB9\xD0\xBB\xD1\x8B \xD0\xB1\xD1\x83\xD0\xB4\xD1\x83\xD1\x82 \xD1\x80\xD0\xB0\xD1\x81\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xBE\xD0\xB2\xD0\xB0\xD0\xBD\xD1\x8B \xD0\xB8\xD0\xB7 \xD0\xBD\xD0\xB5\xD0\xB3\xD0\xBE.",
+					"\xD0\x92\xD1\x8B\xD0\xB1\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C ISO", "\xD0\x92\xD1\x8B\xD1\x85\xD0\xBE\xD0\xB4", NULL);
+			choice = choice == 1 ? 2 : 3;
+		}
+
+		if (choice == 1)
+		{
+			if (DL_AutoImport(url, gamedir))
+			{
+				break;
+			}
+
+			continue;
+		}
+
+		if (choice != 2)
 		{
 			SDL_QuitSubSystem(SDL_INIT_VIDEO);
 			return; /* the engine goes on and reports the missing data as before */
@@ -749,23 +1359,9 @@ CL_OM_EnsureGameData(void)
 		}
 
 		Com_Printf("import: %s -> %s/base\n", pick.path, gamedir);
-		imp_win = SDL_CreateWindow("openMERC", 480, 96, 0);
-		imp_ren = imp_win ? SDL_CreateRenderer(imp_win, NULL) : NULL;
-		IMP_Progress(0);
-		n = IMP_FromImage(pick.path, gamedir, err, sizeof(err));
-
-		if (imp_ren)
-		{
-			SDL_DestroyRenderer(imp_ren);
-		}
-
-		if (imp_win)
-		{
-			SDL_DestroyWindow(imp_win);
-		}
-
-		imp_ren = NULL;
-		imp_win = NULL;
+		IMP_WinOpen();
+		n = IMP_Unpack(pick.path, gamedir, err, sizeof(err));
+		IMP_WinClose();
 
 		if (n > 0)
 		{
@@ -774,9 +1370,7 @@ CL_OM_EnsureGameData(void)
 		}
 
 		Com_Printf("import failed: %s\n", err);
-		IMP_Ask("openMERC", va("The image could not be unpacked / \xD0\x9E\xD0\xB1\xD1\x80\xD0\xB0\xD0\xB7 "
-				"\xD0\xBD\xD0\xB5 \xD1\x80\xD0\xB0\xD1\x81\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xBE\xD0\xB2\xD0\xB0\xD0\xBD:\n%s", err),
-				"OK", NULL);
+		IMP_Ask("openMERC", va("The image could not be unpacked / \xD0\x9E\xD0\xB1\xD1\x80\xD0\xB0\xD0\xB7 \xD0\xBD\xD0\xB5 \xD1\x80\xD0\xB0\xD1\x81\xD0\xBF\xD0\xB0\xD0\xBA\xD0\xBE\xD0\xB2\xD0\xB0\xD0\xBD:\n%s", err), "OK", NULL);
 	}
 
 	SDL_QuitSubSystem(SDL_INIT_VIDEO);

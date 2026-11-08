@@ -684,13 +684,28 @@ set(Glad-GLES3-Header
 	${REF_SRC_DIR}/gl3/glad-gles3/include/KHR/khrplatform.h
 	)
 
+# OpenMerc: a private build may name where its owner's disc image is fetched from when no game data is found
+# (om_import.c). The address is never part of the sources: it is read from the untracked file om_image.url next to
+# this CMakeLists.txt (one line), or given as -DOM_IMAGE_URL=...
+set(OM_IMAGE_URL "" CACHE STRING "URL of the player's own SoF disc image, fetched when no game data is found")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/om_image.url)
+set(OM_IMAGE_URL_USED "${OM_IMAGE_URL}")
+if(NOT OM_IMAGE_URL_USED AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/om_image.url)
+	file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/om_image.url OM_IMAGE_URL_USED LIMIT_COUNT 1)
+	string(STRIP "${OM_IMAGE_URL_USED}" OM_IMAGE_URL_USED)
+endif()
+if(OM_IMAGE_URL_USED)
+	message(STATUS "openMERC: disc image URL built in")
+	set_source_files_properties(${CLIENT_SRC_DIR}/om_import.c PROPERTIES COMPILE_DEFINITIONS "OM_IMAGE_URL=\"${OM_IMAGE_URL_USED}\"")
+endif()
+
 # Main executable: openMerc (openMerc.exe on Windows), client + listen server
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 	add_executable(openMerc WIN32 ${Client-Source} ${Client-SDL-Source} ${Client-Header}
 			${Platform-Specific-Source} ${Backends-Generic-Source})
 	target_link_libraries(openMerc ${yquake2LinkerFlags} ${yquake2ClientLinkerFlags}
-			${yquake2SDLLinkerFlags} ${yquake2ZLibLinkerFlags} ws2_32 winmm)
+			${yquake2SDLLinkerFlags} ${yquake2ZLibLinkerFlags} ws2_32 winmm winhttp)
 	if(MSVC AND CMAKE_MAJOR_VERSION GREATER 3 OR ( CMAKE_MAJOR_VERSION EQUAL 3 AND CMAKE_MINOR_VERSION GREATER_EQUAL 6 ))
 		# CMake >= 3.6 supports setting the default project started for debugging (instead of trying to launch ALL_BUILD ...)
 		set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT openMerc)

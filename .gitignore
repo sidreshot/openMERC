@@ -6,3 +6,4 @@
 *.adp
 __pycache__/
 *.pyc
+engine/om_image.url
