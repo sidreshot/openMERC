@@ -1,0 +1,50 @@
+# OpenMerc: rows of the mouse and gamepad page (menus/m_misc.rmf on PCs, menus/touch/m_misc.rmf on phones,
+# <omtable tabs om_itab>), one tab per section. Same format as om_video.tbl.
+# Each device has its own settings: the mouse rows only move the mouse (m_*), the gamepad rows only the
+# gamepad (joy_*, gyro_*), the touch controls are on their own page (om_touch.tbl). Helpers that work for
+# every device (aim assist, automatic doors) are on the Gameplay page (om_assist.tbl).
+section | MOUSE | МЫШЬ | pc
+slider | m_sensitivity_x | 1 | 30 | 1 | Horizontal Sensitivity | Чувствительность по горизонтали | pc
+slider | m_sensitivity_y | 1 | 30 | 1 | Vertical Sensitivity | Чувствительность по вертикали | pc
+list | m_invert_x | 0,1 | Off,On | Выкл,Вкл | Invert Left/Right | Инверсия по горизонтали | pc
+list | m_invert_y | 0,1 | Off,On | Выкл,Вкл | Invert Up/Down | Инверсия по вертикали | pc
+list | freelook | 0,1 | Off,On | Выкл,Вкл | Free Look | Свободный обзор | pc | tip=The mouse turns the view up and down too/Мышь поворачивает обзор и вверх-вниз
+list | m_filter | 0,1 | Off,On | Выкл,Вкл | Mouse Smoothing | Сглаживание мыши | pc
+list | cl_run | 0,1 | Off,On | Выкл,Вкл | Always Run | Всегда бежать | pc
+list | lookspring | 0,1 | Off,On | Выкл,Вкл | Look Spring | Возврат взгляда | pc | tip=Without free look: the view centres again when the look key is released/Без свободного обзора: взгляд возвращается к центру, когда отпущена клавиша обзора
+button | menu keys | Keyboard and Mouse Buttons | Клавиши и кнопки мыши | pc
+
+section | GAMEPAD | ГЕЙМПАД
+value | joy_status | Gamepad | Геймпад | tip=Any gamepad SDL knows (Xbox, PlayStation, Nintendo and most others) works by itself; buttons are set up by position when it first connects/Любой геймпад, известный SDL (Xbox, PlayStation, Nintendo и большинство других), работает сам; кнопки настраиваются по положению при первом подключении
+slider | joy_sensitivity | 0 | 8 | 1 | Look Speed | Скорость обзора | tip=How fast the right stick turns the view/Насколько быстро правый стик поворачивает обзор
+list | joy_invert | 0,1 | Off,On | Выкл,Вкл | Invert Up/Down | Инверсия по вертикали | tip=The gamepad's own setting: the mouse is not changed/Своя настройка геймпада: мышь не меняется
+list | joy_layout | 0,1,2,3,4,5 | Standard,Left-handed,Classic,Classic left-handed,Flick Stick,Flick Stick left-handed | Обычная,Для левши,Классическая,Классическая для левши,Флик-стик,Флик-стик для левши | Stick Layout | Раскладка стиков | tip=Standard: left stick moves, right stick looks. Classic: left stick moves forward and turns. Flick Stick: the right stick points the view where it is pushed/Обычная: левый стик - движение, правый - обзор. Классическая: левый стик - вперёд и повороты. Флик-стик: правый стик разворачивает взгляд туда, куда его наклонили
+slider | joy_left_deadzone | 0 | 0.3 | 0.02 | Left Stick Dead Zone | Мёртвая зона левого стика | tip=Raise it if the player creeps with the stick released/Увеличьте, если игрок ползёт с отпущенным стиком
+slider | joy_right_deadzone | 0 | 0.3 | 0.02 | Right Stick Dead Zone | Мёртвая зона правого стика | tip=Raise it if the view drifts with the stick released/Увеличьте, если взгляд уплывает с отпущенным стиком
+list | joy_labels | -1,1,2,3 | Automatic,Xbox,PlayStation,Nintendo | Автоматически,Xbox,PlayStation,Nintendo | Button Names | Названия кнопок | tip=How the buttons are named on the Buttons tab/Как называются кнопки на вкладке Кнопки
+
+section | BUTTONS | КНОПКИ
+note | Select a row, then press the button for it | Выберите строку и нажмите для неё кнопку
+key | +attack | Fire | Огонь
+key | +altattack | Alternate Fire | Альтернативный огонь
+key | +moveup | Jump | Прыжок
+key | +movedown | Crouch | Присесть
+key | reload | Reload | Перезарядка
+key | +use | Use | Использовать
+key | weapnext | Next Weapon | Следующее оружие
+key | weapprev | Previous Weapon | Предыдущее оружие
+key | weaplast | Last Weapon | Прошлое оружие
+key | itemuse | Use Item | Применить предмет
+key | itemnext | Next Item | Следующий предмет
+key | +leanleft | Lean Left | Наклон влево
+key | +leanright | Lean Right | Наклон вправо
+key | +speed | Walk | Шагом
+key | score | Score and Objectives | Счёт и задачи
+button | exec menus/om_pad.cfg | Standard Buttons | Стандартные кнопки | tip=Triggers fire, A jump, B crouch, X reload, Y next weapon, bumpers use and item, d-pad lean, last weapon, next item/Курки - огонь, A - прыжок, B - присесть, X - перезарядка, Y - следующее оружие, бамперы - использовать и предмет, крестовина - наклоны, прошлое оружие, следующий предмет
+
+section | GYRO | ГИРОСКОП
+note | Gamepads with a gyro: DualShock 4, DualSense, Switch Pro and others | Геймпады с гироскопом: DualShock 4, DualSense, Switch Pro и другие
+list | gyro_mode | 0,2 | Off,On | Выкл,Вкл | Gyro Aiming | Прицеливание гироскопом | tip=Tilting the gamepad turns the view/Наклон геймпада поворачивает обзор
+slider | gyro_yawsensitivity | 0.5 | 8 | 0.5 | Gyro Left/Right | Гироскоп влево-вправо
+slider | gyro_pitchsensitivity | 0.5 | 8 | 0.5 | Gyro Up/Down | Гироскоп вверх-вниз
+button | joy_calibrate | Calibrate the Gyro | Калибровать гироскоп | tip=Put the gamepad on a table and do not touch it for a few seconds/Положите геймпад на стол и не трогайте несколько секунд

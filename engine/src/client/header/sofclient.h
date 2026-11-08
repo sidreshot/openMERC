@@ -160,6 +160,8 @@ int HUD_TextWidth(const char *s, int font);
 /* cl_touch.c: touch controls (in_touch) */
 void Touch_Init(void);
 qboolean Touch_Enabled(void);
+void Touch_PadInUse(qboolean pad); /* a gamepad button / stick (true), a finger (false) */
+const char *IN_PadKeyName(int key); /* input/sdl3.c: "Pad A" etc., NULL for other keys */
 qboolean Touch_Active(void);
 qboolean Touch_HudTop(void);
 void Touch_Finger(long long id, int type, float nx, float ny);

@@ -1,0 +1,6 @@
+# OpenMerc: helpers for every way of playing (mouse, gamepad, touch), on the Gameplay page (menus/m_scale.rmf).
+# Same format as om_video.tbl.
+section | HELPERS | ПОМОЩЬ
+list | om_aimassist | 0,1 | Off,On | Выкл,Вкл | Aim Assist | Помощь в прицеливании | tip=Shots go to the enemy nearest the crosshair/Выстрелы идут в ближайшего к прицелу врага
+slider | om_aimassist_dist | 8 | 64 | 4 | Aim Assist Radius | Радиус помощи в прицеливании | tip=How close to the aim line (units) an enemy must be for shots to go to him/Насколько близко к линии прицела (в единицах) должен быть враг, чтобы выстрелы шли в него
+list | om_autouse | 0,1 | Off,On | Выкл,Вкл | Automatic Doors and Switches | Двери и переключатели автоматически | tip=Doors, buttons and switches in front of you work without a button/Двери, кнопки и переключатели перед вами срабатывают без кнопки

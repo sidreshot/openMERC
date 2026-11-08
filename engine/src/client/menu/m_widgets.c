@@ -1938,10 +1938,8 @@ Input_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 {
 	char shown[256];
 	const char *s = w->cvar ? w->cvar->string : "";
-	qboolean active = (w->flags & WF_GLOBAL) || MW_Hovered(w);
+	qboolean active = (w->flags & WF_GLOBAL) || MW_Hovered(w) || (pg && pg->tapedit && (pg->focus == w));
 	int tw, room = w->w - MW_SW("_", w->font), P;
-
-	(void)pg;
 
 	if (active)
 	{
@@ -1998,6 +1996,34 @@ Input_Key(mpage_t *pg, mwidget_t *w, int key)
 	if (!w->cvar)
 	{
 		return true;
+	}
+
+	/* OpenMerc: touch screens have no hover - a tap on the field makes it the page's focus and opens the
+	   on-screen keyboard (input/sdl3.c, M_TextEditing); a tap elsewhere, ENTER or ESCAPE close it */
+	if (key == K_MOUSE1)
+	{
+		if (MW_Hovered(w) && Touch_Enabled())
+		{
+			if (!pg->tapedit)
+			{
+				pg->prevfocus = pg->focus; /* a "global" field keeps its focus afterwards */
+			}
+
+			pg->focus = w;
+			pg->tapedit = true;
+			M_TextEditTapped();
+		}
+		else if (pg->tapedit && (pg->focus == w))
+		{
+			M_TextEditEnd(pg);
+		}
+
+		return true;
+	}
+
+	if ((key == K_ENTER || key == K_KP_ENTER || key == K_ESCAPE) && pg->tapedit && (pg->focus == w))
+	{
+		M_TextEditEnd(pg);
 	}
 
 	Q_strlcpy(s, w->cvar->string, sizeof(s));
@@ -2073,6 +2099,52 @@ Input_Key(mpage_t *pg, mwidget_t *w, int key)
 	return true;
 }
 
+/* OpenMerc: the text of the tapped input at the top of the screen, above the on-screen keyboard that covers the
+   lower half (the field itself may lie under it) */
+void
+MW_DrawTapEdit(mpage_t *pg)
+{
+	mwidget_t *w = pg->focus;
+	char shown[260];
+	const char *s;
+	int fh, tw, vw, x, y, n, i, P;
+
+	if (!w || !pg->tapedit)
+	{
+		return;
+	}
+
+	s = w->cvar ? w->cvar->string : "";
+	n = (int)strlen(s);
+
+	if (n > 255)
+	{
+		n = 255;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		shown[i] = (w->flags & WF_HIDDEN) ? '*' : s[i];
+	}
+
+	shown[n] = 0;
+	fh = MW_FH(w);
+	vw = MR_VirtualW();
+	tw = MW_SW(shown, w->font);
+	MR_ResetClip();
+	MR_Fill(0, 0, vw, fh * 3, 0xD0000000u);
+	MR_Fill(0, fh * 3 - 2, vw, 2, 0xFF2080FFu);
+	x = (vw - tw) / 2;
+	y = fh;
+	MR_DrawString(x, y, shown, 0xFFFFFFFFu, w->font, 0);
+	P = (int)cursor_blink_speed->value;
+
+	if (P <= 0 || (M_Time() % P) > P / 2)
+	{
+		MR_DrawString(x + tw, y, "_", 0xFFFFFFFFu, w->font, 0);
+	}
+}
+
 static void
 Input_Free(mwidget_t *w)
 {
@@ -2111,7 +2183,10 @@ typedef struct
 	char *atext;
 	char keytext[128];
 	qboolean drawn;
+	qboolean pad; /* OpenMerc "pad": a gamepad row - shows, takes and replaces only gamepad buttons */
 } setkey_t;
+
+const char *IN_PadKeyName(int key); /* input/sdl3.c */
 
 static void
 SetKey_Text(mwidget_t *w)
@@ -2123,9 +2198,15 @@ SetKey_Text(mwidget_t *w)
 
 	for (k = 0; k < K_LAST && n < 2; k++)
 	{
-		if (keybindings[k] && keybindings[k][0] && !Q_stricmp(keybindings[k], w->text))
+		if (keybindings[k] && keybindings[k][0] && !Q_stricmp(keybindings[k], w->text) &&
+			(!d->pad || IN_PadKeyName(k)))
 		{
-			const char *name = MSP_Find(va("KEY_%s", Key_KeynumToString(k)));
+			const char *name = IN_PadKeyName(k); /* a gamepad button by its label (Pad A, Pad Cross) */
+
+			if (!name)
+			{
+				name = MSP_Find(va("KEY_%s", Key_KeynumToString(k)));
+			}
 
 			/* MENU-SCRATCH: no key-name package entry: the engine's own name */
 			if (!name[0])
@@ -2168,6 +2249,12 @@ SetKey_Option(mparse_t *p, mwidget_t *w, const char *kw)
 		}
 
 		d->atext = CopyString(a[0]);
+		return true;
+	}
+
+	if (!Q_stricmp(kw, "pad"))
+	{
+		d->pad = true;
 		return true;
 	}
 
@@ -2235,11 +2322,13 @@ SetKey_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 static void
 SetKey_Unbind(mwidget_t *w)
 {
+	setkey_t *d = w->data;
 	int k;
 
 	for (k = 0; k < K_LAST; k++)
 	{
-		if (keybindings[k] && keybindings[k][0] && !Q_stricmp(keybindings[k], w->text))
+		if (keybindings[k] && keybindings[k][0] && !Q_stricmp(keybindings[k], w->text) &&
+			(!d->pad || IN_PadKeyName(k)))
 		{
 			Key_SetBinding(k, "");
 		}
@@ -2249,13 +2338,31 @@ SetKey_Unbind(mwidget_t *w)
 static qboolean
 SetKey_Key(mpage_t *pg, mwidget_t *w, int key)
 {
+	setkey_t *d = w->data;
+
 	(void)pg;
 
 	if (ms.capture == w)
 	{
-		/* the key the menu received while waiting is bound */
+		/* a gamepad row waits for a gamepad button: a tap or a click gives up, other keys are ignored */
+		if (d->pad && (key != K_ESCAPE) && !IN_PadKeyName(key))
+		{
+			if (key == K_MOUSE1)
+			{
+				ms.capture = NULL;
+			}
+
+			return true;
+		}
+
+		/* the key the menu received while waiting is bound (a gamepad row: in place of its button) */
 		if (key != K_ESCAPE)
 		{
+			if (d->pad)
+			{
+				SetKey_Unbind(w);
+			}
+
 			M_QueueCommand(va("bind \"%s\" \"%s\"", Key_KeynumToString(key), w->text), true);
 		}
 
@@ -2275,7 +2382,7 @@ SetKey_Key(mpage_t *pg, mwidget_t *w, int key)
 			}
 		}
 
-		if (n >= 2)
+		if ((n >= 2) && !d->pad)
 		{
 			SetKey_Unbind(w);
 		}

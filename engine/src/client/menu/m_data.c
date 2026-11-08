@@ -2194,10 +2194,12 @@ static const struct
 {
 	const char *map;
 	const char *mission; /* string reference of the mission name */
-	int number;
+	int number; /* 0: the mission's only level, no number */
 } lvb_levels[] = {
-	{"tsr1", "MENU_OMSET_PG_LV_TSR", 1}, {"tsr2", "MENU_OMSET_PG_LV_TSR", 2},
-	{"trn1", "MENU_OMSET_PG_LV_TRN", 1},
+	/* tsr2 is not a level: the cutscene between tsr1 and trn1 (tsr1's endcin sets menu_nextmap tsr2, its
+	   changelevel goes to trn1) - owner: "it is just a cutscene" */
+	{"tsr1", "MENU_OMSET_PG_LV_TSR", 0},
+	{"trn1", "MENU_OMSET_PG_LV_TRN", 0},
 	{"kos1", "MENU_OMSET_PG_LV_KOS", 1}, {"kos2", "MENU_OMSET_PG_LV_KOS", 2}, {"kos3", "MENU_OMSET_PG_LV_KOS", 3},
 	{"sib1", "MENU_OMSET_PG_LV_SIB", 1}, {"sib2", "MENU_OMSET_PG_LV_SIB", 2}, {"sib3", "MENU_OMSET_PG_LV_SIB", 3},
 	{"irq1a", "MENU_OMSET_PG_LV_IRQA", 1}, {"irq2a", "MENU_OMSET_PG_LV_IRQA", 2}, {"irq3a", "MENU_OMSET_PG_LV_IRQA", 3},
@@ -2353,7 +2355,14 @@ LVB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 		char line[80];
 
 		/* (own buffer: va() is reused by the picture name below) */
-		Com_sprintf(line, sizeof(line), "%s %d", name ? name : lvb_levels[i].map, lvb_levels[i].number);
+		if (lvb_levels[i].number)
+		{
+			Com_sprintf(line, sizeof(line), "%s %d", name ? name : lvb_levels[i].map, lvb_levels[i].number);
+		}
+		else
+		{
+			Q_strlcpy(line, name ? name : lvb_levels[i].map, sizeof(line));
+		}
 
 		if (d->pics[i])
 		{

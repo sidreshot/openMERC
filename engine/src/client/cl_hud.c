@@ -22,6 +22,7 @@
 #include "../common/header/sof/engine.h"
 
 extern void *reflib_handle;
+extern unsigned reflib_gen; /* vid.c */
 
 /* ---------------------------------------------------------------------
  * 2D layer (SPEC-002 slots)
@@ -31,7 +32,7 @@ typedef unsigned char rgba_t[4];
 
 static const sofrefexport_t *sre;
 static OM_Set2DScale_t sre_setscale; /* OpenMerc V1: HUD scaling export of the renderer */
-static void *sre_handle;
+static unsigned sre_gen; /* reflib_gen of the cached exports */
 static qboolean sre_tried;
 
 static om_fontref_t font_small = {0, {0}, "small", 5, 15};
@@ -56,9 +57,9 @@ RGBA32(const unsigned char *c)
 const sofrefexport_t *
 HUD_Ref(void)
 {
-	if (reflib_handle != sre_handle)
+	if (reflib_gen != sre_gen)
 	{
-		sre_handle = reflib_handle;
+		sre_gen = reflib_gen;
 		sre = NULL;
 		sre_setscale = NULL;
 		sre_tried = false;
@@ -441,7 +442,7 @@ HUD_BeginScaled(void)
 void
 HUD_EndScaled(void)
 {
-	if (sre_setscale)
+	if (HUD_Ref() && sre_setscale)
 	{
 		sre_setscale(1.0f);
 	}

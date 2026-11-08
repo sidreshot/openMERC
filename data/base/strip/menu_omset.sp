@@ -2,7 +2,7 @@ VERSION 1
 ID 197
 REFERENCE MENU_OMSET
 DESCRIPTION "OpenMerc audio, controls, gameplay and multiplayer pages"
-COUNT 145
+COUNT 146
 INDEX 0
 {
    REFERENCE OFFON
@@ -594,8 +594,8 @@ INDEX 97
 INDEX 98
 {
    REFERENCE TAB_MOUSE
-   TEXT_ENGLISH "Mouse"
-   TEXT_RUSSIAN "Мышь"
+   TEXT_ENGLISH "Mouse & Gamepad"
+   TEXT_RUSSIAN "Мышь и геймпад"
 }
 INDEX 99
 {
@@ -872,4 +872,10 @@ INDEX 144
    REFERENCE PG_OBJ_TICK
    TEXT_ENGLISH "*** MISSION OBJECTIVES ***"
    TEXT_RUSSIAN "*** ЗАДАЧИ ЗАДАНИЯ ***"
+}
+INDEX 145
+{
+   REFERENCE TAB_TOUCH
+   TEXT_ENGLISH "Touch"
+   TEXT_RUSSIAN "Сенсор"
 }

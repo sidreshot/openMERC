@@ -83,6 +83,73 @@ M_TopScreen(void)
 	return ms.depth > 0 ? ms.stack[ms.depth - 1] : NULL;
 }
 
+static mpage_t *M_FramePage(mframe_t *f);
+
+/* OpenMerc: an input field tapped on a touch screen (m_widgets.c Input_Key): the page of the top screen that
+   has it as its focus, NULL when no field is being typed into */
+mpage_t *
+M_TapEditPage(void)
+{
+	mscreen_t *scr = M_TopScreen();
+	int i;
+
+	if (!scr || !ms.active || (cls.key_dest != key_menu))
+	{
+		return NULL;
+	}
+
+	for (i = 0; i < scr->numframes; i++)
+	{
+		mpage_t *pg = M_FramePage(scr->frames[i]);
+
+		if (pg && pg->tapedit && pg->focus)
+		{
+			return pg;
+		}
+	}
+
+	return NULL;
+}
+
+static int m_texttaps;
+
+/* input/sdl3.c: the on-screen keyboard is wanted (a tapped field) */
+qboolean
+M_TextEditing(void)
+{
+	return M_TapEditPage() != NULL;
+}
+
+/* input/sdl3.c: taps on a field so far - a new one shows the keyboard again after the system's back key hid it */
+int
+M_TextEditTaps(void)
+{
+	return m_texttaps;
+}
+
+void
+M_TextEditTapped(void)
+{
+	m_texttaps++;
+}
+
+/* the field is done (ENTER, ESCAPE, a tap elsewhere, the keyboard closed): the page's focus is what it was */
+void
+M_TextEditEnd(mpage_t *pg)
+{
+	if (!pg)
+	{
+		pg = M_TapEditPage();
+	}
+
+	if (pg && pg->tapedit)
+	{
+		pg->tapedit = false;
+		pg->focus = pg->prevfocus;
+		pg->prevfocus = NULL;
+	}
+}
+
 void
 M_MarkTabDirty(mscreen_t *scr)
 {
@@ -2162,6 +2229,15 @@ M_DrawScreen(mscreen_t *scr, qboolean input)
 	M_DrawPointer(scr, scr->cursor);
 	M_DrawTooltip(scr);
 
+	{
+		mpage_t *ep = M_TapEditPage();
+
+		if (ep)
+		{
+			MW_DrawTapEdit(ep);
+		}
+	}
+
 	if (scr->hastimeout && (ms.now - scr->opentime) >= (int)(scr->timeout * 1000.0f))
 	{
 		scr->hastimeout = false;
@@ -2198,6 +2274,18 @@ M_Draw(void)
 		ms.drawing = true;
 		ms.now = Sys_Milliseconds();
 		ms.framecount++;
+
+		/* OpenMerc: a tooltip belongs to its screen - another screen on top drops it (it stayed over the next
+		   page for its whole duration, on touch screens where the pointer rests at the last tap) */
+		{
+			static mscreen_t *tipscreen;
+
+			if (scr != tipscreen)
+			{
+				tipscreen = scr;
+				ms.tipwidget = NULL;
+			}
+		}
 
 		if (menu_mouse_x->modified || menu_mouse_y->modified)
 		{

@@ -122,6 +122,9 @@ qboolean joy_altselector_pressed = false;
 // Gamepad labels' style (Xbox, Playstation, etc.) in use, normally set after detection
 gamepad_labels_t joy_current_lbls = LBL_SDL;
 
+/* OpenMerc: the gamepad's own vertical inversion; joy_status: what the gamepad page shows (its name) */
+static cvar_t *joy_invert, *joy_status;
+
 // Using japanese style for confirm & cancel buttons on gamepad
 qboolean japanese_confirm = false;
 
@@ -391,6 +394,103 @@ IN_TranslateScancode(SDL_Scancode sc, SDL_Keycode kc, qboolean *extended)
 static void IN_Controller_Init(qboolean notify_user);
 static void IN_Controller_Shutdown(qboolean notify_user);
 
+/* OpenMerc: the gamepad keys of SoF (SDL positions: JOY1-4 the face buttons, AUX the others) */
+static const int pad_allkeys[] = {
+	K_BTN_SOUTH, K_BTN_EAST, K_BTN_WEST, K_BTN_NORTH, K_BTN_BACK, K_BTN_GUIDE, K_STICK_LEFT, K_STICK_RIGHT,
+	K_SHOULDER_LEFT, K_SHOULDER_RIGHT, K_DPAD_UP, K_DPAD_DOWN, K_DPAD_LEFT, K_DPAD_RIGHT, K_BTN_MISC1,
+	K_PADDLE_RIGHT_1, K_PADDLE_LEFT_1, K_PADDLE_RIGHT_2, K_PADDLE_LEFT_2, K_TOUCHPAD, K_TRIG_LEFT, K_TRIG_RIGHT
+};
+
+/* the name of a gamepad key in the style of the gamepad in use (joy_labels, auto: from its type) for the
+   binding rows of the menus; NULL for other keys. Bindings stay by position (SDL's standard mapping), so the
+   same place on any gamepad does the same thing. */
+const char *
+IN_PadKeyName(int key)
+{
+	static const char *const xbox[] = {"A", "B", "X", "Y", "View", "Guide", "LS", "RS", "LB", "RB", "D-pad Up",
+		"D-pad Down", "D-pad Left", "D-pad Right", "Share", "P1", "P3", "P2", "P4", "Touchpad", "LT", "RT"};
+	static const char *const ps[] = {"Cross", "Circle", "Square", "Triangle", "Create", "PS", "L3", "R3", "L1",
+		"R1", "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right", "Mic", "P1", "P3", "P2", "P4", "Touchpad",
+		"L2", "R2"};
+	static const char *const nin[] = {"B", "A", "Y", "X", "Minus", "Home", "LS", "RS", "L", "R", "D-pad Up",
+		"D-pad Down", "D-pad Left", "D-pad Right", "Capture", "P1", "P3", "P2", "P4", "Touchpad", "ZL", "ZR"};
+	static char out[32];
+	int i;
+
+	for (i = 0; i < (int)(sizeof(pad_allkeys) / sizeof(pad_allkeys[0])); i++)
+	{
+		if (pad_allkeys[i] == key)
+		{
+			const char *const *t = (joy_current_lbls == LBL_PLAYSTATION) ? ps :
+				(joy_current_lbls == LBL_SWITCH) ? nin : xbox;
+
+			Com_sprintf(out, sizeof(out), "Pad %s", t[i]);
+			return out;
+		}
+	}
+
+	return NULL;
+}
+
+/* a gamepad connected while none of its keys is bound (a first start, an old config): the standard layout
+   (menus/om_pad.cfg, also the gamepad page's "Standard Buttons") */
+static void
+IN_PadAutoBind(void)
+{
+	int i;
+
+	for (i = 0; i < (int)(sizeof(pad_allkeys) / sizeof(pad_allkeys[0])); i++)
+	{
+		if (keybindings[pad_allkeys[i]] && keybindings[pad_allkeys[i]][0])
+		{
+			return;
+		}
+	}
+
+	Com_Printf("Gamepad: no buttons bound, the standard layout is set (menus/om_pad.cfg)\n");
+	Cbuf_AddText("exec menus/om_pad.cfg\n");
+}
+
+qboolean SP_RussianActive(void);
+
+/* joy_status: the connected gamepad's name and type for the gamepad page (CP1251 of the menu fonts) */
+static void
+IN_PadStatus(void)
+{
+	char s[128];
+
+	if (controller)
+	{
+		const char *name = SDL_GetGamepadName(controller);
+		const char *type = (joy_current_lbls == LBL_PLAYSTATION) ? "PlayStation" :
+			(joy_current_lbls == LBL_SWITCH) ? "Nintendo" : "Xbox";
+		char clean[64];
+		int i, o = 0;
+
+		for (i = 0; name && name[i] && o < (int)sizeof(clean) - 1; i++)
+		{
+			if ((unsigned char)name[i] >= 32 && (unsigned char)name[i] < 127 && name[i] != '"')
+			{
+				clean[o++] = name[i];
+			}
+		}
+
+		clean[o] = 0;
+		Com_sprintf(s, sizeof(s), "%s (%s)", o ? clean : "Gamepad", type);
+	}
+	else
+	{
+		/* "not connected" / "не подключен" */
+		Q_strlcpy(s, SP_RussianActive() ? "\xED\xE5 \xEF\xEE\xE4\xEA\xEB\xFE\xF7\xE5\xED" : "not connected",
+				sizeof(s));
+	}
+
+	if (strcmp(joy_status->string, s))
+	{
+		Cvar_Set("joy_status", s);
+	}
+}
+
 /*
  * Sets the gamepad buttons' style of labels (SDL, Xbox, PS, Switch).
  * They are only visible in the gamepad binding options.
@@ -642,6 +742,12 @@ qboolean IN_NumpadIsOn()
  */
 static qboolean touchclick_down, touchclick_up;
 
+/* menu.c: a menu input field tapped on a touch screen */
+qboolean M_TextEditing(void);
+int M_TextEditTaps(void);
+struct mpage_s;
+void M_TextEditEnd(struct mpage_s *pg);
+
 void
 IN_Update(void)
 {
@@ -657,23 +763,49 @@ IN_Update(void)
 
 	/* OpenMerc: SDL sends text only while text input is on; on Windows the
 	   text comes from WM_CHAR (winkeys.c), elsewhere it is on while the
-	   console or the chat line is open (no on-screen keyboard otherwise) */
+	   console or the chat line is open or a menu field was tapped on a touch
+	   screen (M_TextEditing: the player name...) - on phones that is when the
+	   on-screen keyboard shows */
 	if (!IN_WinKeys_Active())
 	{
+		static int lasttaps, startms;
 		SDL_Window *tw = SDL_GetKeyboardFocus();
-		bool want_text = (cls.key_dest == key_console) || (cls.key_dest == key_message);
+		qboolean field = M_TextEditing();
+		bool want_text = (cls.key_dest == key_console) || (cls.key_dest == key_message) || field;
+		int taps = M_TextEditTaps();
 
-		if (tw && (want_text != SDL_TextInputActive(tw)))
+		if (tw)
 		{
-			if (want_text)
-			{
-				SDL_StartTextInput(tw);
-			}
-			else
+			bool active = SDL_TextInputActive(tw);
+
+			/* a new tap on a field while the system's back key had hidden the keyboard: show it again */
+			if (want_text && active && (taps != lasttaps) && SDL_HasScreenKeyboardSupport() &&
+				!SDL_ScreenKeyboardShown(tw))
 			{
 				SDL_StopTextInput(tw);
+				active = false;
+			}
+
+			if (want_text != active)
+			{
+				if (want_text)
+				{
+					SDL_StartTextInput(tw);
+					startms = Sys_Milliseconds();
+				}
+				else
+				{
+					SDL_StopTextInput(tw);
+				}
+			}
+			else if (field && active && SDL_HasScreenKeyboardSupport() && !SDL_ScreenKeyboardShown(tw) &&
+				(Sys_Milliseconds() - startms > 1000))
+			{
+				M_TextEditEnd(NULL); /* the keyboard was closed (back key): the field is done */
 			}
 		}
+
+		lasttaps = taps;
 	}
 
 	/* OpenMerc: a menu tap's press, then its release, one frame apart after the pointer moved (see the finger events) */
@@ -789,6 +921,11 @@ IN_Update(void)
 				event.tfinger.x *= glimp_touchscale_x;
 				event.tfinger.y *= glimp_touchscale_y;
 #endif
+
+				if (type == 0)
+				{
+					Touch_PadInUse(false); /* a finger on the screen: the touch controls are back */
+				}
 
 				if (Touch_Active())
 				{
@@ -943,6 +1080,13 @@ IN_Update(void)
 				};
 
 				/* OpenMerc: gamepad buttons as SoF joystick keys */
+				Com_DPrintf("gamepad button %d %s\n", btn, (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) ? "down" : "up");
+
+				if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+				{
+					Touch_PadInUse(true); /* the touch controls step aside while a gamepad is used */
+				}
+
 				if (btn < sizeof(padkeys) / sizeof(padkeys[0]))
 				{
 					Key_Event(padkeys[btn], (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN), true);
@@ -953,6 +1097,11 @@ IN_Update(void)
 			case SDL_EVENT_GAMEPAD_AXIS_MOTION :  /* Handle Controller Motion */
 			{
 				int axis_value = event.gaxis.value;
+
+				if ((axis_value > 16000) || (axis_value < -16000))
+				{
+					Touch_PadInUse(true); /* a stick or trigger pushed well past its rest */
+				}
 
 				switch (event.gaxis.axis)
 				{
@@ -1221,6 +1370,8 @@ IN_Update(void)
 	{
 		IN_ApplyJoyPreset();
 	}
+
+	IN_PadStatus();
 	// Gamepad labels' type and "confirm & cancel style" change handling
 	if (joy_labels->modified)
 	{
@@ -1656,7 +1807,8 @@ IN_GamepadMove(usercmd_t *cmd)
 		const float speed = joy_pitchspeed->value
 							+ joy.extra_scale * joy_extra_pitchspeed->value
 								  * Q_signf(joy_pitchspeed->value);
-		cl.viewangles[PITCH] += (*joy.pitch) * speed * cls.rframetime;
+		/* OpenMerc: joy_invert, the gamepad's own vertical inversion (m_invert_y is the mouse's) */
+		cl.viewangles[PITCH] += (*joy.pitch) * speed * cls.rframetime * (joy_invert->value ? -1.0f : 1.0f);
 	}
 
 	if (*joy.forwardmove)
@@ -1786,7 +1938,7 @@ IN_Move(usercmd_t *cmd)
 
 			if (gyro_in.y)
 			{
-				cl.viewangles[PITCH] -= gyro_in.y * factor;
+				cl.viewangles[PITCH] -= gyro_in.y * factor * (joy_invert->value ? -1.0f : 1.0f);
 			}
 		}
 	}
@@ -2441,6 +2593,101 @@ StartCalibration(void)
 	countdown_reason = REASON_GYROCALIBRATION;
 }
 
+/* OpenMerc test aid: joy_virtual [xbox|ps|nintendo] attaches an SDL virtual gamepad (the whole gamepad path -
+   connection, standard buttons, names, touch hiding - without a real one), joy_vbutton <SDL button> <0|1> and
+   joy_vaxis <SDL axis> <-32768..32767> work it, joy_virtual off removes it */
+static SDL_Joystick *vpad;
+
+static void
+IN_VirtualPad_f(void)
+{
+	const char *kind = (Cmd_Argc() > 1) ? Cmd_Argv(1) : "xbox";
+	SDL_VirtualJoystickDesc d;
+	SDL_JoystickID id;
+
+	if (vpad)
+	{
+		SDL_JoystickID old = SDL_GetJoystickID(vpad);
+
+		SDL_CloseJoystick(vpad);
+		vpad = NULL;
+		SDL_DetachVirtualJoystick(old);
+	}
+
+	if (!Q_stricmp(kind, "off"))
+	{
+		return;
+	}
+
+	SDL_INIT_INTERFACE(&d);
+	d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+	d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+	d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+
+	if (!Q_stricmp(kind, "ps"))
+	{
+		d.vendor_id = 0x054c; /* Sony DualShock 4 */
+		d.product_id = 0x09cc;
+		d.name = "Virtual DualShock 4";
+	}
+	else if (!Q_stricmp(kind, "nintendo"))
+	{
+		d.vendor_id = 0x057e; /* Nintendo Switch Pro */
+		d.product_id = 0x2009;
+		d.name = "Virtual Switch Pro";
+	}
+	else
+	{
+		d.vendor_id = 0x045e; /* Microsoft Xbox One */
+		d.product_id = 0x02ea;
+		d.name = "Virtual Xbox";
+	}
+
+	if (!SDL_WasInit(SDL_INIT_GAMEPAD))
+	{
+		SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+	}
+
+	id = SDL_AttachVirtualJoystick(&d);
+	vpad = id ? SDL_OpenJoystick(id) : NULL;
+	Com_Printf("joy_virtual: %s\n", vpad ? d.name : SDL_GetError());
+}
+
+static void
+IN_VirtualButton_f(void)
+{
+	if (vpad && (Cmd_Argc() > 2))
+	{
+		if (!SDL_SetJoystickVirtualButton(vpad, atoi(Cmd_Argv(1)), atoi(Cmd_Argv(2)) != 0))
+		{
+			Com_Printf("joy_vbutton: %s\n", SDL_GetError());
+		}
+	}
+}
+
+static void
+IN_VirtualAxis_f(void)
+{
+	if (vpad && (Cmd_Argc() > 2))
+	{
+		SDL_SetJoystickVirtualAxis(vpad, atoi(Cmd_Argv(1)), (Sint16)Q_clamp(atoi(Cmd_Argv(2)), -32768, 32767));
+	}
+}
+
+/* OpenMerc: joy_calibrate (the gamepad page): measures the resting gyro of the gamepad for a few seconds */
+static void
+IN_GyroCalibrate_f(void)
+{
+	if (!controller || !show_gyro)
+	{
+		Com_Printf("joy_calibrate: no gamepad with a gyro\n");
+		return;
+	}
+
+	Com_Printf("joy_calibrate: keep the gamepad still on a flat surface\n");
+	StartCalibration();
+}
+
 qboolean
 IsCalibrationZero(void)
 {
@@ -2706,6 +2953,7 @@ IN_Controller_Init(qboolean notify_user)
 
 			show_gamepad = true;
 			Com_Printf("Enabled as Gamepad.\n");
+			IN_PadAutoBind();
 			Com_DPrintf("SDL mapping: %s\n", SDL_GetGamepadMapping(controller));
 			IN_Gyro_and_LED_Enabling();
 
@@ -2880,6 +3128,8 @@ IN_Init(void)
 	joy_forwardsensitivity = Cvar_Get("gp_forwardsensitivity", "1.0", CVAR_ARCHIVE);
 	joy_sidesensitivity = Cvar_Get("gp_sidesensitivity", "1.0", CVAR_ARCHIVE);
 
+	joy_invert = Cvar_Get("joy_invert", "0", CVAR_ARCHIVE);
+	joy_status = Cvar_Get("joy_status", "", 0);
 	joy_labels = Cvar_Get("joy_labels", "-1", CVAR_ARCHIVE);
 	joy_confirm = Cvar_Get("joy_confirm", "-1", CVAR_ARCHIVE);
 	joy_layout = Cvar_Get("joy_layout", "0", CVAR_ARCHIVE);
@@ -2920,6 +3170,10 @@ IN_Init(void)
 
 	Cmd_AddCommand("+joyaltselector", IN_JoyAltSelectorDown);
 	Cmd_AddCommand("-joyaltselector", IN_JoyAltSelectorUp);
+	Cmd_AddCommand("joy_calibrate", IN_GyroCalibrate_f);
+	Cmd_AddCommand("joy_virtual", IN_VirtualPad_f);
+	Cmd_AddCommand("joy_vbutton", IN_VirtualButton_f);
+	Cmd_AddCommand("joy_vaxis", IN_VirtualAxis_f);
 	Cmd_AddCommand("+gyroaction", IN_GyroActionDown);
 	Cmd_AddCommand("-gyroaction", IN_GyroActionUp);
 

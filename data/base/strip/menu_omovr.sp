@@ -72,8 +72,8 @@ INDEX 10
 INDEX 11
 {
    REFERENCE MENU_KEYS_MISC_TICKER
-   TEXT_ENGLISH "*** MOUSE, MOVEMENT AND GAMEPAD ***"
-   TEXT_RUSSIAN "*** лшьэ, оепедбхфемхе х цеилоюд ***"
+   TEXT_ENGLISH "*** MOUSE AND GAMEPAD - EACH WITH ITS OWN SETTINGS ***"
+   TEXT_RUSSIAN "*** лшьэ х цеилоюд - с йюфднцн ябнх мюярпнийх ***"
 }
 INDEX 12
 {

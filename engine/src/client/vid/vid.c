@@ -384,6 +384,10 @@ refexport_t	re;
 
 // Handle / pointer the the loaded renderer DLL.
 void *reflib_handle = NULL;
+/* OpenMerc: counts renderer loads and unloads. Caches of renderer exports compare it, not the handle: dlopen
+   (Android) may give the same handle again for a library mapped at another address (stale pointers crashed
+   the first frame after vid_restart) */
+unsigned reflib_gen = 1;
 
 // Is a renderer loaded and active?
 qboolean ref_active = false;
@@ -477,6 +481,7 @@ VID_ShutdownRenderer(void)
 		GLimp_ShutdownGraphics();
 		Sys_FreeLibrary(reflib_handle);
 		reflib_handle = NULL;
+		reflib_gen++;
 		memset(&re, 0, sizeof(re));
 
 		CL_ClearTEntModels();
@@ -519,6 +524,7 @@ VID_LoadRenderer(void)
 
 	// Mkay, let's load the requested renderer.
 	GetRefAPI = (GetRefAPI_t)Sys_LoadLibrary(reflib_path, "GetRefAPI", &reflib_handle);
+	reflib_gen++;
 
 	// Okay, we couldn't load it. It's up to the
 	// caller to recover from this.

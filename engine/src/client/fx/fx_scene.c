@@ -20,9 +20,10 @@
 #include "../header/cl_ghoul.h" /* I1c: game clock */
 
 extern void *reflib_handle; /* vid.c */
+extern unsigned reflib_gen;
 
 static const sofrefexport_t *fx_re;
-static void *fx_re_handle;
+static unsigned fx_re_gen; /* reflib_gen of the cached exports */
 static qboolean fx_re_tried;
 static cvar_t *fx_refapi;
 
@@ -38,9 +39,9 @@ static void FX_SceneDump(void);
 const sofrefexport_t *
 FX_Ref(void)
 {
-	if (reflib_handle != fx_re_handle)
+	if (reflib_gen != fx_re_gen)
 	{
-		fx_re_handle = reflib_handle;
+		fx_re_gen = reflib_gen;
 		fx_re = NULL;
 		fx_re_tried = false;
 	}

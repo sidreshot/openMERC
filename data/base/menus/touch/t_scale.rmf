@@ -2,7 +2,7 @@
 <stm global>
 <backdrop omflat>
 <center>
-<image none label "^MENU_OMSET_RAIL_KEYS^" bolt "null_tab01" key mouse1 "menu keys">
+<image none label "^MENU_OMSET_TAB_TOUCH^" bolt "null_tab01" key mouse1 "menu keys">
 <image none label "^MENU_OMSET_RAIL_VIDEO^" bolt "null_tab02" key mouse1 "menu video">
 <image none label "^MENU_OMSET_RAIL_AUDIO^" bolt "null_tab03" key mouse1 "menu audio">
 <image none label "^MENU_OMSET_RAIL_GAMEPLAY^" bolt "null_tab04">

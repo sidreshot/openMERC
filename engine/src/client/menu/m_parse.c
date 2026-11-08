@@ -546,6 +546,9 @@ Tag_IncludeCvar(mparse_t *p)
      list    | cvar | values | labels EN | labels RU | label EN | label RU [| flags]
      slider  | cvar | min | max | step | label EN | label RU [| flags]
      note    | EN | RU [| flags]
+     button  | command | EN | RU [| flags]   (OpenMerc: a wide button running the command)
+     value   | cvar | EN | RU [| flags]      (OpenMerc: a read-only status, the cvar's text)
+     key     | command | EN | RU [| flags]   (OpenMerc: a gamepad button binding row, setkey "pad")
      rmf     | raw RMF text
    flags: "stage" (a staged menu_* cvar of the page: marks the page changed),
    "requires=cvar" (row left out while the cvar does not exist, so options of
@@ -678,7 +681,8 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 	}
 
 	fixed = !Q_stricmp(k, "list") ? 7 : !Q_stricmp(k, "slider") ? 7 :
-		(!Q_stricmp(k, "section") || !Q_stricmp(k, "note")) ? 3 : 0;
+		(!Q_stricmp(k, "section") || !Q_stricmp(k, "note")) ? 3 :
+		(!Q_stricmp(k, "button") || !Q_stricmp(k, "value") || !Q_stricmp(k, "key")) ? 4 : 0;
 
 	/* OpenMerc: "pc" rows (window, mouse, desktop-only options) are left out on touch screens, "mobile" rows
 	   everywhere else */
@@ -778,6 +782,29 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 				"<text \"%s\"%s%s%s>\n<hr width %d tint gray>\n"
 				"<font type title tint normaltext atint hilitetext>\n",
 				l1, tip[0] ? " tip \"" : "", tip, tip[0] ? "\"" : "", 2 * MT_SPLIT);
+	}
+	else if (!Q_stricmp(k, "button"))
+	{
+		/* OpenMerc: button | command | EN | RU - a wide button that runs the command */
+		MT_ToFont(ru ? f[3] : f[2], l1, sizeof(l1));
+		Com_sprintf(tmp, sizeof(tmp), "<hbr>\n<center>\n<font type interface tint normaltext atint hilitetext>\n"
+				"<text \"%s\" key mouse1 \"%s\" ombutton btint transgray width 360 height 26%s%s%s><br>\n"
+				"<font type title tint normaltext atint hilitetext>\n",
+				l1, f[1], tip[0] ? " tip \"" : "", tip, tip[0] ? "\"" : "");
+	}
+	else if (!Q_stricmp(k, "value"))
+	{
+		/* OpenMerc: value | cvar | EN | RU - the label and the cvar's text (a status, read only) */
+		MT_ToFont(ru ? f[3] : f[2], l1, sizeof(l1));
+		Com_sprintf(tmp, sizeof(tmp), "<ctext %s atext \"%s\" split %d%s%s%s><hbr>\n",
+				f[1], l1, MT_SPLIT, tip[0] ? " tip \"" : "", tip, tip[0] ? "\"" : "");
+	}
+	else if (!Q_stricmp(k, "key"))
+	{
+		/* OpenMerc: key | command | EN | RU - a gamepad binding row (only the gamepad buttons of the command) */
+		MT_ToFont(ru ? f[3] : f[2], l1, sizeof(l1));
+		Com_sprintf(tmp, sizeof(tmp), "<setkey %s pad atext \"%s\" split %d%s%s%s><hbr>\n",
+				f[1], l1, MT_SPLIT, tip[0] ? " tip \"" : "", tip, tip[0] ? "\"" : "");
 	}
 	else if (!Q_stricmp(k, "note"))
 	{

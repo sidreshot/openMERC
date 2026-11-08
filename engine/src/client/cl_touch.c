@@ -71,6 +71,8 @@ static cvar_t *in_touch, *touch_sens, *touch_joyradius, *touch_alpha, *touch_siz
 static finger_t fingers[TOUCH_FINGERS];
 static cvar_t *touch_crosshair, *touch_aimslow, *touch_autofire, *touch_leftfire, *touch_leftitem, *touch_autoaim;
 static tbutton_t buttons[12];
+static qboolean touch_padinuse; /* Touch_PadInUse */
+static void ReleaseAll(void);
 static int numbuttons;
 static qboolean crouched, firing, autofiring;
 static int fireholds;        /* fingers and the automatic fire holding +attack */
@@ -97,6 +99,11 @@ Touch_Fake_f(void)
 	{
 		Com_Printf("touch_fake <id> <0 down|1 move|2 up> <x 0..1> <y 0..1>\n");
 		return;
+	}
+
+	if (atoi(Cmd_Argv(2)) == 0)
+	{
+		Touch_PadInUse(false); /* as a real finger (sdl3.c) */
 	}
 
 	Touch_Finger(atoi(Cmd_Argv(1)) + 1000, atoi(Cmd_Argv(2)), (float)atof(Cmd_Argv(3)), (float)atof(Cmd_Argv(4)));
@@ -135,24 +142,41 @@ Touch_Init(void)
 	Cmd_AddCommand("touch_fake", Touch_Fake_f);
 }
 
-/* the touch controls are on and take the fingers: the game is running and has the keys */
+/* the touch controls are on (a touch-screen device: the menus are laid out for fingers); Touch_Active: they also
+   take the fingers - the game is running, has the keys and no gamepad is in use */
 qboolean
 Touch_Enabled(void)
 {
 	return in_touch && in_touch->value;
 }
 
+/* a gamepad and the touch controls do not mix: while the gamepad is used the touch buttons, their crosshair and
+   the top-of-screen HUD trays step aside; the next finger on the screen brings them back */
+void
+Touch_PadInUse(qboolean pad)
+{
+	if (pad != touch_padinuse)
+	{
+		touch_padinuse = pad;
+
+		if (pad)
+		{
+			ReleaseAll(); /* nothing held by a finger stays held */
+		}
+	}
+}
+
 qboolean
 Touch_Active(void)
 {
-	return Touch_Enabled() && (cls.state == ca_active) && (cls.key_dest == key_game);
+	return Touch_Enabled() && !touch_padinuse && (cls.state == ca_active) && (cls.key_dest == key_game);
 }
 
 /* cl_hud.c: the trays go to the top of the screen while touch controls are on (the thumbs hold the corners) */
 qboolean
 Touch_HudTop(void)
 {
-	return Touch_Enabled();
+	return Touch_Enabled() && !touch_padinuse;
 }
 
 /* looking through a remote camera (security monitors): the player stands at the terminal */
@@ -1022,7 +1046,7 @@ static int hitstart, killstart, lastflags;
 qboolean
 Touch_DrawCrosshair(void)
 {
-	return Touch_Enabled() && touch_crosshair && touch_crosshair->value;
+	return Touch_Enabled() && !touch_padinuse && touch_crosshair && touch_crosshair->value;
 }
 
 static void

@@ -1,5 +1,6 @@
 # OpenMerc: rows of the touch controls page (menus/touch/m_keys.rmf, <omtable>), phones and tablets.
-# Same format as om_video.tbl.
+# Same format as om_video.tbl. Touch-only settings: the gamepad has its own page (om_input.tbl), the helpers for
+# every device are on the Gameplay page (om_assist.tbl).
 section | TOUCH CONTROLS | СЕНСОРНОЕ УПРАВЛЕНИЕ
 slider | touch_sens | 0.3 | 3 | 0.1 | Look Sensitivity | Чувствительность обзора | tip=How far the view turns for a finger drag on the right half/Насколько поворачивается обзор при движении пальца по правой половине
 slider | touch_size | 0.7 | 1.5 | 0.05 | Button Size | Размер кнопок
@@ -10,12 +11,9 @@ list | touch_crosshair | 0,1 | Off,On | Выкл,Вкл | Touch Crosshair | Се
 slider | touch_aimslow | 0.3 | 1 | 0.05 | Aim Slowdown on Enemy | Замедление прицела на враге | tip=Turning slows down while the crosshair is on an enemy (1 = off)/Поворот замедляется, пока прицел на враге (1 = выкл)
 slider | touch_autoaim | 0 | 1 | 0.05 | Auto Aim Strength | Сила автонаведения | tip=While you move or turn, the view is pulled towards the enemy nearest the crosshair (0 = off)/Пока вы идёте или поворачиваете, прицел подтягивается к ближайшему к нему врагу (0 = выкл)
 slider | om_autoaim_angle | 0 | 30 | 1 | Auto Aim Angle | Угол автонаведения | tip=How far from the crosshair (degrees) an enemy is caught (0 = off)/Насколько далеко от прицела (в градусах) захватывается враг (0 = выкл)
-list | om_aimassist | 0,1 | Off,On | Выкл,Вкл | Aim Assist | Помощь в прицеливании | tip=Shots go to the enemy nearest the crosshair/Выстрелы идут в ближайшего к прицелу врага
-slider | om_aimassist_dist | 8 | 64 | 4 | Aim Assist Radius | Радиус помощи в прицеливании | tip=How close to the aim line (units) an enemy must be for shots to go to him/Насколько близко к линии прицела (в единицах) должен быть враг, чтобы выстрелы шли в него
 list | touch_autofire | 0,1 | Off,On | Выкл,Вкл | Automatic Fire | Автоматическая стрельба | tip=Fires by itself while the crosshair is on an enemy/Стреляет сам, пока прицел на враге
 list | touch_leftitem | 0,1 | Off,On | Выкл,Вкл | Left Item Button | Левая кнопка предмета | tip=Uses the item selected at the top left; grenades and flash packs are held to aim, released to throw (Off: a second fire button there)/Применяет предмет, выбранный слева вверху; гранаты и световые - удерживать для прицела, отпустить для броска (Выкл: там вторая кнопка огня)
 list | om_throwprecise | 0,1 | Off,On | Выкл,Вкл | Precise Grenade Throw | Точный бросок гранаты | tip=The grenade flies exactly along the shown arc/Граната летит точно по показанной дуге
 section | CONTROLS | УПРАВЛЕНИЕ
 list | touch_invert | 0,1 | Off,On | Выкл,Вкл | Invert Look Up/Down | Инверсия обзора по вертикали
-list | om_autouse | 0,1 | Off,On | Выкл,Вкл | Automatic Doors and Switches | Двери и переключатели автоматически | tip=Doors, buttons and switches in front of you work without a button/Двери, кнопки и переключатели перед вами срабатывают без кнопки
-list | in_touch | 0,1 | Off,On | Выкл,Вкл | Touch Controls | Сенсорное управление | tip=Off for a gamepad/Выключите для геймпада
+list | in_touch | 0,1 | Off,On | Выкл,Вкл | Touch Controls | Сенсорное управление | tip=They step aside by themselves while a gamepad is used and come back at the next touch/Сами скрываются, пока используется геймпад, и возвращаются при следующем касании

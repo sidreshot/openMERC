@@ -996,8 +996,9 @@ SW_DrawString(int x, int y, const char *text, unsigned rgba, const char *font, i
 /* dispatch: the renderer's SPEC-002 table when it offers one          */
 
 extern void *reflib_handle; /* vid.c */
+extern unsigned reflib_gen;
 
-static void *mr_relib;
+static unsigned mr_regen; /* reflib_gen of the cached exports (0 = none) */
 static const sofrefexport_t *mr_re;
 static OM_Set2DScale_t mr_setscale; /* MENU2: the renderer's 2D scale export (cl_hud.c's) */
 static OM_SetAlphaImage_t mr_alphaimg; /* RGBA pictures that keep their alpha (own cursor) */
@@ -1022,11 +1023,11 @@ MR_Re(void)
 		return NULL;
 	}
 
-	if (reflib_handle != mr_relib)
+	if (reflib_gen != mr_regen)
 	{
 		OM_GetSoFRefExports_t fn;
 
-		mr_relib = reflib_handle;
+		mr_regen = reflib_gen;
 		mr_re = NULL;
 		mr_setscale = NULL;
 		mr_alphaimg = NULL;
@@ -1404,7 +1405,7 @@ void
 MR_Shutdown(void)
 {
 	SW_Shutdown();
-	mr_relib = NULL;
+	mr_regen = 0;
 	mr_re = NULL;
 }
 

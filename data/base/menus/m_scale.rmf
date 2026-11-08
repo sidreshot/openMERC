@@ -26,6 +26,7 @@
 <hr width 460 tint gray>
 <font type title tint normaltext atint hilitetext>
 <list "^MENU_OMSET_AUTOSAVE_OPTS^" match "0,1,2,3,4,5" atext "^MENU_OMSET_AUTOSAVE^" split 230 cvar om_autosave_interval><hbr>
+<omtable "menus/om_assist.tbl">
 <hbr>
 <blank 16 16>
 </stm>

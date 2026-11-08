@@ -178,6 +178,8 @@ struct mpage_s
 	qboolean global;
 
 	mwidget_t *focus;    /* input with "global" */
+	qboolean tapedit;    /* OpenMerc: focus is an input a finger tapped (the on-screen keyboard types into it) */
+	mwidget_t *prevfocus; /* the focus before that tap */
 	mwidget_t *hovered;
 	mwidget_t *drag;
 	int popups, chats;
@@ -197,6 +199,14 @@ struct mpage_s
 };
 
 #define MENU_MAX_HISTORY 16
+
+/* OpenMerc: typing into a tapped input field on touch screens (menu.c, m_widgets.c) */
+mpage_t *M_TapEditPage(void);
+qboolean M_TextEditing(void);
+int M_TextEditTaps(void);
+void M_TextEditTapped(void);
+void M_TextEditEnd(mpage_t *pg);
+void MW_DrawTapEdit(mpage_t *pg);
 
 /* frame (SPEC-800 section 8) */
 struct mframe_s
