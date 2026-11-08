@@ -1,0 +1,18 @@
+<!-- OpenMerc MENU-SCRATCH: dialog "altervid", own page (the message strings are the game's) -->
+<stm>
+<strings menu_generic>
+<key n "killmenu">
+<key y "menuoff;exec menus/applyvid.cfg;vid_restart;menu main;menu video">
+<center>
+<hbr>
+<font type title tint orange atint orange>
+"^MENU_GENERIC_ALTER_QUESTION1^"<br>
+<font type title tint normaltext atint normaltext>
+"^MENU_GENERIC_ALTER_QUESTION2^"<br>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_NO^" ombutton btint transgray width 240 height 26 key mouse1 "killmenu">
+<br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_YES^" ombutton btint transgray width 240 height 26 key mouse1 "menuoff;exec menus/applyvid.cfg;vid_restart;menu main;menu video"><br>
+</stm>

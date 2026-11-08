@@ -1,0 +1,14 @@
+<!-- OpenMerc MENU-SCRATCH: dialog "disconnect", own page (the message strings are the game's) -->
+<stm nopush>
+<strings menu_generic>
+<key enter "killmenu;menu main">
+<center>
+<hbr>
+<font type title tint orange atint orange>
+"^MENU_GENERIC_DIS^"<br>
+<font type title tint normaltext atint normaltext>
+<ctext menu_dc_reason><br>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_OK^" ombutton btint transgray width 240 height 26 key mouse1 "killmenu;menu main"><br>
+</stm>

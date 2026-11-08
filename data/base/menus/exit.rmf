@@ -1,0 +1,6 @@
+<!-- OpenMerc MENU-SCRATCH: dialog "exit" in the openMERC style (own page a_exit) -->
+<stm resize 400 220>
+<include om_tints>
+<frame main 400 220 border 16 1 darkgray backfill tipback>
+<frame alert 0 0 page a_exit cut main>
+</stm>

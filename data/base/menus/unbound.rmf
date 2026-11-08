@@ -1,0 +1,6 @@
+<!-- OpenMerc MENU-SCRATCH: dialog "unbound" in the openMERC style (own page a_unbound) -->
+<stm resize 400 180>
+<include om_tints>
+<frame main 400 180 border 16 1 darkgray backfill tipback>
+<frame alert 0 0 page a_unbound cut main>
+</stm>

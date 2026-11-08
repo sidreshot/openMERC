@@ -1,0 +1,6 @@
+<!-- OpenMerc MENU-SCRATCH: dialog "altervid" in the openMERC style (own page a_altervid) -->
+<stm resize 400 200>
+<include om_tints>
+<frame main 400 200 border 16 1 darkgray backfill tipback>
+<frame alert 0 0 page a_altervid cut main>
+</stm>

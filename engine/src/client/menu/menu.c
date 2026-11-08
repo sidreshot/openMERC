@@ -803,6 +803,12 @@ M_OpenMenu(const char *rawname, const char *rawframe, qboolean forced)
 		Q_strlcpy(name, "main", sizeof(name));
 	}
 
+	/* the stock difficulty folder (game3) has no own page: the new-game page has the difficulty list */
+	if (!strcmp(name, "game3"))
+	{
+		Q_strlcpy(name, "game", sizeof(name));
+	}
+
 	/* the mission terminal (arm1..3 scripts: "intermission login") opened the
 	   retired, empty login page; the mission briefing (mail, which leads on to
 	   the outfit screen) is opened at once instead */
