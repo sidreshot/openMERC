@@ -54,3 +54,14 @@ The same archive can be unpacked into a subfolder, e.g.
 Mode A (the original game modules) is chosen by removing or renaming
 `openmerc/gamex86.dll` and `openmerc/player.dll`; the modules in `base/` are
 then used.
+
+## Game data from a disc image (2026-11-08)
+
+When no folder with `base/pak0.pak` is found at start (the folders listed above), openMERC asks for the disc image
+(`.iso`) of the player's own Soldier of Fortune copy (`client/om_import.c`). The installer on the disc is an
+InstallShield 5 cabinet (`SETUP/DATA1.HDR` + `SETUP/DATA1.CAB`, the Platinum edition layout); every file of it that
+belongs in a `base` folder (all `.pak` files, never `.exe`/`.dll`) is unpacked into `<game folder>/base`:
+Windows - the folder of `openMerc.exe`, Android - the app's data folder (`basedir`). Nothing is downloaded.
+`om_importiso <image> [folder]` does the same from the console; `+set om_noimport 1` skips the question.
+The cabinet reader follows the layout unshield documents; it is tested on a synthetic image
+(scratch generator: IS5 header/cabinet with stored and deflate-chunked files), not yet on a real disc.

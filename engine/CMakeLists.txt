@@ -407,6 +407,7 @@ set(Client-Source
 	${CLIENT_SRC_DIR}/cl_omrec.c
 	${CLIENT_SRC_DIR}/cl_hud.c
 	${CLIENT_SRC_DIR}/cl_touch.c
+	${CLIENT_SRC_DIR}/om_import.c
 	${CLIENT_SRC_DIR}/cl_sofscreen.c
 	${CLIENT_SRC_DIR}/cl_sofview.c
 	${CLIENT_SRC_DIR}/cl_strings.c

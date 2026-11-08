@@ -356,7 +356,14 @@ Qcommon_Init(int argc, char **argv)
 		Q_strlcpy(userGivenGame, game, sizeof(userGivenGame));
 	}
 
-	/* 4. filesystem */
+	/* 4. filesystem; openMERC: without game data the player may unpack it from a disc image first */
+#ifndef DEDICATED_ONLY
+	{
+		extern void CL_OM_EnsureGameData(void);
+
+		CL_OM_EnsureGameData();
+	}
+#endif
 	FS_InitFilesystem();
 
 	/* 5.-6. default.cfg, config.cfg, second +set pass */
