@@ -1072,9 +1072,20 @@ FX_SlotBusy(int num, int k, const fx_def_t *def)
 		return false;
 	}
 
+	/* busy while a primitive is still to fire or an emitter has bursts left; an emitter
+	   whose last burst is out only waits for its particles to die, and holding the slot
+	   for that (0.6-0.8 s for environ/firelarge2, one burst per 0.05 s instance) thinned
+	   fires to a puff a second */
 	for (j = 0; j < r->def->eft.count; j++)
 	{
-		if (!r->slot[j].done)
+		const fx_slot_t *s = &r->slot[j];
+
+		if (s->done)
+		{
+			continue;
+		}
+
+		if ((r->def->eft.prims[j].type != FXP_EMITTER) || (s->next <= s->end))
 		{
 			return true;
 		}
