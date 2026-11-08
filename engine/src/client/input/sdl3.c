@@ -769,6 +769,7 @@ IN_Update(void)
 	if (!IN_WinKeys_Active())
 	{
 		static int lasttaps, startms;
+		static bool started; /* text input is on because this code turned it on */
 		SDL_Window *tw = SDL_GetKeyboardFocus();
 		qboolean field = M_TextEditing();
 		bool want_text = (cls.key_dest == key_console) || (cls.key_dest == key_message) || field;
@@ -786,6 +787,16 @@ IN_Update(void)
 				active = false;
 			}
 
+			/* SDL turned text input off by itself while a field had it: the system's back key closed the
+			   keyboard (Android) - the field is done, the keyboard is not opened again */
+			if (field && !active && started && (taps == lasttaps))
+			{
+				Com_DPrintf("text input: keyboard closed by the system\n");
+				M_TextEditEnd(NULL);
+				field = false;
+				want_text = (cls.key_dest == key_console) || (cls.key_dest == key_message);
+			}
+
 			if (want_text != active)
 			{
 				if (want_text)
@@ -798,11 +809,14 @@ IN_Update(void)
 					SDL_StopTextInput(tw);
 				}
 			}
+
 			else if (field && active && SDL_HasScreenKeyboardSupport() && !SDL_ScreenKeyboardShown(tw) &&
 				(Sys_Milliseconds() - startms > 1000))
 			{
 				M_TextEditEnd(NULL); /* the keyboard was closed (back key): the field is done */
 			}
+
+			started = want_text;
 		}
 
 		lasttaps = taps;
