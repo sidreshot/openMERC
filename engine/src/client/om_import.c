@@ -379,6 +379,8 @@ IS_Extract(iso_t *iso, Sint64 cabpos, Uint32 cabsize, Uint32 off, Uint32 csize, 
 }
 
 /* unpacks the game files of the image into gamedir/base; the number of files, or -1 */
+static qboolean imp_listonly; /* om_importiso ... list: print what would be unpacked */
+
 static int
 IMP_FromImage(const char *image, const char *gamedir, char *err, size_t errsize)
 {
@@ -496,6 +498,20 @@ IMP_FromImage(const char *image, const char *gamedir, char *err, size_t errsize)
 			if (pass == 0)
 			{
 				total += cs;
+				continue;
+			}
+
+			if (imp_listonly)
+			{
+				Com_Printf("import list: %s/%s -> base/%s%s%s (%u bytes, packed %u, flags %d, at %u)\n", dir, name, sub,
+						sub[0] ? "/" : "", name, esize, cs, flags, dataoff);
+				count++;
+
+				if ((Uint64)dataoff + cs > csize)
+				{
+					failed++;
+				}
+
 				continue;
 			}
 
@@ -624,11 +640,13 @@ IMP_Import_f(void)
 
 	if (Cmd_Argc() < 2)
 	{
-		Com_Printf("Usage: om_importiso <image.iso> [game folder]\n");
+		Com_Printf("Usage: om_importiso <image.iso> [game folder] [list]\n");
 		return;
 	}
 
+	imp_listonly = Cmd_Argc() > 3 && !Q_stricmp(Cmd_Argv(3), "list");
 	n = IMP_FromImage(Cmd_Argv(1), Cmd_Argc() > 2 ? Cmd_Argv(2) : Cvar_VariableString("basedir"), err, sizeof(err));
+	imp_listonly = false;
 
 	if (n > 0)
 	{

@@ -372,11 +372,11 @@ static void T720_8(void)
 	edict_t *a = Player(2, right, 90);
 	vec3_t dir = {0, 1, 0}, pt = {0, -10, 10};
 	Dmg_Damage(p, a, a, dir, pt, right, 5, 0, DMGF_PROJECTILE, MOD_PISTOL1);
-	CHECK(p->client->damage_dir == 4, "from the right: %d expected 4", p->client->damage_dir);
+	CHECK((p->client->damage_dir & 0x3f) == 4 && (p->client->damage_dir & 0x4000), "from the right: %d expected 4 and the marker", p->client->damage_dir);
 	VectorCopy(front, a->s.origin);
 	vec3_t dir2 = {-1, 0, 0}, pt2 = {10, 0, 10};
 	Dmg_Damage(p, a, a, dir2, pt2, front, 5, 0, DMGF_PROJECTILE, MOD_PISTOL1);
-	CHECK(p->client->damage_dir == 0x10, "from the front: %d expected 0x10", p->client->damage_dir);
+	CHECK((p->client->damage_dir & 0x3f) == 0x10 && (p->client->damage_dir & 0x4000), "from the front: %d expected 0x10 and the marker", p->client->damage_dir);
 	CHECK(Count("sound:impact/player/hit") == 2, "player hit sounds");
 	CHECK(test_clientDamaged == 2, "remote-camera hook called for each client hit (%d)", test_clientDamaged);
 }

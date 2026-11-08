@@ -146,7 +146,7 @@ public:
 	virtual bool AddItems(int itemtype, int count, int max) = 0;               // 19
 	virtual int AddArmor(int delta) = 0;                                       // 20
 	virtual bool HasItem(int itemtype) = 0;                                    // 21
-	virtual bool OwnsWeapon(int weapon) = 0;                                   // 22
+	virtual int OwnsWeapon(int weapon) = 0; // 22: the flag bit 1 << weapon, not a bool (a bool read only its low byte: weapons 8+ never owned)
 	virtual int CurrentWeapon() = 0;                                           // 23
 	virtual int BestWeapon() = 0;                                              // 24
 	virtual int SelectedItemType() = 0;                                        // 25

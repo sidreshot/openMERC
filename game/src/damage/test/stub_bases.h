@@ -171,7 +171,7 @@ public:
 	bool AddItems(int itemtype, int count, int max) override { return false; }
 	int AddArmor(int delta) override { return 0; }
 	bool HasItem(int itemtype) override { return false; }
-	bool OwnsWeapon(int weapon) override { return false; }
+	int OwnsWeapon(int weapon) override { return 0; }
 	int CurrentWeapon() override { return 0; }
 	int BestWeapon() override { return 0; }
 	int SelectedItemType() override { return 0; }

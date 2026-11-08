@@ -173,3 +173,6 @@ thunderstorm on jpn2".
 - **Damage direction marker** (cl_hud.c, g_combat.cpp): a short red arc around the crosshair towards the attacker,
   turning with the view and fading over a second; the attacker's world yaw rides in the unused high bits of
   stats[15] (0x4000, bits 7-13) beside SoF's direction flags. Test aid: cl_om_dmgtest <yaw>.
+
+- Weapon ownership (2026-11-08): `PlayerInventory::OwnsWeapon` returns the flag bit `1 << weapon` (SPEC-AMEND-006 I7.13); the game declared it `bool` and read only the low byte, so weapons 8 and up (shotgun and heavier) were never owned for the game: picking one up that the player already had gave no ammunition and the item was gone, the saved inventory cvars and the view-model precache missed them. Declared `int` now.
+- Damage direction marker (2026-11-08): the bullet path (`damage/g3_damage.cpp` HitDirection) also carries the attacker yaw (0x4000 + bits 7-13); before, only `T_Damage` set it and a real hit showed no marker. Test aids `omhurt [dmg]`, `ominv`.

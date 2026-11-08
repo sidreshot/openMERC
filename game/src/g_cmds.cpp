@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "nav/nav_api.h" /* G5 */
 #include "bots/bot_api.h" /* G5 */
 #include "modes/g_modes.h" /* G9 */
+#include "damage/damage_api.h"
 #include "damage/g3_local.h" /* G3: bolt positions for omaim head */
 
 int SP_Id(const char *package, const char *entry);
@@ -183,6 +184,22 @@ static void Cmd_OmNear_f(edict_t *ent)
 	gi.AddCommandString(va("cmd omsetpos %.0f %.0f %.0f %.0f 0\n", o[0], o[1], o[2], yaw));
 }
 
+/* ominv (test aid): the weapons owned and the current one's clip and reserve (not WriteInfo: writing the info
+   moves the clips into the reserve, each call added them again) */
+static void Cmd_OmInv_f(edict_t *ent)
+{
+	if (!ent->client || !ent->client->inv)
+		return;
+	PlayerInventory *inv = ent->client->inv;
+	char owned[128] = "";
+	for (int w = 1; w <= 14; w++)
+		if (inv->OwnsWeapon(w))
+			{ size_t n = strlen(owned); snprintf(owned + n, sizeof(owned) - n, " %d", w); }
+	gi.dprintf("ominv: health %d weapon %d clip %d/%d reserve %d owned%s damage_dir 0x%x\n", ent->health,
+	           inv->CurrentWeapon(), inv->ClipRounds(), inv->ClipSize(), inv->ReserveAmmo(), owned,
+	           ent->client->damage_dir);
+}
+
 static void Cmd_OmSetPos_f(edict_t *ent)
 {
 	if (!CheatsOK(ent))
@@ -323,6 +340,38 @@ static void Cmd_Gimme_f(edict_t *ent)
 	gi.cprintf(NULL, PRINT_HIGH, "Spawning : %s\n", name); // shown without developer, as in mode A (SPEC-006)
 	memset(&st, 0, sizeof(st));
 	ED_CallSpawn(e);
+}
+
+/* omhurt [damage] (test aid): the nearest living character hits the player with a pistol bullet through the damage
+   function its own shots use (Dmg_Damage), e.g. to check the damage direction marker */
+static void Cmd_OmHurt_f(edict_t *ent)
+{
+	if (!CheatsOK(ent))
+		return;
+	edict_t *best = NULL;
+	float bd = 1e9f;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0)
+			continue;
+		vec3_t d;
+		VectorSubtract(e->s.origin, ent->s.origin, d);
+		if (VectorLength(d) < bd) {
+			bd = VectorLength(d);
+			best = e;
+		}
+	}
+	if (!best)
+		return;
+	int dmg = gi.argc() > 1 ? atoi(gi.argv(1)) : 5;
+	vec3_t dir, pt;
+	VectorSubtract(ent->s.origin, best->s.origin, dir);
+	VectorNormalize(dir);
+	VectorMA(ent->s.origin, -8, dir, pt);
+	pt[2] += 16;
+	Dmg_Damage(ent, best, best, dir, pt, best->s.origin, dmg, 0, DMGF_PROJECTILE, MOD_PISTOL1);
+	gi.dprintf("omhurt: %s #%d hit the player for %d, damage_dir 0x%x\n", best->classname, (int)(best - g_edicts), dmg,
+	           ent->client ? ent->client->damage_dir : 0);
 }
 
 /* omkill: the nearest living character (not the player) dies of a shot from the player's position (a test aid) */
@@ -701,6 +750,10 @@ void ClientCommand(edict_t *ent)
 		Cmd_Noclip_f(ent);
 	else if (Q_stricmp(cmd, "omsetpos") == 0)
 		Cmd_OmSetPos_f(ent);
+	else if (Q_stricmp(cmd, "omhurt") == 0)
+		Cmd_OmHurt_f(ent);
+	else if (Q_stricmp(cmd, "ominv") == 0)
+		Cmd_OmInv_f(ent);
 	else if (Q_stricmp(cmd, "omnear") == 0)
 		Cmd_OmNear_f(ent);
 	else if (Q_stricmp(cmd, "omaim") == 0)

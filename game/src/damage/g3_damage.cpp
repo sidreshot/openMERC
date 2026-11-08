@@ -169,11 +169,14 @@ static int HitDirection(edict_t *t, const G3Hit &h)
 	float pyaw = t->client ? t->client->v_angle[YAW] : t->s.angles[YAW];
 	int yp = ((int)(pyaw * 65536.0f / 360.0f)) & 65535;
 	float a = (float)((ya - yp) & 65535) * (360.0f / 65536.0f);
+	/* openMERC (owner 11): the attacker's world yaw in the free high bits of stats[15] (0x4000 valid, bits 7-13 the
+	   yaw in 128 steps) for the client's damage direction marker; the low flags stay as the original sets them */
+	int marker = 0x4000 | ((((int)(vectoyaw(d) * 128.0f / 360.0f + 0.5f)) & 127) << 7);
 	if (a < 30 || a > 340 || (a > 150 && a < 210))
-		return 0x10;
+		return 0x10 | marker;
 	if (a >= 30 && a <= 150)
-		return 8;
-	return 4;
+		return 8 | marker;
+	return 4 | marker;
 }
 
 static void PlayerHitSound(edict_t *t, int before, int left, int mod)
