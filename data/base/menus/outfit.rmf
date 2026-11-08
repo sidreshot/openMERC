@@ -1,0 +1,14 @@
+<!-- OpenMerc MENU-SCRATCH: screen "outfit" (weapons for the mission) in the openMERC style; the weapon and
+     item pages (l_outfit, r_outfit) are the game's -->
+<stm>
+<strings menu_generic>
+<strings menu_outfit>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_outfit center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame top 0 96 page om_outfitsel cut main>
+<frame left 300 0 page l_outfit cut main>
+<frame right 0 0 page r_outfit cut main>
+</stm>

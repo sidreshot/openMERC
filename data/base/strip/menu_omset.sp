@@ -2,7 +2,7 @@ VERSION 1
 ID 197
 REFERENCE MENU_OMSET
 DESCRIPTION "OpenMerc audio, controls, gameplay and multiplayer pages"
-COUNT 130
+COUNT 145
 INDEX 0
 {
    REFERENCE OFFON
@@ -782,4 +782,94 @@ INDEX 129
    REFERENCE HOME_LINK_TIP
    TEXT_ENGLISH "Opens the project page on GitHub"
    TEXT_RUSSIAN "Открывает страницу проекта на GitHub"
+}
+INDEX 130
+{
+   REFERENCE TAB_MAIL
+   TEXT_ENGLISH "Briefing"
+   TEXT_RUSSIAN "Брифинг"
+}
+INDEX 131
+{
+   REFERENCE TAB_OUTFIT
+   TEXT_ENGLISH "Outfit"
+   TEXT_RUSSIAN "Снаряжение"
+}
+INDEX 132
+{
+   REFERENCE TAB_OBJECTIVES
+   TEXT_ENGLISH "Objectives"
+   TEXT_RUSSIAN "Задачи"
+}
+INDEX 133
+{
+   REFERENCE PG_MAIL_TITLE
+   TEXT_ENGLISH "MISSION BRIEFING"
+   TEXT_RUSSIAN "БРИФИНГ ЗАДАНИЯ"
+}
+INDEX 134
+{
+   REFERENCE PG_MAIL_NEXT
+   TEXT_ENGLISH "Outfit"
+   TEXT_RUSSIAN "Снаряжение"
+}
+INDEX 135
+{
+   REFERENCE PG_MAIL_NEXT_TIP
+   TEXT_ENGLISH "Choose the weapons for the mission"
+   TEXT_RUSSIAN "Выбрать оружие для задания"
+}
+INDEX 136
+{
+   REFERENCE PG_MAIL_TICK
+   TEXT_ENGLISH "*** READ THE BRIEFING, THEN CHOOSE YOUR WEAPONS ***"
+   TEXT_RUSSIAN "*** ПРОЧТИТЕ БРИФИНГ И ВЫБЕРИТЕ ОРУЖИЕ ***"
+}
+INDEX 137
+{
+   REFERENCE PG_OUTFIT_TITLE
+   TEXT_ENGLISH "OUTFIT"
+   TEXT_RUSSIAN "СНАРЯЖЕНИЕ"
+}
+INDEX 138
+{
+   REFERENCE PG_OUTFIT_BACK_TIP
+   TEXT_ENGLISH "Back to the briefing"
+   TEXT_RUSSIAN "Назад к брифингу"
+}
+INDEX 139
+{
+   REFERENCE PG_OUTFIT_GO_TIP
+   TEXT_ENGLISH "Start the mission with this outfit"
+   TEXT_RUSSIAN "Начать задание с этим снаряжением"
+}
+INDEX 140
+{
+   REFERENCE PG_DEPLOY_Q
+   TEXT_ENGLISH "Start the mission?"
+   TEXT_RUSSIAN "Начать задание?"
+}
+INDEX 141
+{
+   REFERENCE PG_DEPLOY_NOTE
+   TEXT_ENGLISH "The outfit cannot be changed later"
+   TEXT_RUSSIAN "Снаряжение потом не поменять"
+}
+INDEX 142
+{
+   REFERENCE PG_DEPLOY_YES
+   TEXT_ENGLISH "Deploy"
+   TEXT_RUSSIAN "В бой"
+}
+INDEX 143
+{
+   REFERENCE PG_OBJ_TITLE
+   TEXT_ENGLISH "OBJECTIVES"
+   TEXT_RUSSIAN "ЗАДАЧИ"
+}
+INDEX 144
+{
+   REFERENCE PG_OBJ_TICK
+   TEXT_ENGLISH "*** MISSION OBJECTIVES ***"
+   TEXT_RUSSIAN "*** ЗАДАЧИ ЗАДАНИЯ ***"
 }

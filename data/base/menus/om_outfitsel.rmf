@@ -1,0 +1,14 @@
+<!-- OpenMerc MENU-SCRATCH: the chosen weapons and items of "outfit" (the game's selection widgets) in one
+     centred row -->
+<stm>
+<strings menu_outfit>
+<center>
+<font type title tint transgray atint transgray>
+<text "^MENU_OUTFIT_INVEN^"><br>
+<blank 4 6><br>
+<left>
+<image "weapons/w_knife2" tint normaltext atint normaltext key mouse1 "play menu/small/invalid.wav" noscale rowcenter>
+<selection "weapons/open" 320 64 tint normaltext ctint hblue dtint hgreen weapons rowcenter>
+<image "misc/divider" tint orange atint orange noscale rowcenter>
+<selection "weapons/open" 192 64 tint normaltext ctint hblue dtint hgreen items rowcenter>
+</stm>

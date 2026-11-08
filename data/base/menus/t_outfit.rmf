@@ -1,0 +1,23 @@
+<!-- OpenMerc MENU-SCRATCH: tab, title, buttons and ticker of "outfit" in the openMERC style -->
+<stm global>
+<backdrop omflat>
+<center>
+<image none label "^MENU_OMSET_TAB_MAIL^" bolt "null_tab01" key mouse1 "menu mail">
+<image none label "^MENU_OMSET_TAB_OUTFIT^" bolt "null_tab02">
+
+<font type title tint normaltext atint normaltext>
+<text "^MENU_OMSET_PG_OUTFIT_TITLE^" bolt "NULL_HEADER">
+
+<blank 32 32 bolt "NULL_HOME_PAGE" key mouse1 "menu main" tip "^MENU_OMSET_PG_HOME_TIP^">
+<blank 32 32 bolt "NULL_HELP" key mouse1 "menu mail" tip "^MENU_OMSET_PG_OUTFIT_BACK_TIP^">
+<blank 32 32 bolt "null_arrow_deploy" key mouse1 "menu outfit2" tip "^MENU_OMSET_PG_OUTFIT_GO_TIP^">
+
+<einclude mapname arm1 "maps/arm1weaps">
+<einclude mapname kos3 "maps/kos3weaps">
+<einclude mapname sib3 "maps/sib3weaps">
+<einclude mapname arm2 "maps/arm2weaps">
+<einclude mapname nyc3 "maps/nyc3weaps">
+<einclude mapname arm3 "maps/arm3weaps">
+<einclude mapname jpn3 "maps/jpn3weaps">
+<einclude mapname irq3b "maps/irq3bweaps">
+</stm>

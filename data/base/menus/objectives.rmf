@@ -1,0 +1,18 @@
+<!-- OpenMerc MENU-SCRATCH: screen "objectives" (mission objectives in a level) in the openMERC style; the
+     objectives text is the game's page maps/<map> -->
+<stm command updateinven command savesleft>
+<strings menu_generic>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<cbuf "turnoffmissionmsg">
+
+<ikey "menu objectives" "popmenu">
+<ikey "+use" "popmenu">
+
+<set menu_mapname "maps/$mapname">
+
+<frame topic 0 92 page t_objectives center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame help 0 0 cpage menu_mapname cut main>
+</stm>

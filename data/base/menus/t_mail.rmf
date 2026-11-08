@@ -1,0 +1,15 @@
+<!-- OpenMerc MENU-SCRATCH: tab, title, buttons and ticker of "mail" in the openMERC style -->
+<stm global>
+<backdrop omflat>
+<center>
+<image none label "^MENU_OMSET_TAB_MAIL^" bolt "null_tab01">
+
+<font type title tint normaltext atint normaltext>
+<text "^MENU_OMSET_PG_MAIL_TITLE^" bolt "NULL_HEADER">
+
+<blank 32 32 bolt "NULL_HOME_PAGE" key mouse1 "menu main" tip "^MENU_OMSET_PG_HOME_TIP^">
+<image none label "^MENU_OMSET_PG_MAIL_NEXT^" bolt "null_arrow_deploy" key mouse1 "exec menus/outfit;menu outfit" tip "^MENU_OMSET_PG_MAIL_NEXT_TIP^">
+
+<font type title tint orange>
+<ticker "^MENU_OMSET_PG_MAIL_TICK^" bolt "null_ticker_tape" speed 10 width 336 xoff -160 yoff -11>
+</stm>

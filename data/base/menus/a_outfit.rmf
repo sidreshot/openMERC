@@ -1,0 +1,17 @@
+<!-- OpenMerc MENU-SCRATCH: deploy confirmation of "outfit", own dialog -->
+<stm>
+<key n "killmenu">
+<key y "loading;gamemap $menu_nextmap">
+<center>
+<hbr>
+<font type title tint orange atint orange>
+"^MENU_OMSET_PG_DEPLOY_Q^"<br>
+<font type title tint normaltext atint normaltext>
+"^MENU_OMSET_PG_DEPLOY_NOTE^"<br>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_NO^" ombutton btint transgray width 240 height 26 key mouse1 "killmenu">
+<br>
+<blank 3 3><br>
+<text "^MENU_OMSET_PG_DEPLOY_YES^" ombutton btint transgray width 240 height 26 key mouse1 "loading;gamemap $menu_nextmap"><br>
+</stm>

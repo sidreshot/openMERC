@@ -1,0 +1,6 @@
+<!-- OpenMerc MENU-SCRATCH: deploy confirmation of "outfit", own dialog -->
+<stm resize 400 200>
+<include om_tints>
+<frame main 400 200 border 16 1 darkgray backfill tipback>
+<frame alert 0 0 page a_outfit cut main>
+</stm>

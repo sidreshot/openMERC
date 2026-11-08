@@ -1,0 +1,16 @@
+<!-- OpenMerc MENU-SCRATCH: header of the briefing letter (recipient, classification, subject) -->
+<stm>
+<strings menu_generic>
+<left>
+<font type title tint normaltext atint normaltext>
+<ctext name atext "^MENU_GENERIC_EMAIL_RECIP^: " noshade><br>
+<text "^MENU_GENERIC_EMAIL_CLASS^"><br>
+<einclude mapname arm1 "maps/arm1subject">
+<einclude mapname kos3 "maps/kos3subject">
+<einclude mapname arm2 "maps/arm2subject">
+<einclude mapname nyc3 "maps/nyc3subject">
+<einclude mapname arm3 "maps/arm3subject">
+<einclude mapname jpn3 "maps/jpn3subject">
+<einclude mapname sib3 "maps/sib3subject">
+<einclude mapname irq3b "maps/irq3bsubject">
+</stm>

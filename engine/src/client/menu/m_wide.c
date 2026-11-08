@@ -80,7 +80,7 @@ MWD_Enabled(void)
 qboolean
 MWD_ScreenWide(const char *name)
 {
-	static const char *never[] = {"outfit", "mail", "testmotd", "objectives", NULL};
+	static const char *never[] = {"testmotd", NULL}; /* mail, outfit, objectives: own pages (2026-11-08) */
 	char *buf = NULL;
 	qboolean yes = false;
 	int i, len;
@@ -468,6 +468,15 @@ MWD_ButtonLabel(int slot)
 	}
 }
 
+/* a footer button's own caption (<image none label "..." bolt ...>), else the slot's */
+static const char *
+MWD_SlotLabel(const mwidget_t *w)
+{
+	const char *l = MW_ImageLabel(w);
+
+	return l ? l : MWD_ButtonLabel(w->omslot);
+}
+
 #define MWD_TABPAD 14      /* tab label padding */
 #define MWD_LABELFONT "medium"
 
@@ -564,7 +573,7 @@ MWD_PlacePage(mpage_t *pg)
 				!(w->omslot == OMS_GAME && !ingame))
 			{
 				buttons[nb] = w;
-				bw[nb] = MR_StringWidth(MWD_ButtonLabel(w->omslot), MWD_LABELFONT) + 24;
+				bw[nb] = MR_StringWidth(MWD_SlotLabel(w), MWD_LABELFONT) + 24;
 				bw[nb] = bw[nb] < 64 ? 64 : bw[nb];
 				nb++;
 			}
@@ -684,7 +693,7 @@ MWD_DrawSlot(mpage_t *pg, mwidget_t *w, int x, int y)
 
 	if (w->omslot >= OMS_HELP && w->omslot <= OMS_DEPLOY)
 	{
-		const char *label = MWD_ButtonLabel(w->omslot);
+		const char *label = MWD_SlotLabel(w);
 		int fh = MR_FontHeight(MWD_LABELFONT);
 		int tw = MR_StringWidth(label, MWD_LABELFONT);
 
