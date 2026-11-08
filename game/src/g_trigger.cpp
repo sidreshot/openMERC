@@ -199,6 +199,12 @@ void trigger_push_touch(edict_t *self, edict_t *other, cplane_t *plane, csurface
 {
 	if (other->targetname && !strcmp(other->targetname, "sib2_heli"))
 		return;
+	/* openMERC deviation (docs/DEVIATIONS.md): a push named `playerpush` (tsr1, jpn2) leaves characters run by the AI
+	   alone. tsr1's (speed 900 = 9000 u/s, PUSH_ONCE | TOGGLE, on for 0.5 s as the camera room door is kicked in)
+	   threw a skinhead standing in the doorway into the room and, him being the first toucher, was used up before it
+	   reached the player. Other pushes (closet, stall, blasts) keep the original rule. */
+	if (other->ai && !other->client && self->targetname && strstr(self->targetname, "playerpush"))
+		return;
 	if (strcmp(other->classname, "grenade") == 0) {
 		VectorScale(self->movedir, self->speed * 10, other->velocity);
 	} else if (other->health > 0) {

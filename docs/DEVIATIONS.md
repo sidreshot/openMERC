@@ -144,3 +144,10 @@ thunderstorm on jpn2".
   thunderstorm").
 - **Test aids:** om_testmode 1 (single player): god mode, no target, noclip every frame; omkill kills the nearest
   living monster. Not in the original.
+
+## Scripted scenes (2026-11-08)
+
+- **A push named `playerpush` leaves AI characters alone** (g_trigger.cpp, tsr1 and jpn2): the original pushes everything alive. tsr1's camera
+  room uses a push named `playerpush` (speed 900, i.e. 9000 u/s, push once, switched on for 0.5 s as the door is kicked
+  in) to throw the player back from the door; a skinhead standing in the doorway was thrown into the room instead and,
+  as the first toucher, used the push up. Other pushes (closet, stall, blasts, the sib2 helicopter rule) are unchanged.
