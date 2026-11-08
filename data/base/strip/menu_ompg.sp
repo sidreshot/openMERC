@@ -2,7 +2,7 @@ VERSION 1
 ID 201
 REFERENCE MENU_OMSET_PG
 DESCRIPTION "OpenMerc folder pages, dialogs and key actions"
-COUNT 183
+COUNT 188
 INDEX 0
 {
    REFERENCE HOME_TIP
@@ -1100,4 +1100,34 @@ INDEX 182
    REFERENCE LV_ARM
    TEXT_ENGLISH "Armory"
    TEXT_RUSSIAN "Оружейная"
+}
+INDEX 183
+{
+   REFERENCE CUSTOM_TITLE
+   TEXT_ENGLISH "CUSTOM DIFFICULTY"
+   TEXT_RUSSIAN "СВОЯ СЛОЖНОСТЬ"
+}
+INDEX 184
+{
+   REFERENCE CUSTOM_TICK
+   TEXT_ENGLISH "*** SET UP YOUR OWN DIFFICULTY, THEN START THE GAME ***"
+   TEXT_RUSSIAN "*** НАСТРОЙТЕ СВОЮ СЛОЖНОСТЬ И НАЧНИТЕ ИГРУ ***"
+}
+INDEX 185
+{
+   REFERENCE CUSTOM_HEAD
+   TEXT_ENGLISH "Your difficulty"
+   TEXT_RUSSIAN "Ваша сложность"
+}
+INDEX 186
+{
+   REFERENCE CUSTOM_NOTE
+   TEXT_ENGLISH "Takes effect with a new game"
+   TEXT_RUSSIAN "Действует с началом новой игры"
+}
+INDEX 187
+{
+   REFERENCE CUSTOM_START
+   TEXT_ENGLISH "START GAME"
+   TEXT_RUSSIAN "НАЧАТЬ ИГРУ"
 }

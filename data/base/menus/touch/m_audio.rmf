@@ -1,6 +1,7 @@
 <!-- OpenMerc: the sound page on touch screens (menus/touch overrides menus/m_audio.rmf there): no output device list
      (a Windows feature), no window-focus muting, no sound restart button -->
 <stm>
+<columns 2>
 <strings menu_omset>
 
 <vbar tint vbargray>

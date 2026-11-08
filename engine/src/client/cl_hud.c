@@ -902,14 +902,26 @@ HUD_DrawPanel(int which, int x, int y)
 		{
 			/* OpenMerc: a name longer than the tray's window (localized names, e.g. Russian) is moved
 			   left so that it ends 2 units inside the screen instead of running off the right edge */
-			int lx = x + labelx, w = HUD_TextWidth(label, 0);
+			int lx = x + labelx, w = HUD_TextWidth(label, 0), ly = y + o + 21;
 
 			if ((which == 1) && (lx + w > HUD_W() - 2))
 			{
 				lx = HUD_W() - 2 - w;
 			}
 
-			D_Text(lx, y + o + 21, label, c_hudgreen, &font_small);
+			/* OpenMerc: inside the left edge too, and where the trays stand at the top of the screen (the touch layout)
+			   the opening tray's name would be above it: it is written under the tray instead (owner 15) */
+			if (lx < 2)
+			{
+				lx = 2;
+			}
+
+			if (ly < 2)
+			{
+				ly = y + 94;
+			}
+
+			D_Text(lx, ly, label, c_hudgreen, &font_small);
 		}
 		D_PicPart(x, y + 28, l0, 0, r0, 64, c_white, "pics/interface2/frame_bottom");
 	}
@@ -1039,6 +1051,98 @@ static void
 HUD_CentredText(int y, const char *s, const unsigned char *c, const om_fontref_t *f)
 {
 	D_Text((HUD_W() - D_TextWidth(s, f)) / 2, y, s, c, f);
+}
+
+/* OpenMerc: the last pickup or notice (owner 16: what was just picked up could not be read - it only went to the
+   small console lines in the corner, under the touch layout's trays). Shown 3 s centred under the top of the HUD in
+   the medium font with a shadow, fading over the last second; a new one replaces it. */
+static char hud_pickup[128];
+static int hud_pickuptime = -100000;
+
+void
+HUD_PickupText(const char *s)
+{
+	int i, n = 0;
+
+	for (i = 0; s[i] && n < (int)sizeof(hud_pickup) - 1; i++)
+	{
+		if (s[i] != '\n' && s[i] != '\r')
+		{
+			hud_pickup[n++] = s[i];
+		}
+	}
+
+	hud_pickup[n] = 0;
+	hud_pickuptime = cls.realtime;
+}
+
+/* OpenMerc (owner 11): a light marker of where damage came from - a short red arc around the crosshair towards the
+   attacker, relative to the current view (it turns with the player), fading over a second. The game sends the
+   attacker's world yaw in the high bits of stats[15] (0x4000, bits 7-13, g_combat.cpp); the low flags are SoF's. */
+static void
+HUD_DrawDamageDir(void)
+{
+	static float yaw;
+	static int when = -100000;
+	int s = (unsigned short)PS()->stats[15], age, i;
+	float rel, r = HUD_H() * 0.16f, cx = HUD_W() * 0.5f, cy = HUD_H() * 0.5f;
+	rgba_t c = {230, 20, 10, 200};
+
+	if (s & 0x4000)
+	{
+		yaw = ((s >> 7) & 127) * (360.0f / 128.0f);
+		when = cls.realtime;
+	}
+
+	/* test aid: cl_om_dmgtest <world yaw> shows the marker for that direction (0 = off; 360 = east) */
+	{
+		float t = Cvar_VariableValue("cl_om_dmgtest");
+
+		if (t != 0)
+		{
+			yaw = t;
+			when = cls.realtime;
+		}
+	}
+
+	age = cls.realtime - when;
+
+	if (age < 0 || age > 1000)
+	{
+		return;
+	}
+
+	c[3] = (unsigned char)(200 * (1000 - age) / 1000);
+	rel = (yaw - cl.refdef.viewangles[YAW]) * ((float)M_PI / 180.0f); /* 0 ahead, positive to the left */
+
+	for (i = -3; i < 3; i++)
+	{
+		float a0 = rel + i * 0.07f, a1 = rel + (i + 1) * 0.07f;
+
+		/* screen: ahead is up, a positive (left) angle goes to the left */
+		HUD_DrawLine(cx - sinf(a0) * r, cy - cosf(a0) * r, cx - sinf(a1) * r, cy - cosf(a1) * r, HUD_H() * 0.008f, c);
+	}
+}
+
+static void
+HUD_DrawPickup(void)
+{
+	int age = cls.realtime - hud_pickuptime, y = HUD_H() / 4;
+	rgba_t c = {255, 255, 255, 255}, sh = {0, 0, 0, 200};
+
+	if (!hud_pickup[0] || age < 0 || age > 3000)
+	{
+		return;
+	}
+
+	if (age > 2000)
+	{
+		c[3] = (unsigned char)(255 * (3000 - age) / 1000);
+		sh[3] = (unsigned char)(200 * (3000 - age) / 1000);
+	}
+
+	D_Text((HUD_W() - D_TextWidth(hud_pickup, &font_medium)) / 2 + 2, y + 2, hud_pickup, sh, &font_medium);
+	HUD_CentredText(y, hud_pickup, c, &font_medium);
 }
 
 static void
@@ -1339,6 +1443,8 @@ HUD_DrawInterface(void)
 
 	/* 7 mission messages (always) */
 	HUD_DrawMission();
+	HUD_DrawPickup();
+	HUD_DrawDamageDir();
 
 	/* 8 rank / spectator: remote mask only */
 	if ((ps->remote_type == 0) || (ps->remote_type & elems[E_RANK].mask))

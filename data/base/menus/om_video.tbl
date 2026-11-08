@@ -41,6 +41,10 @@ list | gl_detailtexturingdistance | 150,250,400,600,1000 | Near,Medium,Far,Very 
 list | ghl_light_method | 0,1,2,3 | Fastest,Fast,Quality,Highest quality | Быстрейшее,Быстрое,Качественное,Наилучшее | Character Lighting | Освещение персонажей | pc
 list | ghl_specular | 0,1 | Off,On | Выкл,Вкл | Specular Highlights | Блики
 list | ghl_shadows | 0,1,2 | Off,Basic,Full | Выкл,Простые,Полные | Character Shadows | Тени персонажей | requires=ghl_shadows
+slider | r_om_tess | 0 | 10 | 1 | Model Smoothing (Tessellation) | Сглаживание моделей (тесселяция) | pc | requires=r_om_tess | tip=How round characters and round objects are drawn: 0 off, 10 the full curve/Насколько округло рисуются персонажи и круглые предметы: 0 - выкл, 10 - полный изгиб
+list | r_om_tess_models | 0,1,2,3 | Off,Low,Medium,High | Выкл,Низкая,Средняя,Высокая | Character Tessellation | Тесселяция персонажей | pc | requires=r_om_tess_models | tip=Subdivision of the characters' triangles/Насколько мелко делятся треугольники персонажей
+list | r_om_tess_round | 0,1 | Off,On | Выкл,Вкл | Object Tessellation | Тесселяция объектов | pc | requires=r_om_tess_round | tip=Round objects (barrels, lamps, columns) are tessellated like the characters/Круглые предметы (бочки, лампы, колонны) сглаживаются как персонажи
+list | r_om_tess_weapon | 0,2,3 | Off,Medium,High | Выкл,Средняя,Высокая | Weapon Tessellation | Тесселяция оружия | pc | requires=r_om_tess_weapon | tip=The weapon in your hands (the stock weapons are faceted: little gain)/Оружие в руках (стандартное оружие гранёное: выигрыш небольшой)
 
 # ---- RENDER SCALE / UPSCALING / POST ANTIALIASING (docs GFX-modern.md: r_om_renderscale, r_om_upscale, r_om_postaa)
 section | RENDER SCALE AND SMOOTHING | МАСШТАБ РЕНДЕРА И СГЛАЖИВАНИЕ | requires=r_om_renderscale

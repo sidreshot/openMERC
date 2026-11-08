@@ -1,0 +1,10 @@
+<!-- OpenMerc: screen "game2" - the custom difficulty of a new game (New Game page: "Custom..."), in the openMERC style:
+     no stock backdrop, folder or icons (owner 12: "rework it for the new menu") -->
+<stm>
+<include om_tints>
+<set scr_menuoverlay 1>
+
+<frame topic 0 92 page t_game2 center>
+<frame main 640 372 border 40 0 clear backfill clear>
+<frame game 0 0 page m_game2 cut main>
+</stm>

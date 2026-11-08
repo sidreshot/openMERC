@@ -1,0 +1,24 @@
+<!-- OpenMerc: custom difficulty of a new game (screen "game2"): the stock options (saves, spawning, toughness, carrying,
+     cheats) as rows of the openMERC pages - label left, value right, arrows around it - and the start button -->
+<stm>
+<columns 2>
+<strings menu_game>
+<set menu_skill 5>
+<vbar tint vbargray>
+<center>
+<font type title tint orange atint orange>
+<text "^MENU_OMSET_PG_CUSTOM_HEAD^">
+<hr width 460 tint gray>
+<font type title tint normaltext atint hilitetext>
+<list "^MENU_GAME_SAVES^" match "0,2,5,8,-1" cvar menu_sk_saving atext "^MENU_GAME_SAVENUM^" split 230><hbr>
+<list "^MENU_GAME_SPAWNING^" cvar menu_sk_spawning atext "^MENU_GAME_SPAWNNUM^" split 230><hbr>
+<list "^MENU_GAME_TOUGH^" cvar menu_sk_toughness atext "^MENU_GAME_TOUGHNUM^" split 230><hbr>
+<list "^MENU_GAME_ENCUM^" cvar menu_sk_maxencum atext "^MENU_GAME_ENCUMNUM^" split 230><hbr>
+<list "^MENU_GAME_OFF_ON^" cvar menu_cheats atext "^MENU_GAME_CA^" split 230><hbr>
+<hbr>
+<font type small tint gray>
+<text "^MENU_OMSET_PG_CUSTOM_NOTE^"><br>
+<hbr>
+<font type interface tint normaltext atint hilitetext>
+<text "^MENU_OMSET_PG_CUSTOM_START^" ombutton btint transgray width 280 height 28 key mouse1 "freshgame"><br>
+</stm>

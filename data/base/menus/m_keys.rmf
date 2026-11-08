@@ -2,6 +2,7 @@
      MENU-SCRATCH (owner t104u): own action names (menu_omset PG_K_*), two columns
      (action | keys), own buttons without the stock confirmation dialogs -->
 <stm>
+<columns 2>
 <strings menu_omset>
 <vbar tint vbargray>
 

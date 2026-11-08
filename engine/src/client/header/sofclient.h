@@ -151,6 +151,7 @@ void CL_Strings_LevelChanged(void);
 void CL_Strings_RegisterMedia(void);  /* client packages at level registration */
 /* string-package text with the layout flag (SPEC-201 section 34) */
 void HUD_LayoutText(const char *s);
+void HUD_PickupText(const char *s); /* OpenMerc: the readable pickup line (cl_hud.c) */
 /* 2D helpers of cl_hud.c for the screen code (font 0 small, 1 medium, 2 title) */
 void HUD_DrawFontText(int x, int y, const char *s, const unsigned char *rgba, int font, int keep);
 int HUD_FontHeight(int font);

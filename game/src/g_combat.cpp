@@ -254,7 +254,16 @@ void T_Damage(edict_t *targ, edict_t *inflictor, edict_t *attacker, const vec3_t
 			VectorSet(client->damage_blend, 1, 0, 0);
 		}
 		if (targ->health - take > 0 || take == 0)
+		{
 			client->damage_dir = DamageDirection(targ, attacker, dflags);
+			/* openMERC (owner 11): the attacker's world direction in the free high bits of stats[15] (0x4000 valid,
+			   bits 7-13 the yaw in 128 steps) for the client's damage direction marker; the low flags stay */
+			if (attacker && attacker != targ && !(dflags & (DAMAGE_FIRE | DAMAGE_FALL | DAMAGE_DROWN))) {
+				vec3_t d;
+				VectorSubtract(attacker->s.origin, targ->s.origin, d);
+				client->damage_dir |= 0x4000 | ((((int)(vectoyaw(d) * 128.0f / 360.0f + 0.5f)) & 127) << 7);
+			}
+		}
 		// view kick from damage
 		float kick = (float)take * 0.5f;
 		if (kick > 50)

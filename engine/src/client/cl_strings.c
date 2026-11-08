@@ -436,5 +436,12 @@ CL_SP_Print(int id, const byte *data, int len, qboolean obit)
 	else
 	{
 		Com_Printf("%s", out);
+
+		/* OpenMerc: during play a plain print (an item picked up, "can't carry more ammo") is also the HUD's pickup
+		   line, readable on a phone (owner 16) */
+		if (cls.state == ca_active && !obit)
+		{
+			HUD_PickupText(out);
+		}
 	}
 }

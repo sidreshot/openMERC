@@ -1,5 +1,6 @@
 <!-- OpenMerc: the mouse page on touch screens (menus/touch overrides menus/m_misc.rmf there): a gamepad only -->
 <stm>
+<columns 2>
 <strings menu_omset>
 
 <vbar tint vbargray>

@@ -1,5 +1,6 @@
 <!-- OpenMerc MENU2: video page (rewritten; options of the OpenGL 3 renderer only) -->
 <stm>
+<columns 2>
 <strings menu_omvideo>
 
 <vbar tint vbargray>

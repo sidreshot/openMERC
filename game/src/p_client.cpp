@@ -1282,8 +1282,33 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 			if (!(ent->solid == SOLID_NOT && client->camera_nest > 0))
 				gi.linkentity(ent);
 
-			if (ent->movetype != MOVETYPE_NOCLIP && !client->resp.spectator)
+			if (ent->movetype != MOVETYPE_NOCLIP && !client->resp.spectator) {
 				G_TouchTriggers(ent);
+				/* openMERC (owner 19, docs/DEVIATIONS.md): in single player an item is picked up within reach, not only
+				   when the player's box overlaps it - an armour vest on a shelf needed a jump onto the shelf. Box grown by
+				   24 to the sides, 8 down, 24 up; only an item in sight of the eyes (no wall or shelf board between) */
+				if (!deathmatch->value && ent->health > 0) {
+					edict_t *near[256];
+					vec3_t mins, maxs, eye;
+					for (int k = 0; k < 3; k++) {
+						mins[k] = ent->absmin[k] - (k < 2 ? 24 : 8);
+						maxs[k] = ent->absmax[k] + 24;
+					}
+					VectorCopy(ent->s.origin, eye);
+					eye[2] += ent->viewheight;
+					int num = gi.BoxEdicts(mins, maxs, near, 256, AREA_TRIGGERS);
+					for (int k = 0; k < num && ent->inuse; k++) {
+						edict_t *it = near[k];
+						if (!it->inuse || !it->item || !it->touch || it->solid != SOLID_TRIGGER)
+							continue;
+						vec3_t at = {it->s.origin[0], it->s.origin[1], it->s.origin[2] + 8}; /* above the board it lies on */
+						trace_t tr = gi.trace(eye, vec3_origin, vec3_origin, at, ent, MASK_SOLID);
+						if (tr.fraction < 1.0f && tr.ent != it)
+							continue;
+						it->touch(it, ent, NULL, NULL);
+					}
+				}
+			}
 
 			for (int i = 0; i < pm.numtouch; i++) {
 				edict_t *other = pm.touchents[i];

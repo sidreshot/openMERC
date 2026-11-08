@@ -160,3 +160,16 @@ thunderstorm on jpn2".
   needed). FTSZ is 'OMG2' and checks only the record layouts (entity, client, level, entity image, extension count):
   a rebuild with other code reads the save, a change of edict_t / gclient_t / level_locals_t still refuses it. Saves
   of the former format ('OMG1', offsets of one build) are refused. The original module's saves never loaded.
+
+## Pickups (2026-11-08)
+
+- **Items within reach** (p_client.cpp, single player): an item is picked up when it is within 24 units to the side,
+  8 below or 24 above the player's box and in sight of the eyes - not only when the boxes overlap (an armour vest on
+  a shelf needed a jump onto it).
+- **A dropped weapon comes loaded** (g_items.cpp): a weapon a character dropped carries no rounds and was given with an
+  empty clip; it is given with a full clip, as a weapon lying in the map.
+- **Pickup line** (cl_hud.c): plain prints during play (pickups, "can't carry more") are also shown for 3 s centred
+  under the top of the HUD in the medium font; they went only to the small console lines.
+- **Damage direction marker** (cl_hud.c, g_combat.cpp): a short red arc around the crosshair towards the attacker,
+  turning with the view and fading over a second; the attacker's world yaw rides in the unused high bits of
+  stats[15] (0x4000, bits 7-13) beside SoF's direction flags. Test aid: cl_om_dmgtest <yaw>.

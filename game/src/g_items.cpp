@@ -502,7 +502,9 @@ static void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t
 	}
 	case IK_WEAPON: {
 		int w = it->value;
-		int rounds = dropped ? ent->itemcount : -1;
+		/* openMERC (owner 5, docs/DEVIATIONS.md): a weapon a character dropped carries no rounds (itemcount 0) and was
+		   given empty - picked up, it had no ammunition at all; it comes with a full clip now, as a weapon of the map */
+		int rounds = (dropped && ent->itemcount > 0) ? ent->itemcount : -1;
 		int L = sp ? weight_limit[clamp4(gix.cvar_value("sk_maxencum"))] : realistic ? 4 : 0;
 		if (!inv->OwnsWeapon(w)) {
 			bool encumbered = L > 0 && inv->WeaponWeight(w) + inv->TotalWeight() > L;

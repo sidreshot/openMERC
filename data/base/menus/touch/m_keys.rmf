@@ -1,6 +1,7 @@
 <!-- OpenMerc: the controls page on touch screens (menus/touch overrides menus/m_keys.rmf there): the touch controls
      instead of key bindings -->
 <stm>
+<columns 2>
 <strings menu_omset>
 <vbar tint vbargray>
 
