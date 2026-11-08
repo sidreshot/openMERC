@@ -47,7 +47,7 @@ char *G10_ReadString(int mark);                             // mark -1: NULL; el
 // --- encodings -------------------------------------------------------------------------------------------------
 int G10_EncodeEnt(const edict_t *e);                        // entity number, -1 none
 edict_t *G10_DecodeEnt(int n);                              // NULL for -1 or out of range
-int G10_EncodePtr(const void *p);                           // offset in the module image, -1 none (or not ours)
+int G10_EncodePtr(const void *p);                           // index into the save's symbol names, -1 none / not ours
 void *G10_DecodePtr(int code);                              // NULL for -1 or out of range
 
 // --- state ------------------------------------------------------------------------------------------------------

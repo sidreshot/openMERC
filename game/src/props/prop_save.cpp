@@ -70,6 +70,24 @@ static bool IsEmpty(const PropData &d)
 static void V(float *o, const vec3_t i) { o[0] = i[0], o[1] = i[1], o[2] = i[2]; }
 static void U(vec3_t o, const float *i) { o[0] = i[0], o[1] = i[1], o[2] = i[2]; }
 
+// the pointers WriteLevelProps will save, into the save's symbol list (save_level.cpp, before the records)
+void CollectLevelPropPtrs(void)
+{
+	PropData *t = DataTable();
+	for (int i = 0; i < globals.num_edicts && i < MAX_EDICTS; i++) {
+		const PropData &d = t[i];
+		if (!g_edicts[i].inuse || IsEmpty(d))
+			continue;
+		Ptr(d.entry);
+		Ptr(d.parts);
+		Ptr((const void *)d.pain);
+		Ptr((const void *)d.fall_think);
+		Ptr((const void *)d.fall_use);
+		Ptr((const void *)d.next);
+		Ptr((const void *)d.push_saved_think);
+	}
+}
+
 void WriteLevelProps(void)
 {
 	PropData *t = DataTable();

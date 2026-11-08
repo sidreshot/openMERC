@@ -211,6 +211,19 @@ static void EncodeFields(unsigned char *rec, const Field *f, int n, const char *
 	}
 }
 
+// the pointer fields of every entity in use, so their names are in the list written before the records
+void CollectEntityPtrs(void)
+{
+	for (int i = 0; i < globals.num_edicts; i++) {
+		const edict_t *e = &g_edicts[i];
+		if (!e->inuse)
+			continue;
+		for (int k = 0; k < COUNT(ent_fields); k++)
+			if (ent_fields[k].kind == FK_PTR)
+				SymEncode(GetP((const unsigned char *)e, ent_fields[k].ofs));
+	}
+}
+
 static void WriteStrings(const unsigned char *live, const Field *f, int n)
 {
 	for (int i = 0; i < n; i++)

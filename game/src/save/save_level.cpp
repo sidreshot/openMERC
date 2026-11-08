@@ -37,6 +37,10 @@ void ItemList_Add(edict_t *ent);
 
 extern G10Extension *g10_extensions;
 
+namespace props {
+void CollectLevelPropPtrs(void); // props/prop_save.cpp
+}
+
 namespace g10 {
 
 static cvar_t *g10_savetest;
@@ -51,10 +55,13 @@ static void Fingerprint(int32_t out[9])
 	int nx = 0;
 	for (G10Extension *x = g10_extensions; x; x = x->next)
 		nx++;
-	out[0] = 0x4F4D4731; // 'OMG1'
-	out[1] = (int32_t)im.timestamp;
-	out[2] = (int32_t)im.size;
-	out[3] = (int32_t)im.checksum;
+	(void)im;
+	/* 'OMG2': pointers by symbol name (OMSY chunk, save_symtab.cpp) - another build of the module reads the save as
+	   long as the records keep their layout; 'OMG1' saves (offsets of one build) are refused */
+	out[0] = 0x4F4D4732; // 'OMG2'
+	out[1] = 0;
+	out[2] = 0;
+	out[3] = 0;
 	out[4] = (int32_t)sizeof(edict_t);
 	out[5] = (int32_t)sizeof(gclient_t);
 	out[6] = (int32_t)sizeof(level_locals_t);
@@ -164,6 +171,11 @@ void WriteLevelSection(void)
 	int32_t ft[9];
 	Fingerprint(ft);
 	G10_WriteChunk("FTSZ", ft, 36);
+	// the names of every pointer the section will write, before the records that refer to them by index
+	SymReset();
+	CollectEntityPtrs();
+	props::CollectLevelPropPtrs();
+	SymWriteTable();
 	WriteLevelRecord();
 	WriteEntities();
 	ScriptGlue_WriteLevel();   // SPEC-752 1.2 steps 4-5 (G6b)
@@ -171,6 +183,7 @@ void WriteLevelSection(void)
 	GG_WriteAttached();        // step 7 (G9)
 	WriteItems();              // step 8
 	WriteTail();               // OpenMerc
+	SymCheckComplete();
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -275,7 +288,8 @@ void ReadLevelSection(void)
 	G10_ReadChunk("FTSZ", ft, 36);
 	Fingerprint(mine);
 	if (memcmp(ft, mine, sizeof(ft)))
-		gi.error("Function index tables have changed size"); // SPEC-752 1.2 (a save of another module or build)
+		gi.error("Function index tables have changed size"); // SPEC-752 1.2 (a save of another module or layout)
+	SymReadTable();
 	KeepBefore();
 	ClearLevelObjects();
 	ReadLevelRecord();

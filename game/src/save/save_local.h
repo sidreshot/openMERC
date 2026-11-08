@@ -28,6 +28,15 @@ struct ImageInfo {
 };
 const ImageInfo &Image(void);
 
+// pointers saved by symbol name (save_symtab.cpp)
+void SymReset(void);
+int SymEncode(const void *p);
+void *SymDecode(int code);
+void SymWriteTable(void);
+bool SymReadTable(void);
+void SymCheckComplete(void);
+void CollectEntityPtrs(void); // save_records.cpp: every pointer field of the entities in use into the list
+
 // ---------------------------------------------------------------------------------------------------------------
 // records (save_records.cpp)
 enum FieldKind {

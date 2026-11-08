@@ -73,6 +73,24 @@ if(OM_GAME_CPP)
     target_compile_options(gamex86 PRIVATE -fno-strict-aliasing -fno-exceptions -fno-rtti)
   endif()
   om_elf_module_exports(gamex86 ${CMAKE_CURRENT_SOURCE_DIR}/gamex86.def)
+  # savegames name the module's callbacks and tables (src/save/save_symtab.cpp): the linker map's symbols are written
+  # into the module after linking. /OPT:NOICF keeps every function at an address of its own (two names, one body
+  # would let a save name the wrong one).
+  find_package(Python3 COMPONENTS Interpreter)
+  if(MSVC)
+    target_link_options(gamex86 PRIVATE /OPT:NOICF)
+    set(OM_SYMTAB_ARGS --msvc $<TARGET_FILE_DIR:gamex86>/gamex86.map)
+  else()
+    target_link_options(gamex86 PRIVATE -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/gamex86.map)
+    set(OM_SYMTAB_ARGS --lld ${CMAKE_CURRENT_BINARY_DIR}/gamex86.map)
+  endif()
+  if(Python3_Interpreter_FOUND)
+    add_custom_command(TARGET gamex86 POST_BUILD
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/om_symtab.py ${OM_SYMTAB_ARGS} $<TARGET_FILE:gamex86>
+      VERBATIM)
+  else()
+    message(WARNING "Python 3 not found: gamex86 gets no symbol table, its savegames cannot keep callbacks")
+  endif()
 endif()
 
 # G3 unit tests (SPEC-720..722) as a portable target; on Windows src/damage/test/build_tests.cmd stays the reference

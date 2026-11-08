@@ -151,3 +151,12 @@ thunderstorm on jpn2".
   room uses a push named `playerpush` (speed 900, i.e. 9000 u/s, push once, switched on for 0.5 s as the door is kicked
   in) to throw the player back from the door; a skinhead standing in the doorway was thrown into the room instead and,
   as the first toucher, used the push up. Other pushes (closet, stall, blasts, the sib2 helicopter rule) are unchanged.
+
+## Savegames survive rebuilds (2026-11-08)
+
+- **Pointers saved by name** (game/src/save/save_symtab.cpp, tools/om_symtab.py): callbacks and static tables are
+  saved as the names of their symbols (OMSY chunk after FTSZ; "name+hex" inside a table), resolved by the reading
+  build's symbol table, which the build writes into the module from the linker map (MSVC /MAP, LLD -Map; Python 3
+  needed). FTSZ is 'OMG2' and checks only the record layouts (entity, client, level, entity image, extension count):
+  a rebuild with other code reads the save, a change of edict_t / gclient_t / level_locals_t still refuses it. Saves
+  of the former format ('OMG1', offsets of one build) are refused. The original module's saves never loaded.

@@ -197,26 +197,10 @@ edict_t *G10_DecodeEnt(int n)
 	return &g_edicts[n];
 }
 
-int G10_EncodePtr(const void *p)
-{
-	if (!p)
-		return -1;
-	const ImageInfo &im = Image();
-	const unsigned char *q = (const unsigned char *)p;
-	if (!im.base || q < im.base || (uint32_t)(q - im.base) >= im.size)
-		return -1;
-	return (int)(q - im.base);
-}
+// pointers into the module: an index into the save's list of symbol names (save_symtab.cpp)
+int G10_EncodePtr(const void *p) { return SymEncode(p); }
 
-void *G10_DecodePtr(int code)
-{
-	if (code < 0)
-		return NULL;
-	const ImageInfo &im = Image();
-	if (!im.base || (uint32_t)code >= im.size)
-		return NULL;
-	return (void *)(im.base + code);
-}
+void *G10_DecodePtr(int code) { return SymDecode(code); }
 
 bool G10_Loading(void) { return g_loading != 0; }
 
