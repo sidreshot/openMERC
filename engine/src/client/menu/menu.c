@@ -1207,6 +1207,50 @@ M_ReloadAll_f(void)
 	}
 }
 
+/* MENU-SCRATCH: om_menutab <cvar> <n>: the tab of a tabbed option table
+   (<omtable "file" tabs cvar>); the pages with such a table on the top screen
+   are built again without running their config, so staged values stay */
+static void
+M_Tab_f(void)
+{
+	mscreen_t *scr = M_TopScreen();
+	int j;
+
+	if (Cmd_Argc() < 3)
+	{
+		Com_Printf("Usage: om_menutab <cvar> <tab>\n");
+		return;
+	}
+
+	Cvar_Set(Cmd_Argv(1), Cmd_Argv(2));
+
+	if (!scr)
+	{
+		return;
+	}
+
+	for (j = 0; j < scr->numframes; j++)
+	{
+		mframe_t *f = scr->frames[j];
+		mpage_t *pg = M_FramePage(f);
+		char name[MAX_QPATH];
+
+		if (!pg || !pg->tabbed)
+		{
+			continue;
+		}
+
+		Q_strlcpy(name, pg->name, sizeof(name));
+		MP_FreePage(pg);
+		f->numpages--;
+		mp_rebuilding = true;
+		MP_ShowPage(scr, f, name, false);
+		mp_rebuilding = false;
+	}
+
+	M_MarkTabDirty(scr);
+}
+
 static void
 M_Select_f(void)
 {
@@ -2325,6 +2369,7 @@ M_Init(void)
 	Cmd_AddCommand("refresh", M_Refresh_f);
 	Cmd_AddCommand("reloadall", M_ReloadAll_f);
 	Cmd_AddCommand("select", M_Select_f);
+	Cmd_AddCommand("om_menutab", M_Tab_f);
 	Cmd_AddCommand("freshgame", M_FreshGame_f);
 	Cmd_AddCommand("hackteam", M_HackTeam_f);
 	Cmd_AddCommand("om_menukey", M_TestKey_f);

@@ -59,6 +59,7 @@ typedef struct
 #define WF_HIDEBORDER  0x10000 /* set by a draw function: no border this frame */
 #define WF_DISABLED    0x20000
 #define WF_NOSCROLL    0x40000 /* vbar: does not scroll with the page */
+#define WF_ROWCENTER   0x80000 /* "rowcenter": flows left to right, the row is centred after layout */
 
 /* a key binding of a widget or a page (SPEC-800 section 5.4) */
 typedef struct mbind_s
@@ -181,6 +182,7 @@ struct mpage_s
 	mwidget_t *drag;
 	int popups, chats;
 	qboolean reload;     /* marked by reloadall */
+	qboolean tabbed;     /* has an <omtable ... tabs cvar>: om_menutab rebuilds it */
 	qboolean failed;     /* a widget cvar could not be created */
 	qboolean dry;        /* parse test */
 	int clip[4];         /* clip rectangle of the current draw */
@@ -355,6 +357,7 @@ int ML_TotalH(const mwidget_t *w);
 int ML_ContentW(const mpage_t *pg);
 int ML_ContentH(const mpage_t *pg);
 void ML_FoldColumns(mpage_t *pg);
+void ML_CenterRows(mpage_t *pg);
 int ML_FontHeight(const char *font);
 void ML_WidgetScreenPos(const mpage_t *pg, const mwidget_t *w, int *x, int *y);
 void ML_PageMouse(const mpage_t *pg, const mwidget_t *w, float *mx, float *my);

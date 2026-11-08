@@ -1,6 +1,5 @@
 <!-- OpenMerc MENU2: video page (rewritten; options of the OpenGL 3 renderer only) -->
 <stm>
-<columns 2>
 <strings menu_omvideo>
 
 <vbar tint vbargray>
@@ -11,11 +10,7 @@
      (engine tag omtable); renderer effects plug in there>
 <center>
 <font type title tint normaltext atint hilitetext>
-<omtable "menus/om_video.tbl">
-<hbr>
-
-<center>
-<omcalib>
+<omtable "menus/om_video.tbl" tabs om_vtab>
 <hbr>
 
 <center>

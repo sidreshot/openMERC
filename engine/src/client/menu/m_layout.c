@@ -426,6 +426,13 @@ ML_CommonOption(mparse_t *p, mwidget_t *w, const char *kw)
 	{
 		w->flags |= WF_TAB;
 	}
+	else if (!Q_stricmp(kw, "rowcenter"))
+	{
+		/* OpenMerc: a row of buttons (tabs): placed left to right like left-aligned widgets, wrapping at the page
+		   edge, then each row is centred (ML_CenterRows) */
+		w->flags |= WF_ROWCENTER | WF_SAWALIGN;
+		w->align = MA_LEFT;
+	}
 	else if (!Q_stricmp(kw, "align"))
 	{
 		MP_Args(p, a, 1);
@@ -804,6 +811,67 @@ ML_Reposition(mpage_t *pg, mwidget_t *w)
 	else if (w->align == MA_RIGHT)
 	{
 		w->x = w->colw ? w->colx + w->colw - tw : ML_ContentW(pg) - tw;
+	}
+}
+
+/* OpenMerc: the rows of "rowcenter" widgets (a tab bar) centred in the page width: widgets of the flag with the same
+   top form a row and move together */
+void
+ML_CenterRows(mpage_t *pg)
+{
+	int A = ML_ContentW(pg), i, j;
+
+	for (i = 0; i < pg->numwidgets; i++)
+	{
+		mwidget_t *w = pg->widgets[i];
+		int x0, x1, dx;
+
+		if (!(w->flags & WF_ROWCENTER) || !ML_Placed(w))
+		{
+			continue;
+		}
+
+		/* the first widget of its row: none earlier with the same top */
+		for (j = 0; j < i; j++)
+		{
+			const mwidget_t *o = pg->widgets[j];
+
+			if ((o->flags & WF_ROWCENTER) && ML_Placed(o) && (o->y == w->y))
+			{
+				break;
+			}
+		}
+
+		if (j < i)
+		{
+			continue;
+		}
+
+		x0 = w->x;
+		x1 = w->x + ML_TotalW(w);
+
+		for (j = i + 1; j < pg->numwidgets; j++)
+		{
+			const mwidget_t *o = pg->widgets[j];
+
+			if ((o->flags & WF_ROWCENTER) && ML_Placed(o) && (o->y == w->y))
+			{
+				x0 = (o->x < x0) ? o->x : x0;
+				x1 = (o->x + ML_TotalW(o) > x1) ? o->x + ML_TotalW(o) : x1;
+			}
+		}
+
+		dx = (A - (x1 - x0)) / 2 - x0;
+
+		for (j = i; j < pg->numwidgets; j++)
+		{
+			mwidget_t *o = pg->widgets[j];
+
+			if ((o->flags & WF_ROWCENTER) && ML_Placed(o) && (o->y == w->y))
+			{
+				o->x += dx;
+			}
+		}
 	}
 }
 

@@ -655,6 +655,15 @@ MT_Trim(char *s)
 /* MENU-SCRATCH: half width of the two-column rows (label | value), virtual pixels */
 #define MT_SPLIT 230
 
+/* tabbed tables (<omtable "file" tabs cvar>): the rows of each section go to
+   their own buffer; rows before the first section stay ahead of the tab bar */
+#define MT_MAXSEC 12
+static qboolean mt_tabs;
+static int mt_nsec;
+static mtbuf_t mt_sec[MT_MAXSEC];
+static char mt_secname[MT_MAXSEC][64];
+static mtbuf_t *mt_cur;
+
 static void
 MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 {
@@ -662,6 +671,11 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 	const char *k = f[0];
 	qboolean stage = false;
 	int fixed, i;
+
+	if (mt_tabs && mt_cur)
+	{
+		b = mt_cur;
+	}
 
 	fixed = !Q_stricmp(k, "list") ? 7 : !Q_stricmp(k, "slider") ? 7 :
 		(!Q_stricmp(k, "section") || !Q_stricmp(k, "note")) ? 3 : 0;
@@ -745,6 +759,18 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 		}
 	}
 
+	if (!Q_stricmp(k, "section") && mt_tabs)
+	{
+		/* tabbed table: a section starts a tab; the tab bar names it, no heading */
+		if (mt_nsec < MT_MAXSEC)
+		{
+			MT_ToFont(ru ? f[2] : f[1], mt_secname[mt_nsec], sizeof(mt_secname[0]));
+			mt_cur = &mt_sec[mt_nsec++];
+		}
+
+		return;
+	}
+
 	if (!Q_stricmp(k, "section"))
 	{
 		MT_ToFont(ru ? f[2] : f[1], l1, sizeof(l1));
@@ -794,10 +820,10 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 
 /* builds the RMF of a table; the result is malloc'ed (NULL: no file) */
 char *
-MP_TableRMF(const char *path)
+MP_TableRMF(const char *path, const char *tabcvar)
 {
 	char *text, *line, *next;
-	int len;
+	int len, i;
 	mtbuf_t b = {NULL, 0, 0};
 	qboolean ru = SP_RussianActive();
 
@@ -807,6 +833,9 @@ MP_TableRMF(const char *path)
 	}
 
 	MT_Add(&b, "");
+	mt_tabs = tabcvar && tabcvar[0];
+	mt_nsec = 0;
+	mt_cur = NULL;
 
 	for (line = text; line && *line; line = next)
 	{
@@ -859,18 +888,104 @@ MP_TableRMF(const char *path)
 	}
 
 	free(text);
+
+	if (mt_tabs)
+	{
+		/* the tab bar: sections left without a row (requires=, pc/mobile) get no tab */
+		int vis[MT_MAXSEC], nv = 0, sel = (int)Cvar_VariableValue(tabcvar), cur = -1;
+		char tmp[512];
+
+		for (i = 0; i < mt_nsec; i++)
+		{
+			if (mt_sec[i].len > 0)
+			{
+				vis[nv++] = i;
+			}
+		}
+
+		for (i = 0; i < nv; i++)
+		{
+			if (vis[i] == sel)
+			{
+				cur = sel;
+			}
+		}
+
+		if ((cur < 0) && nv)
+		{
+			cur = vis[0];
+		}
+
+		MT_Add(&b, "<left>\n");
+
+		for (i = 0; i < nv; i++)
+		{
+			int k = vis[i];
+
+			Com_sprintf(tmp, sizeof(tmp), "<font type title tint %s atint hilitetext>\n"
+					"<text \"   %s   \" rowcenter key mouse1 \"om_menutab %s %d\">\n",
+					(k == cur) ? "orange" : "gray", mt_secname[k], tabcvar, k);
+			MT_Add(&b, tmp);
+		}
+
+		Com_sprintf(tmp, sizeof(tmp), "<br>\n<blank 4 4><br>\n<center>\n<hr width %d tint gray>\n<blank 4 6><br>\n"
+				"<font type title tint normaltext atint hilitetext>\n", 3 * MT_SPLIT);
+		MT_Add(&b, tmp);
+
+		if (cur >= 0)
+		{
+			MT_Add(&b, mt_sec[cur].buf);
+		}
+
+		for (i = 0; i < mt_nsec; i++)
+		{
+			free(mt_sec[i].buf);
+			memset(&mt_sec[i], 0, sizeof(mt_sec[i]));
+		}
+
+		mt_tabs = false;
+		mt_cur = NULL;
+	}
+
 	return b.buf;
 }
 
 static void
 Tag_OmTable(mparse_t *p)
 {
-	char a[1][MENU_MAX_TOKEN];
+	char a[3][MENU_MAX_TOKEN];
 	char *rmf;
+	int i;
 
+	/* <omtable "file"> or <omtable "file" tabs cvar>: one section per tab */
+	a[1][0] = a[2][0] = 0;
 	MP_Args(p, a, 1);
+
+	for (i = 1; i < 3; i++)
+	{
+		int t = MP_Token(p, a[i]);
+
+		if (t != 1)
+		{
+			a[i][0] = 0;
+
+			if (t == 2)
+			{
+				MP_Unread(p);
+			}
+
+			break;
+		}
+	}
+
 	MP_EndTag(p);
-	rmf = MP_TableRMF(a[0]);
+
+	if (!Q_stricmp(a[1], "tabs") && a[2][0])
+	{
+		p->page->tabbed = true;
+	}
+
+	rmf = MP_TableRMF(a[0], !Q_stricmp(a[1], "tabs") ? a[2] : NULL);
 
 	if (!rmf)
 	{
@@ -2113,6 +2228,11 @@ MP_LoadPageZ(mscreen_t *scr, mframe_t *frame, const char *name, qboolean dry, fl
 
 	pg->numwidgets = j;
 	scr->opentime = M_Time();
+
+	if (!dry)
+	{
+		ML_CenterRows(pg);
+	}
 
 	if (pg->columns >= 2 && !dry)
 	{

@@ -19,7 +19,7 @@ list | menu_vsync | 0,1 | Off,On | Выкл,Вкл | Vertical Sync | Верти�
 list | menu_maxfps_auto | 1,0 | By Display,Manual | По частоте монитора,Вручную | Frame Rate Limit | Ограничение кадров | stage | tip=By Display: as many frames as the monitor shows; Manual: the value below/По частоте монитора: столько кадров, сколько показывает монитор; Вручную: значение ниже | pc
 list | menu_maxfps | 30,60,75,90,100,120,144,165,200,240,300,999 | 30,60,75,90,100,120,144,165,200,240,300,Unlimited | 30,60,75,90,100,120,144,165,200,240,300,Без ограничения | Manual Limit | Лимит вручную | stage | tip=Used when the limit is Manual/Действует, когда ограничение задано вручную | pc
 
-section | SCALING | МАСШТАБ
+section | VIEW | ВИД
 list | menu_uiscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | Menu and Text Size | Размер меню и текста | stage | pc
 list | scr_textscale | 1,1.25,1.5,2,2.5,3 | 100%,125%,150%,200%,250%,300% | 100%,125%,150%,200%,250%,300% | Text Size | Размер текста | tip=Console text and on-screen messages and subtitles/Текст консоли и сообщений на экране и субтитры
 list | menu_hudscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | HUD Size | Размер HUD | stage
@@ -27,17 +27,17 @@ list | menu_aspect | 0,1 | Off,On | Выкл,Вкл | Widescreen HUD and Menus |
 list | menu_rail | 0,1 | Off,On | Выкл,Вкл | Menu Side Panel | Боковая панель меню | tip=Section list left of the menu on widescreen displays/Список разделов слева от меню на широких экранах | pc
 list | menu_layout | 0,1 | Classic,Widescreen | Классика,Широкая | Menu Layout | Компоновка меню | tip=Widescreen: menus fill the window in openMERC panels/Широкая: меню на весь экран в панелях openMERC | pc
 
-section | VIEW | ОБЗОР
 list | menu_fov | 75,80,85,90,95,100,105,110 | 75,80,85,90,95,100,105,110 | 75,80,85,90,95,100,105,110 | Field of View | Поле зрения | stage
 list | horplus | 0,1 | Off,On | Выкл,Вкл | Widescreen View (Hor+) | Широкий обзор (Hor+)
 
-section | PICTURE QUALITY | КАЧЕСТВО ИЗОБРАЖЕНИЯ
+section | QUALITY | КАЧЕСТВО
 list | menu_hdtextures | 0,1 | Off,On | Выкл,Вкл | HD Textures | HD-текстуры | stage | requires=om_hdpack | tip=The texture pack in openmerc/hd; applied with the Apply button/Пак текстур из папки openmerc/hd; применяется кнопкой Применить
 list | menu_anisotropic | 1,2,4,8,16 | Off,2x,4x,8x,16x | Выкл,2x,4x,8x,16x | Anisotropic Filtering | Анизотропная фильтрация | stage
 list | menu_msaa | 0,2,4,8 | Off,2x,4x,8x | Выкл,2x,4x,8x | Antialiasing (MSAA) | Сглаживание (MSAA) | stage | pc
 list | gl_texturemode | GL_LINEAR_MIPMAP_NEAREST,GL_LINEAR_MIPMAP_LINEAR,GL_LINEAR,GL_NEAREST | Bilinear,Trilinear,Linear without mipmaps,Nearest | Билинейная,Трилинейная,Линейная без MIP-уровней,Без фильтрации | Texture Filtering | Фильтрация текстур | pc
 list | gl_detailtexturing | 0,1 | Off,On | Выкл,Вкл | Detail Textures | Детальные текстуры
 list | gl_detailtexturingdistance | 150,250,400,600,1000 | Near,Medium,Far,Very far,Maximum | Близко,Средне,Далеко,Очень далеко,Максимум | Detail Texture Distance | Дальность детальных текстур | pc
+section | MODELS | МОДЕЛИ
 list | ghl_light_method | 0,1,2,3 | Fastest,Fast,Quality,Highest quality | Быстрейшее,Быстрое,Качественное,Наилучшее | Character Lighting | Освещение персонажей | pc
 list | ghl_specular | 0,1 | Off,On | Выкл,Вкл | Specular Highlights | Блики
 list | ghl_shadows | 0,1,2 | Off,Basic,Full | Выкл,Простые,Полные | Character Shadows | Тени персонажей | requires=ghl_shadows
@@ -47,7 +47,7 @@ list | r_om_tess_round | 0,1 | Off,On | Выкл,Вкл | Object Tessellation | 
 list | r_om_tess_weapon | 0,2,3 | Off,Medium,High | Выкл,Средняя,Высокая | Weapon Tessellation | Тесселяция оружия | pc | requires=r_om_tess_weapon | tip=The weapon in your hands (the stock weapons are faceted: little gain)/Оружие в руках (стандартное оружие гранёное: выигрыш небольшой)
 
 # ---- RENDER SCALE / UPSCALING / POST ANTIALIASING (docs GFX-modern.md: r_om_renderscale, r_om_upscale, r_om_postaa)
-section | RENDER SCALE AND SMOOTHING | МАСШТАБ РЕНДЕРА И СГЛАЖИВАНИЕ | requires=r_om_renderscale
+section | RENDER | РЕНДЕР | requires=r_om_renderscale
 list | r_om_preset | 0,1,2,3 | Custom,Low,Medium,High | Свои,Низкие,Средние,Высокие | Quality Preset | Пресет качества | requires=r_om_preset | tip=Low suits integrated and mobile GPUs; Custom keeps every setting as set/Низкие - для встроенных и мобильных видеокарт; Свои - настройки как выставлены
 list | r_om_renderscale | 0.5,0.59,0.67,0.77,1 | Performance (50%),Balanced (59%),Quality (67%),Ultra Quality (77%),Native (100%) | Производительность (50%),Баланс (59%),Качество (67%),Ультра-качество (77%),Родное (100%) | Render Resolution | Разрешение рендера | requires=r_om_renderscale | tip=The 3D view is drawn smaller and upscaled to the window; the HUD stays sharp/3D-вид рисуется в меньшем разрешении и растягивается до окна; HUD остаётся чётким
 list | r_om_upscale | 2,1 | FSR 1.0,Catmull-Rom | FSR 1.0,Catmull-Rom | Upscaler | Апскейлер | requires=r_om_upscale | tip=FSR 1.0 (EASU): edge-adaptive, sharper; Catmull-Rom: a little cheaper. Used below 100%/FSR 1.0 (EASU): учитывает направление краёв, чётче; Catmull-Rom: чуть дешевле. Работает ниже 100%
@@ -56,13 +56,14 @@ list | r_om_fxaa | -1,0,1 | Auto (without MSAA),Off,On | Авто (без MSAA),
 list | r_om_postaa | 2,1 | SMAA,FXAA | SMAA,FXAA | Post Antialiasing Method | Метод сглаживания | requires=r_om_postaa | tip=SMAA keeps textures sharper, FXAA also softens thin lines/SMAA сохраняет текстуры чётче, FXAA сильнее смягчает тонкие линии | pc
 
 # ---- EFFECTS: renderer effects of the gfx-modern renderer (docs GFX-modern.md 14)
-section | EFFECTS | ЭФФЕКТЫ | requires=r_om_bloom
+section | ATMOSPHERE | АТМОСФЕРА | requires=r_om_bloom
 list | r_om_bloom | 0,1 | Off,On | Выкл,Вкл | Bloom | Свечение | requires=r_om_bloom
 slider | r_om_bloom_intensity | 0.1 | 1.0 | 0.05 | Bloom Intensity | Сила свечения | requires=r_om_bloom
 list | r_om_bloom_radius | 0.5,1,1.5,2 | Small,Normal,Wide,Widest | Малый,Обычный,Широкий,Очень широкий | Bloom Radius | Радиус свечения | requires=r_om_bloom
 list | r_om_volfog | 0,1 | Off,On | Выкл,Вкл | Volumetric Fog | Объёмный туман | requires=r_om_volfog
 list | r_om_volfog_quality | 1,2 | Half resolution,Full resolution | Половинное разрешение,Полное разрешение | Fog Quality | Качество тумана | requires=r_om_volfog | pc
 list | r_om_volfog_shafts | 0,1 | Off,On | Выкл,Вкл | Light Shafts | Лучи света | requires=r_om_volfog
+section | LIGHT | СВЕТ | requires=r_om_csm
 list | r_om_csm | 0,1 | Off,On | Выкл,Вкл | World Shadows | Тени мира | requires=r_om_csm
 list | r_om_csm_size | 512,1024,2048,4096 | Low,Medium,High,Ultra | Низкое,Среднее,Высокое,Ультра | Shadow Resolution | Разрешение теней | requires=r_om_csm | pc
 list | r_om_csm_cascades | 2,3,4 | 2,3,4 | 2,3,4 | Shadow Cascades | Каскады теней | requires=r_om_csm | pc
@@ -70,13 +71,15 @@ list | r_om_csm_soft | 0,1,2 | Hard,Soft,Softest | Жёсткие,Мягкие,�
 list | r_om_lshadow | 0,1 | Off,On | Выкл,Вкл | Lamp Shadows | Тени от ламп | requires=r_om_lshadow | tip=Characters and props cast shadows from the map's lamps/Персонажи и предметы отбрасывают тени от ламп карты
 list | r_om_lshadow_lights | 2,4,6,8 | 2,4,6,8 | 2,4,6,8 | Shadowed Lamps | Ламп с тенями | requires=r_om_lshadow | pc
 list | r_om_lshadow_size | 256,512,1024 | Low,Medium,High | Низкое,Среднее,Высокое | Lamp Shadow Resolution | Разрешение теней ламп | requires=r_om_lshadow | pc
+list | r_om_ssr | 0,0.5,1,1.5 | Off,Weak,Normal,Strong | Выкл,Слабые,Обычные,Сильные | Screen-Space Reflections | Экранные отражения (SSR) | requires=r_om_ssr | tip=Reflections on polished floors, tiles, metal, glass, water and wet ground/Отражения на полированных полах, плитке, металле, стекле, воде и мокрой земле
+list | r_om_ssr_quality | 1,2,3 | Low,Medium,High | Низкое,Среднее,Высокое | Reflection Quality | Качество отражений | requires=r_om_ssr
+list | r_om_ssr_wet | 0,1 | Off,On | Выкл,Вкл | Wet Ground in Rain | Мокрая земля под дождём | requires=r_om_ssr
+
+section | EFFECTS | ЭФФЕКТЫ | requires=r_om_bloom
 list | r_om_softparticles | 0,1 | Off,On | Выкл,Вкл | Soft Particles | Мягкие частицы | requires=r_om_softparticles
 list | r_om_softparticles_dist | 6,12,24 | Short,Normal,Long | Короткое,Обычное,Длинное | Particle Fade Distance | Расстояние смягчения | requires=r_om_softparticles | pc
 list | r_om_ppfog | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Fog | Попиксельный туман | requires=r_om_ppfog
 list | r_om_seams | 0,1 | Off,On | Выкл,Вкл | Soft Texture Seams | Мягкие швы текстур | requires=r_om_seams | tip=Tiles meeting concrete and similar seams blend instead of a hard line/Плитка у бетона и похожие стыки переходят мягко вместо резкой линии
-list | r_om_ssr | 0,0.5,1,1.5 | Off,Weak,Normal,Strong | Выкл,Слабые,Обычные,Сильные | Screen-Space Reflections | Экранные отражения (SSR) | requires=r_om_ssr | tip=Reflections on polished floors, tiles, metal, glass, water and wet ground/Отражения на полированных полах, плитке, металле, стекле, воде и мокрой земле
-list | r_om_ssr_quality | 1,2,3 | Low,Medium,High | Низкое,Среднее,Высокое | Reflection Quality | Качество отражений | requires=r_om_ssr
-list | r_om_ssr_wet | 0,1 | Off,On | Выкл,Вкл | Wet Ground in Rain | Мокрая земля под дождём | requires=r_om_ssr
 # per-pixel dynamic lights: A/B check passed (GFX-modern.md 14)
 list | r_om_pdlight | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Dynamic Lights | Попиксельные источники света | requires=r_om_pdlight
 list | r_om_overbright | 0,1 | Off,On | Выкл,Вкл | Overbright Lighting (not original) | Пересвет (не как в оригинале) | requires=r_om_overbright | tip=Brighter lighting that the original game does not have/Более яркое освещение, которого нет в оригинальной игре
@@ -89,3 +92,4 @@ slider | menu_contrast | 0 | 1 | 0.1 | Contrast | Контраст | stage
 slider | menu_brightness | 0 | 1 | 0.1 | Brightness | Яркость | stage
 slider | menu_modulate | 0.4 | 4.0 | 0.1 | Light Intensity | Интенсивность света | stage
 slider | r_om_look_strength | 0 | 1 | 0.1 | Gloom | Мрачность | requires=r_om_look_strength | tip=0: the original colours; 1: the full look of the level/0: исходные цвета; 1: полный образ уровня
+rmf | <hbr><center><omcalib><hbr>
