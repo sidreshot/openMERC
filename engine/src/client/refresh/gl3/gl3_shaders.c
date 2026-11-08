@@ -1650,14 +1650,13 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			return d * (f * a * cos(dot(d, p) * f + t * s));
 		}
 
-		// the ripple normal of the water at world xy p: five waves in different directions and sizes
+		// the ripple normal of the water at world xy p: five waves in different directions and sizes (cheap enough
+		// for the phones: three swells and two fine ones)
 		vec3 omLiqNormal(vec2 p, float t)
 		{
-			vec2 g = omLiqWave(p, vec2(0.866, 0.5), 0.050, 1.10, 1.2, t);
-			g += omLiqWave(p, vec2(-0.342, 0.940), 0.071, 1.45, 0.85, t);
-			g += omLiqWave(p, vec2(-0.906, -0.423), 0.113, 1.90, 0.55, t);
-			g += omLiqWave(p, vec2(0.574, -0.819), 0.179, 2.60, 0.35, t);
-			g += omLiqWave(p, vec2(0.995, 0.105), 0.283, 3.30, 0.2, t);
+			vec2 g = omLiqWave(p, vec2(0.866, 0.5), 0.050, 1.10, 1.3, t);
+			g += omLiqWave(p, vec2(-0.342, 0.940), 0.083, 1.60, 0.9, t);
+			g += omLiqWave(p, vec2(-0.906, -0.423), 0.161, 2.40, 0.5, t);
 			// fine chop: small sharp sparkles of the highlight
 			g += omLiqWave(p, vec2(-0.707, 0.707), 0.47, 4.70, 0.11, t);
 			g += omLiqWave(p, vec2(0.259, -0.966), 0.73, 6.10, 0.07, t);
@@ -1709,7 +1708,8 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			{
 				vec3 lit = passColor.rgb; // the light at the water (vertex samples)
 				float ndv = max(dot(liqN, liqV), 0.0);
-				float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+				float fm = 1.0 - ndv;
+				float fres = 0.02 + 0.98 * (fm * fm) * (fm * fm) * fm;
 				// the light: above the view and a little ahead (the map's sun is not used - most water is under a
 				// roof the sun does not reach); its strength is the light the water really gets (the vertex samples)
 				vec3 L = normalize(vec3(-liqV.xy, liqV.z + 0.6));
