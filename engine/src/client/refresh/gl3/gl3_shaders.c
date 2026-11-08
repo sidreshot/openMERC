@@ -619,6 +619,10 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 
 		// OpenMerc (I4c): dynamic light of SoF maps per lightmap sample (gl3_dynlight.c), 0 elsewhere
 		uniform sampler2D omDynLight;
+		// OpenMerc: the detail texture in the program (gl3_detail.c GL3_Detail_InShader), GL_TEXTURE6 while the
+		// per-pixel lights leave the CPU light layer unused; scale st, scroll st (0 = no detail)
+		uniform sampler2D omDetail;
+		uniform vec4 omDetailP;
 
 		// OpenMerc (I4c): gl_monolightmap latched at map load: 0 '0', 1 L, 2 I, 3 C, 4 A, 5 other
 		uniform int omMono;
@@ -768,6 +772,10 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
 				}
 			}
+			// OpenMerc: the detail pass's 2 x dst x src (FX blend 5) on the finished colour; the emissive output
+			// keeps its value as under the pass (its neutral 0.5)
+			if(omDetailP.x != 0.0)
+				outColor.rgb *= 2.0 * texture(omDetail, passTexCoord * omDetailP.xy + omDetailP.zw).rgb;
 			// OpenMerc GFX-modern r_om_seams: height blend of the two textures (Mishkinis, "Advanced Terrain Texture
 			// Splatting"; Unity "Material by Height"): each texture's height (texel brightness above its mean) plus
 			// its share - the neighbour's half at the seam, none at the strip's inner end, a world-space noise moving
@@ -1061,6 +1069,10 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 
 		// OpenMerc (I4c): dynamic light of SoF maps per lightmap sample (gl3_dynlight.c), 0 elsewhere
 		uniform sampler2D omDynLight;
+		// OpenMerc: the detail texture in the program (gl3_detail.c GL3_Detail_InShader), GL_TEXTURE6 while the
+		// per-pixel lights leave the CPU light layer unused; scale st, scroll st (0 = no detail)
+		uniform sampler2D omDetail;
+		uniform vec4 omDetailP;
 
 		// OpenMerc (I4c): gl_monolightmap latched at map load: 0 '0', 1 L, 2 I, 3 C, 4 A, 5 other
 		uniform int omMono;
@@ -1213,6 +1225,10 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 					outMaterial = vec4(0.0, 0.0, 0.0, 1.0);
 				}
 			}
+			// OpenMerc: the detail pass's 2 x dst x src (FX blend 5) on the finished colour; the emissive output
+			// keeps its value as under the pass (its neutral 0.5)
+			if(omDetailP.x != 0.0)
+				outColor.rgb *= 2.0 * texture(omDetail, passTexCoord * omDetailP.xy + omDetailP.zw).rgb;
 			// OpenMerc GFX-modern r_om_seams: height blend of the two textures (Mishkinis, "Advanced Terrain Texture
 			// Splatting"; Unity "Material by Height"): each texture's height (texel brightness above its mean) plus
 			// its share - the neighbour's half at the seam, none at the strip's inner end, a world-space noise moving
@@ -1934,6 +1950,11 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 	if(dlLoc != -1)
 	{
 		glUniform1i(dlLoc, 6);
+	}
+	GLint dtLoc = glGetUniformLocation(prog, "omDetail");
+	if(dtLoc != -1)
+	{
+		glUniform1i(dtLoc, 6);
 	}
 
 	/* GFX-modern: sun shadow maps (uniform block uniOMcsm, GL_TEXTURE8) */

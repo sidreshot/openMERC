@@ -265,6 +265,7 @@ void GL3_Fog_SetHardwareFxState(int region, gl3fxstate_t *st);
 void GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis);
 
 /* ---------------- gl3_surf.c (SPEC-410 detail pass) ---------------- */
+qboolean GL3_Detail_InShader(msurface_t *surf, gl3image_t *image, gl3drawCmd_t *cmd);
 void GL3_Detail_Queue(msurface_t *surf, gl3image_t *image, entity_t *ent);
 void GL3_Detail_DrawPass(void);
 gl3image_t *GL3_SoF_TextureAnimation(const mtexinfo_t *tex, int entframe);

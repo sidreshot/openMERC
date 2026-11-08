@@ -535,6 +535,8 @@ typedef struct gl3drawCmd_s {
 	float		lightScaleForTurb; // for gl3state.uni3DData.lightScaleForTurb
 	float		emissive; // OpenMerc GFX-modern: for gl3state.uni3DData.emissive (bloom)
 	float		texdim[2]; // OpenMerc GFX-modern: for gl3state.uni3DData.omTexDim (r_om_pdlight), 0 otherwise
+	GLuint		detailtex; // OpenMerc: detail texture applied by the world program (0 none, GL3_Detail_InShader)
+	float		detail[4]; // its scale s t, scroll s t
 	float		alpha; // either part of color or for gl3state.uni3DData.alpha
 	byte		color[3]; // for uniCommonData.color; its alpha chan is in .alpha
 	byte		flags;    // gl3drawCmd_Flags

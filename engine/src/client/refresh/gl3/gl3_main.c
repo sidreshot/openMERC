@@ -36,6 +36,11 @@
 #include "../ref_shared.h"
 #include "header/local.h"
 
+/* OpenMerc: the omDetailP value each world program holds (GL3_Detail_InShader) */
+static GLuint detailprog[_gl3_numShaders];
+static float detailval[_gl3_numShaders][4];
+
+
 #define HANDMADE_MATH_IMPLEMENTATION
 #include "header/HandmadeMath.h"
 
@@ -1070,6 +1075,7 @@ void GL3_Draw3DBatchesNow()
 
 	gl3ShaderInfo_t* shader = NULL;
 	int cursrc = 0; /* vao3D is bound */
+	GLuint detailbound = 0; /* unit 6 is not known at the start of a flush */
 
 	for(int i=0, n=da_count(drawCmds); i < n; ++i)
 	{
@@ -1097,6 +1103,35 @@ void GL3_Draw3DBatchesNow()
 		}
 		if(cmd->lmtexnum >= 0)
 			GL3_BindLightmap(cmd->lmtexnum);
+
+		/* OpenMerc: the detail texture of world faces in the program (GL3_Detail_InShader); a program that drew
+		   detail last is reset for the next face without */
+		{
+			static const float nodetail[4] = {0, 0, 0, 0};
+			GLint dl = GL3_UniformLoc(shader->shaderProgram, "omDetailP");
+
+			if(dl != -1)
+			{
+				const float *want = cmd->detailtex ? cmd->detail : nodetail;
+				int si = cmd->shaderIdx;
+
+				if(si >= 0 && si < _gl3_numShaders &&
+					(detailprog[si] != shader->shaderProgram || memcmp(detailval[si], want, sizeof(detailval[si]))))
+				{
+					glUniform4fv(dl, 1, want);
+					detailprog[si] = shader->shaderProgram;
+					memcpy(detailval[si], want, sizeof(detailval[si]));
+				}
+
+				if(cmd->detailtex && cmd->detailtex != detailbound)
+				{
+					GL3_SelectTMU(GL_TEXTURE6);
+					glBindTexture(GL_TEXTURE_2D, cmd->detailtex);
+					GL3_SelectTMU(GL_TEXTURE0);
+					detailbound = cmd->detailtex;
+				}
+			}
+		}
 
 		if((flags & DCFlag_DisableDepthMask) != (curFlags & DCFlag_DisableDepthMask))
 			glDepthMask((flags & DCFlag_DisableDepthMask) == 0);
@@ -1289,6 +1324,9 @@ static qboolean drawStateEqual(const gl3drawCmd_t* a, const gl3drawCmd_t* b)
 		return false;
 
 	if(a->texdim[0] != b->texdim[0] || a->texdim[1] != b->texdim[1])
+		return false;
+
+	if(a->detailtex != b->detailtex || (a->detailtex && memcmp(a->detail, b->detail, sizeof(a->detail))))
 		return false;
 
 	if((flags & DCFlag_UseLmStyles) && !lmstylesEqual(a->styles, b->styles))

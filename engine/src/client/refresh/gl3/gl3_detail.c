@@ -112,6 +112,67 @@ GL3_Detail_Queue(msurface_t *surf, gl3image_t *image, entity_t *ent)
 	}
 }
 
+/* OpenMerc: the detail of an opaque world face by its own program instead of the second pass - the same
+   2 x dst x src, without drawing the face again (Adreno 610: the pass cost 1 ms of the tsr1 standard view).
+   Only where the result is the pass's: modes 1 and 2 (the face test of mode 2 is the pass's), no environment
+   map, no flowing or alpha-tested texture (the pass also darkened what shows through the cut-out texels), no
+   seam strips over it, and unit 6 free (the per-pixel lights folded into the programs, gl3_shader_pdl 1). */
+qboolean
+GL3_Detail_InShader(msurface_t *surf, gl3image_t *image, gl3drawCmd_t *cmd)
+{
+	extern int gl3_shader_pdl;
+	static cvar_t *on, *seams;
+	int mode = gl_detailtexturing ? (int)gl_detailtexturing->value : 0;
+	gl3image_t *detail;
+	glpoly_t *p = surf->polys;
+
+	if (!on)
+	{
+		on = ri.Cvar_Get("r_om_detail_inshader", "1", 0);
+		seams = ri.Cvar_Get("r_om_seams", "0", CVAR_ARCHIVE);
+	}
+
+	if (!on->value || (gl3_shader_pdl != 1) || (mode < 1) || (mode > 2) || seams->value || !image ||
+		!(detail = image->detail) || (detail->softype == SOFIMG_ENV) || image->has_alpha || !p ||
+		(surf->texinfo->flags & (SOFSURF_NODETAIL | SOFSURF_FLOWING | SURF_FLOWING)))
+	{
+		return false;
+	}
+
+	if (mode == 2)
+	{
+		float maxdist = gl_detailtexturingdistance ? gl_detailtexturingdistance->value : 250;
+		vec3_t forward, right, up;
+		int j;
+
+		AngleVectors(r_newrefdef.viewangles, forward, right, up);
+
+		for (j = 0; j < p->numverts; j++)
+		{
+			vec3_t d;
+
+			VectorSubtract(p->vertices[j].pos, r_newrefdef.vieworg, d);
+
+			if (DotProduct(d, forward) < maxdist)
+			{
+				break;
+			}
+		}
+
+		if (j == p->numverts)
+		{
+			return true; /* the pass would skip it too: no detail, nothing queued */
+		}
+	}
+
+	cmd->detailtex = detail->texnum;
+	cmd->detail[0] = image->detail_scale[0];
+	cmd->detail[1] = image->detail_scale[1];
+	cmd->detail[2] = image->detail_scroll[0];
+	cmd->detail[3] = image->detail_scroll[1];
+	return true;
+}
+
 /* flowing offset of SPEC-410 (texture repeats) */
 static void
 FlowOffset(const mtexinfo_t *tex, float out[2])

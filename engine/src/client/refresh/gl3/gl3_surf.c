@@ -1341,6 +1341,8 @@ DrawTextureChains(entity_t *currententity)
 			}
 
 			SetLightFlags(s);
+			/* OpenMerc: the face's detail texture by its program where that gives the pass's result */
+			qboolean detailin = !(s->flags & SURF_DRAWTURB) && GL3_Detail_InShader(s, image, &cmd);
 			RenderBrushPoly(currententity, s, cmd);
 
 			/* GFX-modern r_om_seams: the strips of this face are drawn after the chains */
@@ -1358,7 +1360,10 @@ DrawTextureChains(entity_t *currententity)
 
 			if (!(s->flags & SURF_DRAWTURB))
 			{
-				GL3_Detail_Queue(s, image, NULL);
+				if (!detailin)
+				{
+					GL3_Detail_Queue(s, image, NULL);
+				}
 
 				if (outlines && (numoutlinesurfs < MAX_OUTLINE_SURFS))
 				{

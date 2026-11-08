@@ -81,6 +81,13 @@ GL3_DynLight_Free(void)
 void
 GL3_DynLight_BindPage(int page)
 {
+	extern int gl3_shader_pdl;
+
+	if (gl3_shader_pdl == 1)
+	{
+		return; /* the programs have no CPU layer: unit 6 holds the detail textures (GL3_Detail_InShader) */
+	}
+
 	if (!zerotex)
 	{
 		CreateLayer(&zerotex, 1, 1);
