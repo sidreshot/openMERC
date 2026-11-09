@@ -2543,6 +2543,8 @@ GL3_RenderView(refdef_t *fd)
 
 	/* SPEC-412 §10: entities, alpha quads, quad chains, translucent world surfaces */
 	GL3_FX_SortedPass();
+	/* GFX-modern: the spray of the splashes (gl3_liquid.c) */
+	GL3_Liquid_DrawSplashes();
 
 	/* fog overlay for faces collected during the sorted pass */
 	GL3_Fog_DrawPass(false);

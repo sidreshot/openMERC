@@ -30,6 +30,7 @@ static GLuint liqtile;
 #define LIQ_RIPPLES 12
 static float ripples[LIQ_RIPPLES][5];
 static int nextripple;
+static void SplashReset(void);
 static GLuint liqenv;
 static int liqenvmap = -1;
 
@@ -48,6 +49,7 @@ GL3_Liquid_Init(void)
 	amp = 8.0f;
 	liqtile = liqenv = 0; /* a new context: the ripple tile and the sky panorama are made again */
 	memset(ripples, 0, sizeof(ripples));
+	SplashReset();
 	liqenvmap = -1;
 	r_om_water = ri.Cvar_Get("r_om_water", "1", CVAR_ARCHIVE);
 	r_om_water_glint = ri.Cvar_Get("r_om_water_glint", "1", CVAR_ARCHIVE);
@@ -635,6 +637,275 @@ GL3_Liquid_Tile(float *time, float *fine)
 /* GFX-modern: the rings of the last splashes (OM_WaterImpact): position, the water clock at the impact, strength;
    the water shader gets their age */
 
+/*
+ * GFX-modern: the spray of a splash (the bullet impacts in water of the Source engine), drawn by the renderer
+ * after the sorted pass for every OM_WaterImpact: a white column of water shooting up about 40 units and falling
+ * back, sixteen drops thrown up and out and falling under gravity, and a crown of low foam puffs running out over
+ * the surface. Everything is lit by the light at the impact (no glowing spray in a dark room) and moves on the
+ * water clock (it stops with the game). The paths are closed-form from the impact time: nothing to step.
+ */
+#define SPLASH_MAX 24
+#define SPLASH_DROPS 16
+#define SPLASH_PUFFS 8
+#define SPLASH_LIFE 1.2f
+#define SPLASH_GRAV 800.0f
+
+typedef struct
+{
+	qboolean used;
+	vec3_t org, light;
+	float t0, str;
+	float drop[SPLASH_DROPS][4];  /* velocity xyz, size */
+	float puff[SPLASH_PUFFS][3];  /* direction xy, speed */
+} splash_t;
+
+static splash_t splashes[SPLASH_MAX];
+static int nextsplash;
+static GLuint splashtex;
+
+/* a new context: no spray, the sprite made again */
+static void
+SplashReset(void)
+{
+	memset(splashes, 0, sizeof(splashes));
+	splashtex = 0;
+}
+
+static float
+SplashRand(void)
+{
+	return (rand() & 0x7fff) / 32767.0f;
+}
+
+static void
+SplashSpawn(const float *pos, float str)
+{
+	splash_t *s = &splashes[nextsplash];
+	int i;
+
+	nextsplash = (nextsplash + 1) % SPLASH_MAX;
+	memset(s, 0, sizeof(*s));
+	s->used = true;
+	VectorCopy(pos, s->org);
+	s->t0 = GL3_GameTime();
+	s->str = str;
+	GL3_SoF_LightPoint(pos, s->light, 255);
+
+	for (i = 0; i < 3; i++)
+	{
+		s->light[i] = Q_clamp(s->light[i], 0.12f, 1.4f);
+	}
+
+	for (i = 0; i < SPLASH_DROPS; i++)
+	{
+		float a = SplashRand() * 2.0f * (float)M_PI, out = 15.0f + 40.0f * SplashRand();
+
+		s->drop[i][0] = cosf(a) * out;
+		s->drop[i][1] = sinf(a) * out;
+		s->drop[i][2] = (100.0f + 100.0f * SplashRand()) * (0.8f + 0.2f * str);
+		s->drop[i][3] = 1.2f + 1.0f * SplashRand();
+	}
+
+	for (i = 0; i < SPLASH_PUFFS; i++)
+	{
+		float a = (i + 0.5f * SplashRand()) / SPLASH_PUFFS * 2.0f * (float)M_PI;
+
+		s->puff[i][0] = cosf(a);
+		s->puff[i][1] = sinf(a);
+		s->puff[i][2] = 18.0f + 14.0f * SplashRand();
+	}
+}
+
+/* the soft round sprite: white, alpha (1 - r^2)^2 */
+static void
+MakeSplashTex(void)
+{
+	byte px[32][32][4];
+	int x, y;
+
+	for (y = 0; y < 32; y++)
+	{
+		for (x = 0; x < 32; x++)
+		{
+			float dx = (x + 0.5f) / 16.0f - 1.0f, dy = (y + 0.5f) / 16.0f - 1.0f;
+			float r2 = dx * dx + dy * dy, a = (r2 < 1.0f) ? (1.0f - r2) * (1.0f - r2) : 0.0f;
+
+			px[y][x][0] = px[y][x][1] = px[y][x][2] = 255;
+			px[y][x][3] = (byte)(a * 255.0f);
+		}
+	}
+
+	glGenTextures(1, &splashtex);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, splashtex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 32, 32, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	gl3state.currenttexture = splashtex;
+}
+
+/* a quad from its centre and two half-axes, in the effect batch */
+static void
+SplashQuad(const vec3_t c, const vec3_t ax, const vec3_t ay, const float *rgb, float alpha)
+{
+	gl3fxvtx_t v[4];
+	static const float st[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+	static const float sg[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+	int i, k;
+
+	memset(v, 0, sizeof(v));
+
+	for (i = 0; i < 4; i++)
+	{
+		for (k = 0; k < 3; k++)
+		{
+			v[i].pos[k] = c[k] + sg[i][0] * ax[k] + sg[i][1] * ay[k];
+		}
+
+		v[i].st[0] = st[i][0];
+		v[i].st[1] = st[i][1];
+		v[i].rgba[0] = rgb[0];
+		v[i].rgba[1] = rgb[1];
+		v[i].rgba[2] = rgb[2];
+		v[i].rgba[3] = alpha;
+	}
+
+	GL3_FX_Add(v, 4, GL_TRIANGLE_FAN);
+}
+
+/* after the sorted pass (gl3_main.c) */
+void
+GL3_Liquid_DrawSplashes(void)
+{
+	gl3fxstate_t st;
+	vec3_t fwd, right, up, side;
+	float now = GL3_GameTime();
+	qboolean any = false;
+	int n, i;
+
+	for (n = 0; n < SPLASH_MAX; n++)
+	{
+		float age = now - splashes[n].t0;
+
+		if (splashes[n].used && ((age < 0) || (age > SPLASH_LIFE)))
+		{
+			splashes[n].used = false;
+		}
+
+		any = any || splashes[n].used;
+	}
+
+	if (!any || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
+	{
+		return;
+	}
+
+	if (!splashtex)
+	{
+		MakeSplashTex();
+	}
+
+	AngleVectors(r_newrefdef.viewangles, fwd, right, up);
+	/* the column turns about the vertical toward the eye */
+	VectorSet(side, right[0], right[1], 0);
+
+	if (VectorNormalize(side) < 0.01f)
+	{
+		VectorSet(side, 1, 0, 0);
+	}
+
+	GL3_FX_DefaultState(&st);
+	st.texnum = splashtex;
+	st.texmode = 0;
+	st.blend = 1;
+	st.alphatest = false;
+	st.depthwrite = false;
+	st.culling = false;
+	GL3_FX_SetState(&st);
+
+	for (n = 0; n < SPLASH_MAX; n++)
+	{
+		const splash_t *s = &splashes[n];
+		float t, rgb[3];
+
+		if (!s->used)
+		{
+			continue;
+		}
+
+		t = now - s->t0;
+
+		for (i = 0; i < 3; i++)
+		{
+			rgb[i] = s->light[i] * (1.1f + 0.05f * i);
+		}
+
+		/* the column: up to 40 units in 0.18 s, falling back by 0.7 s; three overlapping blobs, the top one narrow */
+		if (t < 0.7f)
+		{
+			float h = 40.0f * s->str * ((t < 0.18f) ? sinf(t / 0.18f * (float)M_PI * 0.5f) :
+				1.0f - (t - 0.18f) / 0.52f * 0.85f);
+			float a = (t < 0.05f) ? t / 0.05f : 1.0f - (t - 0.05f) / 0.65f;
+			int b;
+
+			for (b = 0; b < 3; b++)
+			{
+				vec3_t c, ax, ay;
+				float f = (b + 0.5f) / 3.0f, w = (7.0f - 3.0f * f) * (1.0f + t * 1.5f);
+
+				VectorCopy(s->org, c);
+				c[2] += h * f;
+				VectorScale(side, w, ax);
+				VectorSet(ay, 0, 0, Q_max(h / 3.0f, 2.0f));
+				SplashQuad(c, ax, ay, rgb, a * (0.9f - 0.15f * b));
+			}
+		}
+
+		/* the drops: thrown, falling, gone below the surface */
+		for (i = 0; i < SPLASH_DROPS; i++)
+		{
+			vec3_t c, ax, ay;
+			float z = s->drop[i][2] * t - 0.5f * SPLASH_GRAV * t * t, sz = s->drop[i][3];
+
+			if ((z < -1.0f) || (t < 0.02f))
+			{
+				continue;
+			}
+
+			c[0] = s->org[0] + s->drop[i][0] * t;
+			c[1] = s->org[1] + s->drop[i][1] * t;
+			c[2] = s->org[2] + z;
+			VectorScale(right, sz, ax);
+			VectorScale(up, sz * 1.6f, ay); /* a little drawn out */
+			SplashQuad(c, ax, ay, rgb, 0.85f);
+		}
+
+		/* the crown of foam puffs low over the water */
+		if (t < 0.9f)
+		{
+			float a = 0.55f * (1.0f - t / 0.9f);
+
+			for (i = 0; i < SPLASH_PUFFS; i++)
+			{
+				vec3_t c, ax, ay;
+				float r = 4.0f + s->puff[i][2] * t * 2.0f, sz = 4.0f + 10.0f * t;
+
+				c[0] = s->org[0] + s->puff[i][0] * r;
+				c[1] = s->org[1] + s->puff[i][1] * r;
+				c[2] = s->org[2] + 2.0f + sz * 0.3f;
+				VectorScale(right, sz, ax);
+				VectorScale(up, sz * 0.6f, ay);
+				SplashQuad(c, ax, ay, rgb, a);
+			}
+		}
+	}
+
+	GL3_FX_Flush();
+}
+
 Q2_DLL_EXPORTED void
 OM_WaterImpact(const float *pos, float strength)
 {
@@ -644,6 +915,7 @@ OM_WaterImpact(const float *pos, float strength)
 	VectorCopy(pos, r);
 	r[3] = GL3_GameTime();
 	r[4] = Q_clamp(strength, 0.1f, 4.0f);
+	SplashSpawn(pos, Q_clamp(strength, 0.3f, 2.0f));
 }
 
 /* the rings for the shader: xyz, w = age in s (-1: none, or older than 3 s) */

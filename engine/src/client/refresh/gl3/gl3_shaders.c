@@ -1708,7 +1708,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 				float env = exp(-x * x / 260.0) * exp(-a * 1.6) / (1.0 + r * 0.02);
 				// a train of three crests behind the front; its slope is radial
 				float w = cos(x * 0.45) * env;
-				g += (d / max(r, 0.5)) * (-sin(x * 0.45) * 0.63 * env);
+				g += (d / max(r, 0.5)) * (-sin(x * 0.45) * 0.9 * env);
 				foam += max(w, 0.0) * exp(-a * 3.0);
 			}
 			return foam;
@@ -1957,7 +1957,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 				}
 
 				// the splash rings' young crests: a little white water
-				c.rgb = mix(c.rgb, lit * 1.2 + vec3(0.08), clamp(liqFoam * 0.55, 0.0, 0.6));
+				c.rgb = mix(c.rgb, lit * 1.3 + vec3(0.1), clamp(liqFoam * 0.9, 0.0, 0.75));
 
 				// with distance the surface darkens toward the deep water (not much: the Source engine's water fog
 				// over the surface)

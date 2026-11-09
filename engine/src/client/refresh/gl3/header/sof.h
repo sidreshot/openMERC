@@ -408,6 +408,7 @@ void GL3_Liquid_MapLoad(void);
 GLuint GL3_Liquid_Tile(float *time, float *fine);
 void GL3_Post_Underwater(void);
 void GL3_FX_LiqRipples(const float *r, int n);
+void GL3_Liquid_DrawSplashes(void);
 void GL3_Post_MapLoad(void);
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
 	GLuint tex2);
