@@ -1868,13 +1868,14 @@ GL3_Post_DepthReady(void)
 
 /* r_om_water 2: before the first translucent water surface of the view, the scene drawn so far (the world and
    everything farther in the sorted pass: a swimmer under the surface is in it) at half size on GL_TEXTURE11, and
-   the depth copy again (with those models). False when the post path does not draw this view. */
+   the depth copy (again: with those models; or the first time - soft particles and the fog may be off, as on the
+   phones). False when the post path does not draw this view. */
 qboolean
 GL3_Post_WaterCopy(void)
 {
 	int w, h;
 
-	if (!P.bound || !P.depthcopied)
+	if (!P.bound || !P.texdepthcopy)
 	{
 		return false;
 	}
@@ -1938,7 +1939,7 @@ GL3_Post_WaterCopy(void)
 	GL3_SelectTMU(GL_TEXTURE7);
 	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
 	GL3_SelectTMU(GL_TEXTURE0);
-	P.watercopied = true;
+	P.watercopied = P.depthcopied = true;
 	return true;
 }
 

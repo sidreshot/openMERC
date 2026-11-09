@@ -224,16 +224,15 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 		st.liq[2] = Q_clamp(r_om_water_glint->value, 0.0f, 4.0f);
 		st.liq[3] = GL3_Post_SSRActive() ? 1.0f : 0.0f;
 
-		/* translucent water over the depth of the scene drawn so far (soft particles' copy) */
-		if (translucent && GL3_Post_DepthReady())
+		/* translucent water: quality 2 over copies of the scene and its depth under it (refraction), else over the
+		   depth copy of soft particles if there is one */
+		if (translucent && (st.liq[0] >= 2) && GL3_Post_WaterCopy())
+		{
+			st.soft = 4;
+		}
+		else if (translucent && GL3_Post_DepthReady())
 		{
 			st.soft = 3;
-
-			/* and the scene under it for the refraction */
-			if ((st.liq[0] >= 2) && GL3_Post_WaterCopy())
-			{
-				st.soft = 4;
-			}
 		}
 	}
 
