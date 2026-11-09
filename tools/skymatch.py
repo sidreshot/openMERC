@@ -8,9 +8,13 @@ new sky keeps what the level designers chose - how dark it is, its tint, the bla
 and only the detail (clouds, stars) comes from the panorama, at a higher resolution. Nothing of the original sky is
 copied: only its 90 x 3 means and spreads steer the grade.
 
+The original's moon (its brightest blob, if it has one) is left out of the grade; with a moon map given, a new moon is
+drawn where the old one was: the same size, brightness and halo (its radial profile is measured), the surface from
+the map (e.g. NASA's public domain LROC colour mosaic, svs.gsfc.nasa.gov/4720, lroc_color_2k.jpg).
+
 usage:
   skymatch.py preview <orig_sides.png> <orig_top.png> <out.png> <pano.hdr>...   one view per panorama + the original
-  skymatch.py build <orig_sides.png> <orig_top.png> <pano.hdr> <outdir> <name> <face> [yaw]
+  skymatch.py build <orig_sides.png> <orig_top.png> <pano.hdr> <outdir> <name> <face> [yaw] [moonmap.jpg]
       writes <name>_rt/bk/lf/ft/up.jpg (the bottom face stays "none")
 Needs numpy and opencv-python.
 """
@@ -107,12 +111,16 @@ def sphere_dirs(nel=91, naz=720):
 
 
 def band_stats(img):
-    m = img.mean(axis=1)
-    s = img.std(axis=1)
-    # smooth over a few degrees (the original's bands are noisy)
-    k = np.ones(5) / 5
-    m = np.stack([np.convolve(np.pad(m[:, c], 2, mode='edge'), k, 'valid') for c in range(3)], -1)
-    s = np.stack([np.convolve(np.pad(s[:, c], 2, mode='edge'), k, 'valid') for c in range(3)], -1)
+    m = np.nanmean(img, axis=1)
+    s = np.nanstd(img, axis=1)
+        # the last bands shrink to the zenith point (no spread there): they take the band below
+    m[88:] = m[87]
+    s[88:] = s[87]
+    # smooth over some degrees (sigma 4): band to band jumps of the clouds' cover would show as rings round the zenith
+    k = np.exp(-0.5 * (np.arange(-12, 13) / 4.0) ** 2)
+    k /= k.sum()
+    m = np.stack([np.convolve(np.pad(m[:, c], 12, mode='edge'), k, 'valid') for c in range(3)], -1)
+    s = np.stack([np.convolve(np.pad(s[:, c], 12, mode='edge'), k, 'valid') for c in range(3)], -1)
     return m, s
 
 
@@ -121,9 +129,88 @@ def tonemap(x):
     return np.clip(x, 0, None) ** (1 / 2.2)
 
 
-def grader(orig, pano):
+def find_moon(orig):
+    """the original's moon: (direction, angular radius, disc colour, halo profile (rings of 0.05 radius, rgb) over
+    the sky around it) or None"""
+    best = None
+    for line in (4, 0):
+        img = orig[line]
+        g = img.mean(-1)
+        if best is None or g.max() > best[2]:
+            best = (line, img, g.max())
+    line, img, gmax = best
+    g = img.mean(-1)
+    bg = float(np.median(g))
+    if gmax < bg + 0.25:
+        return None
+    n = img.shape[0]
+    ys, xs = np.nonzero(g > (gmax + bg) / 2)
+    m = face_dirs(line, n)[int(round(ys.mean())), int(round(xs.mean()))]
+    # rings around m out to 20 degrees, 0.1 degree apart
+    e1 = np.cross(m, [0, 0, 1.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(e1, m)
+    th = np.radians(np.arange(0, 20, 0.1) + 0.05)[:, None]
+    az = np.linspace(0, 2 * np.pi, 360, endpoint=False)[None, :]
+    d = (np.cos(th)[..., None] * m + (np.sin(th) * np.cos(az))[..., None] * e1
+         + (np.sin(th) * np.sin(az))[..., None] * e2)
+    prof = cube_sample(orig, d).mean(1)
+    pg = prof.mean(-1)
+    sky = prof[-20:].mean(0)
+    # the disc's edge: where the profile falls through half way from the disc's middle to the sky
+    half = (pg[:5].mean() + sky.mean()) / 2
+    a = np.radians(0.1 * np.argmax(pg < half))
+    rings = np.degrees(th[:, 0]) / np.degrees(a)
+    disc = prof[rings < 0.7].mean(0)
+    halo_r = np.arange(0, 6, 0.05)
+    halo = np.stack([np.interp(halo_r, rings, prof[:, c] - sky[c]) for c in range(3)], -1)
+    halo[halo_r < 1] = halo[np.argmax(halo_r >= 1)]
+    print('moon: dir %s  radius %.2f deg  disc %s  sky %s' % (np.round(m, 3), np.degrees(a), np.round(disc, 3),
+                                                              np.round(sky, 3)))
+    return m, a, disc, np.clip(halo, 0, None), halo_r
+
+
+def draw_moon(y, dirs, moon, mapimg, pix):
+    """y: graded display colours of the directions dirs; pix: the angular size of one face pixel"""
+    m, a, disc, halo, halo_r = moon
+    c = np.clip(dirs @ m, -1, 1)
+    th = np.arccos(c)
+    near = th < a * 6
+    if not near.any():
+        return y
+    r = th[near] / a
+    add = np.stack([np.interp(r, halo_r, halo[:, k], right=0) for k in range(3)], -1)
+    yn = y[near] + add
+    e1 = np.cross(m, [0, 0, 1.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(e1, m)
+    dn = dirs[near]
+    u = (dn @ e1) / np.sin(a)
+    v = (dn @ e2) / np.sin(a)
+    rr = np.minimum(u * u + v * v, 1.0)
+    z = np.sqrt(1 - rr)
+    lon = np.arctan2(u, np.maximum(z, 1e-6))
+    lat = np.arcsin(np.clip(v, -1, 1))
+    H, W = mapimg.shape[:2]
+    tx = (0.5 + lon / (2 * np.pi)) * W - 0.5
+    ty = (0.5 - lat / np.pi) * H - 0.5
+    tex = remap_flat(mapimg, tx, ty, cv2.BORDER_WRAP)
+    # the map's contrast and colour halved: the old moon was a soft, almost white disc
+    rel = tex / mapimg.reshape(-1, 3).mean(0)
+    rel = 1 + 0.6 * (rel.mean(-1, keepdims=True) - 1) + 0.3 * (rel - rel.mean(-1, keepdims=True))
+    surf = rel * disc * (0.85 + 0.15 * z[:, None])
+    alpha = np.clip((a - th[near]) / pix + 0.5, 0, 1)[:, None]
+    y = y.copy()
+    y[near] = yn * (1 - alpha) + surf * alpha
+    return y
+
+
+def grader(orig, pano, moon=None):
     d = sphere_dirs()
-    to, _ = cube_sample(orig, d), None
+    to = cube_sample(orig, d)
+    if moon is not None:
+        # the old moon and its halo stay out of the band statistics
+        to[np.arccos(np.clip(d @ moon[0], -1, 1)) < moon[1] * 5] = np.nan
     tm, ts = band_stats(to)
     raw = pano(d)
     expo = 0.18 / max(float(np.median(raw.mean(axis=-1))), 1e-6)
@@ -139,7 +226,9 @@ def grader(orig, pano):
         def lerp(a):
             return a[i0] * (1 - f) + a[i1] * f
         x = tonemap(pano(dirs) * expo)
-        y = (x - lerp(sm)) / np.maximum(lerp(ss), 1e-4) * lerp(ts) + lerp(tm)
+        # one gain for the three channels (the original's tint is in the means; per channel gains made colour blots)
+        gain = np.clip(lerp(ts).mean(-1, keepdims=True) / np.maximum(lerp(ss).mean(-1, keepdims=True), 1e-4), 0.05, 3.0)
+        y = (x - lerp(sm)) * gain + lerp(tm)
         y = np.where((el < 0)[..., None], 0.0, y)  # under the horizon: black, as SoF's
         return np.clip(y, 0, 1)
     return grade
@@ -170,7 +259,7 @@ def preview(sides, top, out, panos):
     gain = 4.0  # the views are brightened alike so they can be compared on a screen (the game shows them darker)
     tiles = [label(cube_sample(orig, vd) * gain, 'ORIGINAL x%g' % gain)]
     for p in panos:
-        g = grader(orig, pano_sampler(p))
+        g = grader(orig, pano_sampler(p), find_moon(orig))
         tiles.append(label(g(vd) * gain, os.path.basename(p).split('.')[0]))
     cols = 2
     rows = (len(tiles) + cols - 1) // cols
@@ -180,12 +269,17 @@ def preview(sides, top, out, panos):
     cv2.imwrite(out, sheet)
 
 
-def build(sides, top, pano, outdir, name, n, yaw=0.0):
+def build(sides, top, pano, outdir, name, n, yaw=0.0, moonmap=None):
     orig = orig_faces(sides, top)
-    g = grader(orig, pano_sampler(pano, yaw))
+    moon = find_moon(orig)
+    g = grader(orig, pano_sampler(pano, yaw), moon)
+    mapimg = load_rgb(moonmap) if (moonmap and moon is not None) else None
     os.makedirs(outdir, exist_ok=True)
     for line, suf in enumerate(['rt', 'bk', 'lf', 'ft', 'up']):
-        y = g(face_dirs(line, n))
+        dirs = face_dirs(line, n)
+        y = g(dirs)
+        if mapimg is not None:
+            y = np.clip(draw_moon(y, dirs, moon, mapimg, np.radians(90.0) / n), 0, 1)
         im = np.clip(y * 255 + np.random.uniform(-0.5, 0.5, y.shape), 0, 255).astype(np.uint8)
         cv2.imwrite(os.path.join(outdir, '%s_%s.jpg' % (name, suf)), im[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 95])
 
@@ -195,4 +289,4 @@ if __name__ == '__main__':
         preview(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:])
     elif sys.argv[1] == 'build':
         build(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], int(sys.argv[7]),
-              float(sys.argv[8]) if len(sys.argv) > 8 else 0.0)
+              float(sys.argv[8]) if len(sys.argv) > 8 else 0.0, sys.argv[9] if len(sys.argv) > 9 else None)

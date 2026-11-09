@@ -1,0 +1,6 @@
+textures/sky/om/train_rt.jpg
+textures/sky/om/train_bk.jpg
+textures/sky/om/train_lf.jpg
+textures/sky/om/train_ft.jpg
+textures/sky/om/train_up.jpg
+none
