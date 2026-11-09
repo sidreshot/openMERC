@@ -31,7 +31,49 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <stdlib.h>
 #include <string.h>
 
+#include <math.h>
+
 #include "snd_local.h"
+
+/* OpenMerc: how loud a sound is - the mean power of its 50 ms blocks that are above -50 dBFS (silence and
+   tails do not pull a short shot down), in dBFS; -99 for silence */
+float Snd_Loudness(const void *pcm, int frames, int width)
+{
+    double sum = 0, block = 0;
+    int i, n = 0, inblock = 0, blen = 1102;  /* 50 ms at 22050 Hz: close enough for any rate here */
+    for (i = 0; i < frames; i++) {
+        double x = width == 1 ? (((const unsigned char *)pcm)[i] - 128) / 128.0 : ((const short *)pcm)[i] / 32768.0;
+        block += x * x;
+        if (++inblock == blen || i == frames - 1) {
+            double e = block / inblock;
+            if (e > 1e-5) { /* -50 dB */
+                sum += e;
+                n++;
+            }
+            block = 0;
+            inblock = 0;
+        }
+    }
+    return n ? (float)(10.0 * log10(sum / n)) : -99.0f;
+}
+
+/* the gain s_om_normalize gives a sound: its distance from the common level (-14 dBFS, the median of SoF's
+   sounds) is shrunk by that fraction, at most 6 dB either way - loud shots and screams stay louder than
+   footsteps, only the extremes come closer */
+float Snd_NormGain(const sfxcache_t *sc)
+{
+    float k = om_normalize ? om_normalize->value : 0, db;
+    if (k <= 0 || !sc || sc->loudness <= -98)
+        return 1.0f;
+    if (k > 1)
+        k = 1;
+    db = (-14.0f - sc->loudness) * k;
+    if (db > 6)
+        db = 6;
+    if (db < -6)
+        db = -6;
+    return powf(10.0f, db / 20.0f);
+}
 
 const char *S_TrueName(const sfx_t *s);
 
@@ -271,6 +313,7 @@ sfxcache_t *S_LoadSound(sfx_t *s)
         }
         ADP_DecodeTo(payload, nbytes, pcm, srclen);
         Snd_FreeFile(data);
+        sc->loudness = Snd_Loudness(pcm, srclen, 2);
         /* played at the header rate: the original's ratio rule (SPEC-040 1.3) maps the rate onto the mixer rate
          * by an integer ratio, which plays 8000 or 32000 Hz files off-pitch; OpenAL resamples exactly */
         sc->adpcm = true;
@@ -321,6 +364,7 @@ sfxcache_t *S_LoadSound(sfx_t *s)
         memset((byte *)sc->data + have, 0x80, (size_t)(bytes - have)); // unsigned 8-bit silence
     Snd_FreeFile(data);
 
+    sc->loudness = Snd_Loudness(sc->data, info.samples, info.width);
     sc->frames = info.samples;
     sc->speed = info.rate;
     sc->width = info.width;

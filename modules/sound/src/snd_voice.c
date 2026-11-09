@@ -572,7 +572,10 @@ void Vo_Apply(channel_t *ch)
         gain = 0;
     if (gain > 4)
         gain = 4; /* s_volume above 1; the output limiter keeps the sum from clipping */
-    ch->gain = gain;
+    ch->gain = gain; /* the voice-stealing priority stays SoF's (before the levelling) */
+    gain *= Snd_NormGain(sc); /* OpenMerc: s_om_normalize */
+    if (gain > 4)
+        gain = 4;
     alSourcef(s, AL_GAIN, gain);
 
     /* the environment reverb and the underwater filter are for the game world, not the menus */

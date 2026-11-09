@@ -52,6 +52,7 @@ static void S_Play(void);
 static void S_SoundList(void);
 static void S_SoundInfo_f(void);
 static void S_ForceSong_f(void);
+static void S_Levels_f(void);
 static void S_EaxEnvironment_f(void);
 static void S_EaxParams_f(void);
 void S_StopAllSounds(void);
@@ -105,7 +106,7 @@ cvar_t *s_show;
 cvar_t *s_nosound, *s_disable, *s_musicenabled, *s_musicvolume, *paused;
 cvar_t *om_wavefile, *om_debug, *om_focusmute, *om_reverb;
 cvar_t *om_rate, *om_hrtf, *om_limiter, *om_refresh, *om_gain, *om_underwaterlp;
-cvar_t *om_device, *om_voicevolume;
+cvar_t *om_device, *om_voicevolume, *om_normalize;
 static cvar_t *om_stall, *om_stallmin, *om_stallmax;
 static cvar_t *s_initsound;
 
@@ -281,10 +282,13 @@ void S_Init(void)
         om_device = eng.Cvar_Get("s_om_device", "default", CVAR_ARCHIVE, NULL);
         // speech volume (cinematic, enemy and briefing `.adp` lines); a new profile starts at s_volume
         om_voicevolume = eng.Cvar_Get("s_om_voicevolume", s_volume->string, CVAR_ARCHIVE, NULL);
+        // loudness levelling: 0 off (SoF's own levels), 1 every sound at one level; 0.5 halves the differences
+        om_normalize = eng.Cvar_Get("s_om_normalize", "0.5", CVAR_ARCHIVE, NULL);
 
         eng.Cmd_AddCommand("play", S_Play);
         eng.Cmd_AddCommand("stopsound", S_StopAllSounds);
         eng.Cmd_AddCommand("soundlist", S_SoundList);
+        eng.Cmd_AddCommand("s_om_levels", S_Levels_f);
         eng.Cmd_AddCommand("soundinfo", S_SoundInfo_f);
         eng.Cmd_AddCommand("forcesong", S_ForceSong_f);
         eng.Cmd_AddCommand("snd_eaxenvironment", S_EaxEnvironment_f);
@@ -339,6 +343,7 @@ void S_Shutdown(void)
         eng.Cmd_RemoveCommand("play");
         eng.Cmd_RemoveCommand("stopsound");
         eng.Cmd_RemoveCommand("soundlist");
+        eng.Cmd_RemoveCommand("s_om_levels");
         eng.Cmd_RemoveCommand("soundinfo");
         eng.Cmd_RemoveCommand("forcesong");
         eng.Cmd_RemoveCommand("snd_eaxenvironment");
@@ -1409,6 +1414,19 @@ static void S_SoundList(void)
         }
     }
     Snd_Printf("Total resident: %i\n", total);
+}
+
+/* OpenMerc `s_om_levels`: each loaded sound's loudness and the gain s_om_normalize gives it */
+static void S_Levels_f(void)
+{
+    int i;
+    sfx_t *sfx;
+    for (sfx = known_sfx, i = 0; i < num_sfx; i++, sfx++) {
+        sfxcache_t *sc = sfx->cache;
+        if (!sfx->registration_sequence || !sc)
+            continue;
+        Snd_Printf("%6.1f dB  x%.2f  %s\n", sc->loudness, Snd_NormGain(sc), sfx->name);
+    }
 }
 
 /* SPEC-040 5.3 `forcesong`: s_musicenabled's value (only) becomes 1, the set is freed and the named one loaded */

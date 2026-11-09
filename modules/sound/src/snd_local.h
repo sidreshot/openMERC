@@ -71,6 +71,7 @@ struct sfxcache_s {
     qboolean adpcm; /* SPEC-040 1.3: `.adp` rules (non-positional, held while paused) */
     qboolean voice; /* OpenMerc: speech (`.adp` under sound/cin, sound/speech, sound/enemy), s_om_voicevolume */
     int bytes;      /* size of the sample data (soundlist) */
+    float loudness; /* OpenMerc: gated RMS level in dBFS (50 ms blocks above -50 dB), for s_om_normalize */
     unsigned buffer;        /* OpenAL buffer (with the cue loop points when loopstart >= 0) */
     unsigned buffer_whole;  /* the same samples without loop points, for autosound loops (made on demand) */
     void *data;             /* kept only while buffer_whole may still be needed (loopstart > 0) */
@@ -214,7 +215,9 @@ extern qboolean s_started;
 extern cvar_t *s_volume, *s_nosound, *s_show, *s_testsound;
 extern cvar_t *s_musicenabled, *s_musicvolume, *s_disable, *paused, *om_debug, *om_reverb;
 extern cvar_t *om_rate, *om_hrtf, *om_limiter, *om_refresh, *om_gain, *om_underwaterlp;
-extern cvar_t *om_device, *om_voicevolume;
+extern cvar_t *om_device, *om_voicevolume, *om_normalize;
+float Snd_Loudness(const void *pcm, int frames, int width);
+float Snd_NormGain(const sfxcache_t *sc);
 
 qboolean Snd_ClientActive(void); /* connection state active and level prepped */
 sfx_t *S_FindName(const char *name, int create);
