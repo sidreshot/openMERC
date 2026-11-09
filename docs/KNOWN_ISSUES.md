@@ -181,6 +181,13 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
   across a level change. kos1/ger1/ger3/sib1 save-load and tsr1->tsr2, arm2->nyc1, sud3->arm3 pass
   (`docs/impl/MODEB-GAPS.md` 5).
 
+## To investigate (owner's reports, 2026-11-09)
+
+- **sib2: snow falls through rooms.** The `r_om_snow` / `r_om_rain` particles show indoors. Wanted: a hard test -
+  no sky above a point (trace up to a sky face) means no snow and no rain there.
+- **Saving while dead.** The save must not be available while the player is dead.
+- **Weapon in the hands while dying.** The view weapon must go away when the player dies.
+
 ## Reporting
 
 Please include: mode (A or B), map, `user\sof.log`, and the steps. Compare with the original game on the same

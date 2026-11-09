@@ -2583,61 +2583,173 @@ GL3_SetLightLevel(entity_t *currententity)
 }
 
 /*
- * OpenMerc r_om_preset: one knob for the GFX-modern settings. 0 = custom (nothing is touched), 1 = low (mobile,
- * integrated GPUs: 2 sun cascades at 1024, smaller lamp shadows, no SSAO / SSR, 0.75 render scale with the upscale),
- * 2 = medium, 3 = high (the defaults of this build). Applied once when it changes; the single settings stay
- * editable afterwards. GLES builds start on low.
+ * OpenMerc r_om_preset: one knob for the GFX-modern settings. 0 = custom (nothing is touched), 4 = minimal (weak
+ * integrated GPUs such as Intel UHD 610/620: half render scale, no shadows, fog, beams, AO, reflections or mirrors),
+ * 1 = low (mobile, stronger integrated GPUs: 2 sun cascades at 1024, no lamp shadows / SSAO / SSR, 0.67 render
+ * scale with the upscale), 2 = medium, 3 = high (the defaults of this build). Applied once when it changes; the single
+ * settings stay editable afterwards. Every preset sets every key, so going from one to another never leaves an effect
+ * of the previous one behind. GLES builds start on low; on desktop the first start on an integrated GPU picks
+ * minimal or low (r_om_preset_auto), a discrete one keeps the config as it is.
  */
+typedef struct { const char *name, *value; } presetkey_t;
+
+static const presetkey_t preset_minimal[] = {
+	{"r_om_renderscale", "0.5"}, {"r_om_upscale", "2"},
+	{"r_om_csm", "0"}, {"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
+	{"r_om_lshadow", "0"}, {"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
+	{"r_om_ssao", "0"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "0"}, {"r_om_ssr_quality", "1"},
+	{"r_om_volfog", "0"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
+	{"r_om_beams", "0"}, {"r_om_beams_motes", "0"}, {"r_om_bloom", "0"},
+	{"r_om_mirror", "0"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
+	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"}, {"r_om_worldlite", "1"},
+	{NULL, NULL}};
+
+static const presetkey_t preset_low[] = {
+	{"r_om_renderscale", "0.67"}, {"r_om_upscale", "2"},
+	{"r_om_csm", "1"}, {"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
+	/* measured on an Adreno 610 phone (2400x1080, arm1): lamp shadows 18 ms, seam strips 12 ms, look 8 ms */
+	{"r_om_lshadow", "0"}, {"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
+	{"r_om_ssao", "0"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "0"}, {"r_om_ssr_quality", "1"},
+	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
+	{"r_om_beams", "1"}, {"r_om_beams_motes", "0"}, {"r_om_bloom", "1"},
+	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
+	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"},
+	/* the light world shaders: 33 -> 23.5 ms per frame on the Adreno 610 phone (arm1) */
+	{"r_om_worldlite", "1"},
+	{NULL, NULL}};
+
+static const presetkey_t preset_medium[] = {
+	{"r_om_renderscale", "1"}, {"r_om_upscale", "2"},
+	{"r_om_csm", "1"}, {"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "3"}, {"r_om_csm_soft", "2"},
+	{"r_om_lshadow", "1"}, {"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
+	{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "1"},
+	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
+	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
+	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
+	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
+	{NULL, NULL}};
+
+static const presetkey_t preset_high[] = { /* the build's defaults */
+	{"r_om_renderscale", "1"}, {"r_om_upscale", "2"},
+	{"r_om_csm", "1"}, {"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
+	{"r_om_lshadow", "1"}, {"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
+	{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
+	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"},
+	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
+	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
+	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
+	{NULL, NULL}};
+
+/* the tone of the picture: on phones minimal and low get the bright, saturated one in the spirit of the PlayStation
+   ports (Quake II PSX: dark corners lifted, colours stronger - a phone screen is small and often in daylight; the
+   tone mapping pass does it for free), everything else the normal one */
+static const presetkey_t preset_tone_vivid[] = {
+	{"r_om_hdr_shadows", "0.75"}, {"r_om_hdr_brightness", "1.25"}, {"r_om_hdr_saturation", "1.45"},
+	{"r_om_hdr_min", "1.0"}, {"r_om_hdr_max", "2.4"}, {"r_om_hdr_adapt_strength", "0.6"}, {"r_om_vivid", "1"},
+	{NULL, NULL}};
+
+static const presetkey_t preset_tone_normal[] = {
+	{"r_om_hdr_shadows", "0.9"}, {"r_om_hdr_brightness", "1.1"}, {"r_om_hdr_saturation", "1.1"},
+	{"r_om_hdr_min", "0.7"}, {"r_om_hdr_max", "1.6"}, {"r_om_hdr_adapt_strength", "0.35"}, {"r_om_vivid", "0"},
+	{NULL, NULL}};
+
+/* antialiasing: on desktop the MSAA scene buffers cost an integrated GPU much of its memory bandwidth - minimal and
+   low leave the edges to FXAA (cheaper than the SMAA passes); phones have neither (the FSR upscale) */
+#ifndef YQ2_GL3_GLES3
+static const presetkey_t preset_aa_light[] = {
+	{"r_msaa_samples", "0"}, {"r_om_fxaa", "-1"}, {"r_om_postaa", "1"}, {NULL, NULL}};
+static const presetkey_t preset_aa_medium[] = {
+	{"r_msaa_samples", "2"}, {"r_om_fxaa", "-1"}, {"r_om_postaa", "2"}, {NULL, NULL}};
+#else
+static const presetkey_t preset_aa_light[] = {{"r_om_fxaa", "0"}, {NULL, NULL}};
+#endif
+
+static void
+ApplyPresetKeys(const presetkey_t *k)
+{
+	for (; k->name; k++)
+	{
+		ri.Cvar_Set((char *)k->name, (char *)k->value);
+	}
+}
+
+#ifndef YQ2_GL3_GLES3
+/* the first start on desktop: 4 (minimal) for the weak integrated GPUs and software renderers, 1 (low) for the
+   stronger integrated ones, 0 (keep the config) for the rest */
+static int
+PresetForGPU(void)
+{
+	char r[256];
+	const char *s = gl3config.renderer_string ? gl3config.renderer_string : "";
+	int i;
+
+	for (i = 0; s[i] && (i < (int)sizeof(r) - 1); i++)
+	{
+		r[i] = (char)tolower((unsigned char)s[i]);
+	}
+
+	r[i] = 0;
+
+	if (strstr(r, "llvmpipe") || strstr(r, "softpipe") || strstr(r, "swiftshader") || strstr(r, "basic render") ||
+		strstr(r, "gdi generic"))
+	{
+		return 4;
+	}
+
+	if (strstr(r, "intel") && !strstr(r, "arc"))
+	{
+		/* Iris Xe / Iris Plus (Ice Lake and later): about three times a UHD 620 */
+		if (strstr(r, "iris") && (strstr(r, "xe") || strstr(r, "plus")))
+		{
+			return 1;
+		}
+
+		return 4;
+	}
+
+	/* AMD APUs ("AMD Radeon(TM) Graphics", "Radeon(TM) Vega 8 Graphics", "Radeon 780M") */
+	if (strstr(r, "radeon") && (strstr(r, "(tm) graphics") || strstr(r, "vega") || strstr(r, "radeon graphics") ||
+		strstr(r, "610m") || strstr(r, "660m") || strstr(r, "680m") || strstr(r, "740m") || strstr(r, "760m") ||
+		strstr(r, "780m")))
+	{
+		return 1;
+	}
+
+	return 0;
+}
+#endif
+
 static void
 ApplyPreset(void)
 {
 	static cvar_t *preset;
-	static const char *const sets[3][32][2] = {
-		{ /* low */
-			{"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
-			{"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
-			{"r_om_ssao", "0"}, {"r_om_ssr", "0"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
-			{"r_om_mirror_scale", "0.5"}, {"r_om_renderscale", "0.67"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "0"},
-			{"r_om_beams_motes", "0"}, {"r_om_tess", "0"}, {"r_om_ppl_models", "0"},
-			/* measured on an Adreno 610 phone (2400x1080, arm1): lamp shadows 18 ms, seam strips 12 ms, look 8 ms */
-			{"r_om_lshadow", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"},
-			/* the light world shaders: 33 -> 23.5 ms per frame on the Adreno 610 phone (arm1) */
-			{"r_om_worldlite", "1"},
-			/* a bright, saturated picture in the spirit of the PlayStation ports (Quake II PSX): dark corners lifted,
-			   colours stronger - a phone screen is small and often in daylight; the tone mapping pass does it for free */
-			{"r_om_hdr_shadows", "0.75"}, {"r_om_hdr_brightness", "1.25"}, {"r_om_hdr_saturation", "1.45"},
-			{"r_om_hdr_min", "1.0"}, {"r_om_hdr_max", "2.4"}, {"r_om_hdr_adapt_strength", "0.6"},
-			{"r_om_vivid", "1"}, {NULL, NULL}},
-		{ /* medium */
-			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "3"}, {"r_om_csm_soft", "2"},
-			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
-			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "1"},
-			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"}, {"r_om_mirror_scale", "0.7"},
-			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
-			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"},
-			{"r_om_worldlite", "0"},
-			{"r_om_hdr_shadows", "0.9"}, {"r_om_hdr_brightness", "1.1"}, {"r_om_hdr_saturation", "1.1"},
-			{"r_om_hdr_min", "0.7"}, {"r_om_hdr_max", "1.6"}, {"r_om_hdr_adapt_strength", "0.35"},
-			{"r_om_vivid", "0"}, {NULL, NULL}},
-		{ /* high: the build's defaults */
-			{"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
-			{"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
-			{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
-			{"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"}, {"r_om_mirror_scale", "0.7"},
-			{"r_om_renderscale", "1"}, {"r_om_upscale", "2"}, {"r_om_fxaa", "-1"}, {"r_om_beams_motes", "1"}, {"r_om_tess", "8"},
-			{"r_om_ppl_models", "1"}, {"r_om_lshadow", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"},
-			{"r_om_worldlite", "0"},
-			{"r_om_hdr_shadows", "0.9"}, {"r_om_hdr_brightness", "1.1"}, {"r_om_hdr_saturation", "1.1"},
-			{"r_om_hdr_min", "0.7"}, {"r_om_hdr_max", "1.6"}, {"r_om_hdr_adapt_strength", "0.35"},
-			{"r_om_vivid", "0"}, {NULL, NULL}}};
-	int p, i;
+	const presetkey_t *set;
+	int p;
 
 	if (!preset)
 	{
 #ifdef YQ2_GL3_GLES3
 		preset = ri.Cvar_Get("r_om_preset", "1", CVAR_ARCHIVE);
 #else
+		cvar_t *autop = ri.Cvar_Get("r_om_preset_auto", "0", CVAR_ARCHIVE);
+
 		preset = ri.Cvar_Get("r_om_preset", "0", CVAR_ARCHIVE);
+
+		if (autop->value == 0)
+		{
+			int want = PresetForGPU();
+
+			ri.Cvar_Set("r_om_preset_auto", "1");
+
+			if (want)
+			{
+				char num[8];
+
+				Com_sprintf(num, sizeof(num), "%d", want);
+				ri.Cvar_Set("r_om_preset", num);
+				R_Printf(PRINT_ALL, "%s: integrated GPU, quality preset %s\n", gl3config.renderer_string, num);
+			}
+		}
 #endif
 		preset->modified = true; /* a preset from the config applies at start */
 	}
@@ -2650,15 +2762,20 @@ ApplyPreset(void)
 	preset->modified = false;
 	p = (int)preset->value;
 
-	if ((p < 1) || (p > 3))
+	switch (p)
 	{
-		return;
+		case 1: set = preset_low; break;
+		case 2: set = preset_medium; break;
+		case 3: set = preset_high; break;
+		case 4: set = preset_minimal; break;
+		default: return;
 	}
 
 	/* applied once per change of the preset: the single settings a player tuned afterwards (the shadow lift of the
 	   bright phone picture, ...) are not put back at every start */
 	{
 		static cvar_t *applied;
+		char num[8];
 
 		if (!applied)
 		{
@@ -2670,18 +2787,35 @@ ApplyPreset(void)
 			return;
 		}
 
-		{
-			char num[8];
+		Com_sprintf(num, sizeof(num), "%d", p);
+		ri.Cvar_Set("r_om_preset_applied", num);
+	}
 
-			Com_sprintf(num, sizeof(num), "%d", p);
-			ri.Cvar_Set("r_om_preset_applied", num);
+	ApplyPresetKeys(set);
+
+#ifdef YQ2_GL3_GLES3
+	ApplyPresetKeys(((p == 1) || (p == 4)) ? preset_tone_vivid : preset_tone_normal);
+
+	if ((p == 1) || (p == 4))
+	{
+		ApplyPresetKeys(preset_aa_light);
+	}
+#else
+	ApplyPresetKeys(preset_tone_normal);
+
+	if (p != 3)
+	{
+		int before = (int)gl_msaa_samples->value;
+
+		ApplyPresetKeys((p == 2) ? preset_aa_medium : preset_aa_light);
+
+		/* the MSAA buffers are made with the window */
+		if ((int)gl_msaa_samples->value != before)
+		{
+			ri.Cmd_ExecuteText(EXEC_APPEND, "vid_restart\n");
 		}
 	}
-
-	for (i = 0; sets[p - 1][i][0]; i++)
-	{
-		ri.Cvar_Set(sets[p - 1][i][0], sets[p - 1][i][1]);
-	}
+#endif
 
 	R_Printf(PRINT_ALL, "r_om_preset %d applied\n", p);
 }
@@ -2797,6 +2931,9 @@ GL3_BeginFrame(float camera_separation)
 
 	GL3_Post_GpuTimer(true); /* r_om_gputime measurement */
 	GL3_Post_ProfMark("frame");
+
+	/* r_om_preset: also in the menus before the first map (the video page shows the new values at once) */
+	ApplyPreset();
 
 	/* SPEC-413 §6 Begin frame */
 #ifdef OM_SOFREF
