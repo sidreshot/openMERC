@@ -10432,7 +10432,7 @@ GL3_WaterRefl_Render(void)
 	memcpy(WR.plane, cand[best].plane, sizeof(WR.plane));
 	memcpy(WR.box, cand[best].box, sizeof(WR.box));
 	/* the swell lifts the surface by up to about 2 units: the box a little higher */
-	WR.box[5] += 4;
+	WR.box[5] += 10;
 
 	GL3_Draw3DBatchesNow();
 	/* no mirror images inside the pass (their window positions are the real eye's) */

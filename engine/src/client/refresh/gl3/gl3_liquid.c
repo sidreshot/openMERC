@@ -24,7 +24,7 @@
    surface (caustics), and translucent water refracts the scene under it, tints it with depth and has foam where it
    meets walls and objects; 1 the lighter set. r_om_water_glint: strength of the highlight. Lava, molten
    metal and steam keep the original look. */
-static cvar_t *r_om_water, *r_om_water_glint, *r_om_water_quality, *r_om_water_clear;
+static cvar_t *r_om_water, *r_om_water_glint, *r_om_water_quality, *r_om_water_clear, *r_om_water_3d;
 static GLuint liqtile;
 static GLuint liqenv;
 static int liqenvmap = -1;
@@ -49,6 +49,8 @@ GL3_Liquid_Init(void)
 	/* r_om_water_clear 1: level water the original draws solid is see-through too (quality 2 and up: the scene under
 	   it refracted, darker and tinted with depth), as the water of the Source engine */
 	r_om_water_clear = ri.Cvar_Get("r_om_water_clear", "1", CVAR_ARCHIVE);
+	/* r_om_water_3d: height of the ripples the surface really has near the eye (units; 0 flat as the original) */
+	r_om_water_3d = ri.Cvar_Get("r_om_water_3d", "1", CVAR_ARCHIVE);
 	/* 2 on phones too: it measured the same as 1 there (Adreno 610); the refraction needs the depth copy */
 #ifdef YQ2_GL3_GLES3
 	r_om_water_quality = ri.Cvar_Get("r_om_water_quality", "2", CVAR_ARCHIVE);
@@ -534,6 +536,87 @@ MakeEnv(void)
 	gl3state.currenttexture = liqenv;
 }
 
+/* r_om_water_3d: the triangles of a level water face split along their longest edge down to 16 units within 1200
+   units of the eye (the vertex shader fades the lift out by 1100: no cracks where the coarse faces begin); the new
+   vertices take the mean of the two ends (texture coordinates, light, sky openness) */
+#define SUBDIV_EDGE 16.0f
+#define SUBDIV_NEAR 1200.0f
+static gl3fxvtx_t subdivbuf[3 * 1024];
+static int subdivn;
+
+static void
+SubdivFlush(void)
+{
+	if (subdivn)
+	{
+		GL3_FX_Add(subdivbuf, subdivn, GL_TRIANGLES);
+		subdivn = 0;
+	}
+}
+
+static void
+SubdivMid(const gl3fxvtx_t *a, const gl3fxvtx_t *b, gl3fxvtx_t *m)
+{
+	int k;
+
+	for (k = 0; k < 3; k++) m->pos[k] = 0.5f * (a->pos[k] + b->pos[k]);
+	for (k = 0; k < 2; k++) m->st[k] = 0.5f * (a->st[k] + b->st[k]);
+	for (k = 0; k < 4; k++) m->rgba[k] = 0.5f * (a->rgba[k] + b->rgba[k]);
+	for (k = 0; k < 2; k++) m->aux[k] = 0.5f * (a->aux[k] + b->aux[k]);
+}
+
+static float
+Dist2(const float *a, const float *b)
+{
+	float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+
+	return dx * dx + dy * dy + dz * dz;
+}
+
+static void
+SubdivTri(const gl3fxvtx_t *a, const gl3fxvtx_t *b, const gl3fxvtx_t *c, int depth)
+{
+	float ab = Dist2(a->pos, b->pos), bc = Dist2(b->pos, c->pos), ca = Dist2(c->pos, a->pos);
+	float m = Q_max(ab, Q_max(bc, ca));
+	float near = Q_min(Dist2(a->pos, r_newrefdef.vieworg), Q_min(Dist2(b->pos, r_newrefdef.vieworg),
+		Dist2(c->pos, r_newrefdef.vieworg)));
+
+	if ((depth < 12) && (m > SUBDIV_EDGE * SUBDIV_EDGE) && (near < (SUBDIV_NEAR + sqrtf(m)) * (SUBDIV_NEAR + sqrtf(m))))
+	{
+		gl3fxvtx_t mid;
+
+		if (m == ab)
+		{
+			SubdivMid(a, b, &mid);
+			SubdivTri(a, &mid, c, depth + 1);
+			SubdivTri(&mid, b, c, depth + 1);
+		}
+		else if (m == bc)
+		{
+			SubdivMid(b, c, &mid);
+			SubdivTri(a, b, &mid, depth + 1);
+			SubdivTri(a, &mid, c, depth + 1);
+		}
+		else
+		{
+			SubdivMid(c, a, &mid);
+			SubdivTri(a, b, &mid, depth + 1);
+			SubdivTri(&mid, b, c, depth + 1);
+		}
+
+		return;
+	}
+
+	if (subdivn + 3 > (int)(sizeof(subdivbuf) / sizeof(subdivbuf[0])))
+	{
+		SubdivFlush();
+	}
+
+	subdivbuf[subdivn++] = *a;
+	subdivbuf[subdivn++] = *b;
+	subdivbuf[subdivn++] = *c;
+}
+
 /* units 2 and 3 belong to the lightmaps and the post passes: what is bound there is put back after the water */
 static GLint savedtex[2];
 
@@ -664,7 +747,7 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 	qboolean sphere;
 	vec3_t normal, fwd, right, up;
 	int pass;
-	qboolean water = false;
+	qboolean water = false, level3d = false;
 	GLuint refltex = 0;
 
 	memset(&xf, 0, sizeof(xf));
@@ -770,6 +853,13 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 
 		st.liq[0] = (r_om_water_quality->value >= 2) ? 2 : 1;
 		st.liqrefl[3] = liqtile ? 1.0f : 0.0f;
+		level3d = level && liqtile && (r_om_water_3d->value > 0);
+		/* w: 1 = the tile, above 1 the height the vertex shader lifts the ripples by (+ 3 units per r_om_water_3d:
+		   under a unit RMS: just a little) - only on the faces cut small */
+		if (level3d)
+		{
+			st.liqrefl[3] = 1.0f + 3.0f * Q_clamp(r_om_water_3d->value, 0.0f, 4.0f);
+		}
 
 		/* quality 3: this face's plane for the next frame's reflection, the reflection of this frame */
 		if (level && (r_om_water_quality->value >= 3))
@@ -921,7 +1011,21 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 				}
 			}
 
-			GL3_FX_Add(v, n, GL_TRIANGLE_FAN);
+			if (water && level3d && (pass == 0))
+			{
+				/* r_om_water_3d: the face cut into small triangles near the eye; the vertex shader lifts them by
+				   the ripple tile's heights */
+				for (i = 1; i + 1 < n; i++)
+				{
+					SubdivTri(&v[0], &v[i], &v[i + 1], 0);
+				}
+
+				SubdivFlush();
+			}
+			else
+			{
+				GL3_FX_Add(v, n, GL_TRIANGLE_FAN);
+			}
 		}
 	}
 

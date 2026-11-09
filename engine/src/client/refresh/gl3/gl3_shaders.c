@@ -1538,6 +1538,9 @@ static const char* vertexSrcSoFfx = MULTILINE_STRING(
 
 		uniform vec4 fogplane; // view forward and -forward . eye
 		uniform vec4 omLiq;    // r_om_water: x mode (0 off), y time
+		uniform vec4 omLiqEye; // r_om_water: eye xyz
+		uniform vec4 omLiqRefl; // r_om_water: w 1 = the ripple tile, its heights in b
+		uniform sampler2D omLiqTile;
 
 		// GFX-modern r_om_water: the slow swell (three long waves; rough and calm patches drift over it) - its height
 		// lifts the water's vertices (the warped faces are cut into 64-unit pieces), its slope tilts the ripples
@@ -1558,7 +1561,19 @@ static const char* vertexSrcSoFfx = MULTILINE_STRING(
 			vec4 wp = transModel * vec4(position, 1.0);
 
 			if(omLiq.x > 0.5)
+			{
 				wp.z += omLiqSwellH(wp.xy, omLiq.y);
+				// r_om_water_3d: the ripples' own heights (the two big layers of the tile the normal is made of),
+				// fading out by 1100 units where the faces are no longer cut small (gl3_liquid.c)
+				if(omLiqRefl.w > 1.01)
+				{
+					vec2 p = wp.xy;
+					float t = omLiq.y;
+					float hh = (textureLod(omLiqTile, mat2(0.80, 0.60, -0.60, 0.80) * p * 0.00195 + t * vec2(0.0090, 0.0047), 0.0).b - 0.5) * 2.0
+						+ (textureLod(omLiqTile, mat2(-0.28, 0.96, -0.96, -0.28) * p * 0.0047 + t * vec2(-0.0123, 0.0101), 0.0).b - 0.5) * 1.0;
+					wp.z += hh * (omLiqRefl.w - 1.0) * (1.0 - smoothstep(700.0, 1100.0, distance(wp.xyz, omLiqEye.xyz)));
+				}
+			}
 
 			passTexCoord = texCoord;
 			passColor = vertColor;
@@ -1666,7 +1681,8 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		uniform vec4 omLiqEye;
 		uniform sampler2D omSceneCol;
 		// x 1 = omLiqReflTex is the planar reflection (r_om_water_quality 3) read at the window position x yz, else the
-		// sky panorama (yaw across, elevation 0..90 up); w 1 = the ripple tile omLiqTile (slopes rg, height b)
+		// sky panorama (yaw across, elevation 0..90 up); w >= 1 = the ripple tile omLiqTile (slopes rg, height b), above
+		// 1 the lift of the vertices (r_om_water_3d)
 		uniform vec4 omLiqRefl;
 		uniform sampler2D omLiqTile;
 		uniform sampler2D omLiqReflTex;
