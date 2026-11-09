@@ -74,6 +74,76 @@ GL3_Lamps_Set(const byte *lights, int len)
 	}
 }
 
+/* true when the segment a-b passes through solid world (the BSP of the world model) */
+static qboolean
+SolidBetween(mnode_t *node, const vec3_t a, const vec3_t b)
+{
+	float fa, fb, frac;
+	vec3_t mid;
+	int side;
+
+	if (node->contents != CONTENTS_NODE)
+	{
+		return (node->contents & CONTENTS_SOLID) != 0;
+	}
+
+	fa = DotProduct(a, node->plane->normal) - node->plane->dist;
+	fb = DotProduct(b, node->plane->normal) - node->plane->dist;
+
+	if ((fa >= 0) && (fb >= 0))
+	{
+		return SolidBetween(node->children[0], a, b);
+	}
+
+	if ((fa < 0) && (fb < 0))
+	{
+		return SolidBetween(node->children[1], a, b);
+	}
+
+	side = (fa < 0);
+	frac = fa / (fa - fb);
+	mid[0] = a[0] + (b[0] - a[0]) * frac;
+	mid[1] = a[1] + (b[1] - a[1]) * frac;
+	mid[2] = a[2] + (b[2] - a[2]) * frac;
+
+	return SolidBetween(node->children[side], a, mid) || SolidBetween(node->children[!side], mid, b);
+}
+
+/* can the lamp's light reach what the eye sees of the glossy faces around it: a clear line from the lamp (16 units
+   out of its fixture, toward the eye) to the eye, or to the point 40 units under the eye (a floor's glint is seen
+   from a little above it). A lamp behind a wall gave glints on the near side of the wall. */
+static qboolean
+LampSeen(const lamp_t *l, const float *eye)
+{
+	vec3_t d, a, low;
+	float len;
+
+	if (!gl3_worldmodel || !gl3_worldmodel->nodes)
+	{
+		return true;
+	}
+
+	VectorSubtract(eye, l->origin, d);
+	len = VectorLength(d);
+
+	if (len < 24.0f)
+	{
+		return true;
+	}
+
+	VectorMA(l->origin, 16.0f / len, d, a);
+
+	if (!SolidBetween(gl3_worldmodel->nodes, a, eye))
+	{
+		return true;
+	}
+
+	VectorCopy(eye, low);
+	low[2] -= 40.0f;
+
+	return !SolidBetween(gl3_worldmodel->nodes, a, low);
+}
+
 /* the lamps nearest in influence to the eye go to the shader: omBL[i] = origin, radius; omBC[i] = colour */
 void
 GL3_Lamps_View(GLuint prog, const float *eye)
@@ -97,6 +167,17 @@ GL3_Lamps_View(GLuint prog, const float *eye)
 		}
 
 		s = l->radius / (dist + 64.0f);
+
+		/* the score first: the line test only for lamps that would get a place */
+		if ((n >= LAMPS_MAX_VIEW) && (s <= score[LAMPS_MAX_VIEW - 1]))
+		{
+			continue;
+		}
+
+		if (!LampSeen(l, eye))
+		{
+			continue;
+		}
 
 		/* insertion into the best LAMPS_MAX_VIEW by score */
 		for (j = n; j > 0 && score[j - 1] < s; j--)

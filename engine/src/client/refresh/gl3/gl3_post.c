@@ -9103,6 +9103,23 @@ static const char *ssr_apply_fs =
 	"	return vec3(n.x * d * proj2.x, n.y * d * proj2.y, -d);\n"
 	"}\n"	/* a degenerate depth neighbourhood gives no normal (a NaN here spread through the frame and its mipmaps) */
 	"vec3 SafeN(vec3 c) { float l = length(c); return l > 1e-12 ? c / l : vec3(0.0, 0.0, 1.0); }\n"
+	"vec2 Proj(vec3 q) { return vec2(q.x * proj2.z, q.y * proj2.w) / -q.z * 0.5 + 0.5; }\n"
+	/* the lamp hidden from this point by what is on the screen: six steps from the point toward it through the depth
+	   (a face in front of a step, but not far in front - not the room behind - stops the light) */
+	"float LampVis(vec3 P, vec3 Lw)\n"
+	"{\n"
+	"	vec3 Lv = transpose(mat3(invview)) * Lw;\n"
+	"	for (int s = 1; s <= 6; s++)\n"
+	"	{\n"
+	"		vec3 q = P + Lv * (float(s) / 7.0);\n"
+	"		if (q.z > -2.0) return 1.0;\n"
+	"		vec2 sq = Proj(q);\n"
+	"		if (any(lessThan(sq, vec2(0.0))) || any(greaterThan(sq, vec2(1.0)))) return 1.0;\n"
+	"		float sd = Dist(sq);\n"
+	"		if (-q.z > sd + 3.0 && -q.z < sd + 160.0) return 0.0;\n"
+	"	}\n"
+	"	return 1.0;\n"
+	"}\n"
 	"void main()\n"
 	"{\n"
 	/* nothing reflected, matte and dry around here (one filtered tap covers the four the upsampling reads) */
@@ -9177,7 +9194,8 @@ static const char *ssr_apply_fs =
 	"			vec3 L = Lp / dl;\n"
 	"			float ndl = dot(N, L);\n"
 	"			if (ndl <= 0.0) continue;\n"
-	"			acc += omBC[i].rgb * (att * att * ndl * pow(max(dot(N, normalize(L + V)), 0.0), n) * (n + 8.0) / 64.0);\n"
+	"			vec3 gc = omBC[i].rgb * (att * att * ndl * pow(max(dot(N, normalize(L + V)), 0.0), n) * (n + 8.0) / 64.0);\n"
+	"			if (dot(gc, vec3(1.0)) > 0.003) acc += gc * LampVis(P, Lp);\n"
 	"		}\n"
 	"		add += min(acc, vec3(1.5)) * fr * clamp(m.a * 1.6 - 0.05, 0.0, 1.0) * glint.x;\n"
 	"	}\n"
