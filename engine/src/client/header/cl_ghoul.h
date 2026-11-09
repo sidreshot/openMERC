@@ -66,6 +66,8 @@ struct entity_state_s;
 void CL_Ghoul_EntityValues(struct entity_s *ent, const struct entity_state_s *s);
 int CL_Ghoul_AddEntity(struct entity_s *ent, const struct entity_state_s *s, int own);
 void CL_Ghoul_AddViewWeapon(void);
+void CL_Ghoul_SpinInstances(const short *v); /* effects bit 0x0001 with instance handles */
+void CL_Ghoul_SpinFrame(void);
 
 /* menus (m_model.c): draws one root menu model at screen point (x, y) with the menu clock; camerapart =
    the model's `forced_camera` part or 0. The caller has entered the renderer's menu-model mode. */

@@ -445,6 +445,150 @@ CL_Ghoul_AddEntity(entity_t *ent, const entity_state_t *s, int own)
 	return true;
 }
 
+/* SPEC-400 "Entity effects bits", 0x0001 rotate with instance handles (v4..v7 != 0): each existing instance turns
+   about its own axes by w = (v1, v2, v3) / 512 radians per second of game time (the game's wheels give
+   speed * pi / 94: a 30-unit wheel rolling; its fans 1.5 .. 31). It was never drawn: the big fan of irq2a stood,
+   the wheels of the driving trucks, the radar dishes. The turn is kept as an angle on top of the instance's own
+   transform, re-captured whenever something else (the server) changed it since the last frame. */
+#define CLG_SPIN_MAX 256
+
+static struct
+{
+	int handle;
+	void *inst;
+	float base[16], last[16], ang[3], clock;
+	int seen;
+} clg_spin[CLG_SPIN_MAX];
+static int clg_spinframe;
+
+static void
+CLG_SpinMatrix(int axis, float a, float r[9])
+{
+	float c = cosf(a), s = sinf(a);
+	int i = (axis + 1) % 3, j = (axis + 2) % 3;
+
+	memset(r, 0, 9 * sizeof(float));
+	r[axis * 3 + axis] = 1;
+	r[i * 3 + i] = c;
+	r[i * 3 + j] = s;
+	r[j * 3 + i] = -s;
+	r[j * 3 + j] = c;
+}
+
+void
+CL_Ghoul_SpinInstances(const short *v)
+{
+	float now = CL_Ghoul_GameClock();
+	int k;
+
+	if (!CL_Ghoul_Active() || !v)
+	{
+		return;
+	}
+
+	for (k = 0; k < 4; k++)
+	{
+		int h = v[4 + k], slot = -1, i, a;
+		void *inst;
+		float cur[16], rot[9], m[16], dt;
+
+		if (!h || !(inst = CLG_FindInstance(h)))
+		{
+			continue;
+		}
+
+		for (i = 0; i < CLG_SPIN_MAX; i++)
+		{
+			if ((clg_spin[i].handle == h) && (clg_spin[i].inst == inst))
+			{
+				slot = i;
+				break;
+			}
+
+			if ((slot < 0) && (!clg_spin[i].handle || (clg_spinframe - clg_spin[i].seen > 120)))
+			{
+				slot = i;
+			}
+		}
+
+		if (slot < 0)
+		{
+			continue;
+		}
+
+		CLG_GetTransform(inst, cur);
+
+		if ((clg_spin[slot].handle != h) || (clg_spin[slot].inst != inst))
+		{
+			memset(&clg_spin[slot], 0, sizeof(clg_spin[slot]));
+			clg_spin[slot].handle = h;
+			clg_spin[slot].inst = inst;
+			memcpy(clg_spin[slot].base, cur, sizeof(cur));
+			clg_spin[slot].clock = now;
+		}
+		else if (memcmp(cur, clg_spin[slot].last, sizeof(cur)))
+		{
+			memcpy(clg_spin[slot].base, cur, sizeof(cur)); /* the server set it anew */
+			VectorClear(clg_spin[slot].ang);
+		}
+
+		if (clg_spin[slot].seen == clg_spinframe)
+		{
+			continue; /* drawn twice this frame */
+		}
+
+		clg_spin[slot].seen = clg_spinframe;
+		dt = now - clg_spin[slot].clock;
+		clg_spin[slot].clock = now;
+
+		if ((dt < 0) || (dt > 0.25f))
+		{
+			dt = 0;
+		}
+
+		for (a = 0; a < 3; a++)
+		{
+			clg_spin[slot].ang[a] = fmodf(clg_spin[slot].ang[a] + v[1 + a] / 512.0f * dt, 2 * (float)M_PI);
+		}
+
+		/* row vectors: p' = p * Rx * Ry * Rz * base (the turn in the instance's own space, about its origin) */
+		memcpy(m, clg_spin[slot].base, sizeof(m));
+
+		for (a = 2; a >= 0; a--)
+		{
+			float t[12];
+			int r, c;
+
+			if (clg_spin[slot].ang[a] == 0)
+			{
+				continue;
+			}
+
+			CLG_SpinMatrix(a, clg_spin[slot].ang[a], rot);
+
+			for (r = 0; r < 3; r++)
+			{
+				for (c = 0; c < 4; c++)
+				{
+					t[r * 4 + c] = rot[r * 3] * m[c] + rot[r * 3 + 1] * m[4 + c] + rot[r * 3 + 2] * m[8 + c];
+				}
+			}
+
+			memcpy(m, t, sizeof(t));
+		}
+
+		CLG_SetTransform(inst, m);
+		CLG_GetTransform(inst, clg_spin[slot].last);
+	}
+}
+
+/* once per client frame, before the packet entities (cl_sof.c) */
+void
+CL_Ghoul_SpinFrame(void)
+{
+	clg_spinframe++;
+}
+
 /* SPEC-310 13.5: the model's own transform (re-captured whenever something else changed it since the last
    frame) times a translation in model space, stored back on the instance */
 static void

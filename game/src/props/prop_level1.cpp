@@ -241,11 +241,17 @@ static void drive_think(edict_t *self)
 		self->velocity[2] = 0;
 		if (V < 5)
 			d.i0 = DV_STOP;
+		/* OpenMerc: the wheels slow down with the truck (the client now turns them: they kept the cruise speed) */
+		if (d.i2 == 2)
+			WheelRecord(self, HLen(self->velocity) * (float)M_PI / 94, d.i1, 4);
+		else
+			WheelUpdate(self);
 		break;
 	}
 	default:
 		VectorClear(self->velocity);
 		self->movetype = MOVETYPE_NONE;
+		fx::RotationClear(self); /* OpenMerc: a stopped truck's wheels stand (they turned on for ever) */
 		StopLoop(self);
 		self->think = NULL;
 		self->nextthink = 0;

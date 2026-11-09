@@ -2326,6 +2326,8 @@ CL_SoF_AddPacketEntities(frame_t *frame)
 	int pnum, i;
 	vec3_t mins, maxs;
 
+	CL_Ghoul_SpinFrame(); /* the turning instances turn once per frame */
+
 	for (pnum = 0; pnum < frame->num_entities; pnum++)
 	{
 		s1 = &cl_parse_entities[(frame->parse_entities + pnum) & (MAX_PARSE_ENTITIES - 1)];
@@ -2366,6 +2368,22 @@ CL_SoF_AddPacketEntities(frame_t *frame)
 		/* I1c: angles (negated with a secondary model index, the real-time auto-rotate yaw), frame (with the
 		   auto-animation effect bits), old frame, back-lerp, alpha (SPEC-AMEND-006 I1c.2, I1c.7) */
 		CL_Ghoul_EntityValues(&ent, s1);
+
+		/* OpenMerc: effects bit 0x0001, rotate (SPEC-400): the whole entity (no instance handles) or its Ghoul
+		   instances (fans, wheels, radar dishes) - neither was drawn */
+		if (s1->effects & 0x0001)
+		{
+			const short *v = CLFX_StateSlots(s1);
+
+			if (v && (v[4] || v[5] || v[6] || v[7]))
+			{
+				CL_Ghoul_SpinInstances(v);
+			}
+			else if (v)
+			{
+				CLFX_EntityAngles(s1, ent.angles, ent.angles);
+			}
+		}
 
 		/* inline brush models are real geometry */
 		if ((s1->modelindex > 0) && (s1->modelindex < MAX_MODELS) &&
