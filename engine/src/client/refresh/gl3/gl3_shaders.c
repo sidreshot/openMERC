@@ -1825,7 +1825,8 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 				// the ripples and the swell catch the light: slopes facing the viewer brighter, the others darker
 				vec2 toEye = liqV.xy / max(length(liqV.xy), 0.001);
-				c.rgb *= max(1.0 + dot(liqN.xy, toEye) * 0.8, 0.4);
+				float slopeLit = max(1.0 + dot(liqN.xy, toEye) * 1.0, 0.35);
+				c.rgb *= slopeLit;
 
 				// mode 2: the light under the surface dances (caustics through the texture)
 				if(omLiq.x > 1.5)
@@ -1846,17 +1847,17 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					vec2 suv = vec2(atan(Rs.y, Rs.x) * 0.15915494 + 0.5, asin(min(Rs.z, 1.0)) * 0.63661977);
 					vec3 sky = texture(omLiqReflTex, suv).rgb;
 					float blot = (omLiqRefl.w > 0.5) ? texture(omLiqTile, R.xy * 0.35 + passFxWorld.xy * 0.0007).b : 0.5;
-					vec3 room = lit * (0.35 + 0.7 * blot) * mix(1.0, 0.65, clamp(R.z, 0.0, 1.0));
+					vec3 room = lit * (0.55 + 0.45 * blot) * mix(1.0, 0.65, clamp(R.z, 0.0, 1.0));
 					env = mix(room, sky, clamp(passLiqSky, 0.0, 1.0));
 				}
 				// tinted a little by the water's own colour; weaker where the traced reflection (r_om_ssr) adds its own
 				vec3 envT = env * mix(vec3(1.0), normalize(liqT.rgb + 0.05) * 1.6, 0.25);
-				float rf = clamp(0.1 + 0.9 * fres, 0.0, 1.0) * ((omLiq.w > 0.5) ? 0.35 : 0.85);
+				float rf = clamp(0.2 + 0.8 * fres, 0.0, 1.0) * ((omLiq.w > 0.5) ? 0.6 : 0.85);
 				if(liqV.z < 0.0) rf *= 0.3;
 				vec3 body = c.rgb;
 				c.rgb = mix(body * 0.8, envT, rf);
 
-				c.rgb += spec * max(omLiq.z, 0.0) * lit * 0.35;
+				c.rgb += spec * max(omLiq.z, 0.0) * lit * 0.6;
 				if(omLiq.z < -0.5) { c = vec4(env, 1.0); return_env = 1.0; }
 
 				if(return_env < 0.5 && omLiqEye.w > 1.5 && liqV.z > 0.0)
@@ -1869,7 +1870,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					float surfD = omEyeDist(gl_FragCoord.z);
 					float scene = omEyeDist(texture(omDepth, uv).r);
 					float thick = max(scene - surfD, 0.0);
-					vec2 ruv = uv + liqN.xy * 0.045 * clamp(thick / 40.0, 0.0, 1.0) / max(surfD * 0.004, 1.0);
+					vec2 ruv = uv + liqN.xy * 0.08 * clamp(thick / 30.0, 0.0, 1.0) / max(surfD * 0.003, 1.0);
 					float rD = omEyeDist(texture(omDepth, ruv).r);
 					if(rD < surfD)
 					{
@@ -1883,9 +1884,11 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					vec3 tint = normalize(liqT.rgb + 0.02) * 0.9;
 					vec3 trans = exp(-max(rD - surfD, 0.0) * (1.0 - tint) * 0.012);
 					vec3 refr = mix(tex0 * 0.6, behind * mix(vec3(1.0), tint * 1.3, 0.35), trans);
-					// the texture's own pattern over it, a little; the reflection over all
-					refr = mix(refr, body, 0.15);
-					c.rgb = mix(refr, envT, rf) + spec * omLiq.z * lit * 0.35;
+					// the ripples lighten and darken what is seen through them too, the water keeps a colour of its own
+					// (its texture, a third) - clear shallow water must not vanish; the reflection over all
+					refr *= mix(1.0, slopeLit, 0.7);
+					refr = mix(refr, body, 0.3);
+					c.rgb = mix(refr, envT, rf) + spec * max(omLiq.z, 0.0) * lit * 0.6;
 					float shore = 1.0 - clamp(thick / (10.0 + 6.0 * sin(omLiq.y * 1.3 + passFxWorld.x * 0.05 +
 						passFxWorld.y * 0.04)), 0.0, 1.0);
 					float fn = omLiqNoise(passFxWorld.xy * 0.12 + liqN.xy * 3.0 + omLiq.y * 0.3) * 0.6 +

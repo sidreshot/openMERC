@@ -735,7 +735,10 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 		if (!translucent && r_om_water_clear->value && (r_om_water_quality->value >= 2) && !GL3_Mirror_InPass() &&
 			GL3_Post_DepthCopyPossible())
 		{
-			GL3_FX_AddAlphaSurface(surf, ent);
+			/* the world's entity is a local of GL3_DrawWorld (gone by the sorted pass): NULL for the world;
+			   inline models keep theirs (r_newrefdef.entities, alive for the frame) */
+			GL3_FX_AddAlphaSurface(surf, (ent && ent->model && (ent->model != (struct model_s *)gl3_worldmodel)) ?
+				ent : NULL);
 			return;
 		}
 

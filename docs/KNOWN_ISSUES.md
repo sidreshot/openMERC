@@ -191,6 +191,10 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
   Half-Life 2 water: chaotic surface (no visible wave direction or period), reflection + refraction through a
   scrolling normal map, depth fog. Rework the normal: summed scrolled normal-map layers at odd angles/scales instead
   of the sine set.
+- **Mechanisms do not move.** Vehicle wheels do not turn while the vehicles drive; the big fan on irq2a does not
+  spin; the owner sees more such machinery standing still (rotating func_ entities / Ghoul bolt-on animations?).
+- **Weapon choice lost between levels.** Weapons chosen at the loadout screen on arm1 are not there on kos1
+  (the loadout is not carried into the next map).
 - **Intel UHD 610 PC: barely 30 fps even on the minimal preset** (the owner plays it over RDP - Windows caps RDP at
   ~30 fps; to measure at the console with Desktop\openMERC-test.cmd).
 
