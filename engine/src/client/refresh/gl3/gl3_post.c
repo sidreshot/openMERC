@@ -8813,7 +8813,7 @@ static const char *ssr_fs =
 	   of showing the exact pattern of what it hits (arch ribs over the kos1 channel gave stripes) */
 	/* the rippled water (wetness 1 from the water shader): the same normal it is lit by - the ripple tile at the
 	   same scales, angles, drift and time - so the reflection breaks up with the ripples instead of a flat mirror */
-	"	if (rough < 0.12 && m.b > 0.9 && liqp.y > 0.5)\n"
+	"	if (rough < 0.12 && m.b > 0.3 && liqp.y > 0.5)\n"
 	"	{\n"
 	"		vec3 Nw = mat3(invview) * N;\n"
 	"		if (Nw.z > 0.7)\n"
@@ -9161,7 +9161,7 @@ static const char *ssr_apply_fs =
 	"		vec3 N = normalize(mat3(invview) * Nv);\n"
 	/* the rippled water (wetness 1) and wet level ground: level - the depth of the water cut into small lifted
 	   triangles (r_om_water_3d) gave every facet its own glint */
-	"		if (wet > 0.9 && N.z > 0.5) N = vec3(0.0, 0.0, 1.0);\n"
+	"		if (wet > 0.3 && N.z > 0.5) N = vec3(0.0, 0.0, 1.0);\n"
 	"		vec3 wp = (invview * vec4(P, 1.0)).xyz;\n"
 	"		vec3 V = normalize(invview[3].xyz - wp);\n"
 	"		float ndv = max(dot(N, V), 0.0);\n"
