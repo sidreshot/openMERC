@@ -336,6 +336,11 @@ int vec_to_st[6][3] = {
  */
 extern int gl3_sof_extramip;
 
+/* OpenMerc GFX-modern: the brightness of the sky box ("scale <k>" in pics/sky/<name>.txt, 1 without): new skies keep
+   their faces in the full 8-bit range and are darkened here - a night sky stored as dark as SoF's (0..45 of 255) had
+   too few levels and showed steps and blotches over a whole screen */
+float gl3_skyscale = 1.0f;
+
 void
 GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 {
@@ -345,6 +350,7 @@ GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 
 	skyrotate = rotate;
 	VectorCopy(axis, skyaxis);
+	gl3_skyscale = 1.0f;
 
 	for (face = 0; face < 6; face++)
 	{
@@ -377,7 +383,8 @@ GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 	s = buf;
 	face = 0;
 
-	while ((s < buf + len) && (face < 6))
+	/* six face lines; OpenMerc reads on after them for "scale" */
+	while (s < buf + len)
 	{
 		char line[MAX_QPATH];
 		int n = 0;
@@ -405,9 +412,27 @@ GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 			s++;
 		}
 
-		if (line[0] && Q_stricmp(line, "none"))
+		/* OpenMerc: "scale <k>" is no face */
+		if (!Q_strncasecmp(line, "scale ", 6))
 		{
-			sky_images[face] = GL3_SoF_FindImage(line, SOFIMG_SKY, true);
+			gl3_skyscale = Q_clamp((float)atof(line + 6), 0.01f, 4.0f);
+			continue;
+		}
+
+		if ((face < 6) && line[0] && Q_stricmp(line, "none"))
+		{
+			const char *ext = strrchr(line, '.');
+
+			/* OpenMerc: a face with an extension is a picture of any size (.jpg / .png / .tga: the new skies of
+			   zz_openmerc.pak), the others SoF's .m32 */
+			if (ext && (!Q_stricmp(ext, ".jpg") || !Q_stricmp(ext, ".png") || !Q_stricmp(ext, ".tga")))
+			{
+				sky_images[face] = GL3_FindImage(line, it_sky);
+			}
+			else
+			{
+				sky_images[face] = GL3_SoF_FindImage(line, SOFIMG_SKY, true);
+			}
 		}
 
 		face++;
@@ -415,6 +440,20 @@ GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 
 	ri.FS_FreeFile(buf);
 	gl3_sof_extramip = 0;
+
+	/* the half-texel clamp of the face edges for the face size (SoF's are 512) */
+	if ((rotate == 0) && !(gl_skymip && gl_skymip->value))
+	{
+		for (face = 0; face < 6; face++)
+		{
+			if (sky_images[face] && (sky_images[face]->width > 512))
+			{
+				sky_min = 0.5f / sky_images[face]->width;
+				sky_max = 1.0f - sky_min;
+				break;
+			}
+		}
+	}
 }
 
 void
@@ -836,6 +875,24 @@ GL3_DrawSkyBox(void)
 	GL3_SetDrawCmdTransMatrix(&drawCmd, modMVmat);
 
 	GL3_SetDrawCmdShader(&drawCmd, &gl3state.si3Dsky);
+
+	/* the sky's brightness (gl3_skyscale) */
+	{
+		static GLuint prog;
+		static GLint loc = -1;
+
+		if (prog != gl3state.si3Dsky.shaderProgram)
+		{
+			prog = gl3state.si3Dsky.shaderProgram;
+			loc = glGetUniformLocation(prog, "omSkyScale");
+		}
+
+		if (loc != -1)
+		{
+			GL3_UseProgram(prog);
+			glUniform1f(loc, gl3_skyscale);
+		}
+	}
 
 	// TODO: this could all be done in one drawcall.. but.. whatever, it's <= 6 drawcalls/frame
 	//       also, they use different textures..

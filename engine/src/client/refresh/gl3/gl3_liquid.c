@@ -465,9 +465,9 @@ MakeEnv(void)
 			if (n)
 			{
 				any = true;
-				acc[y][x][0] = sum[0] / n;
-				acc[y][x][1] = sum[1] / n;
-				acc[y][x][2] = sum[2] / n;
+				acc[y][x][0] = sum[0] / n * gl3_skyscale; /* the sky's brightness (gl3_warp.c) */
+				acc[y][x][1] = sum[1] / n * gl3_skyscale;
+				acc[y][x][2] = sum[2] / n * gl3_skyscale;
 			}
 			else
 			{
