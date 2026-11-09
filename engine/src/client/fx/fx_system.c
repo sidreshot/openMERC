@@ -396,7 +396,8 @@ FX_ClearRunning(void)
 static qboolean
 FX_IsPriority(const fx_params_t *p)
 {
-	return ((p->mode == FXA_ENTITY) || (p->mode == FXA_BOLT)) && (p->ent > 0) && FX_IsLocalPlayer(p->ent);
+	return (p->mode == FXA_VIEWBOLT) ||
+		(((p->mode == FXA_ENTITY) || (p->mode == FXA_BOLT)) && (p->ent > 0) && FX_IsLocalPlayer(p->ent));
 }
 
 /* frees a running effect before its slot is reused: its particles live on unowned
@@ -649,6 +650,39 @@ FX_RefreshAttachment(fx_run_t *r)
 	{
 		case FXA_POSITION:
 			return; /* position mode never changes */
+
+		case FXA_VIEWBOLT:
+		{
+			/* OpenMerc: the shooter's own effects at the view weapon's bolt (the muzzle), aimed at the point
+			   under the crosshair: line emitters and beams end there (pos2) instead of at the world origin */
+			vec3_t vf, vr, vu, dir;
+
+			AngleVectors(cl.refdef.viewangles, vf, vr, vu);
+			VectorMA(cl.refdef.vieworg, 1024, vf, end);
+			FX_Trace(cl.refdef.vieworg, NULL, NULL, end, FXTR_WORLD, &tr, &hit);
+			VectorCopy(tr.endpos, p->pos2);
+			p->has_pos2 = true;
+
+			if (!FXG_ViewBoltFrame(p->boltname, p->origin, p->fwd, p->right, p->up))
+			{
+				VectorCopy(cl.refdef.vieworg, p->origin); /* no view model bolt: the view, as before */
+			}
+
+			VectorSubtract(p->pos2, p->origin, dir);
+
+			if (VectorNormalize(dir) > 1)
+			{
+				FX_AxesFromDir(dir, p->fwd, p->right, p->up);
+			}
+			else
+			{
+				VectorCopy(vf, p->fwd);
+				VectorCopy(vr, p->right);
+				VectorCopy(vu, p->up);
+			}
+
+			return;
+		}
 
 		case FXA_ENTITY:
 		case FXA_BOLT:
@@ -1245,11 +1279,12 @@ CLFX_ViewWeaponNote(const char *note, qboolean shown, float fov)
 		Q_strlcpy(bolt, "exhause_l", sizeof(bolt));
 	}
 
-	/* attached to the bolt of the view model; without view-model bolts from
-	   the Ghoul system the effect follows the view */
+	/* attached to the bolt of the view model (OpenMerc: FXA_VIEWBOLT; it used to follow the eye, and line
+	   effects without an end point ran to the world origin - the owner's "broken" MPG) */
 	FX_DefaultParams(&p);
-	p.mode = FXA_ENTITY;
+	p.mode = FXA_VIEWBOLT;
 	p.ent = cl.playernum + 1;
+	Q_strlcpy(p.boltname, bolt, sizeof(p.boltname));
 	/* OpenMerc test trace (SPEC-AMEND-011 gates 3 and 6): the own entity must be in the frame, bit 0x4000 clear */
 	if (fx_trace && fx_trace->value)
 	{

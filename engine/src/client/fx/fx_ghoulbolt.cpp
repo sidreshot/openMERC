@@ -156,6 +156,53 @@ FXGB_MuzzleMatrix(int handle, float time, float out[16])
 	return 0;
 }
 
+/* OpenMerc: the bolt of that name on the instance or on a model hanging on it (two levels), in the root
+   instance's entity space - the view weapon's `flash` for the shooter's own effects (SPEC-400 View weapon 1) */
+static int NamedBolt(IGhoulInst *inst, const char *name, float time, float out[16], int depth)
+{
+	IGhoulObject *obj = inst ? inst->GetGhoulObject() : nullptr;
+	GhoulID id;
+	int i, n;
+
+	if (!obj)
+	{
+		return 0;
+	}
+
+	id = obj->FindPart(name);
+
+	if (id && Bolt(inst, id, time, out))
+	{
+		return 1;
+	}
+
+	if (depth <= 0)
+	{
+		return 0;
+	}
+
+	n = inst->NumChildren();
+
+	for (i = 0; i < n; i++)
+	{
+		GhoulID at = 0;
+		IGhoulInst *child = inst->GetChild(i, &at);
+
+		if (child && NamedBolt(child, name, time, out, depth - 1))
+		{
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+extern "C" int
+FXGB_NamedBoltMatrix(int handle, const char *name, float time, float out[16])
+{
+	return (name && name[0]) ? NamedBolt(Inst(handle), name, time, out, 2) : 0;
+}
+
 /* SPEC-401 type 37: whether the instance's model has a part of that name and it is switched on */
 extern "C" int
 FXGB_HasActivePart(int handle, const char *name)

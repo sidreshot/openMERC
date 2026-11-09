@@ -17,12 +17,14 @@
 
 #include "fx_local.h"
 #include "../header/cl_ghoul.h"
+#include "../header/sofclient.h"
 
 /* fx_ghoulbolt.cpp */
 int FXGB_BoltMatrix(int handle, int bolt, float time, float out[16]);
 int FXGB_RandomPart(int handle, int (*rnd)(int));
 int FXGB_MuzzleMatrix(int handle, float time, float out[16]);
 int FXGB_HasActivePart(int handle, const char *name);
+int FXGB_NamedBoltMatrix(int handle, const char *name, float time, float out[16]);
 
 /* fx_ghoulmodel.cpp */
 void *FXGM_Model(const char *path);
@@ -252,6 +254,32 @@ FXG_BoltFrame(int ent, int ghoul_inst, int bolt, qboolean random, vec3_t org, ve
 		VectorCopy(w[0], up);
 	}
 
+	return true;
+}
+
+/* OpenMerc: a bolt of the view weapon (the shooter's own effects, SPEC-400 View weapon 1): the view model is
+   drawn at the view origin with the view angles (cl_ghoul.c CL_Ghoul_AddViewWeapon, gl3_ghoul.c EntityMatrix);
+   false when there is no view weapon or no such bolt */
+qboolean
+FXG_ViewBoltFrame(const char *name, vec3_t org, vec3_t fwd, vec3_t right, vec3_t up)
+{
+	const sofps_t *x = CL_SoF_CurrentPS();
+	vec3_t axes[3], r, w[4];
+	float b[16];
+
+	if (!CL_Ghoul_Active() || !x || !x->gun_id ||
+		!FXGB_NamedBoltMatrix(x->gun_id, name, CL_Ghoul_GameClock(), b))
+	{
+		return false;
+	}
+
+	AngleVectors(cl.refdef.viewangles, axes[0], r, axes[2]);
+	VectorNegate(r, axes[1]);
+	FXG_ToWorld(b, axes, cl.refdef.vieworg, w);
+	VectorCopy(w[3], org);
+	VectorCopy(w[2], fwd);
+	VectorCopy(w[1], right);
+	VectorCopy(w[0], up);
 	return true;
 }
 

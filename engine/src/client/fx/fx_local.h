@@ -40,6 +40,7 @@ enum
 	FXA_POSITION = 0,
 	FXA_ENTITY,
 	FXA_BOLT,
+	FXA_VIEWBOLT,                 /* OpenMerc: a bolt of the view weapon (boltname), the end at the crosshair */
 	FXA_PARTICLE
 };
 
@@ -132,6 +133,7 @@ typedef struct
 	qboolean bolt_reversed;
 	qboolean trace_pos2;          /* svc_effect flag 0x20 */
 	int part, part_serial;        /* FXA_PARTICLE: followed particle */
+	char boltname[32];            /* FXA_VIEWBOLT */
 } fx_params_t;
 
 typedef struct
@@ -396,6 +398,7 @@ qboolean FXG_Available(void);
 qboolean FXG_MuzzlePoint(int shooter, vec3_t out);
 qboolean FXG_InstanceHasPart(int handle, const char *name);
 void FX_FleshDrops(const vec3_t org, const vec3_t n, int r, int g, int b, int a, float size);
+qboolean FXG_ViewBoltFrame(const char *name, vec3_t org, vec3_t fwd, vec3_t right, vec3_t up);
 qboolean FXG_BoltFrame(int ent, int ghoul_inst, int bolt, qboolean random, vec3_t org,
 		vec3_t fwd, vec3_t right, vec3_t up, qboolean reversed);
 
