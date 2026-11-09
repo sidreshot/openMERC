@@ -480,6 +480,9 @@ qboolean GL3_Beam_Capture(const float *clip, const float *st, int numverts, int 
 void GL3_Beam_AddCasterTris(const float *clip, int numverts, int stride);
 int GL3_Beam_Pools(const float **data);
 void GL3_Post_Beams(void);
+void GL3_Post_SkyRays(void);
+qboolean GL3_SkyLight(vec3_t dir, vec3_t color);
+qboolean GL3_CSM_SunDir(vec3_t dir, vec3_t color);
 
 
 #endif

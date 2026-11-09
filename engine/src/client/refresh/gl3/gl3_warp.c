@@ -341,6 +341,24 @@ extern int gl3_sof_extramip;
    too few levels and showed steps and blotches over a whole screen */
 float gl3_skyscale = 1.0f;
 
+/* OpenMerc GFX-modern r_om_skyrays: the light painted on the sky box ("light <x y z> [<r g b>]" in
+   pics/sky/<name>.txt: the direction toward the moon or sun, in the world's axes, and its colour) */
+static qboolean skylight_valid;
+static vec3_t skylight_dir, skylight_color;
+
+qboolean
+GL3_SkyLight(vec3_t dir, vec3_t color)
+{
+	if (!skylight_valid)
+	{
+		return false;
+	}
+
+	VectorCopy(skylight_dir, dir);
+	VectorCopy(skylight_color, color);
+	return true;
+}
+
 void
 GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 {
@@ -351,6 +369,7 @@ GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 	skyrotate = rotate;
 	VectorCopy(axis, skyaxis);
 	gl3_skyscale = 1.0f;
+	skylight_valid = false;
 
 	for (face = 0; face < 6; face++)
 	{
@@ -410,6 +429,22 @@ GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 		if ((s < buf + len) && (*s == 10))
 		{
 			s++;
+		}
+
+		/* OpenMerc: "light <x y z> [<r g b>]" is no face (a rotating sky has no fixed light) */
+		if (!Q_strncasecmp(line, "light ", 6))
+		{
+			vec3_t d, c = {1, 1, 1};
+			int k = sscanf(line + 6, "%f %f %f %f %f %f", &d[0], &d[1], &d[2], &c[0], &c[1], &c[2]);
+
+			if ((k >= 3) && (VectorNormalize(d) > 0) && (rotate == 0))
+			{
+				VectorCopy(d, skylight_dir);
+				VectorCopy(c, skylight_color);
+				skylight_valid = true;
+			}
+
+			continue;
 		}
 
 		/* OpenMerc: "scale <k>" is no face */

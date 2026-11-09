@@ -329,14 +329,16 @@ static void Cmd_Gimme_f(edict_t *ent)
 	if (!CheatsOK(ent) || gi.argc() < 2)
 		return;
 	char *name = gi.argv(1);
-	vec3_t fwd;
-	AngleVectors(ent->client->v_angle, fwd, NULL, NULL);
+	/* OpenMerc test aid: gimme <class> [ahead [right]] - that many units ahead (100) and to the right (0), level */
+	float ahead = gi.argc() > 2 ? (float)atof(gi.argv(2)) : 100.0f, side = gi.argc() > 3 ? (float)atof(gi.argv(3)) : 0.0f;
+	vec3_t fwd, right, flat = {0, ent->client->v_angle[YAW], 0};
+	AngleVectors(gi.argc() > 2 ? flat : ent->client->v_angle, fwd, right, NULL);
 	edict_t *e = G_Spawn();
 	e->classname = G_CopyString(name);
 	for (int i = 0; i < 3; i++)
-		e->s.origin[i] = (float)(int)(ent->s.origin[i] + fwd[i] * 100);
+		e->s.origin[i] = (float)(int)(ent->s.origin[i] + fwd[i] * ahead + right[i] * side);
 	e->s.origin[2] = (float)(int)(e->s.origin[2] + 50);
-	e->s.angles[YAW] = ent->client->v_angle[YAW];
+	e->s.angles[YAW] = ent->client->v_angle[YAW] + (gi.argc() > 2 ? 180.0f : 0.0f); /* placed ones face the player */
 	gi.cprintf(NULL, PRINT_HIGH, "Spawning : %s\n", name); // shown without developer, as in mode A (SPEC-006)
 	memset(&st, 0, sizeof(st));
 	ED_CallSpawn(e);

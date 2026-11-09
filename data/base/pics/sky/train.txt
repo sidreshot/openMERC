@@ -4,3 +4,4 @@ textures/sky/om/train_lf.jpg
 textures/sky/om/train_ft.jpg
 textures/sky/om/train_up.jpg
 none
+light -0.343 0.143 0.928 0.72 0.82 1.0

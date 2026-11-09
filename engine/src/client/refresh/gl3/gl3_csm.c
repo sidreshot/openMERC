@@ -1189,6 +1189,20 @@ WantCsm(void)
 	return true;
 }
 
+/* the loaded map's sun (r_om_skyrays): toward it, and its colour */
+qboolean
+GL3_CSM_SunDir(vec3_t dir, vec3_t color)
+{
+	if (!sun.valid)
+	{
+		return false;
+	}
+
+	VectorCopy(sun.tosun, dir);
+	VectorCopy(sun.color, color);
+	return true;
+}
+
 qboolean
 GL3_CSM_Active(void)
 {

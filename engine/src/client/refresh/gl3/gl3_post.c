@@ -10686,6 +10686,369 @@ static const char *uw_fs =
 	"	outColor = vec4(fogc.rgb, clamp(1.0 - exp(-d * fogc.w), 0.0, 0.97));\n"
 	"}\n";
 
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_skyrays: light shafts from the moon or the sun
+ *
+ * The light painted on the sky box ("light" in pics/sky/<name>.txt) or else the map's sun (_sun_angle ...):
+ * a quarter-size mask of the open sky around the light's place on the screen, blurred radially toward it, added
+ * to the view in the light's colour - rays where hills, roofs, trees and characters cut the sky (MGS5 at night:
+ * soft and few; r_om_skyrays_intensity). Nothing when the light is behind the view or no source is known.
+ * ------------------------------------------------------------------ */
+
+static const char *skyrays_mask_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 proj;\n"   /* P22, P32, depth min, depth max */
+	"uniform vec4 sun;\n"    /* light on the view (0..1), aspect, radius */
+	"uniform vec4 texel;\n"  /* one full-size texel in uv */
+	"uniform sampler2D scenetex;\n"
+	"uniform vec4 lum;\n"   /* threshold, gain, 1 = the view's colour is there */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"float sky(vec2 t)\n"
+	"{\n"
+	"	float z = texture(depthtex, t).r;\n"
+	"	float ndc = (z - proj.z) / max(proj.w - proj.z, 1e-6) * 2.0 - 1.0;\n"
+	"	return (proj.y / (ndc + proj.x)) > 20000.0 ? 1.0 : 0.0;\n" /* the sky box is 37 800 out */
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	float s = 0.25 * (sky(uv + texel.xy * vec2(-1.0, -1.0)) + sky(uv + texel.xy * vec2(1.0, -1.0)) +\n"
+	"		sky(uv + texel.xy * vec2(-1.0, 1.0)) + sky(uv + texel.xy * vec2(1.0, 1.0)));\n"
+	"	vec2 d = (vuv - sun.xy) * vec2(sun.z, 1.0);\n"
+	"	float r2 = dot(d, d) / (sun.w * sun.w);\n"
+	/* the source: the sky's own bright part (the moon and its halo; painted clouds in front of it break it up), or
+	   a soft disc where the view's colour cannot be read */
+	"	float m;\n"
+	"	if (lum.z > 0.5)\n"
+	"	{\n"
+	"		vec3 c = texture(scenetex, uv).rgb;\n"
+	"		float L = dot(c, vec3(0.299, 0.587, 0.114));\n"
+	"		m = s * max(L - lum.x, 0.0) * lum.y * exp(-r2);\n"
+	"	}\n"
+	"	else\n"
+	"		m = s * (exp(-r2 * 4.0) * 0.5 + exp(-r2 * 30.0) * 0.6);\n"
+	"	outColor = vec4(m, m, m, 1.0);\n"
+	"}\n";
+
+static const char *skyrays_blur_fs =
+	"uniform sampler2D masktex;\n"
+	"uniform vec4 sun;\n"
+	"uniform vec4 prm;\n"    /* decay, length, weight, jitter */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	const int N = 48;\n"
+	"	vec2 delta = (vuv - sun.xy) * prm.y / float(N);\n"
+	/* a per-pixel offset along the ray instead of banding from the 48 steps */
+	"	float j = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n"
+	"	vec2 c = vuv - delta * j * prm.w;\n"
+	"	float w = 1.0, sum = 0.0, norm = 0.0;\n"
+	"	for (int i = 0; i < N; i++)\n"
+	"	{\n"
+	"		sum += texture(masktex, c).r * w;\n"
+	"		norm += w;\n"
+	"		w *= prm.x;\n"
+	"		c -= delta;\n"
+	"	}\n"
+	"	float v = sum / norm * prm.z;\n"
+	"	outColor = vec4(v, v, v, 1.0);\n"
+	"}\n";
+
+static const char *skyrays_add_fs =
+	"uniform sampler2D raytex;\n"
+	"uniform vec4 color;\n"
+	"uniform vec4 sun;\n"   /* light on the view, aspect, the radius of its disc (no rays over the disc itself) */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmissive;\n"
+	"void main()\n"
+	"{\n"
+	"	float v = texture(raytex, vuv).r;\n"
+	"	v = v * v * (3.0 - 2.0 * min(v, 1.0));\n" /* soft knee: faint edges fall away, the cores stay */
+	"	vec2 d = (vuv - sun.xy) * vec2(sun.z, 1.0);\n"
+	"	v *= smoothstep(sun.w, sun.w * 2.5, length(d));\n"
+	"	float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;\n"
+	"	outColor = vec4(max(color.rgb * v + n / 255.0, 0.0), 1.0);\n"
+	"	outEmissive = vec4(0.0);\n"
+	"}\n";
+
+static struct
+{
+	qboolean failed;
+	GLuint pmask, pblur, padd;
+	GLuint tex[2], fbo[2];
+	int w, h;
+} SKR;
+
+static cvar_t *r_om_skyrays, *r_om_skyrays_intensity, *r_om_skyrays_tune;
+extern vec3_t vpn; /* gl3_main.c, the view of this frame */
+
+static qboolean
+SkyRaysTargets(int w, int h)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	int i;
+
+	if (SKR.tex[0] && (SKR.w == w) && (SKR.h == h))
+	{
+		return true;
+	}
+
+	for (i = 0; i < 2; i++)
+	{
+		if (SKR.fbo[i]) glDeleteFramebuffers(1, &SKR.fbo[i]);
+		if (SKR.tex[i]) glDeleteTextures(1, &SKR.tex[i]);
+		SKR.tex[i] = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
+		glGenFramebuffers(1, &SKR.fbo[i]);
+		glBindFramebuffer(GL_FRAMEBUFFER, SKR.fbo[i]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, SKR.tex[i], 0);
+		glDrawBuffers(1, one);
+
+		if (!Complete("sky rays"))
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+			SKR.failed = true;
+			return false;
+		}
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	SKR.w = w;
+	SKR.h = h;
+	return true;
+}
+
+static GLuint
+SkyRaysAddProgram(void)
+{
+	GLuint v = CompilePost(GL_VERTEX_SHADER, post_vs), f = CompilePost(GL_FRAGMENT_SHADER, skyrays_add_fs), p = 0;
+	GLint ok = 0;
+
+	if (v && f)
+	{
+		p = glCreateProgram();
+		glAttachShader(p, v);
+		glAttachShader(p, f);
+		GL3_Post_BindOutputs(p);
+		glLinkProgram(p);
+		glGetProgramiv(p, GL_LINK_STATUS, &ok);
+
+		if (!ok)
+		{
+			glDeleteProgram(p);
+			p = 0;
+		}
+	}
+
+	if (v) glDeleteShader(v);
+	if (f) glDeleteShader(f);
+	return p;
+}
+
+void
+GL3_Post_SkyRays(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	vec3_t dir, color;
+	float clip[4], sx, sy, facing, fade, aspect, rect[4], inten, edge;
+	float tune_thr, tune_len, tune_decay, tune_str;
+	const float *m;
+	int k, w, h;
+	qboolean painted;
+
+	if (!r_om_skyrays)
+	{
+#ifdef YQ2_GL3_GLES3
+		r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
+#else
+		r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "1", CVAR_ARCHIVE);
+#endif
+		r_om_skyrays_intensity = ri.Cvar_Get("r_om_skyrays_intensity", "1", CVAR_ARCHIVE);
+		/* threshold, length, decay, strength (tuning; empty = the defaults) */
+		r_om_skyrays_tune = ri.Cvar_Get("r_om_skyrays_tune", "", 0);
+	}
+
+	if (!P.bound || SKR.failed || (r_om_skyrays->value <= 0) || !gl3_worldmodel || !P.depthfbo || !P.texdepthcopy ||
+		(r_newrefdef.rdflags & (RDF_NOWORLDMODEL | RDF_UNDERWATER | SOF_RDF_IRGOGGLES)))
+	{
+		return;
+	}
+
+	/* the light: painted on the sky (its colour as given), else the map's sun */
+	painted = GL3_SkyLight(dir, color);
+
+	if (!painted && !GL3_CSM_SunDir(dir, color))
+	{
+		return;
+	}
+
+	facing = DotProduct(dir, vpn);
+
+	if (facing <= 0.05f)
+	{
+		return;
+	}
+
+	/* where it is on the view: the direction through the view-projection (w = 0, a point at infinity) */
+	m = &gl3state.uni3DData.transProjViewMat4.Elements[0][0];
+
+	for (k = 0; k < 4; k++)
+	{
+		clip[k] = m[k] * dir[0] + m[4 + k] * dir[1] + m[8 + k] * dir[2];
+	}
+
+	if (clip[3] <= 1e-4f)
+	{
+		return;
+	}
+
+	sx = clip[0] / clip[3] * 0.5f + 0.5f;
+	sy = clip[1] / clip[3] * 0.5f + 0.5f;
+
+	/* fades out as it leaves the view (rays from a light just off the edge still show) */
+	edge = Q_max(Q_max(-sx, sx - 1.0f), Q_max(-sy, sy - 1.0f));
+	fade = Q_clamp(1.0f - edge / 0.35f, 0.0f, 1.0f) * Q_clamp((facing - 0.05f) / 0.3f, 0.0f, 1.0f);
+
+	if (fade <= 0.0f)
+	{
+		return;
+	}
+
+	if (!SKR.pmask)
+	{
+		SKR.pmask = LinkPost(skyrays_mask_fs);
+		SKR.pblur = LinkPost(skyrays_blur_fs);
+		SKR.padd = SkyRaysAddProgram();
+
+		if (!SKR.pmask || !SKR.pblur || !SKR.padd)
+		{
+			R_Printf(PRINT_ALL, "r_om_skyrays: shader failed, no light shafts\n");
+			SKR.failed = true;
+			return;
+		}
+
+		GL3_UseProgram(SKR.pmask);
+		glUniform1i(glGetUniformLocation(SKR.pmask, "depthtex"), 0);
+		glUniform1i(glGetUniformLocation(SKR.pmask, "scenetex"), 1);
+		GL3_UseProgram(SKR.pblur);
+		glUniform1i(glGetUniformLocation(SKR.pblur, "masktex"), 0);
+		GL3_UseProgram(SKR.padd);
+		glUniform1i(glGetUniformLocation(SKR.padd, "raytex"), 0);
+	}
+
+	w = Q_max(P.vw / 4, 1);
+	h = Q_max(P.vh / 4, 1);
+
+	if (!SkyRaysTargets(w, h))
+	{
+		return;
+	}
+
+	GL3_Draw3DBatchesNow();
+	GL3_FX_Flush();
+
+	/* the full depth of the view (models and effects included) */
+	if (!P.depthfinal)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		P.depthfinal = true;
+	}
+
+	rect[0] = (float)P.vx / P.w;
+	rect[1] = (float)P.vy / P.h;
+	rect[2] = (float)P.vw / P.w;
+	rect[3] = (float)P.vh / P.h;
+	aspect = (float)P.vw / (float)Q_max(P.vh, 1);
+
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glDisable(GL_BLEND);
+	glDisable(GL_SCISSOR_TEST);
+
+	/* the view's colour so far (multisampled: resolved into the scene texture, as the water copy does; the end of
+	   the view resolves again) */
+	if (P.samples)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.resolvefbo[0]);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
+
+	{
+		float t[4] = {0.35f, 0.80f, 0.94f, 1.0f};
+
+		if (r_om_skyrays_tune->string[0])
+		{
+			sscanf(r_om_skyrays_tune->string, "%f %f %f %f", &t[0], &t[1], &t[2], &t[3]);
+		}
+
+		tune_thr = t[0];
+		tune_len = t[1];
+		tune_decay = t[2];
+		tune_str = t[3];
+	}
+
+	/* 1: the open sky around the light, a quarter of the size */
+	glBindFramebuffer(GL_FRAMEBUFFER, SKR.fbo[0]);
+	glViewport(0, 0, w, h);
+	GL3_UseProgram(SKR.pmask);
+	glUniform4fv(glGetUniformLocation(SKR.pmask, "rect"), 1, rect);
+	glUniform4f(glGetUniformLocation(SKR.pmask, "proj"), gl3state.projMat3D.Elements[2][2],
+		gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+	glUniform4f(glGetUniformLocation(SKR.pmask, "sun"), sx, sy, aspect, 0.45f);
+	glUniform4f(glGetUniformLocation(SKR.pmask, "texel"), 1.5f / P.w, 1.5f / P.h, 0, 0);
+	glUniform4f(glGetUniformLocation(SKR.pmask, "lum"), tune_thr, 1.0f / Q_max(1.0f - tune_thr, 0.05f),
+		P.texcolor ? 1.0f : 0.0f, 0);
+	BindTex(GL_TEXTURE1, P.texcolor);
+	BindTex(GL_TEXTURE0, P.texdepthcopy);
+	DrawQuad();
+
+	/* 2: blurred toward the light */
+	glBindFramebuffer(GL_FRAMEBUFFER, SKR.fbo[1]);
+	GL3_UseProgram(SKR.pblur);
+	glUniform4f(glGetUniformLocation(SKR.pblur, "rect"), 0, 0, 1, 1);
+	glUniform4f(glGetUniformLocation(SKR.pblur, "sun"), sx, sy, aspect, 0);
+	glUniform4f(glGetUniformLocation(SKR.pblur, "prm"), tune_decay, tune_len, 1.6f, 1.0f);
+	BindTex(GL_TEXTURE0, SKR.tex[0]);
+	DrawQuad();
+
+	/* 3: added to the view in the light's colour */
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	glDrawBuffers(1, one);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	inten = Q_clamp(r_om_skyrays_intensity->value, 0.0f, 4.0f) * fade * tune_str * (painted ? 0.5f : 0.6f);
+	GL3_UseProgram(SKR.padd);
+	glUniform4f(glGetUniformLocation(SKR.padd, "rect"), 0, 0, 1, 1);
+	/* the disc: the painted moon is about 4 degrees across in radius (train); half a degree for a sun */
+	glUniform4f(glGetUniformLocation(SKR.padd, "sun"), sx, sy, aspect,
+		0.5f * tanf((painted ? 4.5f : 1.0f) * (float)M_PI / 180.0f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f));
+	glUniform4f(glGetUniformLocation(SKR.padd, "color"), color[0] * inten, color[1] * inten, color[2] * inten, 0);
+	BindTex(GL_TEXTURE0, SKR.tex[1]);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+	DrawQuad();
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+
+	SceneBuffers();
+	gl3state.currentlightmap = -1;
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+	P.depthcopied = true;
+}
+
 void
 GL3_Post_Underwater(void)
 {
