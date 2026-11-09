@@ -1947,7 +1947,8 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 			if(omEmis.w > 1.5) outEmissive = vec4(omEmis.xyz, outColor.a);
 			else if(omEmis.w > 0.5) outEmissive = vec4(outColor.rgb * omEmis.x, outColor.a);
-			if(omFxMat.x > 0.0) outMaterial = vec4(omFxMat.x, omFxMat.x * omFxMat.y, 0.0, outColor.a);
+			// r_om_water: wetness 1 marks the rippled water for the traced reflection (it rebuilds the same normal)
+			if(omFxMat.x > 0.0) outMaterial = vec4(omFxMat.x, omFxMat.x * omFxMat.y, (omLiq.x > 0.5) ? 1.0 : 0.0, outColor.a);
 		}
 );
 

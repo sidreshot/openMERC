@@ -617,6 +617,16 @@ SubdivTri(const gl3fxvtx_t *a, const gl3fxvtx_t *b, const gl3fxvtx_t *c, int dep
 	subdivbuf[subdivn++] = *c;
 }
 
+/* the ripple tile for the traced reflection (gl3_post.c): its texture, 0 before the first water face; the time the
+   water moves by; 1 when the third, finest layer is on (quality 2) */
+GLuint
+GL3_Liquid_Tile(float *time, float *fine)
+{
+	*time = GL3_GameTime();
+	*fine = (r_om_water_quality && (r_om_water_quality->value >= 2)) ? 1.0f : 0.0f;
+	return (r_om_water && r_om_water->value) ? liqtile : 0;
+}
+
 /* units 2 and 3 belong to the lightmaps and the post passes: what is bound there is put back after the water */
 static GLint savedtex[2];
 

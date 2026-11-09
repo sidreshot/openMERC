@@ -8723,7 +8723,7 @@ static struct
 	GLuint prog, progapply, progsmooth, progtemp;
 	GLint t_cur, t_hist, t_depth, t_rect, t_proj, t_proj2, t_size, t_reproj, t_keep;
 	GLint u_depth, u_mat, u_col, u_rect, u_proj, u_proj2, u_params, u_texel, u_frame, u_strength, u_reproj;
-	GLint u_inv, u_ripple;
+	GLint u_inv, u_ripple, u_liqp;
 	GLint a_ref, a_sm, a_depth, a_rect, a_proj, a_proj2, a_size, a_texel, a_inv, a_glint;
 	GLint m_depth, m_src, m_rect, m_proj, m_proj2, m_params, m_texel;
 } SR;
@@ -8735,6 +8735,8 @@ static const char *ssr_fs =
 	"uniform mat4 reproj;\n"        /* this view space -> the last frame's clip space */
 	"uniform mat4 invview;\n"       /* this view space -> world */
 	"uniform vec2 ripple;\n"        /* time, strength */
+	"uniform sampler2D liqtile;\n"  /* r_om_water: the ripple tile (gl3_liquid.c) */
+	"uniform vec4 liqp;\n"          /* the water's time, 1 = the tile, 1 = its finest layer, strength */
 	"uniform vec4 rect;\n"
 	"uniform vec4 proj;\n"          /* projection C, D; depth range min, max */
 	"uniform vec4 proj2;\n"         /* 1/P00, 1/P11, P00, P11 */
@@ -8809,7 +8811,23 @@ static const char *ssr_fs =
 	"	}\n"
 	/* smooth level faces (water, puddles, polished floors) ripple a little: the reflection wobbles softly instead
 	   of showing the exact pattern of what it hits (arch ribs over the kos1 channel gave stripes) */
-	"	if (rough < 0.12 && ripple.y > 0.0)\n"
+	/* the rippled water (wetness 1 from the water shader): the same normal it is lit by - the ripple tile at the
+	   same scales, angles, drift and time - so the reflection breaks up with the ripples instead of a flat mirror */
+	"	if (rough < 0.12 && m.b > 0.9 && liqp.y > 0.5)\n"
+	"	{\n"
+	"		vec3 Nw = mat3(invview) * N;\n"
+	"		if (Nw.z > 0.7)\n"
+	"		{\n"
+	"			vec2 p = (invview * vec4(P, 1.0)).xy;\n"
+	"			float t = liqp.x;\n"
+	"			vec2 h = (texture(liqtile, mat2(0.80, 0.60, -0.60, 0.80) * p * 0.00195 + t * vec2(0.0090, 0.0047)).xy * 2.0 - 1.0) * 0.45\n"
+	"				+ (texture(liqtile, mat2(-0.28, 0.96, -0.96, -0.28) * p * 0.0047 + t * vec2(-0.0123, 0.0101)).xy * 2.0 - 1.0) * 0.35\n"
+	"				+ (texture(liqtile, mat2(0.47, -0.88, 0.88, 0.47) * p * 0.0121 + t * vec2(0.0207, -0.0168)).xy * 2.0 - 1.0) * 0.12 * liqp.z;\n"
+	"			Nw = normalize(vec3(-h * liqp.w, 1.0));\n"
+	"			N = normalize(transpose(mat3(invview)) * Nw);\n"
+	"		}\n"
+	"	}\n"
+	"	else if (rough < 0.12 && ripple.y > 0.0)\n"
 	"	{\n"
 	"		vec3 Nw = mat3(invview) * N;\n"
 	"		if (Nw.z > 0.7)\n"
@@ -9386,6 +9404,9 @@ GL3_Post_SSR(void)
 		SR.u_reproj = glGetUniformLocation(SR.prog, "reproj");
 		SR.u_inv = glGetUniformLocation(SR.prog, "invview");
 		SR.u_ripple = glGetUniformLocation(SR.prog, "ripple");
+		SR.u_liqp = glGetUniformLocation(SR.prog, "liqp");
+		GL3_UseProgram(SR.prog);
+		glUniform1i(glGetUniformLocation(SR.prog, "liqtile"), 3);
 	}
 
 	if (!SSRTargets())
@@ -9496,6 +9517,18 @@ GL3_Post_SSR(void)
 		glUniformMatrix4fv(SR.u_reproj, 1, GL_FALSE, &reproj.Elements[0][0]);
 		glUniformMatrix4fv(SR.u_inv, 1, GL_FALSE, &inv.Elements[0][0]);
 		glUniform2f(SR.u_ripple, fmodf(r_newrefdef.time, 1000.0f), Q_max(0.0f, r_om_ssr_ripple->value));
+	}
+	{
+		float lt, fine;
+		GLuint tile = GL3_Liquid_Tile(&lt, &fine);
+
+		/* 0.45 of the water shader's slopes: with the full ones the reflection broke into blotches */
+		glUniform4f(SR.u_liqp, lt, tile ? 1.0f : 0.0f, fine, 0.45f * Q_max(0.0f, r_om_ssr_ripple->value));
+
+		if (tile)
+		{
+			BindTex(GL_TEXTURE3, tile);
+		}
 	}
 	BindTex(GL_TEXTURE2, SR.coltex);
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
