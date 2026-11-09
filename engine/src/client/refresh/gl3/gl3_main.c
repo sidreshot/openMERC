@@ -35,6 +35,9 @@
 
 #include "../ref_shared.h"
 #include "header/local.h"
+#ifdef _WIN32
+#include <windows.h> /* GetSystemMetrics(SM_REMOTESESSION) */
+#endif
 
 /* OpenMerc: the omDetailP value each world program holds (GL3_Detail_InShader) */
 static GLuint detailprog[_gl3_numShaders];
@@ -239,6 +242,15 @@ GL3_Strings(qboolean show_ext)
 	Com_Printf("\x07GL_VENDOR: \x01%s\n", gl3config.vendor_string);
 	Com_Printf("\x07GL_RENDERER: \x01%s\n", gl3config.renderer_string);
 	Com_Printf("\x07GL_VERSION: \x01%s\n", gl3config.version_string);
+#ifdef _WIN32
+	/* a remote desktop session shows at most about 30 frames a second whatever the GPU does (measured: 31.2 ms a
+	   frame at 10 ms of GPU work) - said at start, so a slow game over RDP is not blamed on the settings */
+	if (GetSystemMetrics(SM_REMOTESESSION))
+	{
+		Com_Printf("\x07Remote desktop session: \x01Windows limits the frame rate to about 30 fps; play at the "
+			"computer itself for the full rate\n");
+	}
+#endif
 
 	glGetIntegerv(GL_NUM_EXTENSIONS, &numExtensions);
 
@@ -2698,13 +2710,30 @@ PresetForGPU(void)
 
 	if (strstr(r, "intel") && !strstr(r, "arc"))
 	{
-		/* Iris Xe / Iris Plus (Ice Lake and later): about three times a UHD 620 */
-		if (strstr(r, "iris") && (strstr(r, "xe") || strstr(r, "plus")))
+		/* measured on a UHD 610 (12 EUs, 1920x1080, half render scale, irq2a): high 29 ms of GPU per frame, low 16,
+		   minimal 10 - the per-pixel world shaders 9 ms, SSAO 5, lamp shadows 3, the rest under 1 each. The 12-EU
+		   parts and the older HD Graphics get minimal; UHD 620/630/7xx and Iris (twice and more) low */
+		static const char *const weak[] = {"graphics 500", "graphics 505", "graphics 510", "graphics 600",
+			"graphics 605", "graphics 610", "hd graphics 2", "hd graphics 3", "hd graphics 4", "hd graphics 5000",
+			NULL};
+		size_t n = strlen(r);
+		int k;
+
+		/* Atom / Celeron / Pentium "Intel(R) HD Graphics" without a number */
+		if ((n >= 11) && !strcmp(r + n - 11, "hd graphics"))
 		{
-			return 1;
+			return 4;
 		}
 
-		return 4;
+		for (k = 0; weak[k]; k++)
+		{
+			if (strstr(r, weak[k]))
+			{
+				return 4;
+			}
+		}
+
+		return 1;
 	}
 
 	/* AMD APUs ("AMD Radeon(TM) Graphics", "Radeon(TM) Vega 8 Graphics", "Radeon 780M") */
