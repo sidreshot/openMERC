@@ -187,6 +187,12 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
   no sky above a point (trace up to a sky face) means no snow and no rain there.
 - **Saving while dead.** The save must not be available while the player is dead.
 - **Weapon in the hands while dying.** The view weapon must go away when the player dies.
+- **Water looks regular, not like water.** r_om_water v2 shows even, straight stripes; the owner's ideal is the
+  Half-Life 2 water: chaotic surface (no visible wave direction or period), reflection + refraction through a
+  scrolling normal map, depth fog. Rework the normal: summed scrolled normal-map layers at odd angles/scales instead
+  of the sine set.
+- **Intel UHD 610 PC: barely 30 fps even on the minimal preset** (the owner plays it over RDP - Windows caps RDP at
+  ~30 fps; to measure at the console with Desktop\openMERC-test.cmd).
 
 ## Reporting
 
