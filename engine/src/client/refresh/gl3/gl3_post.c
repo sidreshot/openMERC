@@ -100,6 +100,12 @@ static struct
 	GLint lum_tex, lum_rect, exp_lum, exp_prev, exp_params, exp_rect, exp_neutral;
 
 	qboolean bound, bloomthis, depthcopied;
+	/* r_om_water 2: half-size copy of the scene under translucent water (refraction), made at the first such
+	   surface of the view (GL_TEXTURE11) */
+	qboolean watercopied;
+	GLuint texwater, waterfbo;
+	int waterw, waterh;
+	qboolean waterhdr;
 	qboolean depthfinal;    /* the depth copy holds the finished view (r_om_ssao made it) */
 	int vx, vy, vw, vh;
 	int wx, wy, ww, wh;      /* the view in the window (vx.. are in the scene targets, smaller with r_om_renderscale) */
@@ -1229,6 +1235,10 @@ DeleteTargets(void)
 	P.rbmat = P.texmat = 0;
 	P.mat = false;
 	if (P.texdepthcopy) glDeleteTextures(1, &P.texdepthcopy);
+	if (P.waterfbo) glDeleteFramebuffers(1, &P.waterfbo);
+	if (P.texwater) glDeleteTextures(1, &P.texwater);
+	P.waterfbo = P.texwater = 0;
+	P.waterw = P.waterh = 0;
 	if (P.lumfbo) glDeleteFramebuffers(1, &P.lumfbo);
 	if (P.lumtex) glDeleteTextures(1, &P.lumtex);
 	if (P.expfbo[0]) glDeleteFramebuffers(2, P.expfbo);
@@ -1684,7 +1694,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	int sw = vid.width, sh = vid.height;
 
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
-	P.bound = P.depthcopied = P.depthfinal = false;
+	P.bound = P.depthcopied = P.depthfinal = P.watercopied = false;
 
 	if (windowsamples < 0)
 	{
@@ -1854,6 +1864,82 @@ qboolean
 GL3_Post_DepthReady(void)
 {
 	return P.bound && P.depthcopied;
+}
+
+/* r_om_water 2: before the first translucent water surface of the view, the scene drawn so far (the world and
+   everything farther in the sorted pass: a swimmer under the surface is in it) at half size on GL_TEXTURE11, and
+   the depth copy again (with those models). False when the post path does not draw this view. */
+qboolean
+GL3_Post_WaterCopy(void)
+{
+	int w, h;
+
+	if (!P.bound || !P.depthcopied)
+	{
+		return false;
+	}
+
+	if (P.watercopied)
+	{
+		return true;
+	}
+
+	w = Q_max(P.w / 2, 1);
+	h = Q_max(P.h / 2, 1);
+
+	if (!P.texwater || (P.waterw != w) || (P.waterh != h) || (P.waterhdr != P.hdr))
+	{
+		static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+
+		if (P.waterfbo) glDeleteFramebuffers(1, &P.waterfbo);
+		if (P.texwater) glDeleteTextures(1, &P.texwater);
+
+		P.texwater = P.hdr ? NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR) :
+			NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
+		glGenFramebuffers(1, &P.waterfbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, P.waterfbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, P.texwater, 0);
+		glDrawBuffers(1, one);
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		P.waterw = w;
+		P.waterh = h;
+		P.waterhdr = P.hdr;
+	}
+
+	GL3_Draw3DBatchesNow();
+
+	/* multisampled: resolved first (a scaled blit cannot resolve), into the scene colour texture the end of the
+	   view resolves into again */
+	if (P.samples)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.resolvefbo[0]);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.resolvefbo[0]);
+	}
+	else
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+	}
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.waterfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx / 2, P.vy / 2, (P.vx + P.vw) / 2,
+		(P.vy + P.vh) / 2, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+
+	GL3_SelectTMU(GL_TEXTURE11);
+	glBindTexture(GL_TEXTURE_2D, P.texwater);
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	P.watercopied = true;
+	return true;
 }
 
 static void

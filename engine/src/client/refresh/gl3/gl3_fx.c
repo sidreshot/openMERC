@@ -74,6 +74,7 @@ QueryUniforms(void)
 	u_fogtab = glGetUniformLocation(prog, "omFogTab");
 	glUniform1i(u_depth, 7); /* depth copy of the post path on GL_TEXTURE7 */
 	glUniform1i(u_fogtab, 4);
+	glUniform1i(glGetUniformLocation(prog, "omSceneCol"), 11); /* r_om_water 2 (GL3_Post_WaterCopy) */
 }
 
 void
@@ -250,7 +251,7 @@ uploaded:
 		if (st->liq[0] > 0)
 		{
 			glUniform4f(u_liqeye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2],
-				(soft == 3) ? 1.0f : 0.0f);
+				(soft == 4) ? 2.0f : (soft == 3) ? 1.0f : 0.0f);
 		}
 
 		if (soft)

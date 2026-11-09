@@ -1536,10 +1536,28 @@ static const char* vertexSrcSoFfx = MULTILINE_STRING(
 		out vec3 passFxWorld;
 
 		uniform vec4 fogplane; // view forward and -forward . eye
+		uniform vec4 omLiq;    // r_om_water: x mode (0 off), y time
+
+		// GFX-modern r_om_water: the slow swell (three long waves; rough and calm patches drift over it) - its height
+		// lifts the water's vertices (the warped faces are cut into 64-unit pieces), its slope tilts the ripples
+		float omLiqGroup(vec2 p, float t)
+		{
+			return 0.6 + 0.4 * sin(dot(p, vec2(0.0041, 0.0029)) + t * 0.31);
+		}
+
+		float omLiqSwellH(vec2 p, float t)
+		{
+			return omLiqGroup(p, t) * (1.6 * sin(dot(p, vec2(0.020, 0.012)) + t * 1.05)
+				+ 1.0 * sin(dot(p, vec2(-0.013, 0.027)) + t * 1.42)
+				+ 0.6 * sin(dot(p, vec2(0.031, -0.024)) + t * 1.9));
+		}
 
 		void main()
 		{
 			vec4 wp = transModel * vec4(position, 1.0);
+
+			if(omLiq.x > 0.5)
+				wp.z += omLiqSwellH(wp.xy, omLiq.y);
 
 			passTexCoord = texCoord;
 			passColor = vertColor;
@@ -1639,10 +1657,26 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 		uniform vec4 omFxMat; // GFX-modern r_om_ssr: reflectivity, roughness of liquids (0 = the default material)
 
-		// GFX-modern r_om_water (gl3_liquid.c): x mode (0 off, 1 water), y time (s), z highlight strength,
-		// w 1 = the traced reflection (r_om_ssr) reflects; eye xyz, w 1 = depth effects (translucent, soft mode 3)
+		// GFX-modern r_om_water (gl3_liquid.c): x mode (0 off, 1 water, 2 the full set: r_om_water_quality), y time
+		// (s), z highlight strength, w 1 = the traced reflection (r_om_ssr) reflects; eye xyz, w 1 = depth effects
+		// (translucent, soft mode 3), 2 = and the scene under it (GL3_Post_WaterCopy, half size)
 		uniform vec4 omLiq;
 		uniform vec4 omLiqEye;
+		uniform sampler2D omSceneCol;
+
+		// GFX-modern r_om_water: the slow swell (three long waves; rough and calm patches drift over it) - its height
+		// lifts the water's vertices (the warped faces are cut into 64-unit pieces), its slope tilts the ripples
+		float omLiqGroup(vec2 p, float t)
+		{
+			return 0.6 + 0.4 * sin(dot(p, vec2(0.0041, 0.0029)) + t * 0.31);
+		}
+
+		vec2 omLiqSwellG(vec2 p, float t)
+		{
+			return omLiqGroup(p, t) * (vec2(0.020, 0.012) * 1.6 * cos(dot(p, vec2(0.020, 0.012)) + t * 1.05)
+				+ vec2(-0.013, 0.027) * 1.0 * cos(dot(p, vec2(-0.013, 0.027)) + t * 1.42)
+				+ vec2(0.031, -0.024) * 0.6 * cos(dot(p, vec2(0.031, -0.024)) + t * 1.9));
+		}
 
 		// a directional wave's slope: direction d, frequency f (rad / unit), speed s (rad / s), height a
 		vec2 omLiqWave(vec2 p, vec2 d, float f, float s, float a, float t)
@@ -1650,17 +1684,60 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			return d * (f * a * cos(dot(d, p) * f + t * s));
 		}
 
-		// the ripple normal of the water at world xy p: five waves in different directions and sizes (cheap enough
-		// for the phones: three swells and two fine ones)
-		vec3 omLiqNormal(vec2 p, float t)
+		float omLiqHash(vec2 p)
 		{
-			vec2 g = omLiqWave(p, vec2(0.866, 0.5), 0.050, 1.10, 1.3, t);
+			p = fract(p * vec2(123.34, 456.21));
+			p += dot(p, p + 45.32);
+			return fract(p.x * p.y);
+		}
+
+		float omLiqNoise(vec2 p)
+		{
+			vec2 i = floor(p), f = fract(p);
+			f = f * f * (3.0 - 2.0 * f);
+			return mix(mix(omLiqHash(i), omLiqHash(i + vec2(1.0, 0.0)), f.x),
+				mix(omLiqHash(i + vec2(0.0, 1.0)), omLiqHash(i + vec2(1.0, 1.0)), f.x), f.y);
+		}
+
+		// the slope of value noise (four hashes): irregular chop, not the rows of summed sines
+		vec2 omLiqNoiseG(vec2 p)
+		{
+			vec2 i = floor(p), f = fract(p);
+			vec2 u = f * f * (3.0 - 2.0 * f), du = 6.0 * f * (1.0 - f);
+			float a = omLiqHash(i), b = omLiqHash(i + vec2(1.0, 0.0));
+			float c = omLiqHash(i + vec2(0.0, 1.0)), d = omLiqHash(i + vec2(1.0, 1.0));
+			return du * vec2(b - a + (a - b - c + d) * u.y, c - a + (a - b - c + d) * u.x);
+		}
+
+		// the water's normal at world xy p: the swell, three ripple waves, drifting noise chop (mode 2: the ripples
+		// over a slowly warped plane, a second finer chop layer)
+		vec3 omLiqNormal(vec2 p, float t, float mode)
+		{
+			vec2 g = omLiqSwellG(p, t);
+			if(mode > 1.5)
+				p += 6.0 * vec2(sin(p.y * 0.021 + t * 0.4), cos(p.x * 0.017 - t * 0.33));
+			g += omLiqWave(p, vec2(0.866, 0.5), 0.050, 1.10, 1.3, t);
 			g += omLiqWave(p, vec2(-0.342, 0.940), 0.083, 1.60, 0.9, t);
 			g += omLiqWave(p, vec2(-0.906, -0.423), 0.161, 2.40, 0.5, t);
-			// fine chop: small sharp sparkles of the highlight
-			g += omLiqWave(p, vec2(-0.707, 0.707), 0.47, 4.70, 0.11, t);
-			g += omLiqWave(p, vec2(0.259, -0.966), 0.73, 6.10, 0.07, t);
+			g += omLiqNoiseG(p * 0.09 + vec2(t * 0.35, t * 0.12)) * 0.22;
+			if(mode > 1.5)
+				g += omLiqNoiseG(p * 0.21 - vec2(t * 0.21, -t * 0.47)) * 0.12;
 			return normalize(vec3(-g, 1.0));
+		}
+
+		// the light focused by the waves: a moving net of bright lines (0 .. ~3)
+		float omLiqCaustic(vec2 p, float t)
+		{
+			vec2 q = p * 0.045;
+			float c = 0.0;
+			for(int i = 0; i < 3; i++)
+			{
+				q += vec2(cos(t * 0.7 - q.y * 1.3 + float(i)), sin(t * 0.6 + q.x * 1.1 - float(i))) * 0.55;
+				c += abs(sin(q.x + q.y * 0.3) * sin(q.y - q.x * 0.2));
+			}
+			c = clamp(1.0 - c / 3.0, 0.0, 1.0);
+			c *= c;
+			return c * c * 3.5;
 		}
 
 		float omEyeDist(float z)
@@ -1674,10 +1751,11 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			vec4 c;
 			vec3 liqN = vec3(0.0, 0.0, 1.0);
 			vec3 liqV = vec3(0.0, 0.0, 1.0);
+			vec4 liqT = vec4(1.0); // r_om_water: the texture sample (the water's colour)
 
 			if(omLiq.x > 0.5)
 			{
-				liqN = omLiqNormal(passFxWorld.xy, omLiq.y);
+				liqN = omLiqNormal(passFxWorld.xy, omLiq.y, omLiq.x);
 				liqV = normalize(omLiqEye.xyz - passFxWorld);
 				if(liqV.z < 0.0) liqN.z = -liqN.z; // seen from below (under water): the side toward the eye
 			}
@@ -1698,6 +1776,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			{
 				// r_om_water: the texture moves with the ripples per pixel (the warp only moves the vertices)
 				vec4 t = texture(tex, passTexCoord + liqN.xy * 0.03);
+				liqT = t;
 				c = (texmode == 1) ? t : t * passColor;
 			}
 
@@ -1715,9 +1794,16 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 				vec3 L = normalize(vec3(-liqV.xy, liqV.z + 0.6));
 				float spec = pow(max(dot(reflect(-liqV, liqN), L), 0.0), 220.0);
 
-				// the ripples catch the light: slopes facing the viewer a little brighter, the others darker
+				float luma = dot(lit, vec3(0.3, 0.5, 0.2));
+				vec3 tex0 = c.rgb; // the water's colour (texture x light)
+
+				// the ripples and the swell catch the light: slopes facing the viewer brighter, the others darker
 				vec2 toEye = liqV.xy / max(length(liqV.xy), 0.001);
-				c.rgb *= 1.0 + dot(liqN.xy, toEye) * 0.9;
+				c.rgb *= max(1.0 + dot(liqN.xy, toEye) * 1.2, 0.25);
+
+				// mode 2: the light under the surface dances (caustics through the texture)
+				if(omLiq.x > 1.5)
+					c.rgb *= 1.0 + 0.3 * omLiqCaustic(passFxWorld.xy + liqN.xy * 30.0, omLiq.y) * (0.3 + 0.5 * luma);
 
 				// no traced reflection: a hint of the lit surroundings at grazing angles
 				if(omLiq.w < 0.5)
@@ -1725,7 +1811,43 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 				c.rgb += spec * omLiq.z * lit * 0.8;
 
-				if(omLiqEye.w > 0.5 && liqV.z > 0.0)
+				if(omLiqEye.w > 1.5 && liqV.z > 0.0)
+				{
+					// translucent water over the scene under it (mode 2): the scene refracted by the ripples (less
+					// near the shore so the edge does not tear; only from what lies behind the surface), the light
+					// focused on the bottom, the water's colour taking over with the path through it, foam where it
+					// meets walls and objects; the surface itself opaque but for a soft edge
+					vec2 uv = gl_FragCoord.xy * omSoftV.xy;
+					float surfD = omEyeDist(gl_FragCoord.z);
+					float scene = omEyeDist(texture(omDepth, uv).r);
+					float thick = max(scene - surfD, 0.0);
+					vec2 ruv = uv + liqN.xy * 0.045 * clamp(thick / 40.0, 0.0, 1.0) / max(surfD * 0.004, 1.0);
+					float rD = omEyeDist(texture(omDepth, ruv).r);
+					if(rD < surfD)
+					{
+						ruv = uv;
+						rD = scene;
+					}
+					vec3 behind = texture(omSceneCol, ruv).rgb;
+					vec3 floorP = omLiqEye.xyz + (passFxWorld - omLiqEye.xyz) * (rD / max(surfD, 1.0));
+					float under = clamp((passFxWorld.z - floorP.z) / 24.0, 0.0, 1.0);
+					behind *= 1.0 + omLiqCaustic(floorP.xy + liqN.xy * 20.0, omLiq.y) * under * (0.25 + 0.6 * luma);
+					vec3 tint = normalize(liqT.rgb + 0.02) * 0.9;
+					vec3 trans = exp(-max(rD - surfD, 0.0) * (1.0 - tint) * 0.012);
+					vec3 refr = mix(tex0 * 0.9, behind * mix(vec3(1.0), tint * 1.3, 0.35), trans);
+					// the texture's own pattern over it, as much as the original showed it
+					refr = mix(refr, c.rgb - spec * omLiq.z * lit * 0.8, liqT.a * 0.35);
+					c.rgb = refr + spec * omLiq.z * lit * 0.8;
+					if(omLiq.w < 0.5)
+						c.rgb = mix(c.rgb, c.rgb * 0.7 + lit * 0.35, fres * 0.5);
+					float shore = 1.0 - clamp(thick / (10.0 + 6.0 * sin(omLiq.y * 1.3 + passFxWorld.x * 0.05 +
+						passFxWorld.y * 0.04)), 0.0, 1.0);
+					float fn = omLiqNoise(passFxWorld.xy * 0.12 + liqN.xy * 3.0 + omLiq.y * 0.3) * 0.6 +
+						omLiqNoise(passFxWorld.xy * 0.35 - omLiq.y * 0.5) * 0.4;
+					c.rgb = mix(c.rgb, lit * 1.1, smoothstep(0.35, 0.75, fn * shore * 1.6) * 0.8);
+					c.a = clamp(thick / 3.0, 0.0, 1.0);
+				}
+				else if(omLiqEye.w > 0.5 && liqV.z > 0.0)
 				{
 					// translucent water over the scene depth (seen from above: from below it is the air): soft where it meets the ground and walls, more opaque
 					// and darker where it is deep
@@ -1737,7 +1859,8 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					c.a *= clamp(thick / 14.0, 0.0, 1.0);
 				}
 
-				c.a = mix(c.a, 1.0, fres * 0.6); // less see-through at grazing angles
+				if(omLiqEye.w < 1.5 || liqV.z <= 0.0)
+					c.a = mix(c.a, 1.0, fres * 0.6); // less see-through at grazing angles
 			}
 
 			if(fogmode != 0)

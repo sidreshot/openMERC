@@ -378,6 +378,7 @@ void GL3_Post_Shutdown(void);
 qboolean GL3_Post_BeginView(int x, int y, int w, int h);
 void GL3_Post_DepthCopy(void);
 qboolean GL3_Post_DepthReady(void);
+qboolean GL3_Post_WaterCopy(void);
 void GL3_Post_EndView(void);
 void GL3_Post_SSAO(void);
 void GL3_Post_Weather(void);
