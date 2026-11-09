@@ -488,10 +488,46 @@ SoF_InitDedicatedKeys(void)
 }
 #endif
 
+/* om_background <seconds> [clock]: a test of the app's time in the background (Android screen lock): the main
+   loop stands for that long, as SDL holds it there; clock 1 (default) stops the engine's clock meanwhile, as
+   the app does, 0 lets it run on (how it was before: the local server dropped the player after 125 s) */
+static void
+Com_Background_f(void)
+{
+	int secs;
+	qboolean clock;
+
+	if (Cmd_Argc() < 2)
+	{
+		Com_Printf("usage: om_background <seconds> [clock 1|0]\n");
+		return;
+	}
+
+	secs = atoi(Cmd_Argv(1));
+	clock = (Cmd_Argc() < 3) || atoi(Cmd_Argv(2));
+	Com_Printf("om_background: %d s, the clock %s\n", secs, clock ? "stopped" : "running");
+
+	if (clock)
+	{
+		Sys_SuspendClock(true);
+	}
+
+	while (secs-- > 0)
+	{
+		Sys_Nanosleep(999999999);
+	}
+
+	if (clock)
+	{
+		Sys_SuspendClock(false);
+	}
+}
+
 void
 SoF_InitSystemCommands(void)
 {
 	Cmd_AddCommand("om_delay", Com_Delay_f);
+	Cmd_AddCommand("om_background", Com_Background_f);
 
 	if (dedicated && dedicated->value)
 	{

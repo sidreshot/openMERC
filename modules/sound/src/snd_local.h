@@ -251,6 +251,7 @@ void Vo_Apply(channel_t *ch);            /* gain, direction, sends from ch->sp *
 void Vo_Pause(channel_t *ch, qboolean pause);
 int Vo_PlayedMs(channel_t *ch, int *total_ms); /* diagnostics: position and length in ms */
 void Vo_SetMasterMute(qboolean mute);
+void Vo_PauseDevice(qboolean pause);
 void Vo_TestTone(qboolean on);
 void Vo_SetUnderwater(qboolean on);
 /* ---- snd_adp.c (SPEC-110) ----------------------------------------------------------------------------- */

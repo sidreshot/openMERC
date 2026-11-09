@@ -56,6 +56,8 @@
 #include "../header/sofclient.h" /* OpenMerc */
 #include "header/winkeys.h" /* OpenMerc */
 
+static void IN_LifecycleProbe(void); /* OpenMerc: the link after a return from the background, logged */
+
 // ----
 
 // Maximal mouse move per frame
@@ -760,6 +762,8 @@ IN_Update(void)
 	static qboolean left_stick[4] = {false, false, false, false};   // left, right, up, down virtual keys
 
 	static int consoleKeyCode = 0;
+
+	IN_LifecycleProbe();
 
 	/* OpenMerc: SDL sends text only while text input is on; on Windows the
 	   text comes from WM_CHAR (winkeys.c), elsewhere it is on while the
@@ -3071,9 +3075,101 @@ IN_MatchJoyPreset(void)
 /*
  * Initializes the backend
  */
+/* OpenMerc: the app goes to the background and back (Android: screen lock, another app). SDL sends these from
+   inside its event pump on the main thread, just before it blocks there (SDL_HINT_ANDROID_BLOCK_ON_PAUSE) and
+   right after it wakes, so an event watch sees them in time; the queue would only hand them out afterwards. */
+static int lc_probe_until; /* Sys_Milliseconds: the client's link is logged once a second until then */
+static int lc_probe_next;
+
+static void
+IN_LifecycleProbe(void)
+{
+	int now = Sys_Milliseconds();
+
+	if (!lc_probe_until || (now < lc_probe_next))
+	{
+		return;
+	}
+
+	lc_probe_next = now + 1000;
+	Com_Printf("lifecycle: state %d server %d, out %d acked %d in %d, last received %d ms ago, frame %s %d, cl.time %d%s",
+		cls.state, Com_ServerState(), cls.netchan.outgoing_sequence, cls.netchan.incoming_acknowledged,
+		cls.netchan.incoming_sequence, curtime - cls.netchan.last_received, cl.frame.valid ? "valid" : "invalid",
+		cl.frame.serverframe, cl.time, "\n");
+
+	if (now >= lc_probe_until)
+	{
+		lc_probe_until = 0;
+	}
+}
+
+static bool SDLCALL
+IN_AppLifecycle(void *userdata, SDL_Event *event)
+{
+	(void)userdata;
+
+	/* what the app went through, for the log (the reports come from phones) */
+	{
+		const char *name = NULL;
+
+		switch (event->type)
+		{
+			case SDL_EVENT_TERMINATING: name = "terminating"; break;
+			case SDL_EVENT_LOW_MEMORY: name = "low memory"; break;
+			case SDL_EVENT_WILL_ENTER_BACKGROUND: name = "will enter background"; break;
+			case SDL_EVENT_DID_ENTER_BACKGROUND: name = "did enter background"; break;
+			case SDL_EVENT_WILL_ENTER_FOREGROUND: name = "will enter foreground"; break;
+			case SDL_EVENT_DID_ENTER_FOREGROUND: name = "did enter foreground"; break;
+			case SDL_EVENT_WINDOW_SHOWN: name = "window shown"; break;
+			case SDL_EVENT_WINDOW_HIDDEN: name = "window hidden"; break;
+			case SDL_EVENT_WINDOW_MINIMIZED: name = "window minimised"; break;
+			case SDL_EVENT_WINDOW_RESTORED: name = "window restored"; break;
+			case SDL_EVENT_WINDOW_FOCUS_LOST: name = "focus lost"; break;
+			case SDL_EVENT_WINDOW_FOCUS_GAINED: name = "focus gained"; break;
+			case SDL_EVENT_WINDOW_RESIZED: name = "window resized"; break;
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: name = "pixel size changed"; break;
+			default: break;
+		}
+
+		if (name)
+		{
+			Com_Printf("lifecycle: %s (clock %d ms)\n", name, Sys_Milliseconds());
+		}
+	}
+
+	switch (event->type)
+	{
+		case SDL_EVENT_WILL_ENTER_BACKGROUND:
+			Key_ReleaseAll();
+			S_Background(true);
+			Sys_SuspendClock(true);
+			break;
+
+		case SDL_EVENT_DID_ENTER_FOREGROUND:
+			Sys_SuspendClock(false);
+			S_Background(false);
+			lc_probe_until = Sys_Milliseconds() + 15000;
+			lc_probe_next = 0;
+			break;
+
+		default:
+			break;
+	}
+
+	return true;
+}
+
 void
 IN_Init(void)
 {
+	static qboolean watching;
+
+	if (!watching)
+	{
+		SDL_AddEventWatch(IN_AppLifecycle, NULL);
+		watching = true;
+	}
+
 	Com_Printf("------- input initialization -------\n");
 
 	Touch_Init(); /* OpenMerc: touch controls (cl_touch.c) */

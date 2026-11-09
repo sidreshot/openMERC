@@ -19,6 +19,7 @@ void S_Shutdown(void);
 /* the window gained or lost the focus; the module decides what that does
    (OMsnd: s_om_focusmute, default 0 = keep playing) */
 void S_Activate(qboolean active);
+void S_Background(qboolean background); /* OpenMerc: the app went to the background (Android): silent, whatever s_om_focusmute */
 
 /* if origin is NULL, the sound will be dynamically sourced from the entity */
 void S_StartSound(vec3_t origin, int entnum, int entchannel,

@@ -256,8 +256,8 @@ Sys_ConsoleOutput(char *string)
 
 /* ================================================================ */
 
-long long
-Sys_Microseconds(void)
+static long long
+Sys_RawMicroseconds(void)
 {
 #ifdef __APPLE__
 	// OSX didn't have clock_gettime() until recently, so use Mach's clock_get_time()
@@ -310,6 +310,41 @@ Sys_Microseconds(void)
 	}
 
 	return sec*1000000ll + nsec/1000ll;
+}
+
+/* OpenMerc: the engine's clock stands still while the app is in the background (Android: the screen locked or
+   another app in front; SDL blocks the main loop meanwhile). Without it the first frame after the return saw all
+   that time pass at once: the local server dropped the player as timed out (timeout 125 s) and the client went on
+   sending into nothing - the "net" icon over a frozen picture. */
+static long long clock_skip;      /* time spent in the background so far */
+static long long clock_suspended; /* raw time it went there, 0 = in front */
+
+long long
+Sys_Microseconds(void)
+{
+	if (clock_suspended)
+	{
+		return clock_suspended - clock_skip;
+	}
+
+	return Sys_RawMicroseconds() - clock_skip;
+}
+
+void
+Sys_SuspendClock(qboolean suspend)
+{
+	if (suspend && !clock_suspended)
+	{
+		clock_suspended = Sys_RawMicroseconds();
+	}
+	else if (!suspend && clock_suspended)
+	{
+		long long away = Sys_RawMicroseconds() - clock_suspended;
+
+		clock_skip += away;
+		clock_suspended = 0;
+		Com_Printf("app back after %.1f s in the background (the clock stood still)\n", away / 1000000.0);
+	}
 }
 
 int

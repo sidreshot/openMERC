@@ -111,6 +111,7 @@ static cvar_t *s_initsound;
 
 static qboolean cmds_added;
 static qboolean app_active = true;
+static qboolean app_background; /* S_Activate(-1): the app is in the background (Android screen lock): silent */
 
 /*
 OMsnd 1.0 focus rule: losing the focus never silences a visible game. s_om_focusmute 1 mutes only while the
@@ -120,7 +121,7 @@ s_om_focusmute "1", which used to mute on every focus change).
 */
 static qboolean S_FocusMuted(void)
 {
-    return !app_active && om_focusmute->value && Eng_WindowHidden();
+    return app_background || (!app_active && om_focusmute->value && Eng_WindowHidden());
 }
 
 // ====================================================================
@@ -1267,9 +1268,17 @@ void S_SetSoundStruct(void *const *ptrs)
 
 void S_Activate(int active)
 {
-    app_active = active != 0;
-    if (!s_started)
+    qboolean bg = active < 0;
+
+    app_active = active > 0;
+    if (!s_started) {
+        app_background = bg;
         return;
+    }
+    if (bg != app_background) {
+        app_background = bg;
+        Vo_PauseDevice(bg); /* no mixing at all meanwhile (battery) */
+    }
     if ((int)om_debug->value & 1)
         Snd_Printf("OMsnd: [p=%d] S_Activate(%d)%s\n", paintedtime, active,
                    S_FocusMuted() ? " (muted: s_om_focusmute, window minimised)" : "");

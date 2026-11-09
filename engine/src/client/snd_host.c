@@ -422,6 +422,17 @@ S_Activate(qboolean active)
 	}
 }
 
+/* the sound module's S_Activate(-1): in the background (OMsnd mutes and pauses its device; the original modules
+   read any nonzero value as "active", which only means they keep playing as before) */
+void
+S_Background(qboolean background)
+{
+	if (snd.Activate)
+	{
+		snd.Activate(background ? -1 : 1);
+	}
+}
+
 void
 S_StartSound(vec3_t origin, int entnum, int entchannel, struct sfx_s *sfx,
 		float fvol, float attenuation, float timeofs)

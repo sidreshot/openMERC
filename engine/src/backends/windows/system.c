@@ -360,8 +360,8 @@ Sys_ConsoleOutput(char *string)
 
 /* ================================================================ */
 
-long long
-Sys_Microseconds(void)
+static long long
+Sys_RawMicroseconds(void)
 {
 	static LARGE_INTEGER freq = { 0 };
 	static LARGE_INTEGER base = { 0 };
@@ -381,6 +381,38 @@ Sys_Microseconds(void)
 	QueryPerformanceCounter(&cur);
 
 	return (cur.QuadPart - base.QuadPart) * 1000000 / freq.QuadPart;
+}
+
+/* OpenMerc: the clock stands still while the app is in the background (the unix backend has the reason; on
+   Windows only om_background uses it) */
+static long long clock_skip, clock_suspended;
+
+long long
+Sys_Microseconds(void)
+{
+	if (clock_suspended)
+	{
+		return clock_suspended - clock_skip;
+	}
+
+	return Sys_RawMicroseconds() - clock_skip;
+}
+
+void
+Sys_SuspendClock(qboolean suspend)
+{
+	if (suspend && !clock_suspended)
+	{
+		clock_suspended = Sys_RawMicroseconds();
+	}
+	else if (!suspend && clock_suspended)
+	{
+		long long away = Sys_RawMicroseconds() - clock_suspended;
+
+		clock_skip += away;
+		clock_suspended = 0;
+		Com_Printf("app back after %.1f s in the background (the clock stood still)\n", away / 1000000.0);
+	}
 }
 
 int

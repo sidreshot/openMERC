@@ -588,6 +588,21 @@ void Vo_Apply(channel_t *ch)
     }
 }
 
+/* the app in the background: the device stops mixing (ALC_SOFT_pause_device), or at least goes silent */
+void Vo_PauseDevice(qboolean pause)
+{
+    LPALCDEVICEPAUSESOFT p;
+    LPALCDEVICERESUMESOFT r;
+    if (!ctx || !dev || !alcIsExtensionPresent(dev, "ALC_SOFT_pause_device"))
+        return;
+    p = (LPALCDEVICEPAUSESOFT)alcGetProcAddress(dev, "alcDevicePauseSOFT");
+    r = (LPALCDEVICERESUMESOFT)alcGetProcAddress(dev, "alcDeviceResumeSOFT");
+    if (pause && p)
+        p(dev);
+    else if (!pause && r)
+        r(dev);
+}
+
 void Vo_SetMasterMute(qboolean mute)
 {
     float g = om_gain->value >= 0 ? om_gain->value : 1.0f;
