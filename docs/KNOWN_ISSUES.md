@@ -183,20 +183,18 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
 
 ## To investigate (owner's reports, 2026-11-09)
 
-- **sib2: snow falls through rooms.** The `r_om_snow` / `r_om_rain` particles show indoors. Wanted: a hard test -
-  no sky above a point (trace up to a sky face) means no snow and no rain there.
-- **Saving while dead.** The save must not be available while the player is dead.
-- **Weapon in the hands while dying.** The view weapon must go away when the player dies.
-- **Water looks regular, not like water.** r_om_water v2 shows even, straight stripes; the owner's ideal is the
-  Half-Life 2 water: chaotic surface (no visible wave direction or period), reflection + refraction through a
-  scrolling normal map, depth fog. Rework the normal: summed scrolled normal-map layers at odd angles/scales instead
-  of the sine set.
-- **Mechanisms do not move.** Vehicle wheels do not turn while the vehicles drive; the big fan on irq2a does not
-  spin; the owner sees more such machinery standing still (rotating func_ entities / Ghoul bolt-on animations?).
-- **Weapon choice lost between levels.** Weapons chosen at the loadout screen on arm1 are not there on kos1
-  (the loadout is not carried into the next map).
+- **Weapon choice lost between levels (not reproduced).** Weapons chosen at the loadout screen on arm1 were not
+  there on kos1. Checked 2026-11-09 on the PC: the terminal path (`intermission login` -> briefing -> outfit,
+  `select` of shotgun / HK53 / grenades, deploy -> `gamemap kos1`), with and without the kos1 intro, and after
+  `load auto` on kos1 - every time kos1 started with the chosen weapons and their ammunition. Needed: the exact
+  steps (came to arm1 from trn1 or from a save? which weapons? back to the briefing in between?).
 - **Intel UHD 610 PC: barely 30 fps even on the minimal preset** (the owner plays it over RDP - Windows caps RDP at
   ~30 fps; to measure at the console with Desktop\openMERC-test.cmd).
+
+Fixed from that list: snow and rain indoors on sib2 (13dfdeb: per-map sky columns - weather only where a sky face
+is straight above), saving while dead offered by the menus and the weapon left in a dead player's hands
+(b2f2e13), turning machinery - irq2a fans, truck wheels, radar dishes (09b20fc: the client draws the rotate
+effect), the water (r_om_water v3, HL2-style).
 
 ## Reporting
 
