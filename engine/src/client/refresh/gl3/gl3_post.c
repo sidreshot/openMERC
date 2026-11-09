@@ -10293,6 +10293,153 @@ GL3_Mirror_InPass(void)
 	return MR.inpass;
 }
 
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_water_fog: under water the view sinks into the
+ * water's colour with distance (the water fog of the Source engine): the
+ * depth of the finished opaque view (with the models) turned into
+ * 1 - exp(-distance / (92 units / r_om_water_fog)), at most 97 %, over
+ * the scene but the weapon (stencil 0x80). The colour is a dark earthy
+ * brown lit by the light at the eye.
+ * ------------------------------------------------------------------ */
+
+static struct
+{
+	GLuint prog;
+	GLint u_rect, u_proj, u_fogc;
+	qboolean failed;
+} UW;
+static cvar_t *r_om_water_fog;
+
+static const char *uw_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 proj;\n"   /* projection C, D; depth range min, max */
+	"uniform vec4 fogc;\n"   /* colour, 1 / distance scale */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	float z = texture(depthtex, uv).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	float d = proj.y / (ndc + proj.x);\n"
+	"	outColor = vec4(fogc.rgb, clamp(1.0 - exp(-d * fogc.w), 0.0, 0.97));\n"
+	"}\n";
+
+void
+GL3_Post_Underwater(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	qboolean under;
+	float col[3], light[3], rect[4], scale;
+	int k;
+
+	if (!r_om_water_fog)
+	{
+		r_om_water_fog = ri.Cvar_Get("r_om_water_fog", "1", CVAR_ARCHIVE);
+	}
+
+	if (!P.bound || UW.failed || (r_om_water_fog->value <= 0) || !gl3_worldmodel || !P.depthfbo ||
+		!P.texdepthcopy || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
+	{
+		return;
+	}
+
+	under = (r_newrefdef.rdflags & RDF_UNDERWATER) != 0;
+
+	if (!under)
+	{
+		mleaf_t *leaf = Mod_PointInLeaf(r_newrefdef.vieworg, gl3_worldmodel->nodes);
+
+		under = leaf && (leaf->contents & (CONTENTS_WATER | CONTENTS_SLIME));
+	}
+
+	if (!under)
+	{
+		return;
+	}
+
+	if (!UW.prog)
+	{
+		UW.prog = LinkPost(uw_fs);
+
+		if (!UW.prog)
+		{
+			UW.failed = true;
+			return;
+		}
+
+		UW.u_rect = glGetUniformLocation(UW.prog, "rect");
+		UW.u_proj = glGetUniformLocation(UW.prog, "proj");
+		UW.u_fogc = glGetUniformLocation(UW.prog, "fogc");
+		GL3_UseProgram(UW.prog);
+		glUniform1i(glGetUniformLocation(UW.prog, "depthtex"), 0);
+	}
+
+	GL3_Draw3DBatchesNow();
+	GL3_FX_Flush();
+
+	/* the depth again, with the models and the sorted pass */
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	glDrawBuffers(1, one);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+
+	GL3_SoF_LightPoint(r_newrefdef.vieworg, light, 255);
+
+	{
+		/* dark brown, the colour of earth and silt (the owner's choice: more real than the water textures'
+		   blues and greens), in the light at the eye */
+		static const float brown[3] = {0.20f, 0.13f, 0.07f};
+		float l = Q_clamp((light[0] + light[1] + light[2]) / 3.0f, 0.35f, 1.5f);
+
+		for (k = 0; k < 3; k++)
+		{
+			col[k] = brown[k] * l * 0.8f;
+		}
+	}
+
+	/* 5 m (175 units: 64 units = 1.8 m) leave 15 % of the view: exp(-175 / 92) */
+	scale = 92.0f / Q_clamp(r_om_water_fog->value, 0.1f, 8.0f);
+	rect[0] = (float)P.vx / P.w;
+	rect[1] = (float)P.vy / P.h;
+	rect[2] = (float)P.vw / P.w;
+	rect[3] = (float)P.vh / P.h;
+
+	GL3_UseProgram(UW.prog);
+	glUniform4fv(UW.u_rect, 1, rect);
+	glUniform4f(UW.u_proj, gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], gl3depthmin,
+		gl3depthmax);
+	glUniform4f(UW.u_fogc, col[0], col[1], col[2], 1.0f / scale);
+	BindTex(GL_TEXTURE0, P.texdepthcopy);
+
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glEnable(GL_STENCIL_TEST);
+	glStencilFunc(GL_EQUAL, 0, 0x80);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+	glStencilMask(0);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	DrawQuad();
+
+	glDisable(GL_STENCIL_TEST);
+	glStencilMask(0xff);
+	glDisable(GL_BLEND);
+	SceneBuffers();
+	gl3state.currentlightmap = -1;
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+	P.depthcopied = true;
+}
+
 /* a new map: no plane from the old one */
 void
 GL3_Mirror_MapLoad(void)

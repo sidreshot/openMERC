@@ -406,6 +406,7 @@ qboolean GL3_Mirror_InPass(void);
 qboolean GL3_Post_DepthCopyPossible(void);
 void GL3_Liquid_MapLoad(void);
 GLuint GL3_Liquid_Tile(float *time, float *fine);
+void GL3_Post_Underwater(void);
 void GL3_Post_MapLoad(void);
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
 	GLuint tex2);

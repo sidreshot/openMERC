@@ -2565,6 +2565,8 @@ GL3_RenderView(refdef_t *fd)
 
 	/* GFX-modern: volumetric light beams in place of the painted Ghoul light cones */
 	GL3_Post_Beams();
+	/* GFX-modern r_om_water_fog: under water the view sinks into the water's colour */
+	GL3_Post_Underwater();
 	GL3_Post_ProfMark("beams");
 
 	/* GFX-modern: bloom and the copy of the view into the window */

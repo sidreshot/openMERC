@@ -1924,6 +1924,11 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					c.a *= clamp(thick / 14.0, 0.0, 1.0);
 				}
 
+				// with distance the surface darkens toward the deep water (not much: the Source engine's water fog
+				// over the surface)
+				if(liqV.z > 0.0)
+					c.rgb *= mix(1.0, 0.62, smoothstep(250.0, 2200.0, length(omLiqEye.xyz - passFxWorld)));
+
 				if(omLiqEye.w < 1.5 || liqV.z <= 0.0)
 					c.a = mix(c.a, 1.0, fres * 0.6); // less see-through at grazing angles
 			}
