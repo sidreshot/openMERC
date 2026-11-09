@@ -20,9 +20,9 @@
 /* GFX-modern r_om_water: 1 (default) a slow swell lifting the surface, per-pixel ripples moving the texture, a
    highlight of the light on them, the Fresnel term (grazing angles reflect and hide more) and, on translucent water
    over the scene depth, soft edges where it meets the ground and walls and more opacity where it is deep; 0 the
-   original's liquids. r_om_water_quality 2 (default on desktop): irregular fine chop, the light dancing under the
+   original's liquids. r_om_water_quality 2 (default): irregular fine chop, the light dancing under the
    surface (caustics), and translucent water refracts the scene under it, tints it with depth and has foam where it
-   meets walls and objects; 1 the lighter set (phones). r_om_water_glint: strength of the highlight. Lava, molten
+   meets walls and objects; 1 the lighter set. r_om_water_glint: strength of the highlight. Lava, molten
    metal and steam keep the original look. */
 static cvar_t *r_om_water, *r_om_water_glint, *r_om_water_quality;
 
@@ -41,11 +41,8 @@ GL3_Liquid_Init(void)
 	amp = 8.0f;
 	r_om_water = ri.Cvar_Get("r_om_water", "1", CVAR_ARCHIVE);
 	r_om_water_glint = ri.Cvar_Get("r_om_water_glint", "1", CVAR_ARCHIVE);
-#ifdef YQ2_GL3_GLES3
-	r_om_water_quality = ri.Cvar_Get("r_om_water_quality", "1", CVAR_ARCHIVE);
-#else
+	/* 2 on phones too: it measured the same as 1 there (Adreno 610); the refraction needs the depth copy */
 	r_om_water_quality = ri.Cvar_Get("r_om_water_quality", "2", CVAR_ARCHIVE);
-#endif
 
 	for (k = 0; k < turbstarts; k++)
 	{
