@@ -2,7 +2,7 @@ VERSION 1
 ID 201
 REFERENCE MENU_OMSET_PG
 DESCRIPTION "OpenMerc folder pages, dialogs and key actions"
-COUNT 189
+COUNT 191
 INDEX 0
 {
    REFERENCE HOME_TIP
@@ -1136,4 +1136,16 @@ INDEX 188
    REFERENCE OK
    TEXT_ENGLISH "OK"
    TEXT_RUSSIAN "OK"
+}
+INDEX 189
+{
+   REFERENCE SAVE_DEAD
+   TEXT_ENGLISH "You cannot save while dead"
+   TEXT_RUSSIAN "Мертвым сохраняться нельзя"
+}
+INDEX 190
+{
+   REFERENCE SAVE_NOGAME
+   TEXT_ENGLISH "Saving is possible during a single player mission"
+   TEXT_RUSSIAN "Сохраниться можно во время одиночной миссии"
 }

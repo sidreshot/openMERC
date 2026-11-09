@@ -347,6 +347,8 @@ PG = [
      '*** «НОВОЕ СОХРАНЕНИЕ» ДОБАВЛЯЕТ ЗАПИСЬ *** ЩЕЛЧОК ПЕРЕЗАПИСЫВАЕТ, ПРАВЫЙ ЩЕЛЧОК УДАЛЯЕТ ***'),
     ('PG_SAVE_NEW', 'NEW SAVE', 'НОВОЕ СОХРАНЕНИЕ'),
     ('PG_SAVE_LEFT', 'Saves left', 'Осталось сохранений'),
+    ('PG_SAVE_DEAD', 'You cannot save while dead', 'Мертвым сохраняться нельзя'),
+    ('PG_SAVE_NOGAME', 'Saving is possible during a single player mission', 'Сохраниться можно во время одиночной миссии'),
     ('PG_CREDITS_TITLE', 'CREDITS', 'АВТОРЫ'),
     ('PG_CREDITS_TICK', '*** THE PEOPLE WHO MADE SOLDIER OF FORTUNE ***', '*** ЛЮДИ, СОЗДАВШИЕ SOLDIER OF FORTUNE ***'),
     # dialogs

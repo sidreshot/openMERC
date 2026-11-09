@@ -370,8 +370,9 @@ static void Cmd_OmHurt_f(edict_t *ent)
 	VectorMA(ent->s.origin, -8, dir, pt);
 	pt[2] += 16;
 	Dmg_Damage(ent, best, best, dir, pt, best->s.origin, dmg, 0, DMGF_PROJECTILE, MOD_PISTOL1);
-	gi.dprintf("omhurt: %s #%d hit the player for %d, damage_dir 0x%x\n", best->classname, (int)(best - g_edicts), dmg,
-	           ent->client ? ent->client->damage_dir : 0);
+	gi.dprintf("omhurt: %s #%d hit the player for %d, damage_dir 0x%x, health now %d (takedamage %d flags 0x%x protect %.1f)\n",
+	           best->classname, (int)(best - g_edicts), dmg, ent->client ? ent->client->damage_dir : 0, ent->health,
+	           (int)ent->takedamage, ent->flags, ent->client ? ent->client->spawnprotect_time - level.time : 0.0f);
 }
 
 /* omkill: the nearest living character (not the player) dies of a shot from the player's position (a test aid) */

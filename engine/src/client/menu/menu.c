@@ -451,8 +451,17 @@ M_NewScreen(const char *name)
 	/* MENU-SCRATCH: the landing page (menus/m_omhome.rmf) offers "continue"
 	   only while a level is running */
 	Cvar_Set("menu_ingame", cls.state == ca_active ? "1" : "0");
-	/* OpenMerc: "save game" on the landing page while a single player level runs here (owner: it was missing) */
-	Cvar_Set("menu_cansave", (cls.state == ca_active && Com_ServerState() && !Cvar_VariableValue("deathmatch")) ? "1" : "0");
+	/* OpenMerc: "save game" on the landing page while a single player level runs here (owner: it was missing) -
+	   and the player lives (owner: the save page was there after death; the save command refused it, but the
+	   page said nothing). The save page shows why it cannot save (menus/m_save.rmf) */
+	{
+		qboolean sp = (cls.state == ca_active) && Com_ServerState() && !Cvar_VariableValue("deathmatch");
+		qboolean alive = cl.frame.playerstate.stats[1] > 0; /* STAT_HEALTH, as the save command reads it */
+
+		Cvar_Set("menu_cansave", (sp && alive) ? "1" : "0");
+		Cvar_Set("menu_savedead", (sp && !alive) ? "1" : "0");
+		Cvar_Set("menu_savenogame", !sp ? "1" : "0");
+	}
 	/* MENU-SCRATCH (owner t96): the landing page shows the newest save
 	   ("continue" loads it outside a level); the load page shows an empty
 	   state line without saves */

@@ -1379,8 +1379,16 @@ SG_QuickSave_f(void)
 		i = 0;
 	}
 
+	int before = sg_savecount;
+
 	Cmd_ExecuteString(va("save quick%i", i));
-	Cvar_SetValue("sv_quicksave_index", (float)i);
+
+	/* OpenMerc: the slot turns only when the save was written (a refused one - dead, cinematic - left the newest
+	   quicksave behind the index, and quickload took an older one) */
+	if (sg_savecount != before)
+	{
+		Cvar_SetValue("sv_quicksave_index", (float)i);
+	}
 }
 
 static void

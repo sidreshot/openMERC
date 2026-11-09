@@ -384,7 +384,8 @@ CLP_ViewWeaponShown(void)
 	const sofps_t *x = CL_SoF_CurrentPS();
 
 	return CL_Ghoul_Active() && cl_gun->value && !x->remote_type && x->gun_id &&
-		(cl.frame.playerstate.fov <= 95);
+		(cl.frame.playerstate.fov <= 95) && (cl.frame.playerstate.pmove.pm_type != PM_DEAD) &&
+		(cl.frame.playerstate.stats[1] > 0); /* no weapon in a dead player's hands (cl_ghoul.c) */
 }
 
 /* client import 6: effect `name [bolt]` on the view model (SPEC-400 "View weapon" 1) */

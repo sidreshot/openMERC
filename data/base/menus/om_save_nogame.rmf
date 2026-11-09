@@ -1,0 +1,4 @@
+<!-- OpenMerc: the save page when saving is not possible (menu.c menu_savenogame) -->
+<hbr>
+<font type title tint normaltext atint normaltext>
+<text "^MENU_OMSET_PG_SAVE_NOGAME^"><br>

@@ -483,8 +483,11 @@ CL_Ghoul_AddViewWeapon(void)
 	entity_t gun;
 	void *inst;
 
+	/* OpenMerc: no weapon in the hands of a dead player (owner: the gun stayed in view through the death fall;
+	   player_die sets PM_DEAD, the health stat goes to 0 and below) */
 	if (!CL_Ghoul_Active() || !cl_gun->value || x->remote_type || !x->gun_id ||
-		(cl.frame.playerstate.fov > 95))
+		(cl.frame.playerstate.fov > 95) || (cl.frame.playerstate.pmove.pm_type == PM_DEAD) ||
+		(cl.frame.playerstate.stats[1] <= 0))
 	{
 		return;
 	}
