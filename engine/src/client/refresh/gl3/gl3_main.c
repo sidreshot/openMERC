@@ -2512,6 +2512,8 @@ GL3_RenderView(refdef_t *fd)
 
 	/* GFX-modern: the world seen in the nearest mirror (r_om_mirror) */
 	GL3_Mirror_Render();
+	/* GFX-modern r_om_water_quality 3: the water's planar reflection */
+	GL3_WaterRefl_Render();
 	GL3_Post_ProfMark("mirror");
 
 	GL3_DrawWorld();

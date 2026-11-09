@@ -1870,6 +1870,13 @@ GL3_Post_DepthReady(void)
    everything farther in the sorted pass: a swimmer under the surface is in it) at half size on GL_TEXTURE11, and
    the depth copy (again: with those models; or the first time - soft particles and the fog may be off, as on the
    phones). False when the post path does not draw this view. */
+/* r_om_water_clear: will GL3_Post_WaterCopy work in this view (the solid water goes to the sorted pass then) */
+qboolean
+GL3_Post_DepthCopyPossible(void)
+{
+	return P.bound && P.texdepthcopy;
+}
+
 qboolean
 GL3_Post_WaterCopy(void)
 {
@@ -9665,7 +9672,25 @@ static struct
 	float plane[MIRROR_PLANES][4];
 	float box[MIRROR_PLANES][6];
 	int numplanes;
+	/* the uniforms set last (with the images: lset) */
+	float lon[4], lplanes[MIRROR_PLANES][4], lrect[4];
+	qboolean lset;
 } MR;
+
+/* GFX-modern r_om_water_quality 3: the planar reflection of the water plane that took the most of the last frame's
+   view (the mirror pass with the eye mirrored in the water) */
+#define WATER_CANDS 8
+static struct
+{
+	qboolean failed, on, inpass;
+	int w, h;
+	GLuint tex, fbo, rbdepth;
+	mirrorcand_t cand[WATER_CANDS];
+	int numcand, candframe;
+	float plane[4], box[6];
+} WR;
+static cvar_t *r_om_water_reflscale;
+static void WaterDeleteTargets(void);
 
 extern vec3_t gl3_origin;
 
@@ -9785,6 +9810,8 @@ MirrorShutdown(void)
 	MirrorDeleteTargets();
 	MR.w = MR.h = 0;
 	MR.failed = false;
+	WaterDeleteTargets();
+	WR.failed = WR.on = false;
 }
 
 static qboolean
@@ -9852,7 +9879,7 @@ RigidInverse(const hmm_mat4 *v)
 /* the world (and the opaque brush entities) seen in the plane n.x = d, into framebuffer fbo; false when the view
    cannot be built */
 static qboolean
-MirrorPass(const float *n, float d, GLuint fbo, const float *box)
+MirrorPass(const float *n, float d, GLuint fbo, const float *box, int tw, int th, float clipoff)
 {
 	qboolean scissor = false;
 	int sc[4] = {0, 0, 0, 0};
@@ -9886,7 +9913,7 @@ MirrorPass(const float *n, float d, GLuint fbo, const float *box)
 		cv[i] = inv.Elements[i][0] * cw[0] + inv.Elements[i][1] * cw[1] + inv.Elements[i][2] * cw[2] +
 			inv.Elements[i][3] * cw[3];
 	}
-	cv[3] -= 0.5f; /* a little in front of the glass: the mirror face itself is not drawn into its image */
+	cv[3] -= clipoff; /* a little in front of the glass: the mirror face itself is not drawn into its image */
 	proj = gl3state.projMat3D;
 	q[0] = ((cv[0] > 0 ? 1.0f : cv[0] < 0 ? -1.0f : 0.0f) + proj.Elements[2][0]) / proj.Elements[0][0];
 	q[1] = ((cv[1] > 0 ? 1.0f : cv[1] < 0 ? -1.0f : 0.0f) + proj.Elements[2][1]) / proj.Elements[1][1];
@@ -10021,7 +10048,7 @@ MirrorPass(const float *n, float d, GLuint fbo, const float *box)
 	gl3_drawsamples = 0; /* the mirror textures are single-sampled */
 	/* the view's rectangle at the mirror texture's scale */
 	{
-		float sx = (float)MR.w / P.w, sy = (float)MR.h / P.h;
+		float sx = (float)tw / P.w, sy = (float)th / P.h;
 
 		glViewport((int)(P.vx * sx), (int)(P.vy * sy), (int)(P.vw * sx), (int)(P.vh * sy));
 
@@ -10047,7 +10074,15 @@ MirrorPass(const float *n, float d, GLuint fbo, const float *box)
 	MR.inpass = true;
 	GL3_FX_BeginFrame3D();
 	GL3_Fog_BeginFrame();
-	GL3_DrawWorld();
+	{
+		extern const hmm_mat4 *gl3_skypv_override;
+		static hmm_mat4 skypv;
+
+		skypv = HMM_MultiplyMat4(saveproj, view);
+		gl3_skypv_override = &skypv;
+		GL3_DrawWorld();
+		gl3_skypv_override = NULL;
+	}
 
 	/* the brush entities too (doors, func_walls, lifts): without them the mirror shows a black hole where the door
 	   stands */
@@ -10173,6 +10208,8 @@ GL3_Mirror_Render(void)
 		n++;
 	}
 
+	MR.lset = false;
+
 	if (MR.failed || !n || !r_om_mirror->value || !P.bound || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
 	{
 		GL3_SoF_MirrorUniforms(on, planes[0], planes[1], rect, 0, 0);
@@ -10196,7 +10233,7 @@ GL3_Mirror_Render(void)
 	for (k = 0; k < n; k++)
 	{
 		memcpy(planes[k], MR.plane[k], sizeof(planes[0]));
-		on[k] = MirrorPass(MR.plane[k], MR.plane[k][3], MR.fbo[k], MR.box[k]) ? 1.0f : 0.0f;
+		on[k] = MirrorPass(MR.plane[k], MR.plane[k][3], MR.fbo[k], MR.box[k], MR.w, MR.h, 0.5f) ? 1.0f : 0.0f;
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
@@ -10211,6 +10248,16 @@ GL3_Mirror_Render(void)
 	rect[1] = 1.0f / P.h;
 	rect[2] = Q_max(0.0f, Q_min(r_om_mirror->value, 1.0f));
 	GL3_SoF_MirrorUniforms(on, planes[0], planes[1], rect, MR.tex[0], MR.tex[1]);
+	memcpy(MR.lon, on, sizeof(MR.lon));
+	memcpy(MR.lplanes, planes, sizeof(MR.lplanes));
+	memcpy(MR.lrect, rect, sizeof(MR.lrect));
+	MR.lset = true;
+}
+
+qboolean
+GL3_Mirror_InPass(void)
+{
+	return MR.inpass;
 }
 
 /* a new map: no plane from the old one */
@@ -10219,6 +10266,216 @@ GL3_Mirror_MapLoad(void)
 {
 	MR.numcand = MR.numplanes = 0;
 	MR.candframe = 0;
+	WR.numcand = 0;
+	WR.candframe = 0;
+	WR.on = false;
+}
+
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_water_quality 3: the planar reflection of water, as in
+ * the Source engine. The level water faces note their plane while drawn
+ * (gl3_liquid.c); of the planes the eye is above, the one that took the
+ * most of the view gives the plane of the next frame. Before the world of
+ * a view is drawn, the mirror pass draws the world, the brush entities and
+ * the models from the eye mirrored in that plane (oblique near plane on
+ * the water, PVS of the real eye, scissored to the water's box) into a
+ * texture at r_om_water_reflscale of the scene size. The water shader
+ * reads it at its window position moved by the ripples.
+ * ------------------------------------------------------------------ */
+
+static void
+WaterDeleteTargets(void)
+{
+	if (WR.fbo) glDeleteFramebuffers(1, &WR.fbo);
+	if (WR.tex) glDeleteTextures(1, &WR.tex);
+	if (WR.rbdepth) glDeleteRenderbuffers(1, &WR.rbdepth);
+	WR.fbo = WR.tex = WR.rbdepth = 0;
+	WR.w = WR.h = 0;
+}
+
+static qboolean
+WaterTargets(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	float s = Q_clamp(r_om_water_reflscale->value, 0.25f, 1.0f);
+	int w = Q_max((int)(P.w * s), 16), h = Q_max((int)(P.h * s), 16);
+
+	if (WR.fbo && (WR.w == w) && (WR.h == h))
+	{
+		return true;
+	}
+
+	WaterDeleteTargets();
+	WR.w = w;
+	WR.h = h;
+	WR.rbdepth = NewRenderbuffer(GL_DEPTH24_STENCIL8, w, h, 0);
+	WR.tex = NewTexture(OM_RT_FMT, GL_RGBA, OM_RT_TYPE, w, h, GL_LINEAR);
+	glGenFramebuffers(1, &WR.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, WR.fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, WR.tex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, WR.rbdepth);
+	glDrawBuffers(1, one);
+	return Complete("water reflection");
+}
+
+/* a level water face facing up is drawn: its share of the view goes to the score of its height */
+void
+GL3_WaterRefl_Note(const float *plane, const float *mins, const float *maxs, const float *center, float area)
+{
+	float side, dist2, score;
+	vec3_t c;
+	int i;
+
+	if (MR.inpass || (plane[2] < 0.99f))
+	{
+		return;
+	}
+
+	side = DotProduct(plane, r_newrefdef.vieworg) - plane[3];
+
+	if (side < 2)
+	{
+		return;
+	}
+
+	VectorSubtract(center, r_newrefdef.vieworg, c);
+	dist2 = Q_max(DotProduct(c, c), 1.0f);
+	score = area * (side / sqrtf(dist2)) / dist2;
+
+	for (i = 0; i < WR.numcand; i++)
+	{
+		if (fabsf(WR.cand[i].plane[3] - plane[3]) < 2.0f)
+		{
+			int a;
+
+			WR.cand[i].score += score;
+
+			for (a = 0; a < 3; a++)
+			{
+				WR.cand[i].box[a] = Q_min(WR.cand[i].box[a], mins[a]);
+				WR.cand[i].box[3 + a] = Q_max(WR.cand[i].box[3 + a], maxs[a]);
+			}
+
+			return;
+		}
+	}
+
+	if (WR.numcand < WATER_CANDS)
+	{
+		mirrorcand_t *m = &WR.cand[WR.numcand++];
+
+		m->plane[0] = 0;
+		m->plane[1] = 0;
+		m->plane[2] = 1;
+		m->plane[3] = plane[3];
+		m->score = score;
+		VectorCopy(mins, m->box);
+		m->box[3] = maxs[0];
+		m->box[4] = maxs[1];
+		m->box[5] = maxs[2];
+	}
+}
+
+/* before the world of the view, after the mirrors (gl3_main.c) */
+void
+GL3_WaterRefl_Render(void)
+{
+	static cvar_t *water, *quality;
+	mirrorcand_t cand[WATER_CANDS];
+	int numcand = (WR.candframe == 1) ? WR.numcand : 0, best = -1, i;
+	qboolean was = WR.on;
+	float off[4] = {0, 0, 0, 0}, zero[4] = {0, 0, 0, 0};
+
+	if (!water)
+	{
+		water = ri.Cvar_Get("r_om_water", "1", CVAR_ARCHIVE);
+		quality = ri.Cvar_Get("r_om_water_quality", "2", CVAR_ARCHIVE);
+		r_om_water_reflscale = ri.Cvar_Get("r_om_water_reflscale", "0.5", CVAR_ARCHIVE);
+	}
+
+	memcpy(cand, WR.cand, sizeof(cand));
+	WR.numcand = 0;
+	WR.candframe = 1;
+	WR.on = false;
+
+	if (WR.failed || !water->value || (quality->value < 3) || !P.bound || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
+	{
+		return;
+	}
+
+	for (i = 0; i < numcand; i++)
+	{
+		/* the plane of the last frame keeps its place unless another takes clearly more of the view */
+		if (was && (fabsf(cand[i].plane[3] - WR.plane[3]) < 2.0f))
+		{
+			cand[i].score *= 1.5f;
+		}
+
+		if ((r_newrefdef.vieworg[2] - cand[i].plane[3] >= 2) && ((best < 0) || (cand[i].score > cand[best].score)))
+		{
+			best = i;
+		}
+	}
+
+	if (best < 0)
+	{
+		return;
+	}
+
+	if (!WaterTargets())
+	{
+		WR.failed = true;
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		return;
+	}
+
+	memcpy(WR.plane, cand[best].plane, sizeof(WR.plane));
+	memcpy(WR.box, cand[best].box, sizeof(WR.box));
+	/* the swell lifts the surface by up to about 2 units: the box a little higher */
+	WR.box[5] += 4;
+
+	GL3_Draw3DBatchesNow();
+	/* no mirror images inside the pass (their window positions are the real eye's) */
+	GL3_SoF_MirrorUniforms(off, zero, zero, zero, 0, 0);
+	WR.inpass = true;
+	WR.on = MirrorPass(WR.plane, WR.plane[3], WR.fbo, WR.box, WR.w, WR.h, 1.0f);
+	WR.inpass = false;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	gl3_drawsamples = P.samples;
+	SceneBuffers();
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	gl3state.currentlightmap = -1;
+	gl3state.currenttexture = -1;
+
+	if (MR.lset)
+	{
+		GL3_SoF_MirrorUniforms(MR.lon, MR.lplanes[0], MR.lplanes[1], MR.lrect, MR.tex[0], MR.tex[1]);
+	}
+}
+
+/* the reflection for a water face on plane (normal up, dist): its texture and 1 / the scene target size; false
+   when this plane has none this frame (or inside a mirror pass) */
+qboolean
+GL3_WaterRefl_For(const float *plane, GLuint *tex, float *rect)
+{
+	if (!WR.on || MR.inpass || (plane[2] < 0.99f) || (fabsf(plane[3] - WR.plane[3]) > 2.0f))
+	{
+		return false;
+	}
+
+	*tex = WR.tex;
+	rect[0] = 1.0f / P.w;
+	rect[1] = 1.0f / P.h;
+	return true;
+}
+
+/* inside the water's own reflection pass: its faces on that plane are not drawn (they would read the texture being
+   drawn, and the near plane cuts them anyway) */
+qboolean
+GL3_WaterRefl_Skip(float dist)
+{
+	return WR.inpass && (fabsf(dist - WR.plane[3]) < 2.0f);
 }
 
 /* a new map is loading: the volumetric fog program is compiled now, not when the first fog comes into view (a

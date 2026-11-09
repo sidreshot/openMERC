@@ -790,15 +790,19 @@ MakeSkyVec(float s, float t, int axis, gl3_3D_vtx_t* vert)
 	vert->lmTexCoord[0] = vert->lmTexCoord[1] = 0.0f;
 }
 
+/* GFX-modern r_om_water_quality 3: the projection x view the sky box uses inside a mirror pass - without the oblique
+   near plane, whose skewed far plane cut the distant sky box away (black sky in the water's reflection) */
+const hmm_mat4 *gl3_skypv_override;
+
 void
 GL3_DrawSkyBox(void)
 {
 	int i;
 
 	/* OpenMerc: the whole face when rotating or fov_x < 90 (SPEC-410) */
-	qboolean wholeface = (skyrotate != 0.0f) || (r_newrefdef.fov_x < 90);
+	qboolean wholeface = (skyrotate != 0.0f) || (r_newrefdef.fov_x < 90) || (gl3_skypv_override != NULL);
 
-	if (skyrotate)
+	if (skyrotate && !gl3_skypv_override)
 	{   /* check for no sky at all */
 		for (i = 0; i < 6; i++)
 		{
@@ -868,6 +872,19 @@ GL3_DrawSkyBox(void)
 		MakeSkyVec( skymaxs [ 0 ] [ i ], skymins [ 1 ] [ i ], i, &skyVertices[3] );
 
 		GL3_Add3DdrawCmdToBatch(skyVertices, 4, GL_TRIANGLE_FAN, drawCmd);
+	}
+
+	if (gl3_skypv_override)
+	{
+		hmm_mat4 save = gl3state.uni3DData.transProjViewMat4;
+
+		/* the world before the sky with the mirror's matrix, the sky with the plain one */
+		GL3_Draw3DBatchesNow();
+		gl3state.uni3DData.transProjViewMat4 = *gl3_skypv_override;
+		GL3_UpdateUBO3D();
+		GL3_Draw3DBatchesNow();
+		gl3state.uni3DData.transProjViewMat4 = save;
+		GL3_UpdateUBO3D();
 	}
 
 	// glPopMatrix();

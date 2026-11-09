@@ -169,6 +169,7 @@ typedef struct
 	float pos[3];
 	float st[2];
 	float rgba[4];
+	float aux[2];   /* r_om_water: x how open the sky is over the vertex (0..1); unused elsewhere */
 } gl3fxvtx_t;
 
 /* render state of an effect batch */
@@ -195,6 +196,9 @@ typedef struct
 	float matrefl, matrough; /* GFX-modern r_om_ssr: material of liquids (0 = default) */
 	/* GFX-modern r_om_water (gl3_liquid.c): mode (0 off, 1 water), time, highlight strength, 1 = SSR reflects */
 	float liq[4];
+	/* r_om_water: x 1 = the planar reflection (r_om_water_quality 3) on GL_TEXTURE3, y z 1 / scene target size,
+	   w 1 = the ripple tile on GL_TEXTURE2 (gl3_liquid.c binds both) */
+	float liqrefl[4];
 } gl3fxstate_t;
 qboolean GL3_Post_SSRActive(void);
 qboolean GL3_Post_SSAOActive(void);
@@ -394,6 +398,13 @@ void GL3_Post_MaterialWrites(qboolean on);
 void GL3_Mirror_Note(const msurface_t *surf);
 void GL3_Mirror_Render(void);
 void GL3_Mirror_MapLoad(void);
+void GL3_WaterRefl_Note(const float *plane, const float *mins, const float *maxs, const float *center, float area);
+void GL3_WaterRefl_Render(void);
+qboolean GL3_WaterRefl_For(const float *plane, GLuint *tex, float *rect);
+qboolean GL3_WaterRefl_Skip(float dist);
+qboolean GL3_Mirror_InPass(void);
+qboolean GL3_Post_DepthCopyPossible(void);
+void GL3_Liquid_MapLoad(void);
 void GL3_Post_MapLoad(void);
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
 	GLuint tex2);

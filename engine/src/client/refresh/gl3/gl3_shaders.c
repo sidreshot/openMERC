@@ -1534,6 +1534,7 @@ static const char* vertexSrcSoFfx = MULTILINE_STRING(
 		out vec4 passColor;
 		out float passFogDist;
 		out vec3 passFxWorld;
+		out float passLiqSky; // r_om_water: how open the sky is over the vertex (gl3_liquid.c, lightmap slot)
 
 		uniform vec4 fogplane; // view forward and -forward . eye
 		uniform vec4 omLiq;    // r_om_water: x mode (0 off), y time
@@ -1563,6 +1564,7 @@ static const char* vertexSrcSoFfx = MULTILINE_STRING(
 			passColor = vertColor;
 			passFogDist = abs(dot(fogplane.xyz, wp.xyz) + fogplane.w);
 			passFxWorld = wp.xyz;
+			passLiqSky = lmTexCoord.x;
 			gl_Position = transProjView * wp;
 		}
 );
@@ -1663,6 +1665,12 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		uniform vec4 omLiq;
 		uniform vec4 omLiqEye;
 		uniform sampler2D omSceneCol;
+		// x 1 = omLiqReflTex is the planar reflection (r_om_water_quality 3) read at the window position x yz, else the
+		// sky panorama (yaw across, elevation 0..90 up); w 1 = the ripple tile omLiqTile (slopes rg, height b)
+		uniform vec4 omLiqRefl;
+		uniform sampler2D omLiqTile;
+		uniform sampler2D omLiqReflTex;
+		in float passLiqSky;
 
 		// GFX-modern r_om_water: the slow swell (three long waves; rough and calm patches drift over it) - its height
 		// lifts the water's vertices (the warped faces are cut into 64-unit pieces), its slope tilts the ripples
@@ -1711,8 +1719,25 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 		// the water's normal at world xy p: the swell, three ripple waves, drifting noise chop (mode 2: the ripples
 		// over a slowly warped plane, a second finer chop layer)
+		vec2 omLiqTileG(vec2 uv)
+		{
+			return texture(omLiqTile, uv).xy * 2.0 - 1.0;
+		}
+
 		vec3 omLiqNormal(vec2 p, float t, float mode)
 		{
+			if(omLiqRefl.w > 0.5)
+			{
+				// the ripple tile read three times: other scales (513, 213, 83 units), turned by odd angles,
+				// drifting other ways - every direction has the same weight, no row of waves shows; the swell
+				// only tilts it a little
+				vec2 h = omLiqSwellG(p, t) * 0.3;
+				h += omLiqTileG(mat2(0.80, 0.60, -0.60, 0.80) * p * 0.00195 + t * vec2(0.0090, 0.0047)) * 0.45;
+				h += omLiqTileG(mat2(-0.28, 0.96, -0.96, -0.28) * p * 0.0047 + t * vec2(-0.0123, 0.0101)) * 0.35;
+				if(mode > 1.5)
+					h += omLiqTileG(mat2(0.47, -0.88, 0.88, 0.47) * p * 0.0121 + t * vec2(0.0207, -0.0168)) * 0.12;
+				return normalize(vec3(-h, 1.0));
+			}
 			vec2 g = omLiqSwellG(p, t);
 			if(mode > 1.5)
 				p += 6.0 * vec2(sin(p.y * 0.021 + t * 0.4), cos(p.x * 0.017 - t * 0.33));
@@ -1752,6 +1777,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			vec3 liqN = vec3(0.0, 0.0, 1.0);
 			vec3 liqV = vec3(0.0, 0.0, 1.0);
 			vec4 liqT = vec4(1.0); // r_om_water: the texture sample (the water's colour)
+			float return_env = 0.0; // r_om_water_glint -1: what the water reflects, nothing else
 
 			if(omLiq.x > 0.5)
 			{
@@ -1799,19 +1825,41 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 
 				// the ripples and the swell catch the light: slopes facing the viewer brighter, the others darker
 				vec2 toEye = liqV.xy / max(length(liqV.xy), 0.001);
-				c.rgb *= max(1.0 + dot(liqN.xy, toEye) * 1.2, 0.25);
+				c.rgb *= max(1.0 + dot(liqN.xy, toEye) * 0.8, 0.4);
 
 				// mode 2: the light under the surface dances (caustics through the texture)
 				if(omLiq.x > 1.5)
 					c.rgb *= 1.0 + 0.3 * omLiqCaustic(passFxWorld.xy + liqN.xy * 30.0, omLiq.y) * (0.3 + 0.5 * luma);
 
-				// no traced reflection: a hint of the lit surroundings at grazing angles
-				if(omLiq.w < 0.5)
-					c.rgb = mix(c.rgb, c.rgb * 0.7 + lit * 0.35, fres * 0.5);
+				// what the surface reflects: the planar reflection moved by the ripples, or (the env_cubemap of the
+				// Source engine's water) under open sky the map's sky blurred, under a roof the room blurred - the
+				// light around the water with soft blotches of brighter and darker walls
+				vec3 R = reflect(-liqV, liqN);
+				vec3 env;
+				if(omLiqRefl.x > 0.5)
+				{
+					env = texture(omLiqReflTex, gl_FragCoord.xy * omLiqRefl.yz + liqN.xy * 0.06).rgb;
+				}
+				else
+				{
+					vec3 Rs = vec3(R.xy, max(R.z, 0.02));
+					vec2 suv = vec2(atan(Rs.y, Rs.x) * 0.15915494 + 0.5, asin(min(Rs.z, 1.0)) * 0.63661977);
+					vec3 sky = texture(omLiqReflTex, suv).rgb;
+					float blot = (omLiqRefl.w > 0.5) ? texture(omLiqTile, R.xy * 0.35 + passFxWorld.xy * 0.0007).b : 0.5;
+					vec3 room = lit * (0.35 + 0.7 * blot) * mix(1.0, 0.65, clamp(R.z, 0.0, 1.0));
+					env = mix(room, sky, clamp(passLiqSky, 0.0, 1.0));
+				}
+				// tinted a little by the water's own colour; weaker where the traced reflection (r_om_ssr) adds its own
+				vec3 envT = env * mix(vec3(1.0), normalize(liqT.rgb + 0.05) * 1.6, 0.25);
+				float rf = clamp(0.1 + 0.9 * fres, 0.0, 1.0) * ((omLiq.w > 0.5) ? 0.35 : 0.85);
+				if(liqV.z < 0.0) rf *= 0.3;
+				vec3 body = c.rgb;
+				c.rgb = mix(body * 0.8, envT, rf);
 
-				c.rgb += spec * omLiq.z * lit * 0.8;
+				c.rgb += spec * max(omLiq.z, 0.0) * lit * 0.35;
+				if(omLiq.z < -0.5) { c = vec4(env, 1.0); return_env = 1.0; }
 
-				if(omLiqEye.w > 1.5 && liqV.z > 0.0)
+				if(return_env < 0.5 && omLiqEye.w > 1.5 && liqV.z > 0.0)
 				{
 					// translucent water over the scene under it (mode 2): the scene refracted by the ripples (less
 					// near the shore so the edge does not tear; only from what lies behind the surface), the light
@@ -1834,12 +1882,10 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					behind *= 1.0 + omLiqCaustic(floorP.xy + liqN.xy * 20.0, omLiq.y) * under * (0.25 + 0.6 * luma);
 					vec3 tint = normalize(liqT.rgb + 0.02) * 0.9;
 					vec3 trans = exp(-max(rD - surfD, 0.0) * (1.0 - tint) * 0.012);
-					vec3 refr = mix(tex0 * 0.9, behind * mix(vec3(1.0), tint * 1.3, 0.35), trans);
-					// the texture's own pattern over it, as much as the original showed it
-					refr = mix(refr, c.rgb - spec * omLiq.z * lit * 0.8, liqT.a * 0.35);
-					c.rgb = refr + spec * omLiq.z * lit * 0.8;
-					if(omLiq.w < 0.5)
-						c.rgb = mix(c.rgb, c.rgb * 0.7 + lit * 0.35, fres * 0.5);
+					vec3 refr = mix(tex0 * 0.6, behind * mix(vec3(1.0), tint * 1.3, 0.35), trans);
+					// the texture's own pattern over it, a little; the reflection over all
+					refr = mix(refr, body, 0.15);
+					c.rgb = mix(refr, envT, rf) + spec * omLiq.z * lit * 0.35;
 					float shore = 1.0 - clamp(thick / (10.0 + 6.0 * sin(omLiq.y * 1.3 + passFxWorld.x * 0.05 +
 						passFxWorld.y * 0.04)), 0.0, 1.0);
 					float fn = omLiqNoise(passFxWorld.xy * 0.12 + liqN.xy * 3.0 + omLiq.y * 0.3) * 0.6 +

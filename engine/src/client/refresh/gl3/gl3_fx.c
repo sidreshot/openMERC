@@ -41,7 +41,7 @@ static qboolean fxstate_valid;
 
 static GLint u_texmode, u_alphatest, u_fogmode, u_fogstart, u_fogend, u_fogcolor, u_fogplane;
 static GLint u_emis, u_softp, u_softv, u_depth, u_fxmat; /* GFX-modern (gl3_post.c) */
-static GLint u_liq, u_liqeye; /* GFX-modern r_om_water (gl3_liquid.c) */
+static GLint u_liq, u_liqeye, u_liqrefl; /* GFX-modern r_om_water (gl3_liquid.c) */
 static GLint u_pf0, u_pf1, u_pf2, u_pfpl; /* GFX-modern r_om_ppfog (gl3_fog.c) */
 static GLint u_fogtab; /* r_om_ppfog region table (GL_TEXTURE4) */
 
@@ -64,6 +64,7 @@ QueryUniforms(void)
 	u_fxmat = glGetUniformLocation(prog, "omFxMat");
 	u_liq = glGetUniformLocation(prog, "omLiq");
 	u_liqeye = glGetUniformLocation(prog, "omLiqEye");
+	u_liqrefl = glGetUniformLocation(prog, "omLiqRefl");
 	u_softp = glGetUniformLocation(prog, "omSoftP");
 	u_softv = glGetUniformLocation(prog, "omSoftV");
 	u_depth = glGetUniformLocation(prog, "omDepth");
@@ -75,6 +76,8 @@ QueryUniforms(void)
 	glUniform1i(u_depth, 7); /* depth copy of the post path on GL_TEXTURE7 */
 	glUniform1i(u_fogtab, 4);
 	glUniform1i(glGetUniformLocation(prog, "omSceneCol"), 11); /* r_om_water 2 (GL3_Post_WaterCopy) */
+	glUniform1i(glGetUniformLocation(prog, "omLiqTile"), 2);    /* r_om_water: the ripple tile (gl3_liquid.c) */
+	glUniform1i(glGetUniformLocation(prog, "omLiqReflTex"), 3); /* r_om_water_quality 3: the planar reflection */
 }
 
 void
@@ -91,6 +94,9 @@ GL3_FX_Init(void)
 	qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3fxvtx_t), offsetof(gl3fxvtx_t, st));
 	glEnableVertexAttribArray(GL3_ATTRIB_COLOR);
 	qglVertexAttribPointer(GL3_ATTRIB_COLOR, 4, GL_FLOAT, GL_FALSE, sizeof(gl3fxvtx_t), offsetof(gl3fxvtx_t, rgba));
+	/* r_om_water: the sky openness per vertex in the lightmap coordinate slot */
+	glEnableVertexAttribArray(GL3_ATTRIB_LMTEXCOORD);
+	qglVertexAttribPointer(GL3_ATTRIB_LMTEXCOORD, 2, GL_FLOAT, GL_FALSE, sizeof(gl3fxvtx_t), offsetof(gl3fxvtx_t, aux));
 	GL3_BindVAO(0);
 
 	u_program = 0;
@@ -252,6 +258,7 @@ uploaded:
 		{
 			glUniform4f(u_liqeye, r_newrefdef.vieworg[0], r_newrefdef.vieworg[1], r_newrefdef.vieworg[2],
 				(soft == 4) ? 2.0f : (soft == 3) ? 1.0f : 0.0f);
+			glUniform4fv(u_liqrefl, 1, st->liqrefl);
 		}
 
 		if (soft)
