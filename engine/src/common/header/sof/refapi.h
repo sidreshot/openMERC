@@ -314,5 +314,9 @@ typedef void (*OM_Set2DScale_t)(float scale);
    the name is loaded. Returns whether it is loaded afterwards. */
 typedef int (*OM_SetAlphaImage_t)(const char *name, int w, int h, const unsigned char *rgba);
 #define OM_SOFREF_ALPHAIMAGE_NAME "OM_SetAlphaImage"
+/* OpenMerc GFX-modern r_om_water: something hit the water at pos (a bullet splash): the water there gets an
+   expanding ring of ripples; strength 1 = a bullet */
+typedef void (*OM_WaterImpact_t)(const float *pos, float strength);
+#define OM_SOFREF_WATERIMPACT_NAME "OM_WaterImpact"
 
 #endif

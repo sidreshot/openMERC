@@ -26,6 +26,10 @@
    metal and steam keep the original look. */
 static cvar_t *r_om_water, *r_om_water_glint, *r_om_water_quality, *r_om_water_clear, *r_om_water_3d;
 static GLuint liqtile;
+/* GFX-modern: the rings of the last splashes (OM_WaterImpact) */
+#define LIQ_RIPPLES 12
+static float ripples[LIQ_RIPPLES][5];
+static int nextripple;
 static GLuint liqenv;
 static int liqenvmap = -1;
 
@@ -43,6 +47,7 @@ GL3_Liquid_Init(void)
 	turbstarts++;
 	amp = 8.0f;
 	liqtile = liqenv = 0; /* a new context: the ripple tile and the sky panorama are made again */
+	memset(ripples, 0, sizeof(ripples));
 	liqenvmap = -1;
 	r_om_water = ri.Cvar_Get("r_om_water", "1", CVAR_ARCHIVE);
 	r_om_water_glint = ri.Cvar_Get("r_om_water_glint", "1", CVAR_ARCHIVE);
@@ -627,6 +632,41 @@ GL3_Liquid_Tile(float *time, float *fine)
 	return (r_om_water && r_om_water->value) ? liqtile : 0;
 }
 
+/* GFX-modern: the rings of the last splashes (OM_WaterImpact): position, the water clock at the impact, strength;
+   the water shader gets their age */
+
+Q2_DLL_EXPORTED void
+OM_WaterImpact(const float *pos, float strength)
+{
+	float *r = ripples[nextripple];
+
+	nextripple = (nextripple + 1) % LIQ_RIPPLES;
+	VectorCopy(pos, r);
+	r[3] = GL3_GameTime();
+	r[4] = Q_clamp(strength, 0.1f, 4.0f);
+}
+
+/* the rings for the shader: xyz, w = age in s (-1: none, or older than 3 s) */
+static void
+RippleUniforms(void)
+{
+	float u[LIQ_RIPPLES * 4];
+	float now = GL3_GameTime();
+	int k;
+
+	for (k = 0; k < LIQ_RIPPLES; k++)
+	{
+		float age = now - ripples[k][3];
+
+		u[k * 4 + 0] = ripples[k][0];
+		u[k * 4 + 1] = ripples[k][1];
+		u[k * 4 + 2] = ripples[k][2];
+		u[k * 4 + 3] = ((ripples[k][4] > 0) && (age >= 0) && (age < 3.0f)) ? age : -1.0f;
+	}
+
+	GL3_FX_LiqRipples(u, LIQ_RIPPLES);
+}
+
 /* units 2 and 3 belong to the lightmaps and the post passes: what is bound there is put back after the water */
 static GLint savedtex[2];
 
@@ -959,6 +999,11 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 		if (pass == 0)
 		{
 			GL3_FX_SetState(&st);
+
+			if (water)
+			{
+				RippleUniforms();
+			}
 		}
 		else
 		{

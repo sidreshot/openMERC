@@ -1687,6 +1687,32 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		uniform sampler2D omLiqTile;
 		uniform sampler2D omLiqReflTex;
 		in float passLiqSky;
+		// GFX-modern: the rings of the last splashes: position, age in s (-1 off)
+		uniform vec4 omLiqRip[12];
+
+		// the splash rings at world point p: their slope added to g, the foam of their young crests returned
+		float omLiqRings(vec3 p, inout vec2 g)
+		{
+			float foam = 0.0;
+			for(int i = 0; i < 12; i++)
+			{
+				float a = omLiqRip[i].w;
+				if(a < 0.0 || abs(omLiqRip[i].z - p.z) > 24.0)
+					continue;
+				vec2 d = p.xy - omLiqRip[i].xy;
+				float r = length(d);
+				float front = 6.0 + 70.0 * a;          // the ring runs out at 70 units/s
+				if(r > front + 40.0)
+					continue;
+				float x = r - front;
+				float env = exp(-x * x / 260.0) * exp(-a * 1.6) / (1.0 + r * 0.02);
+				// a train of three crests behind the front; its slope is radial
+				float w = cos(x * 0.45) * env;
+				g += (d / max(r, 0.5)) * (-sin(x * 0.45) * 0.63 * env);
+				foam += max(w, 0.0) * exp(-a * 3.0);
+			}
+			return foam;
+		}
 
 		// GFX-modern r_om_water: the slow swell (three long waves; rough and calm patches drift over it) - its height
 		// lifts the water's vertices (the warped faces are cut into 64-unit pieces), its slope tilts the ripples
@@ -1795,9 +1821,15 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			vec4 liqT = vec4(1.0); // r_om_water: the texture sample (the water's colour)
 			float return_env = 0.0; // r_om_water_glint -1: what the water reflects, nothing else
 
+			float liqFoam = 0.0;
 			if(omLiq.x > 0.5)
 			{
 				liqN = omLiqNormal(passFxWorld.xy, omLiq.y, omLiq.x);
+				{
+					vec2 rg = vec2(0.0);
+					liqFoam = omLiqRings(passFxWorld, rg);
+					liqN = normalize(liqN + vec3(-rg, 0.0));
+				}
 				liqV = normalize(omLiqEye.xyz - passFxWorld);
 				if(liqV.z < 0.0) liqN.z = -liqN.z; // seen from below (under water): the side toward the eye
 			}
@@ -1923,6 +1955,9 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					c.rgb *= mix(1.0, 0.8, deep);
 					c.a *= clamp(thick / 14.0, 0.0, 1.0);
 				}
+
+				// the splash rings' young crests: a little white water
+				c.rgb = mix(c.rgb, lit * 1.2 + vec3(0.08), clamp(liqFoam * 0.55, 0.0, 0.6));
 
 				// with distance the surface darkens toward the deep water (not much: the Source engine's water fog
 				// over the surface)

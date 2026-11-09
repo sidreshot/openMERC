@@ -41,7 +41,7 @@ static qboolean fxstate_valid;
 
 static GLint u_texmode, u_alphatest, u_fogmode, u_fogstart, u_fogend, u_fogcolor, u_fogplane;
 static GLint u_emis, u_softp, u_softv, u_depth, u_fxmat; /* GFX-modern (gl3_post.c) */
-static GLint u_liq, u_liqeye, u_liqrefl; /* GFX-modern r_om_water (gl3_liquid.c) */
+static GLint u_liq, u_liqeye, u_liqrefl, u_liqrip; /* GFX-modern r_om_water (gl3_liquid.c) */
 static GLint u_pf0, u_pf1, u_pf2, u_pfpl; /* GFX-modern r_om_ppfog (gl3_fog.c) */
 static GLint u_fogtab; /* r_om_ppfog region table (GL_TEXTURE4) */
 
@@ -65,6 +65,7 @@ QueryUniforms(void)
 	u_liq = glGetUniformLocation(prog, "omLiq");
 	u_liqeye = glGetUniformLocation(prog, "omLiqEye");
 	u_liqrefl = glGetUniformLocation(prog, "omLiqRefl");
+	u_liqrip = glGetUniformLocation(prog, "omLiqRip");
 	u_softp = glGetUniformLocation(prog, "omSoftP");
 	u_softv = glGetUniformLocation(prog, "omSoftV");
 	u_depth = glGetUniformLocation(prog, "omDepth");
@@ -122,6 +123,16 @@ GL3_FX_Shutdown(void)
 	vbofx = vaofx = 0;
 	GL3_FX_NightVisionShutdown();
 	numfxverts = 0;
+}
+
+/* r_om_water: the splash rings (gl3_liquid.c) into the effect program, bound by GL3_FX_SetState */
+void
+GL3_FX_LiqRipples(const float *r, int n)
+{
+	if (u_liqrip != -1)
+	{
+		glUniform4fv(u_liqrip, n, r);
+	}
 }
 
 void

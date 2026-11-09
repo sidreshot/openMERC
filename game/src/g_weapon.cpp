@@ -474,7 +474,8 @@ static void BulletGlassWaterPass(edict_t *ent, int a, const vec3_t start, const 
 	trace_t tw = gi.trace(start, NULL, NULL, impact, ent, 0x22);
 	if (tw.fraction >= 1.0f)
 		return;
-	if ((tw.contents & CONTENTS_WATER) && !DM()) {
+	/* OpenMerc: in deathmatch too (the original showed none there: shots into water looked lost) */
+	if (tw.contents & CONTENTS_WATER) {
 		FX_Effect(fxn("environ/bulletsplash"), tw.endpos, MULTICAST_PVS);
 		return;
 	}

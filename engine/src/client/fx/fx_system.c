@@ -17,6 +17,7 @@
 #include "fx_local.h"
 #include "../header/sofclient.h" /* CL_SoF_GameFov (ENG2) */
 #include "../header/cl_ghoul.h" /* CL_Ghoul_GameClock (D1) */
+#include "../../common/header/sof/refapi.h" /* OM_WaterImpact (GFX-modern) */
 
 static fx_def_t fx_cs_defs[FX_MAX_DEFS];
 static fx_def_t fx_named[FX_MAX_NAMED];
@@ -498,6 +499,28 @@ FX_StartEffect(fx_def_t *def, const fx_params_t *p, int source)
 	if (!def || !def->loaded || (def->eft.count <= 0))
 	{
 		return -1; /* an empty definition plays nothing */
+	}
+
+	/* GFX-modern: a splash (bullets in water, environ/bulletsplash) rings the water around it (the renderer's
+	   OM_WaterImpact; a fountain is no impact) */
+	if (Q_strcasestr(def->name, "splash") && !Q_strcasestr(def->name, "fountain"))
+	{
+		extern void *reflib_handle;
+		extern unsigned reflib_gen;
+		static OM_WaterImpact_t impact;
+		static unsigned gen;
+
+		if (gen != reflib_gen)
+		{
+			gen = reflib_gen;
+			impact = reflib_handle ?
+				(OM_WaterImpact_t)Sys_GetProcAddress(reflib_handle, OM_SOFREF_WATERIMPACT_NAME) : NULL;
+		}
+
+		if (impact)
+		{
+			impact(p->origin, 1.0f);
+		}
 	}
 
 	priority = FX_IsPriority(p);
