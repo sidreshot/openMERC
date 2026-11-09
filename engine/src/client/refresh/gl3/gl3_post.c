@@ -6665,6 +6665,22 @@ static cvar_t *r_om_rain, *r_om_rain_density, *r_om_rain_sky, *r_om_lightning, *
 static cvar_t *r_om_storm_maps, *r_om_aa, *r_om_aa_maps, *r_om_snow, *r_om_snow_maps, *r_om_war, *r_om_rain_maps;
 static cvar_t *r_om_lightning_zones;
 
+static float *wxextra;
+static int wxnextra, wxcapextra;
+static const void *wxextramodel;
+
+#define SKC_MAX 1024
+
+static struct
+{
+	GLuint tex;
+	const void *model;
+	float org[2], cell;
+	int w, h;
+	qboolean failed, built;
+	float *pts; /* per grid point (corners then centres): low, high */
+} SKC;
+
 #define SKYM_W 256
 #define SKYM_H 64
 
@@ -6845,6 +6861,9 @@ WXShutdown(void)
 	if (WX.shtex) glDeleteTextures(1, &WX.shtex);
 	if (WX.shfbo) glDeleteFramebuffers(1, &WX.shfbo);
 	if (WX.skytex) glDeleteTextures(1, &WX.skytex);
+	if (SKC.tex) glDeleteTextures(1, &SKC.tex);
+	SKC.tex = 0;
+	SKC.built = false;
 	WX.progaa = WX.progsnow = WX.progwar = WX.progsmoke = WX.prograin = WX.progsplash = WX.progbolt = 0;
 	WX.vao = WX.bolt_vbo = WX.occtex = WX.occfbo = WX.shtex = WX.shfbo = WX.skytex = 0;
 	WX.failed = false;
@@ -6867,6 +6886,8 @@ GL3_Weather_MapLoad(const char *ents, int len)
 	   the anti-aircraft guns and the lightning warm-up of the previous map were kept) */
 	WX.skymodel = WX.gunmodel = NULL;
 	WX.warm = NULL;
+	SKC.built = false;   /* the sky columns of the new map */
+	wxextramodel = NULL; /* the extra occluders too (the model pointer stays the same from map to map) */
 
 	if (!ents || len <= 0)
 	{
@@ -7595,6 +7616,9 @@ static const char *wx_rain_vs =
 	"uniform vec4 params;\n"   /* box size, box height, fall speed, streak length (s) */
 	"uniform vec4 layer;\n"    /* near fade from, to; far fade from, to (units) */
 	"uniform sampler2D occ;\n"
+	"uniform sampler2D skyc;\n"
+	"uniform vec4 skycb;\n"
+	"bool SkyOpen(vec3 p) { if (skycb.z <= 0.0) return true; vec2 u = (p.xy - skycb.xy) * skycb.zw; if (any(lessThan(u, vec2(0.0))) || any(greaterThan(u, vec2(1.0)))) return false; vec2 r = texture(skyc, u).rg; return p.z >= r.x && p.z <= r.y; }\n"
 	"uniform mat4 occvp;\n"
 	"out float vA;\n"
 	"out float vT;\n"
@@ -7617,6 +7641,7 @@ static const char *wx_rain_vs =
 	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
 	"	float od = texture(occ, ou).r;\n"
 	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0002);\n"
+	"	open = open && SkyOpen(p);\n"
 	"	float dist = length(p - eye);\n"
 	"	vA = open ? smoothstep(layer.x, layer.y, dist) * (1.0 - smoothstep(layer.z, layer.w, dist)) : 0.0;\n"
 	"	vec3 a = (c == 0 || c == 1 || c == 4) ? q : p;\n"
@@ -7672,6 +7697,9 @@ static const char *wx_splash_vs =
 	"uniform sampler2D occ;\n"
 	"uniform mat4 occvp;\n"
 	"uniform mat4 occinv;\n"
+	"uniform sampler2D skyc;\n"
+	"uniform vec4 skycb;\n"
+	"bool SkyOpen(vec3 p) { if (skycb.z <= 0.0) return true; vec2 u = (p.xy - skycb.xy) * skycb.zw; if (any(lessThan(u, vec2(0.0))) || any(greaterThan(u, vec2(1.0)))) return false; vec2 r = texture(skyc, u).rg; return p.z >= r.x && p.z <= r.y; }\n"
 	"out vec2 vUV;\n"
 	"out float vPh;\n"
 	"float H(float n) { return fract(sin(n) * 43758.5453); }\n"
@@ -7700,6 +7728,7 @@ static const char *wx_splash_vs =
 	"	vUV = cr;\n"
 	"	vPh = ph;\n"
 	"	bool ok = od < 0.999 && abs(z - eye.z) < 400.0 && spread < 0.0003;\n"
+	"	ok = ok && SkyOpen(vec3(xy, z + 1.0));\n"
 	"	gl_Position = ok ? vp * vec4(xy + cr * s, z, 1.0) : vec4(2.0, 2.0, 2.0, 1.0);\n"
 	"}\n";
 
@@ -7876,6 +7905,9 @@ static const char *wx_snow_vs =
 	"uniform float pxsize;\n"  /* one pixel in world units at distance 1 */
 	"uniform vec4 layer;\n"    /* fade in from x to y (where the nearer layer ends), seed, - */
 	"uniform sampler2D occ;\n"
+	"uniform sampler2D skyc;\n"
+	"uniform vec4 skycb;\n"
+	"bool SkyOpen(vec3 p) { if (skycb.z <= 0.0) return true; vec2 u = (p.xy - skycb.xy) * skycb.zw; if (any(lessThan(u, vec2(0.0))) || any(greaterThan(u, vec2(1.0)))) return false; vec2 r = texture(skyc, u).rg; return p.z >= r.x && p.z <= r.y; }\n"
 	"uniform mat4 occvp;\n"
 	"out vec2 vUV;\n"
 	"out float vA;\n"
@@ -7899,6 +7931,7 @@ static const char *wx_snow_vs =
 	"	vec2 ou = oc.xy * 0.5 + 0.5;\n"
 	"	float od = texture(occ, ou).r;\n"
 	"	bool open = any(lessThan(ou, vec2(0.0))) || any(greaterThan(ou, vec2(1.0))) || (oc.z * 0.5 + 0.5 <= od + 0.0002);\n"
+	"	open = open && SkyOpen(p);\n"
 	"	float dist = length(p - eye);\n"
 	/* nothing right in front of the eye (flakes there were blots flying into the face) */
 	"	vA = open ? (1.0 - smoothstep(B * 0.35, B * 0.5, dist)) * smoothstep(layer.x, layer.y, dist) : 0.0;\n"
@@ -8171,9 +8204,6 @@ WXCreate(void)
 /* the top-down depth of the static world around the eye (orthographic, looking down) */
 /* what the static caster set leaves out but still keeps rain and lightning off: glass and other translucent world
    faces, and the brush entities (awnings, func_walls, doors as placed) - once per map, world-space triangles */
-static float *wxextra;
-static int wxnextra, wxcapextra;
-static const void *wxextramodel;
 
 static void
 WXExtraGeometry(void)
@@ -8239,6 +8269,311 @@ WXExtraGeometry(void)
 			}
 		}
 	}
+}
+
+/*
+ * The sky columns: snow and rain only where the sky is straight above (the owner's rule: no sky above, no snow and
+ * no rain). The top-down depth above stops at the first face met from the top of a 3072-unit square around the eye
+ * and let everything outside that square through - flakes of the far layers (up to 1800 units out) fell inside the
+ * dark halls of sib2. Once per map, every 16 units (coarser on huge maps) a vertical line through the BSP from the
+ * top of the world down: the highest stretch of open air whose top is a sky face is where weather may be; a cell
+ * keeps the part common to its centre and its four corners (nothing leaks in beside a wall). RG32F: the lowest and
+ * the highest height of the open stretch (empty cell: low above high). Outside the world: no weather.
+ */
+
+/* 1 sky, 2 another face or solid, 0 out of the world (the same walk as gl3_liquid.c's) */
+static int
+SKCSkyTrace(mnode_t *node, const vec3_t start, const vec3_t end)
+{
+	float front, back, frac;
+	int side, i, r;
+	vec3_t mid;
+	msurface_t *surf;
+
+	if (node->contents != CONTENTS_NODE)
+	{
+		return (node->contents & (CONTENTS_SOLID | CONTENTS_WINDOW)) ? 2 : 0;
+	}
+
+	front = DotProduct(start, node->plane->normal) - node->plane->dist;
+	back = DotProduct(end, node->plane->normal) - node->plane->dist;
+	side = front < 0;
+
+	if ((back < 0) == side)
+	{
+		return SKCSkyTrace(node->children[side], start, end);
+	}
+
+	frac = front / (front - back);
+	mid[0] = start[0] + (end[0] - start[0]) * frac;
+	mid[1] = start[1] + (end[1] - start[1]) * frac;
+	mid[2] = start[2] + (end[2] - start[2]) * frac;
+
+	r = SKCSkyTrace(node->children[side], start, mid);
+
+	if (r)
+	{
+		return r;
+	}
+
+	surf = gl3_worldmodel->surfaces + node->firstsurface;
+
+	for (i = 0; i < node->numsurfaces; i++, surf++)
+	{
+		const mtexinfo_t *tex = surf->texinfo;
+		float s, t;
+
+		if (surf->flags & SURF_DRAWTURB)
+		{
+			continue;
+		}
+
+		s = DotProduct(mid, tex->vecs[0]) + tex->vecs[0][3];
+		t = DotProduct(mid, tex->vecs[1]) + tex->vecs[1][3];
+
+		if ((s < surf->texturemins[0]) || (t < surf->texturemins[1]) ||
+			(s - surf->texturemins[0] > surf->extents[0]) || (t - surf->texturemins[1] > surf->extents[1]))
+		{
+			continue;
+		}
+
+		return (tex->flags & SURF_SKY) ? 1 : 2;
+	}
+
+	return SKCSkyTrace(node->children[!side], mid, end);
+}
+
+typedef struct
+{
+	float x, y;
+	qboolean insolid, done;
+	float runtop, lo, hi;
+} skccol_t;
+
+/* the leaves of a vertical line from the top down, in order */
+static void
+SKCWalk(mnode_t *node, float z0, float z1, skccol_t *c)
+{
+	if (c->done)
+	{
+		return;
+	}
+
+	if (node->contents != CONTENTS_NODE)
+	{
+		qboolean solid = (node->contents & (CONTENTS_SOLID | CONTENTS_WINDOW)) != 0;
+
+		if (solid == c->insolid)
+		{
+			return;
+		}
+
+		if (!solid)
+		{
+			c->runtop = z0; /* open air begins under a solid */
+		}
+		else
+		{
+			/* the stretch [z0, runtop] ends here: is its top the sky? */
+			vec3_t a = {c->x, c->y, c->runtop - 2.0f}, b = {c->x, c->y, c->runtop + 8.0f};
+
+			if (SKCSkyTrace(gl3_worldmodel->nodes, a, b) == 1)
+			{
+				c->lo = z0;
+				c->hi = c->runtop;
+				c->done = true;
+			}
+		}
+
+		c->insolid = solid;
+		return;
+	}
+
+	{
+		const cplane_t *p = node->plane;
+		float f0 = p->normal[0] * c->x + p->normal[1] * c->y + p->normal[2] * z0 - p->dist;
+		float f1 = p->normal[0] * c->x + p->normal[1] * c->y + p->normal[2] * z1 - p->dist;
+		int side = f0 < 0;
+
+		if ((f1 < 0) == side)
+		{
+			SKCWalk(node->children[side], z0, z1, c);
+		}
+		else
+		{
+			float zm = z0 + (z1 - z0) * (f0 / (f0 - f1));
+
+			SKCWalk(node->children[side], z0, zm, c);
+			SKCWalk(node->children[!side], zm, z1, c);
+		}
+	}
+}
+
+static void
+SKCPoint(float x, float y, float *out)
+{
+	const float *mm = gl3_worldmodel->nodes[0].minmaxs;
+	skccol_t c;
+
+	memset(&c, 0, sizeof(c));
+	c.x = x;
+	c.y = y;
+	c.insolid = true; /* above the world: the void */
+	SKCWalk(gl3_worldmodel->nodes, mm[5] + 64.0f, mm[2] - 64.0f, &c);
+
+	if (!c.done && !c.insolid)
+	{
+		/* open air down to the bottom of the world (a hole): its top decides */
+		vec3_t a = {x, y, c.runtop - 2.0f}, b = {x, y, c.runtop + 8.0f};
+
+		if (SKCSkyTrace(gl3_worldmodel->nodes, a, b) == 1)
+		{
+			c.lo = mm[2] - 64.0f;
+			c.hi = c.runtop;
+			c.done = true;
+		}
+	}
+
+	out[0] = c.done ? c.lo : 1e9f;
+	out[1] = c.done ? c.hi : -1e9f;
+}
+
+/* one row of grid points: corners (w + 1 per row, h + 1 rows) then centres (w per row, h rows) */
+static void
+SKCRow(int j, void *ctx)
+{
+	int i, nc = (SKC.w + 1) * (SKC.h + 1);
+
+	(void)ctx;
+
+	if (j <= SKC.h)
+	{
+		for (i = 0; i <= SKC.w; i++)
+		{
+			/* half a unit off the 16-unit grid of the brushes */
+			SKCPoint(SKC.org[0] + i * SKC.cell + 0.5f, SKC.org[1] + j * SKC.cell + 0.5f,
+				SKC.pts + 2 * (j * (SKC.w + 1) + i));
+		}
+	}
+
+	if (j < SKC.h)
+	{
+		for (i = 0; i < SKC.w; i++)
+		{
+			SKCPoint(SKC.org[0] + (i + 0.5f) * SKC.cell, SKC.org[1] + (j + 0.5f) * SKC.cell,
+				SKC.pts + 2 * (nc + j * SKC.w + i));
+		}
+	}
+}
+
+static void
+SKCBuild(void)
+{
+	const float *mm;
+	float *tex;
+	double ms;
+	int i, j, nc;
+
+	if (SKC.built && (SKC.model == gl3_worldmodel))
+	{
+		return;
+	}
+
+	SKC.built = true;
+	SKC.model = gl3_worldmodel;
+	SKC.failed = true;
+
+	if (!gl3_worldmodel || !gl3_worldmodel->nodes)
+	{
+		return;
+	}
+
+	ms = GL3_LoadClockMs();
+	mm = gl3_worldmodel->nodes[0].minmaxs;
+	SKC.cell = Q_max(16.0f, Q_max(mm[3] - mm[0], mm[4] - mm[1]) / SKC_MAX);
+	SKC.cell = ceilf(SKC.cell / 16.0f) * 16.0f;
+	SKC.org[0] = floorf(mm[0] / 16.0f) * 16.0f;
+	SKC.org[1] = floorf(mm[1] / 16.0f) * 16.0f;
+	SKC.w = Q_min(SKC_MAX, (int)ceilf((mm[3] - SKC.org[0]) / SKC.cell));
+	SKC.h = Q_min(SKC_MAX, (int)ceilf((mm[4] - SKC.org[1]) / SKC.cell));
+
+	if ((SKC.w <= 0) || (SKC.h <= 0))
+	{
+		return;
+	}
+
+	nc = (SKC.w + 1) * (SKC.h + 1);
+	free(SKC.pts);
+	SKC.pts = malloc(sizeof(float) * 2 * (nc + SKC.w * SKC.h));
+	tex = malloc(sizeof(float) * 2 * SKC.w * SKC.h);
+
+	if (!SKC.pts || !tex)
+	{
+		free(tex);
+		return;
+	}
+
+	GL3_ParallelFor(SKC.h + 1, SKCRow, NULL);
+
+	for (j = 0; j < SKC.h; j++)
+	{
+		for (i = 0; i < SKC.w; i++)
+		{
+			const float *p[5] = {
+				SKC.pts + 2 * (j * (SKC.w + 1) + i), SKC.pts + 2 * (j * (SKC.w + 1) + i + 1),
+				SKC.pts + 2 * ((j + 1) * (SKC.w + 1) + i), SKC.pts + 2 * ((j + 1) * (SKC.w + 1) + i + 1),
+				SKC.pts + 2 * (nc + j * SKC.w + i)};
+			float lo = -1e9f, hi = 1e9f;
+			int k;
+
+			for (k = 0; k < 5; k++)
+			{
+				lo = Q_max(lo, p[k][0]);
+				hi = Q_min(hi, p[k][1]);
+			}
+
+			tex[2 * (j * SKC.w + i)] = lo;
+			tex[2 * (j * SKC.w + i) + 1] = hi;
+		}
+	}
+
+	if (!SKC.tex)
+	{
+		glGenTextures(1, &SKC.tex);
+	}
+
+	GL3_SelectTMU(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, SKC.tex);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, SKC.w, SKC.h, 0, GL_RG, GL_FLOAT, tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	gl3state.currenttexture = SKC.tex;
+	free(tex);
+	SKC.failed = false;
+
+	R_Printf(PRINT_DEVELOPER, "sky columns: %dx%d cells of %.0f units in %.0f ms\n", SKC.w, SKC.h, SKC.cell,
+		GL3_LoadClockMs() - ms);
+}
+
+/* the sky columns to a weather program: sampler on unit 4, "skycb" = origin, 1 / size (z 0: no map, all open) */
+static void
+SKCBind(GLuint prog)
+{
+	GLint loc = GL3_UniformLoc(prog, "skycb");
+
+	glUniform1i(GL3_UniformLoc(prog, "skyc"), 4);
+
+	if (SKC.failed || !SKC.tex)
+	{
+		glUniform4f(loc, 0, 0, 0, 0);
+		return;
+	}
+
+	glUniform4f(loc, SKC.org[0], SKC.org[1], 1.0f / (SKC.w * SKC.cell), 1.0f / (SKC.h * SKC.cell));
+	BindTex(GL_TEXTURE4, SKC.tex);
 }
 
 static void
@@ -8352,6 +8687,7 @@ GL3_Post_Weather(void)
 	GL3_Draw3DBatchesNow();
 	GL3_FX_Flush();
 	WXOcclusion();
+	SKCBuild(); /* once per map: where the sky is straight above */
 	flash = LightningFlash();
 	dens = Q_max(0.0f, Q_min(r_om_rain_density->value, 4.0f));
 	pv = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
@@ -8480,6 +8816,7 @@ GL3_Post_Weather(void)
 		light = Q_max(0.65f, Q_min(1.1f, 0.6f + Q_max(lc[0], Q_max(lc[1], lc[2]))));
 
 		GL3_UseProgram(WX.progsnow);
+		SKCBind(WX.progsnow);
 		glUniformMatrix4fv(WX.n_vp, 1, GL_FALSE, &pv.Elements[0][0]);
 		glUniform3fv(WX.n_eye, 1, r_newrefdef.vieworg);
 		glUniform1f(WX.n_time, fmodf(r_newrefdef.time, 3600.0f));
@@ -8541,6 +8878,7 @@ GL3_Post_Weather(void)
 		int l;
 
 		GL3_UseProgram(WX.prograin);
+		SKCBind(WX.prograin);
 		glUniformMatrix4fv(WX.r_vp, 1, GL_FALSE, &pv.Elements[0][0]);
 		glUniform3fv(WX.r_eye, 1, r_newrefdef.vieworg);
 		glUniform1f(WX.r_time, r_newrefdef.time);
@@ -8573,6 +8911,7 @@ GL3_Post_Weather(void)
 
 		WXInverse4(WX.occvp, inv);
 		GL3_UseProgram(WX.progsplash);
+		SKCBind(WX.progsplash);
 		glUniformMatrix4fv(WX.s_vp, 1, GL_FALSE, &pv.Elements[0][0]);
 		glUniform3fv(WX.s_eye, 1, r_newrefdef.vieworg);
 		glUniform1f(WX.s_time, r_newrefdef.time);
