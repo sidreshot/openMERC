@@ -9159,6 +9159,9 @@ static const char *ssr_apply_fs =
 	"		vec3 Nv = SafeN(cross(dx, dy));\n"
 	"		if (dot(Nv, P) > 0.0) Nv = -Nv;\n"
 	"		vec3 N = normalize(mat3(invview) * Nv);\n"
+	/* the rippled water (wetness 1) and wet level ground: level - the depth of the water cut into small lifted
+	   triangles (r_om_water_3d) gave every facet its own glint */
+	"		if (wet > 0.9 && N.z > 0.5) N = vec3(0.0, 0.0, 1.0);\n"
 	"		vec3 wp = (invview * vec4(P, 1.0)).xyz;\n"
 	"		vec3 V = normalize(invview[3].xyz - wp);\n"
 	"		float ndv = max(dot(N, V), 0.0);\n"
