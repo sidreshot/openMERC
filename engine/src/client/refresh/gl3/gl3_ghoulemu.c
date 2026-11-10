@@ -852,6 +852,42 @@ static const char *emu_fs =
 	   surroundings, and lamps that fade to nothing at their radius (GL's 1/(1+d/r) was still half bright there,
 	   so a light leaving the set jumped). Roughness from the GL shininess (Blinn exponent n: sqrt(2/(n+2)));
 	   materials without specular get a soft dielectric sheen */
+#ifndef YQ2_GL3_GLES3
+	/* r_om_probes: the reflection probes of the SSR pass (gl3_post.c) as the surroundings in the gloss */
+	"uniform samplerCube pc0;\n"
+	"uniform samplerCube pc1;\n"
+	"uniform samplerCube pc2;\n"
+	"uniform samplerCube pc3;\n"
+	"uniform vec4 ppos[4];\n"
+	"uniform vec4 pmin[4];\n"
+	"uniform vec4 pmax[4];\n"
+	"uniform float pcount;\n"
+	"vec3 PDir(vec4 o, vec4 bmin, vec4 bmax, vec3 wp, vec3 wr)\n"
+	"{\n"
+	"	vec3 r = wr + vec3(equal(wr, vec3(0.0))) * 1e-5;\n"
+	"	vec3 tf = max((bmax.xyz - wp) / r, (bmin.xyz - wp) / r);\n"
+	"	float t = max(min(min(tf.x, tf.y), tf.z), 0.0);\n"
+	"	return wp + wr * t - o.xyz;\n"
+	"}\n"
+	"float PW(vec4 o, vec4 bmin, vec4 bmax, vec3 wp)\n"
+	"{\n"
+	"	if (o.w < 0.5) return 0.0;\n"
+	"	vec3 q = max(max(bmin.xyz - wp, wp - bmax.xyz), vec3(0.0));\n"
+	"	vec3 e = wp - o.xyz;\n"
+	"	return 1.0 - smoothstep(0.0, 96.0, length(q)) + 1e-3 / (1.0 + dot(e, e) * 1e-5);\n"
+	"}\n"
+	"vec3 Probe(vec3 wp, vec3 wr, float lod)\n"
+	"{\n"
+	"	float w0 = PW(ppos[0], pmin[0], pmax[0], wp), w1 = PW(ppos[1], pmin[1], pmax[1], wp);\n"
+	"	float w2 = PW(ppos[2], pmin[2], pmax[2], wp), w3 = PW(ppos[3], pmin[3], pmax[3], wp);\n"
+	"	vec3 c = vec3(0.0);\n"
+	"	if (w0 > 0.0) c += w0 * textureLod(pc0, PDir(ppos[0], pmin[0], pmax[0], wp, wr), lod).rgb;\n"
+	"	if (w1 > 0.0) c += w1 * textureLod(pc1, PDir(ppos[1], pmin[1], pmax[1], wp, wr), lod).rgb;\n"
+	"	if (w2 > 0.0) c += w2 * textureLod(pc2, PDir(ppos[2], pmin[2], pmax[2], wp, wr), lod).rgb;\n"
+	"	if (w3 > 0.0) c += w3 * textureLod(pc3, PDir(ppos[3], pmin[3], pmax[3], wp, wr), lod).rgb;\n"
+	"	return c / max(w0 + w1 + w2 + w3, 1e-6);\n"
+	"}\n"
+#endif
 	"vec3 omSpec;\n"
 	"float omMetal;\n"   /* 1: a glossy SoF material - its highlight takes the texture colour (metal) */
 	"float omGGX(float nh, float a)\n"
@@ -920,7 +956,17 @@ static const char *emu_fs =
 	"	}\n"
 	"	vec3 R = reflect(-v, n);\n"
 	"	vec3 Fe = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - nv, 5.0);\n"
-	"	sp += amb * omAmbK(R) * Fe * (1.0 - 0.7 * rough);\n"
+	/* the surroundings: the probe cube maps where there are any (mip by roughness, the gloss of the room the model
+	   stands in), else the ambient cube along the reflection */
+	"	vec3 env = amb * omAmbK(R);\n"
+#ifndef YQ2_GL3_GLES3
+	"	if (pcount > 0.5)\n"
+	"	{\n"
+	"		vec4 wq = omInvPV * vPos;\n"
+	"		env = Probe(wq.xyz / wq.w, omE2W * R, 1.0 + rough * 5.0);\n"
+	"	}\n"
+#endif
+	"	sp += env * Fe * (1.0 - 0.7 * rough);\n"
 	"	omSpec = sp * omPbrK;\n"
 	"	return vec4(min(c, vec3(2.0)), clamp(md.a, 0.0, 1.0));\n"
 	"}\n"
@@ -2017,6 +2063,36 @@ Flush(void)
 				U3fv(E.u_amb, 6, E.amb);
 				UM3(E.u_e2w, E.e2w);
 			}
+			else if (ppl == 2)
+			{
+				float e2w[9];
+				int i, j;
+
+				for (j = 0; j < 3; j++)
+				{
+					for (i = 0; i < 3; i++)
+					{
+						e2w[j * 3 + i] = gl3state.viewMat3D.Elements[i][j];
+					}
+				}
+
+				UM3(E.u_e2w, e2w);
+			}
+
+#ifndef YQ2_GL3_GLES3
+			if (ppl == 2)
+			{
+				static int probeframe = -1;
+				static GLuint probeprog;
+
+				if ((probeframe != gl3_framecount) || (probeprog != E.prog))
+				{
+					probeframe = gl3_framecount;
+					probeprog = E.prog;
+					GL3_Probes_Uniforms(E.prog);
+				}
+			}
+#endif
 		}
 	}
 

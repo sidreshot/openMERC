@@ -69,6 +69,7 @@ static void MirrorShutdown(void);
 static void TimersShutdown(void);
 static void SSRKeepColour(void);
 static void ProbesUniforms(GLuint prog);
+void GL3_Probes_Uniforms(GLuint prog);
 static void ProbesShutdown(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
 static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth, *r_om_ssr_temporal, *r_om_ssr_ripple, *r_om_ssr_checker;
@@ -11626,6 +11627,13 @@ GL3_Probes_Frame(void)
 
 		RP.bind[RP.nbind] = k;
 	}
+}
+
+/* the probes for another program in use (the Ghoul models' gloss): the same samplers and uniforms */
+void
+GL3_Probes_Uniforms(GLuint prog)
+{
+	ProbesUniforms(prog);
 }
 
 /* the probes for the SSR trace program: samplers pc0..pc3 on PROBE_UNIT.., their places and boxes */
