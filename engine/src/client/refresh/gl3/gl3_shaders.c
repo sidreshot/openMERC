@@ -1005,12 +1005,15 @@ static const char* fragmentSrcOmWorld =
 	"uniform int omCapN;\n"
 	"uniform vec4 omCapA[8];\n"
 	"uniform vec4 omCapB[8];\n"
+	"uniform vec4 omCapS[8];\n"
 	"float omCapsuleAO(vec3 P, vec3 Nn)\n"
 	"{\n"
 	"	vec3 N = normalize(Nn);\n"
 	"	float vis = 1.0;\n"
 	"	for (int i = 0; i < omCapN; i++)\n"
 	"	{\n"
+	"		vec3 sc = P - omCapS[i].xyz;\n"
+	"		if (dot(sc, sc) > omCapS[i].w) continue;\n"
 	"		vec3 a = omCapA[i].xyz, ab = omCapB[i].xyz - a;\n"
 	"		float r = omCapA[i].w;\n"
 	"		vec3 c = a + ab * clamp(dot(P - a, ab) / max(dot(ab, ab), 1e-3), 0.0, 1.0);\n"
@@ -3177,8 +3180,25 @@ void GL3_SoF_CapsuleUniforms(int n, const float *a, const float *b)
 
 		if (n > 0)
 		{
+			float sp[8][4];
+			int k;
+
+			/* the bounding sphere of each capsule's reach (the middle, (half length + 5 r)^2): a cheap first test */
+			for (k = 0; k < n && k < 8; k++)
+			{
+				const float *ka = a + k * 4, *kb = b + k * 4;
+				float hx = 0.5f * (kb[0] - ka[0]), hy = 0.5f * (kb[1] - ka[1]), hz = 0.5f * (kb[2] - ka[2]);
+				float R = sqrtf(hx * hx + hy * hy + hz * hz) + 5.0f * ka[3];
+
+				sp[k][0] = ka[0] + hx;
+				sp[k][1] = ka[1] + hy;
+				sp[k][2] = ka[2] + hz;
+				sp[k][3] = R * R;
+			}
+
 			glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omCapA"), n, a);
 			glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omCapB"), n, b);
+			glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omCapS"), n, &sp[0][0]);
 		}
 	}
 }

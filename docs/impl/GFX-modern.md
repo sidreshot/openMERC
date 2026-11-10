@@ -1739,3 +1739,14 @@ client fx module) to start an effect in front of the eye.
   (l / (1 + 0.35 l)), a P43 phosphor (0.55, 1.0, 0.42), scintillation noise per pixel and frame (stronger in the
   dark), the round field of the tube (radius 0.42..0.62 of the height), a faint flicker, the power-up surge (to 1.8 x
   over 0.35 s, settling by 1 s). Cost: composite +0.01 ms. Test aid r_om_nv_test 1 puts the goggles on.
+
+## Aggregate cost on five more maps, capsule optimisation (2026-11-11)
+
+* All new effects on/off/on (1080p, camera turning 1 deg/frame): jpn2 +0.46 ms, sib1 +0.3, irq1a +0.2, ger1 within
+  noise; tsr1 +0.8..1.6 - the world pass +0.65 ms: its intro has eight bodies in view and the world shader looped over
+  eight capsules per pixel.
+* Capsules now: a bounding sphere per capsule (middle, (half length + 5 r)^2, omCapS) rejects a pixel before the
+  segment math; a capsule whose reach is outside the view frustum is not sent; r_om_capsule_max 4 (nearest bodies).
+  tsr1, comparable segments: world pass 4.23 ms with capsules, 4.19 without.
+* Muzzle-flash shadows (left from the owner's point 2) are not done on purpose: a cube of depth maps per shot is the
+  cost of a lamp shadow per frame of fire, and neither MGS5 nor Death Stranding casts them.

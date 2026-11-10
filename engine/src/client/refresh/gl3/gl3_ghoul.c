@@ -699,8 +699,9 @@ CapsuleAdd(const vec3_t mins, const vec3_t maxs)
 void
 GL3_Ghoul_CapsuleFrame(void)
 {
+	static cvar_t *capmax;
 	float a[8][4], b[8][4], dist[8];
-	int last = capcur, n = 0, i, j;
+	int last = capcur, n = 0, i, j, cmax;
 
 	capcur ^= 1;
 	numcaps[capcur] = 0;
@@ -710,6 +711,14 @@ GL3_Ghoul_CapsuleFrame(void)
 		GL3_SoF_CapsuleUniforms(0, NULL, NULL);
 		return;
 	}
+
+	/* r_om_capsule_max: the nearest bodies only (a loop over eight in the world shader cost tsr1's intro 0.5 ms) */
+	if (!capmax)
+	{
+		capmax = ri.Cvar_Get("r_om_capsule_max", "4", CVAR_ARCHIVE);
+	}
+
+	cmax = (int)Q_clamp(capmax->value, 1.0f, 8.0f);
 
 	for (i = 0; i < numcaps[last]; i++)
 	{
@@ -729,10 +738,33 @@ GL3_Ghoul_CapsuleFrame(void)
 			continue;
 		}
 
+		/* reach outside the view frustum: nothing it shades is seen (the last frame's frustum, a frame old at most) */
+		{
+			vec3_t h;
+			float R;
+			int p;
+
+			VectorSubtract(capb[last][i], capa[last][i], h);
+			R = 0.5f * VectorLength(h) + 5.0f * capa[last][i][3];
+
+			for (p = 0; p < 4; p++)
+			{
+				if (DotProduct(frustum[p].normal, m) - frustum[p].dist < -R)
+				{
+					break;
+				}
+			}
+
+			if (p < 4)
+			{
+				continue;
+			}
+		}
+
 		/* insertion into the eight nearest */
 		for (j = n; (j > 0) && (dist[j - 1] > dd); j--)
 		{
-			if (j < 8)
+			if (j < cmax)
 			{
 				memcpy(a[j], a[j - 1], sizeof(a[j]));
 				memcpy(b[j], b[j - 1], sizeof(b[j]));
@@ -740,12 +772,12 @@ GL3_Ghoul_CapsuleFrame(void)
 			}
 		}
 
-		if (j < 8)
+		if (j < cmax)
 		{
 			memcpy(a[j], capa[last][i], sizeof(a[j]));
 			memcpy(b[j], capb[last][i], sizeof(b[j]));
 			dist[j] = dd;
-			n = Q_min(n + 1, 8);
+			n = Q_min(n + 1, cmax);
 		}
 	}
 
