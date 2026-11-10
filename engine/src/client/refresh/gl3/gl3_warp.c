@@ -874,7 +874,19 @@ GL3_DrawSkyBox(void)
 	int i;
 
 	/* OpenMerc: the whole face when rotating or fov_x < 90 (SPEC-410) */
-	qboolean wholeface = (skyrotate != 0.0f) || (r_newrefdef.fov_x < 90) || (gl3_skypv_override != NULL);
+	/* GFX-modern r_om_skyfill: the whole sky box after the world, depth-tested - it lands only where the world left the
+	   depth clear: the sky faces and the holes of a map, which otherwise kept old frames (Quake's hall of mirrors; on
+	   arm1 the rain drops then built such a hole up to a white wall). Covered pixels fail the early depth test */
+	static cvar_t *r_om_skyfill;
+	qboolean wholeface;
+
+	if (!r_om_skyfill)
+	{
+		r_om_skyfill = ri.Cvar_Get("r_om_skyfill", "1", CVAR_ARCHIVE);
+	}
+
+	wholeface = (skyrotate != 0.0f) || (r_newrefdef.fov_x < 90) || (gl3_skypv_override != NULL) ||
+		(r_om_skyfill->value != 0);
 
 	if (skyrotate && !gl3_skypv_override)
 	{   /* check for no sky at all */

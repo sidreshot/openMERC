@@ -1641,3 +1641,15 @@ client fx module) to start an effect in front of the eye.
 * Cost (1080p, composite pass, one run on/off/on): still camera 0 (one depth fetch, early out), 1 deg/frame
   +0.15 ms, 3 deg/frame +0.29 ms (taps by length: one per ~5 px, 3..8; was +0.75 ms with 8 fixed taps and pow).
 * Presets: minimal/low 0 (phones), medium/high 0.5. Menu: Colour -> Motion Blur.
+
+## The white wall over arm1's street: a map hole, rain feedback (r_om_skyfill, 2026-11-11)
+
+* What it was: at omsetpos -408 46 109 -99 6 the map has a hole (no face at all along those rays, BSP face test).
+  Nothing redrew those pixels, so they kept old frames (Quake's hall of mirrors: one second after the start the
+  "SKY'S USED BOOKS" sign of the spawn view was still there), and the rain drops, which show the last frame
+  (r_om_ssr's colour copy) x 1.3 plus its blur x 1.1, raised that stale image frame by frame to white - also
+  reflected by SSR in the wet street. Found by: the white grew over seconds after r_om_ssr 1 (facade mean 14 -> 102).
+* r_om_skyfill 1 (gl3_warp.c): the whole sky box after the world, depth-tested - it fills only what the world left
+  at the clear depth (sky faces, holes); covered pixels fail early. The hole now shows the painted New York skyline.
+* Rain drops: behind x 0.7 + blur x 0.25 (gain under 1, the loop through the last frame always converges) + the rain
+  colour x 0.25 (not fed back) for their sheen.

@@ -8240,7 +8240,11 @@ static const char *wx_rain_fs =
 	"	{\n"
 	"		vec3 behind = textureLod(scenecol, clamp(vuv + vec2(vS * 0.0045, -0.002), 0.0, 1.0), 0.5).rgb;\n"
 	"		vec3 amb = textureLod(scenecol, vuv, 4.5).rgb;\n"
-	"		c = behind * 1.3 + amb * 1.1 + c * 0.08;\n"
+	/* the last frame already holds the drops: its gain must stay under 1 or the loop runs away - where the far drops
+	   cover a dark sky almost whole the old 1.3 + 1.1 raised it frame by frame to a white wall (arm1, also mirrored in
+	   the wet street). A drop passes the light behind it bent (0.7) and gathers the light around (0.25); its own sheen (the
+	   rain colour, not fed back) keeps it visible */
+	"		c = behind * 0.7 + amb * 0.25 + c * 0.25;\n"
 	"	}\n"
 	"	outColor = vec4(c, a);\n"
 	"}\n";
