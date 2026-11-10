@@ -2067,6 +2067,20 @@ static const char *glint_src_fs =
 	"	outColor = vec4(min(p, vec3(4.0)), 1.0);\n"
 	"}\n";
 
+/* the taps of the streaks: every texel on desktops; phones (Adreno 610: 4.5 ms for the 100 taps) every third / every
+   second and a half texel, weighted by the step - the same length, a little less smooth */
+#ifdef YQ2_GL3_GLES3
+#define GLINT_HN "13"
+#define GLINT_HS "3.0"
+#define GLINT_VN "4"
+#define GLINT_VS "2.5"
+#else
+#define GLINT_HN "40"
+#define GLINT_HS "1.0"
+#define GLINT_VN "10"
+#define GLINT_VS "1.0"
+#endif
+
 static const char *glint_streak_fs =
 	"uniform sampler2D src;\n"
 	"uniform vec4 texel;\n" /* one source texel (x, y); horizontal and vertical falloff (in texels) */
@@ -2077,17 +2091,17 @@ static const char *glint_streak_fs =
 	"void main()\n"
 	"{\n"
 	"	vec3 h = vec3(0.0), v = vec3(0.0);\n"
-	"	for (int i = 1; i <= 40; i++)\n"
+	"	for (int i = 1; i <= " GLINT_HN "; i++)\n"
 	"	{\n"
-	"		float fi = float(i);\n"
+	"		float fi = float(i) * " GLINT_HS ";\n"
 	"		vec2 o = vec2(texel.x * fi, 0.0);\n"
-	"		h += (texture(src, uv + o).rgb + texture(src, uv - o).rgb) * exp(-fi / texel.z);\n"
+	"		h += (texture(src, uv + o).rgb + texture(src, uv - o).rgb) * exp(-fi / texel.z) * " GLINT_HS ";\n"
 	"	}\n"
-	"	for (int i = 1; i <= 10; i++)\n"
+	"	for (int i = 1; i <= " GLINT_VN "; i++)\n"
 	"	{\n"
-	"		float fi = float(i);\n"
+	"		float fi = float(i) * " GLINT_VS ";\n"
 	"		vec2 o = vec2(0.0, texel.y * fi);\n"
-	"		v += (texture(src, uv + o).rgb + texture(src, uv - o).rgb) * exp(-fi / texel.w);\n"
+	"		v += (texture(src, uv + o).rgb + texture(src, uv - o).rgb) * exp(-fi / texel.w) * " GLINT_VS ";\n"
 	"	}\n"
 	"	vec3 c = texture(src, uv).rgb;\n"
 	/* the long streak cools a little toward its ends, as an anamorphic flare does */
