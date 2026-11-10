@@ -2577,6 +2577,12 @@ static qboolean createShaders(void)
 		Com_Printf("WARNING: Failed to create shader program for SoF effects!\n");
 		return false;
 	}
+	/* GFX-modern r_om_glass: without it the glass is drawn as before */
+	if(!initShader3D(&gl3state.siSoFglass, gl3_glass_vs, gl3_glass_fs))
+	{
+		Com_Printf("WARNING: Failed to create shader program for glass, it is drawn the old way\n");
+		gl3state.siSoFglass.shaderProgram = 0;
+	}
 
 	const char* particleFrag = fragmentSrcParticles;
 	if(gl3_particle_square->value != 0.0f)

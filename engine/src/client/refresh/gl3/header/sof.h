@@ -381,6 +381,8 @@ qboolean GL3_Post_BeginView(int x, int y, int w, int h);
 void GL3_Post_DepthCopy(void);
 qboolean GL3_Post_DepthReady(void);
 qboolean GL3_Post_WaterCopy(void);
+qboolean GL3_Post_GlassCopy(void);
+void GL3_Post_GlassBind(void);
 void GL3_Post_EndView(void);
 void GL3_Post_SSAO(void);
 void GL3_Post_Weather(void);

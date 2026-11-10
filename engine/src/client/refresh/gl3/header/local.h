@@ -496,6 +496,7 @@ typedef struct
 	// OpenMerc: SoF 2D drawing (fixed-function state emulated per vertex) and 3D effects
 	gl3ShaderInfo_t siSoF2D;
 	gl3ShaderInfo_t siSoFfx;
+	gl3ShaderInfo_t siSoFglass; /* GFX-modern r_om_glass (gl3_glass.c) */
 
 	// NOTE: make sure siParticle is always the last shaderInfo (or adapt GL3_ShutdownShaders())
 	gl3ShaderInfo_t siParticle; // for particles. surprising, right?
@@ -654,6 +655,8 @@ typedef struct image_s
 	int omglossgen;                     /* ... for this generation of the material table (gl3_material.c) */
 	int omlamp;                         /* GFX-modern: a little lamp by its name (indicator, switch, button lit):
 	                                       0 = not worked out yet, 1 = no, 2 = yes */
+	float omglass[4];                   /* GFX-modern r_om_glass: the clear pane of a see-through texture - its mean
+	                                       colour (0..1) and alpha; alpha <= 0: no pane band (gl3_glass.c) */
 } gl3image_t;
 
 enum {MAX_GL3TEXTURES = 1024};
@@ -766,6 +769,11 @@ extern qboolean GL3_Relight_Fit(const char *mapname, float *point, float *surf, 
 // gl3_lamps.c: the map's lamps for the lamp glints of r_om_ssr
 extern void GL3_Lamps_Set(const byte *lights, int len);
 extern void GL3_Lamps_View(GLuint prog, const float *eye);
+/* GFX-modern r_om_glass (gl3_glass.c): see-through glass with refraction */
+extern const char *gl3_glass_vs, *gl3_glass_fs;
+void GL3_Glass_PaneStats(gl3image_t *image, const byte *rgba, int w, int h);
+void GL3_Glass_BeginFrame(void);
+qboolean GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int fogregion);
 extern float GL3_Mat_SurfClass(const msurface_t *surf); /* gl3_material.c: material class, negative */
 extern float GL3_Mat_SurfReflect(const msurface_t *surf, const vec3_t n); /* r_om_ssr reflectivity of a face */
 // gl3_material.c: material classes and material maps of the world textures (r_om_ssr)

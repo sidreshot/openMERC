@@ -636,6 +636,12 @@ DrawInlineAlphaFaces(entity_t *currententity, gl3model_t *currentmodel, msurface
 
 		c_brush_polys++; /* I4c: r_speeds 1 "wp" counts inline-model alpha faces (SPEC-AMEND-006 I4c.4) */
 
+		/* GFX-modern r_om_glass: a pane of a breakable window as see-through glass */
+		if (GL3_Glass_Draw(surf, image, currententity, GL3_Fog_HardwareModelRegion(surf, modelregion)))
+		{
+			continue;
+		}
+
 		gl3fxstate_t fst = st;
 
 		fst.texnum = image->texnum;

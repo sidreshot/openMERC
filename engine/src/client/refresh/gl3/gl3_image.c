@@ -1938,6 +1938,17 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 	UploadM32(image, m, size, kind, pictipskip);
 	imgt[3] += ImgClock() - t1;
 	SetImageFilter(image);
+	/* r_om_glass: the clear pane of a see-through texture, from its level-0 texels */
+	if (image->has_alpha)
+	{
+		int ofs0 = M32Int(m, M32_OFS_OFFSETS), w0 = M32Int(m, M32_OFS_WIDTHS), h0 = M32Int(m, M32_OFS_HEIGHTS);
+
+		if ((ofs0 > 0) && (w0 > 0) && (h0 > 0) && (ofs0 + w0 * h0 * 4 <= size))
+		{
+			GL3_Glass_PaneStats(image, m + ofs0, w0, h0);
+		}
+	}
+
 	/* r_om_ssr material map of a world texture, from its level-0 texels */
 	if (image->type == it_wall)
 	{

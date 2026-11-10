@@ -107,6 +107,11 @@ static struct
 	   surface of the view (GL_TEXTURE11) */
 	qboolean watercopied;
 	GLuint texwater, waterfbo;
+	/* r_om_glass: the scene drawn so far under a pane of glass (full size; half on phones), made again for a pane
+	   over another one (gl3_glass.c) */
+	GLuint texglass, glassfbo;
+	int glassw, glassh;
+	qboolean glasshdr;
 	int waterw, waterh;
 	qboolean waterhdr;
 	qboolean depthfinal;    /* the depth copy holds the finished view (r_om_ssao made it) */
@@ -1285,6 +1290,9 @@ DeleteTargets(void)
 	if (P.waterfbo) glDeleteFramebuffers(1, &P.waterfbo);
 	if (P.texwater) glDeleteTextures(1, &P.texwater);
 	P.waterfbo = P.texwater = 0;
+	if (P.glassfbo) glDeleteFramebuffers(1, &P.glassfbo);
+	if (P.texglass) glDeleteTextures(1, &P.texglass);
+	P.glassfbo = P.texglass = 0;
 	P.waterw = P.waterh = 0;
 	if (P.lumfbo) glDeleteFramebuffers(1, &P.lumfbo);
 	if (P.lumtex) glDeleteTextures(1, &P.lumtex);
@@ -2001,6 +2009,89 @@ GL3_Post_WaterCopy(void)
 	GL3_SelectTMU(GL_TEXTURE0);
 	P.watercopied = P.depthcopied = true;
 	return true;
+}
+
+/* r_om_glass: the scene drawn so far (the world, everything farther in the sorted pass) into the glass copy, and the
+   depth copy again (with the models); false when the post path does not draw this view */
+qboolean
+GL3_Post_GlassCopy(void)
+{
+	int w, h, div;
+
+	if (!P.bound || !P.texdepthcopy)
+	{
+		return false;
+	}
+
+#ifdef YQ2_GL3_GLES3
+	div = 2;
+#else
+	div = 1;
+#endif
+	w = Q_max(P.w / div, 1);
+	h = Q_max(P.h / div, 1);
+
+	if (!P.texglass || (P.glassw != w) || (P.glassh != h) || (P.glasshdr != P.hdr))
+	{
+		static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+
+		if (P.glassfbo) glDeleteFramebuffers(1, &P.glassfbo);
+		if (P.texglass) glDeleteTextures(1, &P.texglass);
+
+		P.texglass = P.hdr ? NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR) :
+			NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
+		glGenFramebuffers(1, &P.glassfbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, P.glassfbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, P.texglass, 0);
+		glDrawBuffers(1, one);
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		P.glassw = w;
+		P.glassh = h;
+		P.glasshdr = P.hdr;
+	}
+
+	GL3_Draw3DBatchesNow();
+
+	/* multisampled at half size: resolved first (a scaled blit cannot resolve); at full size the resolve is the copy
+	   (same format) */
+	if (P.samples && (div != 1))
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.resolvefbo[0]);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.resolvefbo[0]);
+	}
+	else
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+	}
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.glassfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx / div, P.vy / div, (P.vx + P.vw) / div,
+		(P.vy + P.vh) / div, GL_COLOR_BUFFER_BIT, (div == 1) ? GL_NEAREST : GL_LINEAR);
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	P.depthcopied = true;
+	GL3_Post_GlassBind();
+	return true;
+}
+
+/* the glass copy on GL_TEXTURE11 (the water copy's unit: water drawn later binds its own again) and the depth copy
+   on GL_TEXTURE7 */
+void
+GL3_Post_GlassBind(void)
+{
+	GL3_SelectTMU(GL_TEXTURE11);
+	glBindTexture(GL_TEXTURE_2D, P.texglass);
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	P.watercopied = false; /* unit 11 no longer holds the water copy */
 }
 
 static void

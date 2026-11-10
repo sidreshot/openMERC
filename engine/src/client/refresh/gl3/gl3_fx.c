@@ -1482,6 +1482,7 @@ GL3_FX_BeginFrame3D(void)
 {
 	numalphasurfs = 0;
 	effecttotal = 0;
+	GL3_Glass_BeginFrame();
 	AngleVectors(r_newrefdef.viewangles, vforward, vright, vup);
 }
 
@@ -1590,6 +1591,13 @@ DrawAlphaSurface(msurface_t *surf, entity_t *ent)
 	}
 
 	image = GL3_SoF_TextureAnimation(surf->texinfo, (ent && ent->frame) ? ent->frame : (int)(GL3_GameTime() * 2));
+
+	/* GFX-modern r_om_glass: a pane of glass as see-through glass */
+	if (GL3_Glass_Draw(surf, image, NULL, GL3_Fog_HardwareRegion(surf)))
+	{
+		GL3_Fog_DrawSurfaceNow(surf);
+		return;
+	}
 
 	if (surf->texinfo->flags & SOFSURF_FLOWING)
 	{

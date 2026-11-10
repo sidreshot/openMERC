@@ -1547,3 +1547,24 @@ spawn point", as the original does; the harness starts them with deathmatch 1.
 * GL3_SoF_LightPoint (floor light of models and effects) blends the 8 corners of the 32-unit grid (solid corners
   left out) instead of one value per cell: walking characters no longer step in brightness.
 * r_om_pbr_models 0 brings the GL 1.1 emulation back; values above 1 scale the specular.
+
+## r_om_glass: see-through glass with refraction (gl3_glass.c, 2026-11-10; owner: "glass transparent with refraction, replace completely")
+
+SoF glass is a translucent texture of material 37: one flat dark grey alpha over the pane (0.36-0.72), frames and
+wire solid, cracks as holes - blended, every window was smoked film. Now (world faces of the sorted pass and the
+0x800 faces of inline models: breakable windows are brush entities, DrawInlineAlphaFaces):
+- the pane's colour and alpha are measured from the texture when it loads (GL3_Glass_PaneStats: the most common
+  alpha between holes and solid); alpha above it is frame/wire/dirt (drawn lit as before), below 0.03 a hole;
+- the scene drawn so far is copied (GL3_Post_GlassCopy, full size; half on phones) and refracted: low waves of drawn
+  glass plus the texture's gradient, scaled with the distance behind the pane, a little per channel, never from
+  what is in front of the pane; tinted by the texture's hue (not its darkness), Fresnel F0 0.04 reflection of the
+  probes (phones: the light around the pane), GGX-like lamp highlights, frosted under lighter smudges;
+- premultiplied blend: colour replaced, emissive dimmed only by the solid parts; the material target is cleared
+  (the old blend did too) - else the SSR pass, which runs after, drew the floor glints behind the pane unrefracted
+  over the glass (owner: "strange glints on the floor through the glass").
+- Cost: the first version copied the scene again for every pane over the union box of the panes drawn since the
+  last copy - a window grid covered its own panes, up to 8 copies a frame, each an MSAA resolve + blit + depth blit
+  (~0.7 ms each at 1080p; owner: "glass cuts FPS hard"). Now the boxes are kept per pane (touching panes do not
+  count), at most 2 extra copies (none on phones), and at full size the MSAA resolve is the copy. kos2 window view
+  1080p: 12.5 vs 12.1 ms GPU with r_om_glass 0.
+Cvars: r_om_glass (1; 0 the old blend), r_om_glass_refract (1), r_om_glass_tint (0.35), r_om_glass_reflect (1).
