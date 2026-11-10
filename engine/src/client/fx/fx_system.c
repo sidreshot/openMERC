@@ -1531,6 +1531,48 @@ FX_Play_f(void)
 	}
 }
 
+/* om_decal <sprite> [size] [alpha] [r g b]: a mark of textures/sprites/<sprite> where the view meets the world
+   (test aid: repeatable blood, holes and scorches without shooting) */
+static void
+FX_Decal_f(void)
+{
+	vec3_t f, end;
+	trace_t tr;
+	fx_impact_t im;
+	char path[MAX_QPATH];
+	int hit;
+
+	if (Cmd_Argc() < 2)
+	{
+		Com_Printf("Usage: om_decal <sprite> [size] [alpha] [r g b]\n");
+		return;
+	}
+
+	AngleVectors(cl.refdef.viewangles, f, NULL, NULL);
+	VectorMA(cl.refdef.vieworg, 2048, f, end);
+	FX_Trace(cl.refdef.vieworg, NULL, NULL, end, FXTR_WORLD, &tr, &hit);
+
+	if (tr.fraction >= 1.0f)
+	{
+		Com_Printf("om_decal: no wall in view\n");
+		return;
+	}
+
+	memset(&im, 0, sizeof(im));
+	im.kind = 0;
+	VectorCopy(tr.endpos, im.point);
+	VectorCopy(tr.plane.normal, im.normal);
+	im.ent = -1;
+	im.material = -1;
+	im.surfflags = tr.surface ? tr.surface->flags : 0;
+	im.leaf = CM_PointLeafnum(im.point);
+	im.hole = -1;
+	Com_sprintf(path, sizeof(path), "textures/sprites/%s", Cmd_Argv(1));
+	FX_AddDecal(&im, path, (Cmd_Argc() > 6) ? atoi(Cmd_Argv(4)) : 255, (Cmd_Argc() > 6) ? atoi(Cmd_Argv(5)) : 255,
+		(Cmd_Argc() > 6) ? atoi(Cmd_Argv(6)) : 255, (Cmd_Argc() > 3) ? (float)atof(Cmd_Argv(3)) : 250.0f,
+		(Cmd_Argc() > 2) ? (float)atof(Cmd_Argv(2)) : 16.0f, -1, 0, 0, 0);
+}
+
 static void
 FX_Save_f(void)
 {
@@ -1674,6 +1716,7 @@ CLFX_Init(void)
 	Cmd_AddCommand("om_fxpool", FX_Pool_f);
 	Cmd_AddCommand("om_fxmeatdemo", FX_MeatDemo_f);
 	Cmd_AddCommand("om_fxplay", FX_Play_f);
+	Cmd_AddCommand("om_decal", FX_Decal_f);
 }
 
 qboolean
@@ -1697,6 +1740,7 @@ CLFX_Shutdown(void)
 	Cmd_RemoveCommand("om_fxpool");
 	Cmd_RemoveCommand("om_fxmeatdemo");
 	Cmd_RemoveCommand("om_fxplay");
+	Cmd_RemoveCommand("om_decal");
 	fx_inited = false;
 }
 

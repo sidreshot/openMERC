@@ -883,8 +883,10 @@ static const char* fragmentSrcOmPdl =
 	"			vec3 H = normalize(L + V);\n"
 	"			float nh = max(dot(N, H), 0.0);\n"
 	"			float dd = nh * nh * (a2 - 1.0) + 1.0;\n"
-	"			float fr = f0 + (1.0 - f0) * pow(1.0 - max(dot(V, H), 0.0), 5.0);\n"
-	"			spec += E * (nl * min(a2 / (3.14159 * dd * dd) * 0.25 * fr, 4.0));\n"
+	"			float vh = max(dot(V, H), 0.0);\n"
+	"			float fr = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);\n"
+	/* E is in lightmap units (E/pi, see omDeluxeSpec): no 1/pi in D; Kelemen visibility like the baked highlight */
+	"			spec += E * (nl * min(a2 / (dd * dd) * fr * 0.25 / max(vh * vh, 0.1), 4.0));\n"
 	"		}\n"
 	"	}\n"
 	"	spec *= omPdl.y * omPdl.z;\n"

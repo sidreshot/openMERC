@@ -1607,3 +1607,11 @@ client fx module) to start an effect in front of the eye.
   texture, so the lightmap holds E/pi (with the 1/pi the highlight stayed under frame noise).
 * r_om_deluxe 1 default (strength; 3 is already too much), 0 off, -1 shows the directions, -2 the highlight alone x10.
   PC only (GLES builds without the atlas). Cost: kos1 1080p, one run on/off/on 8.76/8.76/8.90 ms GPU.
+* The dynamic light highlight (omDlightsNew) lost its 1/pi too and uses the same Kelemen visibility (0.25/(v.h)^2).
+
+## Wet blood marks (r_om_wetblood, owner's point 3, 2026-11-10)
+
+* An alpha-blended mark used to write "no material" to the reflection target and erased the reflectivity under it.
+  Blood marks (sprite bld*, *blood*) now write a wet material (reflectivity 0.45 x r_om_wetblood, roughness 0.18):
+  the traced reflection and the lamp glints run over fresh blood. Other marks unchanged.
+* Test aid `om_decal <sprite> [size] [alpha] [r g b]` (client fx): a mark where the view meets the world.

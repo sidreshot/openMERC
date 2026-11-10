@@ -1347,6 +1347,42 @@ BeamVerts(const sofalphaquad_t *q, const float rgba[4], gl3fxvtx_t v[4])
 	return true;
 }
 
+/* GFX-modern r_om_wetblood: a blood mark (bldglob*, blood_pool*, any sprite named blood or bld) is wet - it writes
+   a glossy material to the reflection target (gl3_post.c), so the traced reflection and the lamp glints run over
+   it. Before, an alpha-blended mark wrote "no material" and erased the reflectivity of the wall under it. Only for
+   normal-blended marks: a modulating pass keeps the material below anyway */
+static cvar_t *r_om_wetblood;
+
+static void
+DecalMaterial(const sofalphaquad_t *q, const gl3image_t *image, int blend, gl3fxstate_t *st)
+{
+	const char *n;
+
+	if (!(q->flags & SOF_AQ_DECAL) || (blend != 1) || !image)
+	{
+		return;
+	}
+
+	if (!r_om_wetblood)
+	{
+		r_om_wetblood = ri.Cvar_Get("r_om_wetblood", "1", CVAR_ARCHIVE);
+	}
+
+	if (r_om_wetblood->value <= 0)
+	{
+		return;
+	}
+
+	n = strrchr(image->name, '/');
+	n = n ? n + 1 : image->name;
+
+	if (!Q_strncasecmp(n, "bld", 3) || Q_strcasestr(n, "blood"))
+	{
+		st->matrefl = Q_min(0.45f * r_om_wetblood->value, 1.0f);
+		st->matrough = 0.18f;
+	}
+}
+
 /* one alpha quad drawn alone (SPEC-412 §8) */
 static void
 DrawAlphaQuad(sofalphaquad_t *q)
@@ -1373,6 +1409,7 @@ DrawAlphaQuad(sofalphaquad_t *q)
 	st.alphatest = (blend == 1);
 	st.polyoffset = (q->flags & SOF_AQ_DECAL) &&
 		((gl_offsetfactor->value != 0) || (gl_offsetunits->value != 0));
+	DecalMaterial(q, image, blend, &st);
 	SetPointFog(&st, QuadFog(q), q->origin, blend);
 	/* GFX-modern: camera-facing smoke, dust and blood fade where they cut into the world */
 	st.soft = GL3_Post_SoftMode(blend, (q->flags & SOF_AQ_BILLBOARD) &&
@@ -1513,6 +1550,7 @@ DrawQuadChain(sofquadchain_t *chain)
 	st.blend = blend;
 	st.alphatest = (blend == 1);
 	st.depthtest = !(first->flags & SOF_AQ_NODEPTH);
+	DecalMaterial(first, image, blend, &st);
 	SetPointFog(&st, QuadFog(first), first->origin, blend);
 	st.soft = GL3_Post_SoftMode(blend, billboard && !(first->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)),
 		st.depthtest);
