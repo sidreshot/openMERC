@@ -934,17 +934,30 @@ correction away and put ours in its place".
 * Before: SoF's colour table (vid_gamma, vid_brightness, vid_contrast; SPEC-413 §9) baked into every texture and
   lightmap at load, in 8 bits (banding, restart per change), then r_om_hdr's exposure, shoulder, saturation and
   shadow gamma. Now (r_om_look 1) the table is neutral (0, 0.5, 0.5) and the composite pass grades the linear scene
-  in float: auto exposure x the look's "adapt" share (dark rooms may stay dark) -> look exposure + r_om_hdr_brightness
-  + menu brightness (+0.3 EV per 0.1 above 0.5) -> split toning (shadow/highlight tints, luminance kept) -> saturation
-  (r_om_hdr_saturation x look) -> filmic curve (toe presses the blacks with mid grey fixed, shoulder) -> menu gamma
-  (v^(1-g)) and contrast (SoF's S power k) as the table had them -> brightness lift of lit dark tones (a plain offset
-  greyed every black) -> optional LUT (strip N*N x N, looks/neutral_lut.png to grade in an editor) -> vignette,
-  film grain stronger in the dark, dither.
-* Looks per map from looks/om_looks.txt ("look" and "map" lines, '*' patterns, loose copy overrides the pak,
-  r_om_looks_reload), r_om_look_preset forces one, r_om_look_strength (menu Colour: Gloom) blends from neutral. Neutral
-  matches the original picture on the measured views (mean brightness kos1 23.5 vs 24.0, tsr1 16.8 vs 16.6).
-  Looks: darkness (default), nyc (tsr, nyc, arm, trn), kosovo, desert (sud, irq), siberia, castle (ger).
-  r_om_look 0 brings the old table and HDR grade back (renderer restart).
+  in float as a film camera (2026-11-10, the MGS5 / Fox Engine way, replacing the "Gloom" looks): auto exposure ->
+  grade exposure + r_om_hdr_brightness + menu brightness (+0.3 EV per 0.1 above 0.5) -> white balance (luminance
+  kept) -> saturation (r_om_hdr_saturation x grade) -> contrast around mid grey -> ACES RRT+ODT (Hill's fit, input
+  x1.4619 so mid grey 0.18 stays 0.18) -> menu gamma (v^(1-g)) and contrast (SoF's S power k) as the table had them
+  -> brightness lift of lit dark tones -> optional LUT (strip N*N x N, looks/neutral_lut.png to grade in an editor)
+  -> vignette, film grain stronger in the dark, dither.
+* r_om_camera 0..1 (menu Colour: Film Camera) blends from the plain picture (the shoulder curve, original mid tones)
+  to the camera. Grades per map from looks/om_looks.txt ("grade <name> <ev> <temperature> <tint> <saturation>
+  <contrast> <vignette> <grain> [lut]" and "map" lines, '*' patterns, loose copy overrides the pak,
+  r_om_looks_reload), r_om_look_preset forces one. Grades: standard (default), city (tsr, nyc, arm, tut, trn),
+  kosovo, desert (sud, irq), siberia, castle (ger), japan (jpn). Removed with it: r_om_look_strength (Gloom), the
+  split toning and toe/shoulder looks, the "adapt" share, r_om_hdr_curve and the Narkowicz ACES of the r_om_look 0
+  path (that path keeps the shoulder). r_om_look 0 brings the old table and HDR grade back (renderer restart).
+
+## r_om_probes: reflection probes behind SSR (gl3_post.c)
+
+* Local cube maps (Fox Engine): made lazily around the eye - a 256 x 256 x 128 cell without a probe gets one at its
+  centre (the eye's height; the eye when that is solid), 128 px R11G11B10F, one face per frame, world and brush
+  entities from the probe's own PVS, held back up to 30 frames while dynamic lights burn. 16 kept, the farthest is
+  reused. The box for the parallax correction: 8-unit steps along the six axes until solid (up to 4096).
+* The SSR trace binds the four ready probes nearest to the eye (units 24..27) and blends them per pixel by how far
+  the point is inside each box (fade over 96 units outside). Rays that leave the view, turn to the eye or reach the
+  sky read the probes; hits fade into them at the screen edges instead of to nothing (a mirrored lamp no longer
+  vanishes when it leaves the screen). Roughness picks the mip (1 + 5 x roughness). Off in GLES builds for now.
 
 ### Characters in mirrors
 

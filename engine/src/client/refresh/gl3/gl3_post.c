@@ -987,7 +987,11 @@ static const char *post_comp_fs =
 	"	vec3 w = l * look1.rgb;\n"
 	"	w = max(mix(vec3(Luma(w)), w, look0.z), vec3(0.0));\n"
 	"	w = 0.18 * pow(w / 0.18, vec3(look0.y));\n"
-	"	l = (look0.w > 0.0) ? mix(p, Camera(w), look0.w) : p;\n"
+	/* the film curve presses the dark tones (0.02 -> 0.006): SoF's dark rooms went black. Below mid grey the
+	   camera follows the plain curve (the original shadows), the film shoulder and colour from there up */
+	"	vec3 cw = Camera(w);\n"
+	"	cw = mix(Shoulder(w), cw, smoothstep(0.03, 0.30, Luma(w)));\n"
+	"	l = (look0.w > 0.0) ? mix(p, cw, look0.w) : p;\n"
 	"	vec3 d = pow(l, vec3(1.0 / 2.2));\n"
 	/* the menu's gamma, contrast and brightness as SoF's colour table had them (SPEC-413 В§9), in float: v^(1-g), an S
 	   curve of power k around the middle, an offset */
