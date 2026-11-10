@@ -1690,3 +1690,7 @@ client fx module) to start an effect in front of the eye.
 * Cost (1080p, whole frame out of focus, worst case): 16 full-res taps +1.4..2.1 ms; with the mip chain and 8 taps
   +0.6..0.9 ms. Only in cut scenes / zoom.
 * Presets: medium/high on, minimal/low off. Menu: Colour -> Depth of Field.
+* Follow-up: the circle of confusion now scales with the focal length squared (aperture x 3 px / tan^2(fov_x / 2)):
+  at 90 degrees 3 px, under 40 degrees the 14 px cap. The fixed 9 px made the tsr1 intro's high wide shots look like
+  a tilt-shift model; now wide shots stay nearly sharp and long lenses (close-ups, the scope) blur the background.
+  Checked on the tsr1 intro (cl_cinematicfreeze 1 there).

@@ -3861,10 +3861,13 @@ GL3_Post_EndView(void)
 				gl3state.projMat3D.Elements[1][1], gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2]);
 			glUniform4f(GL3_UniformLoc(P.progcomp, "mb1"), (float)P.vw, (float)P.vh, 0, 0);
 			glUniform1i(GL3_UniformLoc(P.progcomp, "mbdepth"), 5);
-			/* the scope: a long lens wide open; cut scenes: a portrait aperture */
+			/* the circle of confusion grows with the square of the focal length (1 / tan^2 of half the view angle): a
+			   wide shot keeps nearly everything sharp (a strong blur there made a street look like a tilt-shift model,
+			   tsr1 intro), a long lens - close-ups, the scope - blurs the background. 3 px at 90 degrees */
+			float t = tanf(Q_clamp(r_newrefdef.fov_x, 5.0f, 150.0f) * (float)M_PI / 360.0f);
+
 			glUniform4f(GL3_UniformLoc(P.progcomp, "dof"), 1, focus,
-				Q_clamp(r_om_dof_aperture->value, 0.0f, 4.0f) * ((r_newrefdef.fov_x < 40.0f) ? 14.0f : 9.0f) * sc,
-				14.0f * sc);
+				Q_clamp(r_om_dof_aperture->value, 0.0f, 4.0f) * 3.0f / (t * t) * sc, 14.0f * sc);
 		}
 		else
 		{
