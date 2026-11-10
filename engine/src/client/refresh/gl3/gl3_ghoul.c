@@ -720,6 +720,44 @@ GL3_Ghoul_CapsuleFrame(void)
 
 	cmax = (int)Q_clamp(capmax->value, 1.0f, 8.0f);
 
+	/* test aid r_om_capsule_test N: N upright bodies in a row 100 units ahead of the eye, 30 apart, standing 40 below
+	   the eye - a repeatable load for the cost of the world shader's loop */
+	{
+		static cvar_t *ct;
+		vec3_t f, rt;
+
+		if (!ct)
+		{
+			ct = ri.Cvar_Get("r_om_capsule_test", "0", 0);
+		}
+
+		if (ct->value > 0)
+		{
+			n = (int)Q_clamp(ct->value, 1.0f, (float)cmax);
+			AngleVectors(r_newrefdef.viewangles, f, rt, NULL);
+			f[2] = 0;
+			VectorNormalize(f);
+
+			for (i = 0; i < n; i++)
+			{
+				float off = (i - 0.5f * (n - 1)) * 30.0f;
+
+				for (j = 0; j < 2; j++)
+				{
+					a[i][j] = b[i][j] = r_newrefdef.vieworg[j] + f[j] * 100.0f + rt[j] * off;
+				}
+
+				a[i][2] = r_newrefdef.vieworg[2] - 40.0f + 11.0f;
+				b[i][2] = a[i][2] + 42.0f;
+				a[i][3] = 11.0f;
+				b[i][3] = 0.85f;
+			}
+
+			GL3_SoF_CapsuleUniforms(n, &a[0][0], &b[0][0]);
+			return;
+		}
+	}
+
 	for (i = 0; i < numcaps[last]; i++)
 	{
 		vec3_t m, dv;

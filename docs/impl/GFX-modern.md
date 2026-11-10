@@ -1750,3 +1750,6 @@ client fx module) to start an effect in front of the eye.
   tsr1, comparable segments: world pass 4.23 ms with capsules, 4.19 without.
 * Muzzle-flash shadows (left from the owner's point 2) are not done on purpose: a cube of depth maps per shot is the
   cost of a lamp shadow per frame of fire, and neither MGS5 nor Death Stranding casts them.
+* Exact cost with a fixed load (test aid r_om_capsule_test N: N bodies in a row 100 units ahead; arm1 street, still
+  camera, 1080p, r_om_capsule_max 8, A/B alternated): world pass 4 capsules 3.63 / 3.35 ms, 8 capsules 3.63 / 3.86,
+  none 3.58 / 3.83 / 3.63 - within the run's noise (+-0.25 ms) even at eight after the sphere early-out.
