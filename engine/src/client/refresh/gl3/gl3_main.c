@@ -2455,6 +2455,20 @@ GL3_RenderView(refdef_t *fd)
 	r_newrefdef = *fd;
 	GL3_Fog_ViewTest(&r_newrefdef);
 	GL3_DynLight_TestLight(&r_newrefdef); /* GFX-modern: r_om_pdlight_test A/B light */
+	/* test aid r_om_nv_test 1: the night vision goggles on, as the game sets them */
+	{
+		static cvar_t *nt;
+
+		if (!nt)
+		{
+			nt = ri.Cvar_Get("r_om_nv_test", "0", 0);
+		}
+
+		if (nt->value != 0)
+		{
+			r_newrefdef.rdflags |= SOF_RDF_IRGOGGLES;
+		}
+	}
 	/* test aid r_om_hitfx_test "r g b a": the game's screen tint of every frame (a hit without taking one) */
 	{
 		static cvar_t *ht;

@@ -1731,3 +1731,11 @@ client fx module) to start an effect in front of the eye.
 * The metal class (619 textures) reviewed by eye too: shelves of goods, paintings and coats of arms of the castle
   dining hall and a poster went to picture, a stone wall with arches, a fireback painted as masonry and a concrete
   wall to stone (9). Steel walls, vaults, ship panels, appliances and tables stay metal.
+
+## r_om_nightvision: an image intensifier tube instead of the green noise multiply (2026-11-11)
+
+* Before: the frame multiplied by a 64x64 green noise texture rebuilt now and then (gl3_fx.c), a flat green.
+* Now in the composite (gl3_fx.c skips the multiply when GL3_Post_NVHandled): luminance x gain, rolled off
+  (l / (1 + 0.35 l)), a P43 phosphor (0.55, 1.0, 0.42), scintillation noise per pixel and frame (stronger in the
+  dark), the round field of the tube (radius 0.42..0.62 of the height), a faint flicker, the power-up surge (to 1.8 x
+  over 0.35 s, settling by 1 s). Cost: composite +0.01 ms. Test aid r_om_nv_test 1 puts the goggles on.

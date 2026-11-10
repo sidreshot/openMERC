@@ -2319,6 +2319,12 @@ GL3_FX_ScreenOverlays(void)
 		st[2][0] = u1; st[2][1] = v1;
 		st[3][0] = u0; st[3][1] = v1;
 
+		/* r_om_nightvision: the composite drew the intensifier tube; no green noise multiply over it */
+		if (GL3_Post_NVHandled())
+		{
+			goto nvdone;
+		}
+
 		GL3_SoF2D_Flush();
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_DST_COLOR, GL_ZERO);
@@ -2330,6 +2336,7 @@ GL3_FX_ScreenOverlays(void)
 		}
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glDisable(GL_BLEND);
+nvdone:;
 	}
 	else
 	{

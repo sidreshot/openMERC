@@ -202,6 +202,7 @@ typedef struct
 } gl3fxstate_t;
 qboolean GL3_Post_SSRActive(void);
 qboolean GL3_Post_TintHandled(void);
+qboolean GL3_Post_NVHandled(void);
 qboolean GL3_Post_SSAOActive(void);
 qboolean GL3_LShadow_On(void);
 

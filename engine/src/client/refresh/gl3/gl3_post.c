@@ -105,6 +105,8 @@ static struct
 
 	qboolean bound, bloomthis, depthcopied;
 	qboolean tinthandled; /* r_om_hitfx: the composite drew the game's screen tint this frame */
+	qboolean nvhandled;   /* r_om_nightvision: the composite drew the night vision this frame */
+	float nvon;           /* the time night vision came on (0 = off) */
 	/* r_om_water 2: half-size copy of the scene under translucent water (refraction), made at the first such
 	   surface of the view (GL_TEXTURE11) */
 	qboolean watercopied;
@@ -967,6 +969,7 @@ static const char *post_comp_fs =
 	"uniform vec4 lens;\n"
 	/* r_om_hitfx: the game's screen tint (rgb, alpha); x 1 = a hit */
 	"uniform vec4 tint;\n"
+	"uniform vec4 nvis;\n"
 	/* r_om_dof: x on, y focus distance (units), z aperture (circle of confusion in pixels where the point is twice
 	   the focus distance away), w largest circle in pixels */
 	"uniform vec4 dof;\n"
@@ -1186,6 +1189,19 @@ static const char *post_comp_fs =
 	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
 	"			c = pow(l, vec3(grade.y));\n"
 	"		}\n"
+	"	}\n"
+	/* r_om_nightvision: an image intensifier tube instead of the green noise multiply - the luminance amplified and
+	   rolled off, a P43 phosphor (yellow-green), scintillation noise per pixel and frame (stronger in the dark), the round
+	   field of the tube; nvis: x on, y gain (with the power-up surge), z time, w flicker */
+	"	if (nvis.x > 0.5)\n"
+	"	{\n"
+	"		vec2 tv = (vuv - 0.5) * vec2(lens.w, 1.0);\n"
+	"		float l = Luma(c) * nvis.y;\n"
+	"		l = l / (1.0 + 0.35 * l);\n"
+	"		float ns = Hash(gl_FragCoord.xy + fract(nvis.z * 13.7) * 977.0) - 0.5;\n"
+	"		l = max(l + ns * (0.16 - 0.08 * l), 0.0) * nvis.w;\n"
+	"		float tube = 1.0 - smoothstep(0.42, 0.62, length(tv));\n"
+	"		c = vec3(0.55, 1.0, 0.42) * l * (0.25 + 0.75 * tube);\n"
 	"	}\n"
 	/* r_om_hitfx: the screen tint of the game (r_newrefdef.blend) here instead of a flat fill over the frame. tintk.x 1:
 	   a hit (red) - the picture loses its colour, the edges sink into a dark red, the middle stays readable (the MGS5
@@ -1546,6 +1562,13 @@ qboolean
 GL3_Post_TintHandled(void)
 {
 	return P.tinthandled;
+}
+
+/* r_om_nightvision: the night vision of this frame was drawn by the composite */
+qboolean
+GL3_Post_NVHandled(void)
+{
+	return P.nvhandled;
 }
 
 qboolean
@@ -1923,6 +1946,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
 	P.bound = P.depthcopied = P.depthfinal = P.watercopied = false;
 	P.tinthandled = false;
+	P.nvhandled = false;
 
 	if (windowsamples < 0)
 	{
@@ -4013,6 +4037,38 @@ GL3_Post_EndView(void)
 			glUniform4f(GL3_UniformLoc(P.progcomp, "tint"), b[0], b[1], b[2], P.tinthandled ? Q_clamp(b[3], 0.0f, 1.0f) : 0.0f);
 			glUniform4f(GL3_UniformLoc(P.progcomp, "tintk"), dmg, 0, 0, 0);
 			cabump = dmg * Q_clamp(b[3], 0.0f, 1.0f) * 4.0f;
+		}
+
+		/* r_om_nightvision: the tube's power-up (a surge to 1.8 over 0.35 s, settling by 1 s), a faint flicker */
+		{
+			static cvar_t *nvcv;
+			float g = 0, t = r_newrefdef.time;
+
+			if (!nvcv)
+			{
+				nvcv = ri.Cvar_Get("r_om_nightvision", "1", CVAR_ARCHIVE);
+			}
+
+			P.nvhandled = nv && !dbg && (nvcv->value != 0);
+
+			if (!nv)
+			{
+				P.nvon = 0;
+			}
+			else if (P.nvon <= 0)
+			{
+				P.nvon = Q_max(t, 0.001f);
+			}
+
+			if (P.nvhandled)
+			{
+				float age = t - P.nvon;
+
+				g = 2.6f * ((age < 0.35f) ? (age / 0.35f) * 1.8f : 1.0f + 0.8f * expf(-(age - 0.35f) * 4.0f));
+			}
+
+			glUniform4f(GL3_UniformLoc(P.progcomp, "nvis"), P.nvhandled ? 1.0f : 0.0f, g, t,
+				0.96f + 0.04f * sinf(t * 37.0f) * sinf(t * 11.3f));
 		}
 
 		glUniform4f(GL3_UniformLoc(P.progcomp, "lens"), (dbg || nv) ? 0.0f : Q_clamp(ca->value + cabump, 0.0f, 6.0f),
