@@ -833,6 +833,13 @@ Mod_LoadBrushModel(gl3model_t *mod, void *buffer, int modfilelen)
 	Mod_LoadSubmodels (mod, mod_base, &header->lumps[LUMP_MODELS]);
 	mod->numframes = 2;
 
+	/* GFX-modern r_om_smoothnormals: smooth vertex normals for the lights' angle and highlights (gl3_smooth.c) */
+	if (mod->bspversion == BSPVERSION_SOF)
+	{
+		GL3_World_SmoothNormals(mod);
+		GL3_LoadMark("smooth normals");
+	}
+
 	/* GFX-modern: the compiler's sun keys of worldspawn for the sun shadows (SPEC-AMEND-016 R16.2) */
 	GL3_CSM_LoadSun((const char *)(mod_base + header->lumps[LUMP_ENTITIES].fileofs),
 		header->lumps[LUMP_ENTITIES].filelen); /* regular and alternate animation */

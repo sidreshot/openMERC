@@ -83,7 +83,7 @@ GL3_DynLight_BindPage(int page)
 {
 	extern int gl3_shader_pdl;
 
-	if (gl3_shader_pdl == 1)
+	if (gl3_shader_pdl >= 1)
 	{
 		return; /* the programs have no CPU layer: unit 6 holds the detail textures (GL3_Detail_InShader) */
 	}
@@ -309,6 +309,9 @@ GL3_DynLight_Face(msurface_t *surf)
  * ------------------------------------------------------------------ */
 
 static cvar_t *r_om_pdlight, *r_om_pdlight_max, *r_om_pdlight_scale, *r_om_pdlight_normal, *r_om_pdlight_soft;
+/* r_om_dlight_model 1: the per-pixel dlights as lights (gl3_shaders.c omDlightsNew); 0 the SoF rule.
+   r_om_dlight_spec: strength of their highlight */
+static cvar_t *r_om_dlight_model, *r_om_dlight_spec;
 static qboolean pdlview;
 
 static void
@@ -322,6 +325,8 @@ PdlCvars(void)
 		r_om_pdlight_normal = ri.Cvar_Get("r_om_pdlight_normal", "0", CVAR_ARCHIVE);
 		/* fb4: width of the soft edge of a dlight pool in texture units (0 = the SoF 16-unit step) */
 		r_om_pdlight_soft = ri.Cvar_Get("r_om_pdlight_soft", "40", CVAR_ARCHIVE);
+		r_om_dlight_model = ri.Cvar_Get("r_om_dlight_model", "1", CVAR_ARCHIVE);
+		r_om_dlight_spec = ri.Cvar_Get("r_om_dlight_spec", "1", CVAR_ARCHIVE);
 	}
 }
 
@@ -339,6 +344,20 @@ GL3_DynLight_SetupView(gl3Uni3D_t *u)
 	u->omPdl.Z = Q_max(0.0f, Q_min(r_om_pdlight_normal->value, 1.0f));
 	u->omPdl.W = Q_max(0.0f, Q_min(r_om_pdlight_soft->value, 128.0f));
 	u->omTexDim.X = u->omTexDim.Y = 0.0f;
+
+	/* r_om_dlight_model 1: z the highlight's strength, the eye in omTexDim.zw and omPdl.w (the SoF rule's normal
+	   term and soft edge are not used there) */
+	{
+		extern int gl3_shader_pdl;
+
+		if (gl3_shader_pdl == 2)
+		{
+			u->omPdl.Z = Q_max(-1.0f, Q_min(r_om_dlight_spec->value, 4.0f)); /* -1: debug view */
+			u->omPdl.W = r_newrefdef.vieworg[2];
+			u->omTexDim.Z = r_newrefdef.vieworg[0];
+			u->omTexDim.W = r_newrefdef.vieworg[1];
+		}
+	}
 }
 
 qboolean
@@ -356,7 +375,7 @@ GL3_DynLight_ShaderWants(void)
 	PdlCvars();
 
 	return ((r_om_pdlight->value != 0) && (!gl3_worldmodel || (gl3_worldmodel->bspversion == BSPVERSION_SOF)) &&
-		(!gl_dynamic || gl_dynamic->value)) ? 1 : 0;
+		(!gl_dynamic || gl_dynamic->value)) ? (r_om_dlight_model->value ? 2 : 1) : 0;
 }
 
 /* the vertex light flags of a face drawn this view (same exclusions as the sample layer) */

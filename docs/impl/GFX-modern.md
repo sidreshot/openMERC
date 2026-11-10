@@ -1568,3 +1568,30 @@ wire solid, cracks as holes - blended, every window was smoked film. Now (world 
   count), at most 2 extra copies (none on phones), and at full size the MSAA resolve is the copy. kos2 window view
   1080p: 12.5 vs 12.1 ms GPU with r_om_glass 0.
 Cvars: r_om_glass (1; 0 the old blend), r_om_glass_refract (1), r_om_glass_tint (0.35), r_om_glass_reflect (1).
+
+## Effects pass 1 (owner: "Q2-era effects: smoke, fire, explosions - do it properly, mind the FPS; smooth every square and unevenness under anything luminous", 2026-11-10)
+
+Gallery: jpn1 start, every weapon fired (`fxgal.cfg`), and `om_fxplay <effect> [dist] [up]` (new console test aid,
+client fx module) to start an effect in front of the eye.
+
+* **r_om_smoothnormals** (gl3_smooth.c, map load): smooth vertex normals for the world and each inline model. A
+  corner takes the normals of faces touching that point (on the polygon or an edge: T-junctions count) within 60
+  degrees; a neighbour weighs at most its area over the face's own, so a big wall next to a small bevel keeps its
+  normal, columns and arches round off. jpn1: 7019 corners. Basis for every light/highlight on the world.
+* **r_om_dlight_model 1** (gl3_shaders.c omDlightsNew, folded in as gl3_shader_pdl 2): the dynamic lights of muzzle
+  flashes, fire and explosions as lights - window `1 - x^2(3-2x)` in the squared distance over the SoF radius (half
+  the light at 0.7 R, as SoF's linear rule), wrapped N.L on the smoothed normal, a GGX highlight by the face's
+  material (r_om_dlight_spec), added in linear light after the colour table. SoF's rule added them before the table
+  and clipped the sum at 255: the flamethrower flooded the ceiling flat in its colour. Eye in omTexDim.zw / omPdl.w
+  (unused by the new model). Cost: flamethrower firing 9.7 vs 9.7 ms GPU. r_om_dlight_spec -1: debug view of the
+  normal where a dlight is flagged.
+* **r_om_fxvolume 1** (gl3_fx.c FxVolumeVerts): unlit alpha-blended puffs (r_om_fxlight's smoke) drawn as a fan of
+  five points around the centre (no diagonal crease between two triangles of a card), lit as a ball: the light
+  sample turned by the ambient cube along a sphere normal per point, plus a signed term toward each dynamic light
+  (mean unchanged). SoF's gun smoke is nearly transparent, so the change is small; CPU only.
+* **r_om_fxsoft 1** (gl3_ghoulemu.c): additive passes of effect models (the explosion ball is a low-poly Ghoul
+  sphere, its polygon outline was the worst "Q2" artifact of an explosion) fade toward their outline
+  (|N.V|, smoothstep 0..0.55; unlit effect models have no normals: the direction from the model origin) and where
+  they cut into the world (scene depth, 16 units). The view weapon (own depth range) is left alone - muzzle flashes
+  unchanged. r_om_fxsoft_debug 1 prints the blend of the next 60 blended Ghoul passes.
+* Soft particles (r_om_softparticles) stay off: the explosion's hard edge was the model, not the sprites.

@@ -147,6 +147,7 @@ static struct
 	int tess;
 	float tessk;    /* how far toward the PN surface (r_om_tess / 10) */
 	qboolean ppl;   /* per-pixel lighting of the entity being drawn (r_om_ppl_models) */
+	qboolean softadd; /* GFX-modern r_om_fxsoft: the additive passes of effect models get soft edges */
 	/* GFX-modern r_om_ambcube: the ambient factors of the entity along +x -x +y -y +z -z (world), on; the eye to
 	   world rotation of the view (column-major 3x3) */
 	float amb[18];
@@ -673,15 +674,30 @@ Emit(float x, float y, float z)
 		v->fog = 1;
 	}
 
-	if ((E.tess > 1) || (E.lighting && E.ppl))
+	if ((E.tess > 1) || (E.lighting && E.ppl) || (E.softadd && E.blendon && (E.bdst == GL_ONE)))
 	{
 		float n[3], l, w = (eye[3] != 0) ? eye[3] : 1;
 
-		EyeNormal(E.normal, n);
-		l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
 		v->eye[0] = eye[0] / w;
 		v->eye[1] = eye[1] / w;
 		v->eye[2] = eye[2] / w;
+
+		if (!E.lighting && (E.tess <= 1) && E.softadd && E.blendon && (E.bdst == GL_ONE))
+		{
+			/* r_om_fxsoft: an unlit additive effect model (an explosion ball) gives no normals of its own - the
+			   direction from the model's origin (the modelview's translation) to the vertex, its shape as a ball */
+			const float *m = E.mv[E.mvdepth];
+
+			n[0] = v->eye[0] - m[12];
+			n[1] = v->eye[1] - m[13];
+			n[2] = v->eye[2] - m[14];
+		}
+		else
+		{
+			EyeNormal(E.normal, n);
+		}
+
+		l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
 		v->en[0] = (l > 0) ? n[0] / l : 0;
 		v->en[1] = (l > 0) ? n[1] / l : 0;
 		v->en[2] = (l > 0) ? n[2] / l : 0;
@@ -785,6 +801,13 @@ static const char *emu_fs =
 	   Material: ambient, diffuse, specular, emission, (shininess, colour material, local viewer), model ambient */
 	"in vec3 vEN;\n"
 	"in vec3 vEP;\n"
+	/* GFX-modern r_om_fxsoft: an additive pass of an effect model (explosion balls, flame and muzzle shells) fades out
+	   toward its outline (the glow of a ball is thin where one looks along its surface: the low-poly silhouette no
+	   longer shows) and where it cuts into the world (scene depth). x on, y depth fade on, z fade distance */
+	"uniform vec4 omSoftAdd;\n"
+	"uniform vec4 omSoftAddP;\n"   /* projection C, D; depth range min, max */
+	"uniform vec4 omSoftAddV;\n"   /* 1 / scene target size */
+	"uniform sampler2D omSoftAddDepth;\n"
 	"uniform int omPPL;\n"
 	"uniform float omPbrK;\n"   /* r_om_pbr_models: strength of the specular */
 	"uniform float omSunK;\n"
@@ -1100,6 +1123,19 @@ static const char *emu_fs =
 	"		if (c.a <= 0.0) discard;\n"
 	"	}\n"
 	"	if (!pass) discard;\n"
+	"	if (omSoftAdd.x > 0.5 && gl_DepthRange.diff > 0.5)\n"   /* not the view weapon (its own depth range) */
+	"	{\n"
+	"		float rim = abs(dot(normalize(vEN), normalize(-vEP)));\n"
+	"		float k = smoothstep(0.0, 0.55, rim);\n"
+	"		if (omSoftAdd.y > 0.5)\n"
+	"		{\n"
+	"			float zs = texture(omSoftAddDepth, gl_FragCoord.xy * omSoftAddV.xy).r;\n"
+	"			float ds = omSoftAddP.y / ((zs - omSoftAddP.z) / (omSoftAddP.w - omSoftAddP.z) * 2.0 - 1.0 + omSoftAddP.x);\n"
+	"			float df = omSoftAddP.y / ((gl_FragCoord.z - omSoftAddP.z) / (omSoftAddP.w - omSoftAddP.z) * 2.0 - 1.0 + omSoftAddP.x);\n"
+	"			k *= clamp((ds - df) / omSoftAdd.z, 0.0, 1.0);\n"
+	"		}\n"
+	"		c *= k;\n"
+	"	}\n"
 	"	outColor = c;\n"
 	"	if (omEmis.w > 1.5) outEmissive = vec4(omEmis.xyz, c.a);\n"
 	"	else if (omEmis.w > 0.5) outEmissive = vec4(omPre * omEmis.x, c.a);\n"
@@ -2012,6 +2048,44 @@ Flush(void)
 		}
 
 		U4fv(E.u_emis, 1, emis);
+	}
+
+	/* GFX-modern r_om_fxsoft: soft edges of the additive passes */
+	{
+		qboolean on = E.softadd && E.blendon && (E.bdst == GL_ONE);
+		{
+			static cvar_t *dbg;
+			static int printed;
+
+			if (!dbg)
+			{
+				dbg = ri.Cvar_Get("r_om_fxsoft_debug", "0", 0);
+			}
+
+			/* test aid: the blend and normal of the first blended passes after it is set */
+			if (dbg->value && E.blendon && (printed < 60))
+			{
+				printed++;
+				R_Printf(PRINT_ALL, "FXSOFT blend 0x%x 0x%x normal %.2f %.2f %.2f lighting %d tex %u\n", E.bsrc, E.bdst,
+					E.normal[0], E.normal[1], E.normal[2], E.lighting, E.boundtex);
+			}
+		}
+		qboolean depth = on && GL3_Post_DepthReady();
+		static GLuint lastprog;
+		static int laston = -1;
+
+		if ((lastprog != E.prog) || (laston != (on ? (depth ? 2 : 1) : 0)) || depth)
+		{
+			lastprog = E.prog;
+			laston = on ? (depth ? 2 : 1) : 0;
+			glUniform4f(GL3_UniformLoc(E.prog, "omSoftAdd"), on ? 1.0f : 0.0f, depth ? 1.0f : 0.0f, 16.0f, 0.0f);
+
+			if (depth)
+			{
+				glUniform1i(GL3_UniformLoc(E.prog, "omSoftAddDepth"), 7);
+				GL3_Post_SoftUniforms(GL3_UniformLoc(E.prog, "omSoftAddP"), GL3_UniformLoc(E.prog, "omSoftAddV"), 0);
+			}
+		}
 	}
 
 	/* GFX-modern sun shadows: the ground shadow pass (blend 0, 1 - src alpha, ghoul_draw) gives way to the
@@ -3646,7 +3720,17 @@ GL3_GhoulEmu_SetCsm(qboolean capture, qboolean replace)
 void
 GL3_GhoulEmu_SetPPL(qboolean on)
 {
+	static cvar_t *r_om_fxsoft;
+
 	E.ppl = on;
+
+	/* GFX-modern r_om_fxsoft (with every entity: the cvar is read here) */
+	if (!r_om_fxsoft)
+	{
+		r_om_fxsoft = ri.Cvar_Get("r_om_fxsoft", "1", CVAR_ARCHIVE);
+	}
+
+	E.softadd = r_om_fxsoft->value != 0;
 }
 
 /* GFX-modern r_om_ambcube: the ambient factors of the entity being drawn (18 floats, +x -x +y -y +z -z), NULL off;

@@ -1504,6 +1504,33 @@ FX_Load_f(void)
 	}
 }
 
+/* OpenMerc test aid: om_fxplay <effect> [distance] [up]: starts an effect (effects/<effect>.eft) at distance units
+   (default 150) in front of the eye, raised by up, facing the eye - repeatable smoke, fire and explosions for the
+   renderer's tests without firing a weapon */
+static void
+FX_Play_f(void)
+{
+	vec3_t f, r, u, o, back;
+	float dist = (Cmd_Argc() > 2) ? (float)atof(Cmd_Argv(2)) : 150.0f;
+	float up = (Cmd_Argc() > 3) ? (float)atof(Cmd_Argv(3)) : 0.0f;
+
+	if (Cmd_Argc() < 2)
+	{
+		Com_Printf("Usage: om_fxplay <effect> [distance] [up]\n");
+		return;
+	}
+
+	AngleVectors(cl.refdef.viewangles, f, r, u);
+	VectorMA(cl.refdef.vieworg, dist, f, o);
+	o[2] += up;
+	VectorScale(f, -1, back);
+
+	if (CLFX_StartNamedEffect(Cmd_Argv(1), o, back) < 0)
+	{
+		Com_Printf("om_fxplay: %s did not start\n", Cmd_Argv(1));
+	}
+}
+
 static void
 FX_Save_f(void)
 {
@@ -1646,6 +1673,7 @@ CLFX_Init(void)
 	Cmd_AddCommand("om_fxselftest", FX_SelfTest_f); /* OpenMerc test vectors */
 	Cmd_AddCommand("om_fxpool", FX_Pool_f);
 	Cmd_AddCommand("om_fxmeatdemo", FX_MeatDemo_f);
+	Cmd_AddCommand("om_fxplay", FX_Play_f);
 }
 
 qboolean
@@ -1668,6 +1696,7 @@ CLFX_Shutdown(void)
 	Cmd_RemoveCommand("om_fxselftest");
 	Cmd_RemoveCommand("om_fxpool");
 	Cmd_RemoveCommand("om_fxmeatdemo");
+	Cmd_RemoveCommand("om_fxplay");
 	fx_inited = false;
 }
 

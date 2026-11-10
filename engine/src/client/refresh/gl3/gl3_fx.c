@@ -1073,6 +1073,140 @@ FxLight(const sofalphaquad_t *q, int blend, qboolean lit, float *rgba)
 	}
 }
 
+/*
+ * GFX-modern r_om_fxvolume: a camera-facing puff of smoke or dust lit as a ball, not as a flat card. The quad is
+ * drawn as a fan around its centre (no diagonal crease where two triangles of a card meet with different corner
+ * colours); each of the five points takes the normal of a sphere seen from the eye there (the centre facing the
+ * eye, the corners tilted out), and its light is r_om_fxlight's light at the puff turned by that normal: the
+ * directional ambient of r_om_ambcube (the side toward a lit wall or the sky lighter) and, signed so the puff's
+ * mean light stays the same, the side toward a muzzle flash or a fire brighter, the far side darker. CPU work per
+ * puff (one light sample, one ambient cube, the frame's dynamic lights); r_om_fxvolume 0: the flat card.
+ */
+static cvar_t *r_om_fxvolume;
+static void BillboardVerts(const sofalphaquad_t *q, const float rgba[4], gl3fxvtx_t v[4]);
+
+/* the r_om_fxlight conditions: an unlit, alpha-blended effect quad (smoke, dust) that is not a decal */
+static qboolean
+FxLightApplies(const sofalphaquad_t *q, int blend, qboolean lit)
+{
+	static cvar_t *r_om_fxlight;
+
+	if (!r_om_fxlight)
+	{
+		r_om_fxlight = ri.Cvar_Get("r_om_fxlight", "1", CVAR_ARCHIVE);
+	}
+
+	return (blend == 1) && !lit && (r_om_fxlight->value == 1) && !(q->flags & SOF_AQ_DECAL) &&
+		!(r_newrefdef.rdflags & RDF_IRGOGGLES) && (r_fullbright->value == 0);
+}
+
+/* the ambient cube's value along unit normal n (the factors of the six axes weighted by n squared) */
+static float
+CubeAlong(const float *cube, const vec3_t n, int k)
+{
+	return n[0] * n[0] * cube[(n[0] >= 0 ? 0 : 1) * 3 + k] + n[1] * n[1] * cube[(n[1] >= 0 ? 2 : 3) * 3 + k] +
+		n[2] * n[2] * cube[(n[2] >= 0 ? 4 : 5) * 3 + k];
+}
+
+/* the volume fan of billboard q: v[0] the centre, v[1..4] the corners, v[5] the first corner again; false: drawn as
+   before (r_om_fxvolume 0 or not such a quad) */
+static qboolean
+FxVolumeVerts(const sofalphaquad_t *q, int blend, qboolean lit, const float unlit[4], gl3fxvtx_t v[6])
+{
+	gl3fxvtx_t c[4];
+	vec3_t light, toeye, dldir[8], dlcol[8];
+	float cube[18], ob;
+	qboolean hascube;
+	int i, k, ndl = 0;
+
+	if (!r_om_fxvolume)
+	{
+		r_om_fxvolume = ri.Cvar_Get("r_om_fxvolume", "1", CVAR_ARCHIVE);
+	}
+
+	if (!r_om_fxvolume->value || !(q->flags & SOF_AQ_BILLBOARD) || (q->flags & SOF_AQ_ORIENTED) ||
+		!FxLightApplies(q, blend, lit))
+	{
+		return false;
+	}
+
+	BillboardVerts(q, unlit, c);
+	GL3_SoF_LightPoint(q->origin, light, 255);
+	hascube = GL3_SoF_AmbientCube(q->origin, cube);
+	ob = gl3state.uni3DData.overbrightbits;
+	VectorSubtract(r_newrefdef.vieworg, q->origin, toeye);
+	VectorNormalize(toeye);
+
+	/* the dynamic lights reaching the puff: their direction and the light GL3_SoF_LightPoint added for them */
+	for (i = 0; (i < r_newrefdef.num_dlights) && (ndl < 8); i++)
+	{
+		const dlight_t *dl = &r_newrefdef.dlights[i];
+		vec3_t d;
+		float len, add;
+
+		VectorSubtract(dl->origin, q->origin, d);
+		len = VectorNormalize(d);
+		add = (dl->intensity - len) / 256.0f;
+
+		if (add > 0)
+		{
+			VectorCopy(d, dldir[ndl]);
+			VectorScale(dl->color, add, dlcol[ndl]);
+			ndl++;
+		}
+	}
+
+	/* the five points: centre, then the corners */
+	for (i = 0; i < 5; i++)
+	{
+		gl3fxvtx_t *o = &v[i];
+		vec3_t n;
+
+		if (i == 0)
+		{
+			VectorCopy(q->origin, o->pos);
+			o->st[0] = o->st[1] = 0.5f;
+			VectorCopy(toeye, n);
+		}
+		else
+		{
+			vec3_t out;
+
+			*o = c[i - 1];
+			VectorSubtract(o->pos, q->origin, out);
+			VectorNormalize(out);
+			/* a sphere's normal at its rim seen from the eye, a little short of edge-on (smoke is soft) */
+			for (k = 0; k < 3; k++)
+			{
+				n[k] = 0.8f * out[k] + 0.6f * toeye[k];
+			}
+
+			VectorNormalize(n);
+		}
+
+		for (k = 0; k < 3; k++)
+		{
+			float l = light[k] * (hascube ? CubeAlong(cube, n, k) : 1.0f);
+			int j, idx;
+
+			for (j = 0; j < ndl; j++)
+			{
+				l += 0.6f * dlcol[j][k] * DotProduct(n, dldir[j]);
+			}
+
+			l = Q_max(l, 0.25f * light[k]);
+			idx = (int)Q_clamp(l * 255.0f + 0.5f, 0.0f, 255.0f);
+			/* as r_om_fxlight: through the colour table, then the overbright scale */
+			o->rgba[k] = unlit[k] * Q_clamp(gl3_colortable[idx] / 255.0f * ob, 0.06f, 1.6f);
+		}
+
+		o->rgba[3] = unlit[3];
+	}
+
+	v[5] = v[1];
+	return true;
+}
+
 /* fog settings for drawing a point p of region r with a given blend mode */
 static void
 SetPointFog(gl3fxstate_t *st, int region, const vec3_t p, int blend)
@@ -1243,6 +1377,21 @@ DrawAlphaQuad(sofalphaquad_t *q)
 	/* GFX-modern: camera-facing smoke, dust and blood fade where they cut into the world */
 	st.soft = GL3_Post_SoftMode(blend, (q->flags & SOF_AQ_BILLBOARD) &&
 		!(q->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)), st.depthtest);
+
+	/* GFX-modern r_om_fxvolume: a puff lit as a ball, a fan around its centre */
+	{
+		gl3fxvtx_t fan[6];
+		float unlit[4];
+
+		QuadColor(q, blend, light, lit, unlit);
+
+		if (FxVolumeVerts(q, blend, lit, unlit, fan))
+		{
+			GL3_FX_SetState(&st);
+			GL3_FX_Add(fan, 6, GL_TRIANGLE_FAN);
+			return;
+		}
+	}
 
 	if (q->flags & SOF_AQ_BILLBOARD)
 	{
@@ -1421,8 +1570,23 @@ DrawQuadChain(sofquadchain_t *chain)
 			}
 			else
 			{
-				BillboardVerts(q, rgba, v);
-				GL3_FX_Add(v, 4, GL_TRIANGLE_FAN);
+				gl3fxvtx_t fan[6];
+				float unlit[4];
+				int qb = (QuadBlend(q->flags) == blend) ? blend : QuadBlend(q->flags);
+				qboolean ql = (q->flags & SOF_AQ_LIT) != 0;
+
+				/* GFX-modern r_om_fxvolume: a puff of a smoke trail lit as a ball */
+				QuadColor(q, qb, light, ql, unlit);
+
+				if ((qb == blend) && FxVolumeVerts(q, blend, ql, unlit, fan))
+				{
+					GL3_FX_Add(fan, 6, GL_TRIANGLE_FAN);
+				}
+				else
+				{
+					BillboardVerts(q, rgba, v);
+					GL3_FX_Add(v, 4, GL_TRIANGLE_FAN);
+				}
 			}
 		}
 		else if (BeamVerts(q, rgba, v))

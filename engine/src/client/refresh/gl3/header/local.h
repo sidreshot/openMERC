@@ -773,6 +773,7 @@ extern void GL3_Lamps_View(GLuint prog, const float *eye);
 extern const char *gl3_glass_vs, *gl3_glass_fs;
 void GL3_Glass_PaneStats(gl3image_t *image, const byte *rgba, int w, int h);
 void GL3_Glass_BeginFrame(void);
+void GL3_World_SmoothNormals(gl3model_t *mod); /* gl3_smooth.c */
 qboolean GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int fogregion);
 extern float GL3_Mat_SurfClass(const msurface_t *surf); /* gl3_material.c: material class, negative */
 extern float GL3_Mat_SurfReflect(const msurface_t *surf, const vec3_t n); /* r_om_ssr reflectivity of a face */

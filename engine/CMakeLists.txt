@@ -635,6 +635,7 @@ set(GL3-Source
 	${REF_SRC_DIR}/gl3/gl3_relight.c
 	${REF_SRC_DIR}/gl3/gl3_lamps.c
 	${REF_SRC_DIR}/gl3/gl3_glass.c
+	${REF_SRC_DIR}/gl3/gl3_smooth.c
 	${REF_SRC_DIR}/gl3/gl3_material.c
 	${REF_SRC_DIR}/gl3/gl3_jobs.c
 	${REF_SRC_DIR}/gl3/gl3_look.c

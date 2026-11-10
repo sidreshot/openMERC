@@ -648,11 +648,11 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			if(omPdl.x < 0.5) // r_om_pdlight replaces the CPU dlight layer (it stays black then)
 				lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
-			if(passLightFlags != 0u && omPdl.x > 0.5)
+			if(passLightFlags != 0u && omPdl.x > 0.5 && OM_DLNEW == 0)
 			{
 				lmTex.rgb += omSoFDlights(passLightFlags); // GFX-modern r_om_pdlight
 			}
-			else if(passLightFlags != 0u)
+			else if(passLightFlags != 0u && OM_DLNEW == 0)
 			{
 				// TODO: or is hardcoding 32 better?
 				for(uint i=0u; i<numDynLights; ++i)
@@ -733,7 +733,17 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
+			// GFX-modern r_om_dlight_model 1: the dynamic lights in linear light, their highlight by the material
+			vec3 omDlS = vec3(0.0);
+			if(OM_DLNEW != 0 && passLightFlags != 0u)
+			{
+				float omRf = (omMat.x > 0.001) ? omMat.y / omMat.x : 0.7;
+				lmTex.rgb += omDlightsNew(passLightFlags, clamp(omRf, 0.22, 1.0), 0.04 + 0.4 * omMat.x, omDlS) * overbrightbits;
+			}
 			outColor = lmTex*texel;
+			outColor.rgb += omDlS;
+			if(OM_DLNEW != 0 && omPdl.z < 0.0) // r_om_dlight_spec -1: the normal (rgb) where a dlight is flagged
+				outColor.rgb = (passLightFlags != 0u) ? normalize(passNormal) * 0.5 + 0.5 : vec3(0.0);
 			float omFogK = 1.0;
 			// OpenMerc (I4c): gl_fogmode 1, linear fog of the face's fog region (SPEC-410)
 			if(omFogParams.z != 0.0)
@@ -825,6 +835,49 @@ static const char* fragmentSrcOmPdl =
 	"		sum += dynLights[i].lightColor.rgb * add;\n"
 	"	}\n"
 	"	return sum * (omPdl.y / 255.0);\n"
+	"}\n"
+	/* GFX-modern r_om_dlight_model 1 (folded in by LmVariant): the dynamic lights of muzzle flashes, fire and
+	   explosions as lights - a smooth window to nothing at the SoF radius, the angle to the (smoothed) normal, a GGX
+	   highlight by the face's material - added in linear light after the lightmap's colour table, so they neither
+	   clip at 255 (the flamethrower flooded a ceiling flat in its own colour) nor lose their falloff there */
+	"#define OM_DLNEW 0\n"
+	"vec3 omDlightsNew(uint flags, float rough, float f0, out vec3 spec)\n"
+	"{\n"
+	"	vec3 P = passWorldCoord;\n"
+	"	vec3 N = normalize(passNormal);\n"
+	"	vec3 V = normalize(vec3(omTexDim.zw, omPdl.w) - P);\n"
+	"	float a = rough * rough;\n"
+	"	float a2 = a * a;\n"
+	"	vec3 sum = vec3(0.0);\n"
+	"	spec = vec3(0.0);\n"
+	"	for(uint i = 0u; i < numDynLights; ++i)\n"
+	"	{\n"
+	"		if((flags & (1u << i)) == 0u) continue;\n"
+	"		float R = dynLights[i].lightColor.a;\n"
+	"		vec3 Lp = dynLights[i].lightOrigin - P;\n"
+	/* a soft core of 8 units: a light touching the face lights a spot, not a burnt dot */
+	"		float d2 = dot(Lp, Lp) + 64.0;\n"
+	"		float x = d2 / (R * R);\n"
+	"		if(x >= 1.0) continue;\n"
+	"		vec3 L = Lp * inversesqrt(d2);\n"
+	/* in the squared distance: flat near the light, no slope at the radius (no ring); half the light at 0.7 of the
+	   radius, as SoF's linear rule had there */
+	"		float win = 1.0 - x * x * (3.0 - 2.0 * x);\n"
+	"		vec3 E = dynLights[i].lightColor.rgb * (R / 255.0) * win;\n"
+	"		float nl = dot(N, L);\n"
+	/* a little wrap: the terminator of a flash on a rounded pillar is soft, not a line */
+	"		sum += E * clamp((nl + 0.25) / 1.25, 0.0, 1.0);\n"
+	"		if(nl > 0.0)\n"
+	"		{\n"
+	"			vec3 H = normalize(L + V);\n"
+	"			float nh = max(dot(N, H), 0.0);\n"
+	"			float dd = nh * nh * (a2 - 1.0) + 1.0;\n"
+	"			float fr = f0 + (1.0 - f0) * pow(1.0 - max(dot(V, H), 0.0), 5.0);\n"
+	"			spec += E * (nl * min(a2 / (3.14159 * dd * dd) * 0.25 * fr, 4.0));\n"
+	"		}\n"
+	"	}\n"
+	"	spec *= omPdl.y * omPdl.z;\n"
+	"	return sum * omPdl.y;\n"
 	"}\n"
 	;
 
@@ -1062,11 +1115,11 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			if(omPdl.x < 0.5) // r_om_pdlight replaces the CPU dlight layer (it stays black then)
 				lmTex.rgb += texture(omDynLight, passLMcoord).rgb; // OpenMerc (I4c): not multiplied by gl_modulate
 
-			if(passLightFlags != 0u && omPdl.x > 0.5)
+			if(passLightFlags != 0u && omPdl.x > 0.5 && OM_DLNEW == 0)
 			{
 				lmTex.rgb += omSoFDlights(passLightFlags); // GFX-modern r_om_pdlight
 			}
-			else if(passLightFlags != 0u)
+			else if(passLightFlags != 0u && OM_DLNEW == 0)
 			{
 				// TODO: or is hardcoding 32 better?
 				for(uint i=0u; i<numDynLights; ++i)
@@ -1150,7 +1203,17 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
+			// GFX-modern r_om_dlight_model 1: the dynamic lights in linear light, their highlight by the material
+			vec3 omDlS = vec3(0.0);
+			if(OM_DLNEW != 0 && passLightFlags != 0u)
+			{
+				float omRf = (omMat.x > 0.001) ? omMat.y / omMat.x : 0.7;
+				lmTex.rgb += omDlightsNew(passLightFlags, clamp(omRf, 0.22, 1.0), 0.04 + 0.4 * omMat.x, omDlS) * overbrightbits;
+			}
 			outColor = lmTex*texel;
+			outColor.rgb += omDlS;
+			if(OM_DLNEW != 0 && omPdl.z < 0.0) // r_om_dlight_spec -1: the normal (rgb) where a dlight is flagged
+				outColor.rgb = (passLightFlags != 0u) ? normalize(passNormal) * 0.5 + 0.5 : vec3(0.0);
 			float omFogK = 1.0;
 			// OpenMerc (I4c): gl_fogmode 1, linear fog of the face's fog region (SPEC-410)
 			if(omFogParams.z != 0.0)
@@ -2329,6 +2392,12 @@ LmVariant(const char *src, int translucent)
 	{
 		FoldAll(out, "omPdl.x < 0.5", gl3_shader_pdl ? "false" : "true");
 		FoldAll(out, "omPdl.x > 0.5", gl3_shader_pdl ? "true" : "false");
+	}
+
+	/* r_om_dlight_model 1 (gl3_shader_pdl 2): the dynamic lights as lights (omDlightsNew) */
+	if (gl3_shader_pdl == 2)
+	{
+		FoldAll(out, "#define OM_DLNEW 0", "#define OM_DLNEW 1");
 	}
 
 	return out;

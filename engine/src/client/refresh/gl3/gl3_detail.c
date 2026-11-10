@@ -125,7 +125,7 @@ GL3_Detail_InShader(msurface_t *surf, gl3image_t *image, gl3drawCmd_t *cmd)
 	gl3image_t *detail;
 	glpoly_t *p = surf->polys;
 
-	if ((gl3_shader_pdl != 1) || (mode < 1) || (mode > 2) || !image ||
+	if ((gl3_shader_pdl < 1) || (mode < 1) || (mode > 2) || !image ||
 		!(detail = image->detail) || (detail->softype == SOFIMG_ENV) || image->has_alpha || !p ||
 		(surf->texinfo->flags & (SOFSURF_NODETAIL | SOFSURF_FLOWING | SURF_FLOWING)))
 	{
