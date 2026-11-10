@@ -1704,3 +1704,10 @@ client fx module) to start an effect in front of the eye.
   skies (trn1) keep their own motion. Cost: sky pixels only, ALU.
 * Tried first and dropped: a flow-map drift of the painted clouds (two phases half a cycle apart) - invisible at a
   small drift, doubled the clouds at a visible one.
+
+## Aggregate cost of the cinematic pass (2026-11-11, 1080p, camera turning 1 deg/frame, one run on/off/on)
+
+* Motion blur + lens + sky fill + sky layer: arm1 +1.0 ms before the change below, +0.5..0.8 ms after; jpn1 within
+  noise; kos1 +0.3 ms. Still camera: motion blur costs nothing.
+* The motion blur / depth of field depth copy at EndView is skipped when SSAO, SSR or the rain already copied the
+  finished depth (P.depthfinal; all run after the sorted pass, the view weapon is in it) - the weapon stays sharp.

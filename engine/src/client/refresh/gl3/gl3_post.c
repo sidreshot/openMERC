@@ -3835,11 +3835,15 @@ GL3_Post_EndView(void)
 	dofon = DofWanted();
 	if (MotionBlurUniforms(P.progcomp) || dofon)
 	{
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
-		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
-			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-		P.depthfinal = true;
+		/* SSAO, SSR or the rain already copied the finished depth (after the sorted pass: the weapon is in it) */
+		if (!P.depthfinal)
+		{
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+			glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+				GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+			P.depthfinal = true;
+		}
 		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
 		mbbind = true;
 	}
