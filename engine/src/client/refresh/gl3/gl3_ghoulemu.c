@@ -137,7 +137,7 @@ static struct
 	/* GFX-modern sun shadows (gl3_csm.c): the depth mask as set, whether the entity casts and whether its
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
-	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM;
+	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk;
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
@@ -786,6 +786,7 @@ static const char *emu_fs =
 	"in vec3 vEN;\n"
 	"in vec3 vEP;\n"
 	"uniform int omPPL;\n"
+	"uniform float omPbrK;\n"   /* r_om_pbr_models: strength of the specular */
 	"uniform vec4 omL[48];\n"
 	"uniform vec4 omM[6];\n"
 	/* r_om_ambcube: the ambient factors along +x -x +y -y +z -z of the world and the eye to world rotation */
@@ -845,6 +846,86 @@ static const char *emu_fs =
 	"	}\n"
 	"	return vec4(clamp(c, 0.0, 1.0), clamp(md.a, 0.0, 1.0));\n"
 	"}\n"
+	/* GFX-modern r_om_pbr_models (omPPL 2): the same lights, physically based - Lambert diffuse, GGX specular
+	   (Smith visibility, Schlick Fresnel) added after the texture instead of multiplied by it, no clamp to 1 (the
+	   HDR scene and bloom take the highlights), the ambient cube along the reflection as the gloss of the
+	   surroundings, and lamps that fade to nothing at their radius (GL's 1/(1+d/r) was still half bright there,
+	   so a light leaving the set jumped). Roughness from the GL shininess (Blinn exponent n: sqrt(2/(n+2)));
+	   materials without specular get a soft dielectric sheen */
+	"vec3 omSpec;\n"
+	"float omMetal;\n"   /* 1: a glossy SoF material - its highlight takes the texture colour (metal) */
+	"float omGGX(float nh, float a)\n"
+	"{\n"
+	"	float a2 = a * a, d = nh * nh * (a2 - 1.0) + 1.0;\n"
+	"	return a2 / (3.14159 * d * d);\n"
+	"}\n"
+	"float omVis(float nl, float nv, float a)\n"
+	"{\n"
+	"	float k = a * 0.5;\n"
+	"	return 0.25 / ((nl * (1.0 - k) + k) * (nv * (1.0 - k) + k));\n"
+	"}\n"
+	"vec4 omLitPBR(vec4 vc)\n"
+	"{\n"
+	"	vec3 n = dot(vEN, vEN) > 1e-12 ? normalize(vEN) : vec3(0.0, 0.0, 1.0);\n"
+	"	vec3 v = -normalize(vEP);\n"
+	"	bool cm = omM[4].y > 0.5;\n"
+	"	vec4 ma = cm ? vc : omM[0];\n"
+	"	vec4 md = cm ? vc : omM[1];\n"
+	"	bool hasSpec = dot(omM[2].rgb, vec3(1.0)) > 0.003;\n"
+	"	float rough = hasSpec ? clamp(sqrt(2.0 / (max(omM[4].x, 1.0) + 2.0)), 0.15, 1.0) : 0.65;\n"
+	"	float a = rough * rough;\n"
+	"	vec3 F0 = hasSpec ? clamp(omM[2].rgb * 0.5, vec3(0.04), vec3(0.5)) : vec3(0.035);\n"
+	"	omMetal = hasSpec ? 1.0 : 0.0;\n"
+	"	float nv = max(dot(n, v), 1e-3);\n"
+	"	vec3 amb = ma.rgb * omM[5].rgb;\n"
+	"	vec3 c = omM[3].rgb + amb * omAmbK(n);\n"
+	"	vec3 sp = vec3(0.0);\n"
+	"	for (int i = 0; i < 8; i++)\n"
+	"	{\n"
+	"		if (omL[i * 6 + 1].w < 0.5) continue;\n"
+	"		vec4 P = omL[i * 6];\n"
+	"		vec3 L;\n"
+	"		float att = 1.0, spot = 1.0;\n"
+	"		if (P.w != 0.0)\n"
+	"		{\n"
+	"			L = P.xyz / P.w - vEP;\n"
+	"			float d = length(L);\n"
+	"			if (d > 0.0) L /= d;\n"
+	"			vec3 k = omL[i * 6 + 5].xyz;\n"
+	"			float q = k.x + k.y * d + k.z * d * d;\n"
+	"			att = (q > 0.0) ? 1.0 / q : 1.0;\n"
+	"			if (k.y > 0.0)\n"
+	"			{\n"
+	"				float w = clamp(d * k.y, 0.0, 1.0);\n"
+	"				w *= w;\n"
+	"				att *= (1.0 - w * w) * (1.0 - w * w);\n"
+	"			}\n"
+	"		}\n"
+	"		else L = normalize(P.xyz);\n"
+	"		vec4 sd = omL[i * 6 + 4];\n"
+	"		if (sd.w > -1.5)\n"
+	"		{\n"
+	"			float sl = length(sd.xyz);\n"
+	"			float cs = (sl > 0.0) ? -dot(L, sd.xyz) / sl : 0.0;\n"
+	"			spot = (cs < sd.w) ? 0.0 : pow(max(cs, 0.0), omL[i * 6 + 5].w);\n"
+	"		}\n"
+	"		float nl = max(dot(n, L), 0.0);\n"
+	"		vec3 Lc = att * spot * omL[i * 6 + 2].rgb;\n"
+	"		c += att * spot * omL[i * 6 + 1].rgb * ma.rgb + nl * Lc * md.rgb;\n"
+	"		if (nl > 0.0)\n"
+	"		{\n"
+	"			vec3 h = normalize(L + v);\n"
+	"			float nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);\n"
+	"			vec3 F = F0 + (vec3(1.0) - F0) * pow(1.0 - vh, 5.0);\n"
+	"			sp += min(Lc * nl * F * (3.14159 * omGGX(nh, a) * omVis(nl, nv, a)), vec3(3.0));\n"
+	"		}\n"
+	"	}\n"
+	"	vec3 R = reflect(-v, n);\n"
+	"	vec3 Fe = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - nv, 5.0);\n"
+	"	sp += amb * omAmbK(R) * Fe * (1.0 - 0.7 * rough);\n"
+	"	omSpec = sp * omPbrK;\n"
+	"	return vec4(min(c, vec3(2.0)), clamp(md.a, 0.0, 1.0));\n"
+	"}\n"
 	/* GFX-modern light beams (gl3_post.c): the lamp pools of the last view; a ground shadow in one gives
 	   way to the lamp's own shadow of the character */
 	"uniform int omBeamN;\n"
@@ -867,7 +948,9 @@ static const char *emu_fs =
 	"out vec4 outColor;\n"
 	"void main()\n"
 	"{\n"
-	"	vec4 c = (omPPL != 0) ? omLit(vColor) : vColor;\n"
+	"	omSpec = vec3(0.0);\n"
+	"	omMetal = 0.0;\n"
+	"	vec4 c = (omPPL == 2) ? omLitPBR(vColor) : (omPPL != 0) ? omLit(vColor) : vColor;\n"
 	"	if (texenv != 0)\n"
 	"	{\n"
 	"		vec4 r = texture(tex, vTex);\n"
@@ -904,6 +987,10 @@ static const char *emu_fs =
 	"		}\n"
 	"		else c *= t;\n"
 	"	}\n"
+	/* the gloss of a glossy SoF material (weapons, buckles, helmets) is coloured by the texture as a metal's; the sheen of
+	   the others is white like a dielectric's */
+	"	if (omPPL == 2 && (texenv == 0 || texenv == 1))\n"
+	"		c.rgb += omSpec * ((texenv == 1 && omMetal > 0.5) ? texture(tex, vTex).rgb * 1.6 : vec3(1.0));\n"
 	"	vec3 omPre = (fogon != 0) ? c.rgb * vFog : c.rgb;\n"
 	"	if (fogon != 0) c.rgb = mix(fogcolor.rgb, c.rgb, vFog);\n"
 	"	if (omCsmRepl != 0 || omBeamN > 0)\n"
@@ -1123,6 +1210,7 @@ CreateObjects(void)
 	E.u_invpv = glGetUniformLocation(E.prog, "omInvPV");
 	E.u_csmrepl = glGetUniformLocation(E.prog, "omCsmRepl");
 	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
+	E.u_pbrk = glGetUniformLocation(E.prog, "omPbrK");
 	E.u_pplL = glGetUniformLocation(E.prog, "omL");
 	E.u_pplM = glGetUniformLocation(E.prog, "omM");
 	E.u_ambon = glGetUniformLocation(E.prog, "omAmbOn");
@@ -1879,7 +1967,16 @@ Flush(void)
 
 	/* GFX-modern per-pixel lighting: this primitive's light and material state for omLit() */
 	{
-		int ppl = (E.lighting && E.ppl) ? 1 : 0;
+		static cvar_t *r_om_pbr_models;
+		int ppl;
+
+		if (!r_om_pbr_models)
+		{
+			r_om_pbr_models = ri.Cvar_Get("r_om_pbr_models", "1", CVAR_ARCHIVE);
+		}
+
+		ppl = (E.lighting && E.ppl) ? ((r_om_pbr_models->value > 0) ? 2 : 1) : 0;
+		glUniform1f(E.u_pbrk, Q_clamp(r_om_pbr_models->value, 0.0f, 4.0f));
 
 		U1i(E.u_ppl, ppl);
 

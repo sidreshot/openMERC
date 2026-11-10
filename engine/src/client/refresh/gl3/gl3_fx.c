@@ -407,7 +407,7 @@ GL3_SoF_SetDirTable(const float (*table)[3], int count)
 	dirtablecount = count;
 }
 
-#define LIGHTCACHE_MAX 1000
+#define LIGHTCACHE_MAX 4096 /* corners of the light grid (8 per query) */
 
 typedef struct
 {
@@ -582,10 +582,73 @@ StaticLight(const vec3_t p, int dir, vec3_t color)
 	}
 }
 
+/* the static light at a corner of the 32-unit light grid, cached; false where the corner lies in solid */
+static qboolean
+CornerLight(int cx, int cy, int cz, int dir, vec3_t color)
+{
+	int i, free;
+	vec3_t q;
+	mleaf_t *leaf;
+
+	lightqueries++;
+
+	for (i = 0; i < numlightcache; i++)
+	{
+		lightcache_t *c = &lightcache[i];
+
+		if ((c->x == cx) && (c->y == cy) && (c->z == cz) && (c->dir == dir))
+		{
+			c->lastuse = lightqueries;
+			VectorCopy(c->rgb, color);
+			return c->rgb[0] >= 0;
+		}
+	}
+
+	VectorSet(q, cx * 32.0f - 4096, cy * 32.0f - 4096, cz * 32.0f - 4096);
+	leaf = Mod_PointInLeaf(q, gl3_worldmodel->nodes);
+
+	if (!leaf || (leaf->contents & CONTENTS_SOLID))
+	{
+		VectorSet(color, -1, -1, -1); /* remembered as solid */
+	}
+	else
+	{
+		StaticLight(q, dir, color);
+	}
+
+	if (numlightcache > LIGHTCACHE_MAX - 64)
+	{
+		int j = 0;
+
+		for (i = 0; i < numlightcache; i++)
+		{
+			if (lightqueries - lightcache[i].lastuse <= 4000)
+			{
+				lightcache[j++] = lightcache[i];
+			}
+		}
+
+		numlightcache = j;
+	}
+
+	if (numlightcache < LIGHTCACHE_MAX)
+	{
+		free = numlightcache++;
+		lightcache[free].x = cx;
+		lightcache[free].y = cy;
+		lightcache[free].z = cz;
+		lightcache[free].dir = dir;
+		lightcache[free].lastuse = lightqueries;
+		VectorCopy(color, lightcache[free].rgb);
+	}
+
+	return color[0] >= 0;
+}
+
 void
 GL3_SoF_LightPoint(const vec3_t p, vec3_t color, int dir)
 {
-	int i, cx, cy, cz, free = -1;
+	int i, cx, cy, cz;
 	dlight_t *dl;
 
 	if (!gl3_worldmodel || !gl3_worldmodel->lightdata)
@@ -600,52 +663,41 @@ GL3_SoF_LightPoint(const vec3_t p, vec3_t color, int dir)
 		GL3_SoF_ClearLightCache();
 	}
 
-	/* static light, cached per 32-unit cell and direction */
-	cx = (int)floor((p[0] + 4096) / 32);
-	cy = (int)floor((p[1] + 4096) / 32);
-	cz = (int)floor((p[2] + 4096) / 32);
-	lightqueries++;
-
-	for (i = 0; i < numlightcache; i++)
+	/* static light: sampled at the corners of the 32-unit grid (cached per corner and direction) and blended
+	   trilinearly - one value per cell made a walking character's light step at every cell and lightmap texel edge.
+	   Corners inside solid have no light of their own and are left out of the blend */
 	{
-		lightcache_t *c = &lightcache[i];
+		float gx = (p[0] + 4096) / 32.0f, gy = (p[1] + 4096) / 32.0f, gz = (p[2] + 4096) / 32.0f;
+		float fx, fy, fz, wsum = 0;
+		vec3_t acc = {0, 0, 0}, c;
+		int k;
 
-		if ((c->x == cx) && (c->y == cy) && (c->z == cz) && (c->dir == dir))
+		cx = (int)floorf(gx);
+		cy = (int)floorf(gy);
+		cz = (int)floorf(gz);
+		fx = gx - cx;
+		fy = gy - cy;
+		fz = gz - cz;
+
+		for (k = 0; k < 8; k++)
 		{
-			c->lastuse = lightqueries;
-			VectorCopy(c->rgb, color);
-			break;
-		}
-	}
+			int x = cx + (k & 1), y = cy + ((k >> 1) & 1), z = cz + ((k >> 2) & 1);
+			float w = ((k & 1) ? fx : 1 - fx) * ((k & 2) ? fy : 1 - fy) * ((k & 4) ? fz : 1 - fz);
 
-	if (i == numlightcache)
-	{
-		StaticLight(p, dir, color);
-
-		if (numlightcache > 200)
-		{
-			int j = 0;
-
-			for (i = 0; i < numlightcache; i++)
+			if ((w > 0.0001f) && CornerLight(x, y, z, dir, c))
 			{
-				if (lightqueries - lightcache[i].lastuse <= 100)
-				{
-					lightcache[j++] = lightcache[i];
-				}
+				VectorMA(acc, w, c, acc);
+				wsum += w;
 			}
-
-			numlightcache = j;
 		}
 
-		if (numlightcache < LIGHTCACHE_MAX)
+		if (wsum > 0.0001f)
 		{
-			free = numlightcache++;
-			lightcache[free].x = cx;
-			lightcache[free].y = cy;
-			lightcache[free].z = cz;
-			lightcache[free].dir = dir;
-			lightcache[free].lastuse = lightqueries;
-			VectorCopy(color, lightcache[free].rgb);
+			VectorScale(acc, 1.0f / wsum, color);
+		}
+		else
+		{
+			StaticLight(p, dir, color); /* every corner in solid: the point itself */
 		}
 	}
 
