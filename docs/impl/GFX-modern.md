@@ -1728,3 +1728,6 @@ client fx module) to start an effect in front of the eye.
 * Corpses (checked on kos1: grunt killed with omkill, origin 11 units over the ledge): the lying capsule is built
   along the body's yaw directly, r 9, half-length 26 - the axis-aligned box of a body turned 45 degrees is square and
   was refused by the size test. The ground under the legs darkens; r_om_capsule 3 prints every model's box.
+* The metal class (619 textures) reviewed by eye too: shelves of goods, paintings and coats of arms of the castle
+  dining hall and a poster went to picture, a stone wall with arches, a fireback painted as masonry and a concrete
+  wall to stone (9). Steel walls, vaults, ship panels, appliances and tables stay metal.

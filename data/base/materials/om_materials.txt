@@ -277,8 +277,8 @@ tex armory/dryerside                         metal
 tex armory/dumpbck                           metal
 tex armory/dumpfrt                           metal
 tex armory/dumplid                           metal
-tex armory/foodstores1                       metal
-tex armory/foodstores2                       metal
+tex armory/foodstores1                       picture
+tex armory/foodstores2                       picture
 tex armory/gunrack1                          metal
 tex armory/newpipe1                          metal
 tex armory/newpipe1hilight                   metal
@@ -390,14 +390,14 @@ tex castle/4_contower_side1a                 metal
 tex castle/4_contower_top_end                metal
 tex castle/4_contower_top_mid                metal
 tex castle/4_periscope_etc                   metal
-tex castle/diningwall_top1                   metal
-tex castle/diningwall_top3                   metal
-tex castle/diningwall_top4                   metal
+tex castle/diningwall_top1                   picture
+tex castle/diningwall_top3                   picture
+tex castle/diningwall_top4                   picture
 tex castle/door1a                            metal
 tex castle/file_front                        metal
 tex castle/file_side                         metal
 tex castle/file_top                          metal
-tex castle/fireplace_iron                    metal
+tex castle/fireplace_iron                    stone
 tex castle/fuse1                             metal
 tex castle/fuse2                             metal
 tex castle/greenbox                          metal
@@ -411,7 +411,7 @@ tex castle/kit_stovehood                     metal
 tex castle/kit_stovetop                      metal
 tex castle/metal_dark2                       metal
 tex castle/shelf                             metal
-tex castle/stonewall16b                      metal
+tex castle/stonewall16b                      stone
 tex castle/vaultbeam                         metal
 tex castle/vaultbeam2a                       metal
 tex castle/vaultbeam_side                    metal
@@ -481,7 +481,7 @@ tex iraq/door5                               metal
 tex iraq/door7                               metal
 tex iraq/f_door1                             metal
 tex iraq/f_door2l                            metal
-tex iraq/king_hill                           metal
+tex iraq/king_hill                           picture
 tex iraq/light_pool                          metal
 tex iraq/lightbars                           metal
 tex iraq/pipe4                               metal
@@ -489,7 +489,7 @@ tex iraq/pipe4b                              metal
 tex iraq/pipe_end                            metal
 tex iraq/pipe_endb                           metal
 tex iraq/tabletop                            metal
-tex siberia/1_conwall_trans2                 metal
+tex siberia/1_conwall_trans2                 stone
 tex siberia/1_conwall_trans3                 metal
 tex siberia/1_flare                          metal
 tex siberia/2_3_ceil1                        metal
