@@ -2414,6 +2414,7 @@ SetupGL(void)
 	// just use one projection-view-matrix (premultiplied here)
 	// so we have one less mat4 multiplication in the 3D shaders
 	gl3state.uni3DData.transProjViewMat4 = HMM_MultiplyMat4(gl3state.projMat3D, gl3state.viewMat3D);
+	GL3_Post_CaptureView(); /* GFX-modern r_om_motionblur */
 
 	gl3state.uni3DData.transModelMat4 = gl3_identityMat4;
 
@@ -2621,6 +2622,7 @@ static const presetkey_t preset_minimal[] = {
 	{"r_om_lshadow", "0"}, {"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
 	{"r_om_ssao", "0"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "0"}, {"r_om_ssr_quality", "1"},
 	{"r_om_volfog", "0"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
+	{"r_om_motionblur", "0"},
 	{"r_om_beams", "0"}, {"r_om_beams_motes", "0"}, {"r_om_bloom", "0"},
 	{"r_om_mirror", "0"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
 	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_look", "0"}, {"r_om_worldlite", "1"},
@@ -2633,6 +2635,7 @@ static const presetkey_t preset_low[] = {
 	{"r_om_lshadow", "0"}, {"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
 	{"r_om_ssao", "0"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "0"}, {"r_om_ssr_quality", "1"},
 	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
+	{"r_om_motionblur", "0"},
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "0"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
 	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_look", "0"},
@@ -2646,6 +2649,7 @@ static const presetkey_t preset_medium[] = {
 	{"r_om_lshadow", "1"}, {"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 	{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "1"},
 	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
+	{"r_om_motionblur", "0.5"},
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
 	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
@@ -2657,6 +2661,7 @@ static const presetkey_t preset_high[] = { /* the build's defaults */
 	{"r_om_lshadow", "1"}, {"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
 	{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
 	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"},
+	{"r_om_motionblur", "0.5"},
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
 	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},

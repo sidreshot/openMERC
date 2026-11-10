@@ -951,10 +951,57 @@ static const char *post_comp_fs =
 	"uniform vec4 look3;\n"  /* vignette, grain, time, LUT strength */
 	"uniform vec4 look4;\n"  /* aspect, LUT size, -, menu brightness offset */
 	"uniform sampler2D lut;\n"
+	/* r_om_motionblur: camera motion blur (the film shutter). The depth of the finished view (weapon included) gives
+	   each pixel its view-space point (mbP: P00 P11 P22 P32 of the projection); mbM takes it to the previous frame's
+	   clip space. mb0: on, exposure / frame time, longest blur (view uv), depth of the near mask (the weapon and hands
+	   move with the camera); mb1: view size in pixels */
+	"uniform sampler2D mbdepth;\n"
+	"uniform vec4 mb0;\n"
+	"uniform vec4 mb1;\n"
+	"uniform vec4 mbP;\n"
+	"uniform mat4 mbM;\n"
+	"uniform vec4 rect;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
 	"float Luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }\n"
+	/* the scene seen through an open shutter: up to 8 taps along the pixel's motion, centred, jittered per pixel (no
+	   steps), in linear light (the target holds display-encoded colour); taps on the weapon are left out. A still
+	   camera costs one depth fetch */
+	"vec3 MotionScene(vec2 tuv)\n"
+	"{\n"
+	"	vec3 c0 = texture(scene, tuv).rgb;\n"
+	"	if (mb0.x <= 0.0) return c0;\n"
+	"	float z = texture(mbdepth, tuv).r;\n"
+	"	if (z < mb0.w) return c0;\n"
+	"	vec2 ndc = vuv * 2.0 - 1.0;\n"
+	"	float vz = -mbP.w / ((z * 2.0 - 1.0) + mbP.z);\n"
+	"	vec4 pc = mbM * vec4(-ndc.x * vz / mbP.x, -ndc.y * vz / mbP.y, vz, 1.0);\n"
+	"	if (pc.w <= 0.01) return c0;\n"
+	"	vec2 mv = (vuv - (pc.xy / pc.w * 0.5 + 0.5)) * mb0.y;\n"
+	"	float ml = length(mv);\n"
+	"	if (ml > mb0.z) mv *= mb0.z / ml;\n"
+	"	if (length(mv * mb1.xy) < 0.75) return c0;\n"
+	"	vec2 tv = mv * rect.zw;\n"
+	/* taps by the blur's length: one per ~5 pixels, 3..8 (most motion is short); squares for linear light (close to
+	   the 2.2 curve, a highlight still smears bright) */
+	"	float n = clamp(floor(length(mv * mb1.xy) * 0.2), 3.0, 8.0);\n"
+	"	float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;\n"
+	"	vec3 c1 = max(c0, vec3(0.0));\n"
+	"	vec3 acc = c1 * c1;\n"
+	"	float wsum = 1.0;\n"
+	"	for (int i = 0; i < 8; i++)\n"
+	"	{\n"
+	"		if (float(i) >= n) break;\n"
+	"		float t = (float(i) + 0.5 + j) / n - 0.5;\n"
+	"		vec2 s = clamp(tuv + tv * t, rect.xy, rect.xy + rect.zw);\n"
+	"		if (texture(mbdepth, s).r < mb0.w) continue;\n"
+	"		vec3 c = max(texture(scene, s).rgb, vec3(0.0));\n"
+	"		acc += c * c;\n"
+	"		wsum += 1.0;\n"
+	"	}\n"
+	"	return sqrt(acc / wsum);\n"
+	"}\n"
 	/* shoulder only: unchanged up to 0.6 (linear), above it rolls off smoothly towards white (the plain picture: the
 	   original mid tones and shadows) */
 	"vec3 Shoulder(vec3 x)\n"
@@ -1022,7 +1069,7 @@ static const char *post_comp_fs =
 	"	else if (mode == 3) c = texture(bloom, vuv).rgb * intensity;\n"
 	"	else\n"
 	"	{\n"
-	"		c = texture(scene, uv).rgb;\n"
+	"		c = MotionScene(uv);\n"
 	"		if (mode == 1) c += texture(bloom, vuv).rgb * intensity;\n"
 	"		if (look != 0)\n"
 	"			c = Grade(c, hdr == 1 ? texture(exptex, vec2(0.5)).r : 1.0);\n"
@@ -3371,6 +3418,120 @@ UpscaleEnd(void)
 }
 
 /* end of the 3D view: resolve, bloom and composite into the default framebuffer */
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_motionblur: camera motion blur as a film camera's shutter
+ * (MGS5 / Death Stranding). r_om_motionblur is the shutter as a share of a
+ * 60 Hz frame (0.5 = 180 degrees, 1/120 s): the blur length follows the
+ * exposure time, not the frame rate. Camera only (the world's own motion is
+ * the camera's here; characters move little within 1/120 s). A cut (a
+ * teleport, a level start, a turn of more than ~45 degrees in a frame) shows
+ * no blur.
+ * ------------------------------------------------------------------ */
+
+static struct
+{
+	hmm_mat4 view, proj, prevvp;
+	vec3_t eye, preveye, fwd, prevfwd;
+	float time, prevtime;
+	qboolean captured, prevvalid;
+} MB;
+
+static cvar_t *r_om_motionblur, *r_om_motionblur_max, *r_om_motionblur_test;
+static qboolean mbbind; /* the composite of this view reads the depth copy on unit 5 */
+static hmm_mat4 ViewInverse(void);
+
+/* the 3D view of this frame, right after SetupGL (before a weapon's own projection) */
+void
+GL3_Post_CaptureView(void)
+{
+	MB.captured = false;
+
+	if (r_newrefdef.rdflags & RDF_NOWORLDMODEL)
+	{
+		return;
+	}
+
+	MB.view = gl3state.viewMat3D;
+	MB.proj = gl3state.projMat3D;
+	VectorCopy(r_newrefdef.vieworg, MB.eye);
+	AngleVectors(r_newrefdef.viewangles, MB.fwd, NULL, NULL);
+	MB.time = r_newrefdef.time;
+	MB.captured = true;
+}
+
+/* the blur uniforms of the composite; true when the depth copy is wanted (the camera moved) */
+static qboolean
+MotionBlurUniforms(GLuint prog)
+{
+	float on = 0, scale = 0, dt, maxlen;
+	qboolean nv = (r_fullbright->value != 0) || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES);
+	hmm_mat4 cur;
+
+	if (!r_om_motionblur)
+	{
+		r_om_motionblur = ri.Cvar_Get("r_om_motionblur", "0.5", CVAR_ARCHIVE);
+		r_om_motionblur_max = ri.Cvar_Get("r_om_motionblur_max", "0.035", CVAR_ARCHIVE);
+		/* test aid: N > 0 as if the camera had turned N degrees right since the last frame, N < 0 moved -N units
+		   forward (a still frame shows a repeatable blur) */
+		r_om_motionblur_test = ri.Cvar_Get("r_om_motionblur_test", "0", 0);
+	}
+
+	if (!MB.captured)
+	{
+		glUniform4f(GL3_UniformLoc(prog, "mb0"), 0, 0, 0, 0);
+		return false;
+	}
+
+	cur = HMM_MultiplyMat4(MB.proj, MB.view);
+	dt = MB.time - MB.prevtime;
+	maxlen = Q_clamp(r_om_motionblur_max->value, 0.0f, 0.1f);
+
+	if ((r_om_motionblur->value > 0) && MB.prevvalid && !nv && (gl3depthmin == 0) && (gl3depthmax == 1) &&
+		(dt > 0.001f) && (dt < 0.2f) && (DotProduct(MB.eye, MB.eye) + DotProduct(MB.preveye, MB.preveye) - 2.0f * DotProduct(MB.eye, MB.preveye) < 96.0f * 96.0f) &&
+		(DotProduct(MB.fwd, MB.prevfwd) > 0.7f) && P.texdepthcopy && (maxlen > 0))
+	{
+		on = 1;
+		scale = Q_min(Q_clamp(r_om_motionblur->value, 0.0f, 2.0f) / 60.0f / dt, 2.0f);
+	}
+
+	if (MB.captured && (r_om_motionblur_test->value != 0) && (r_om_motionblur->value > 0) && P.texdepthcopy)
+	{
+		float t = r_om_motionblur_test->value;
+
+		MB.prevvp = HMM_MultiplyMat4(MB.proj, HMM_MultiplyMat4((t > 0) ? HMM_Rotate(t, HMM_Vec3(0, 1, 0)) :
+			HMM_Translate(HMM_Vec3(0, 0, -t)), MB.view));
+		on = 1;
+		scale = Q_clamp(r_om_motionblur->value, 0.0f, 2.0f);
+	}
+
+	if (on)
+	{
+		hmm_mat4 inv = ViewInverse();
+		hmm_mat4 m = HMM_MultiplyMat4(MB.prevvp, inv);
+		/* the window depth of the near mask: 24 units from the eye */
+		float d = 24.0f, nz = (MB.proj.Elements[2][2] * -d + MB.proj.Elements[3][2]) / d;
+
+		glUniformMatrix4fv(GL3_UniformLoc(prog, "mbM"), 1, GL_FALSE, (const float *)m.Elements);
+		glUniform4f(GL3_UniformLoc(prog, "mbP"), MB.proj.Elements[0][0], MB.proj.Elements[1][1],
+			MB.proj.Elements[2][2], MB.proj.Elements[3][2]);
+		glUniform4f(GL3_UniformLoc(prog, "mb1"), (float)P.vw, (float)P.vh, 0, 0);
+		glUniform4f(GL3_UniformLoc(prog, "mb0"), 1, scale, maxlen, nz * 0.5f + 0.5f);
+		glUniform1i(GL3_UniformLoc(prog, "mbdepth"), 5);
+	}
+	else
+	{
+		glUniform4f(GL3_UniformLoc(prog, "mb0"), 0, 0, 0, 0);
+	}
+
+	MB.prevvp = cur;
+	VectorCopy(MB.eye, MB.preveye);
+	VectorCopy(MB.fwd, MB.prevfwd);
+	MB.prevtime = MB.time;
+	MB.prevvalid = true;
+	MB.captured = false;
+	return on != 0;
+}
+
 void
 GL3_Post_EndView(void)
 {
@@ -3390,6 +3551,24 @@ GL3_Post_EndView(void)
 	/* the scene's depth and stencil are done (later passes read the depth copies, the next view clears them):
 	   not written back to memory on a tiled GPU */
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+
+	/* r_om_motionblur: the composite reads the finished depth, view weapon included */
+	GL3_UseProgram(P.progcomp);
+	if (MotionBlurUniforms(P.progcomp))
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		P.depthfinal = true;
+		glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+		mbbind = true;
+	}
+	else
+	{
+		mbbind = false;
+	}
+
 	PostDiscard(GL_DEPTH_STENCIL_ATTACHMENT);
 
 	glDisable(GL_DEPTH_TEST);
@@ -3522,6 +3701,10 @@ GL3_Post_EndView(void)
 	}
 	BindTex(GL_TEXTURE2, P.texemis);
 	BindTex(GL_TEXTURE1, P.nlevels ? P.leveltex[0] : P.texemis);
+	if (mbbind)
+	{
+		BindTex(GL_TEXTURE5, P.texdepthcopy); /* r_om_motionblur */
+	}
 	BindTex(GL_TEXTURE0, P.texcolor);
 	DrawQuad();
 	GL3_Post_ProfMark("post_composite");

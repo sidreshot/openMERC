@@ -1624,3 +1624,20 @@ client fx module) to start an effect in front of the eye.
 * om_materials.txt reviewed by eye for the glossy classes: concrete block (jpn1 kitchen 1_kitchblock*), white
   plaster (2_cleanwall1*), a slab and old planks were sorted as tiles/varnish/polished - now stone/wood/
   smoothcon (22 textures). The metal class (618) is not reviewed yet.
+
+## r_om_motionblur: camera motion blur as a film shutter (goal: "Kojima-level cinematic effects", 2026-11-10)
+
+* Composite pass (gl3_post.c MotionScene): the depth of the finished view (copied at EndView, the view weapon
+  included) gives each pixel its view-space point (analytic: P00 P11 P22 P32 of the symmetric frustum); the
+  previous frame's view-projection x the inverse view takes it to where it was. Up to 8 taps along that motion,
+  centred and jittered per pixel (interleaved gradient noise), averaged in linear light (squares - the target
+  holds display-encoded colour). Pixels nearer than 24 units (weapon, hands) are neither blurred nor sampled.
+* r_om_motionblur = shutter as a share of a 60 Hz frame (0.5 = 180 degrees, 1/120 s): blur = motion x exposure /
+  frame time, so it does not depend on the frame rate. r_om_motionblur_max caps the length (0.035 of the view).
+  No blur on a cut (eye moved > 96 units or turned > ~45 degrees in a frame), with night vision, gl_ztrick.
+* Captured right after SetupGL (GL3_Post_CaptureView), before a weapon's own projection.
+* Test aid r_om_motionblur_test N: as if the camera had turned N degrees (N > 0) or moved -N units forward (N < 0)
+  since the last frame - repeatable on a still frame. Real motion checked with a generated r_om_campath turn.
+* Cost (1080p, composite pass, one run on/off/on): still camera 0 (one depth fetch, early out), 1 deg/frame
+  +0.15 ms, 3 deg/frame +0.29 ms (taps by length: one per ~5 px, 3..8; was +0.75 ms with 8 fixed taps and pow).
+* Presets: minimal/low 0 (phones), medium/high 0.5. Menu: Colour -> Motion Blur.

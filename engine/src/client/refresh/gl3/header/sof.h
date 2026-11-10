@@ -384,6 +384,7 @@ qboolean GL3_Post_WaterCopy(void);
 qboolean GL3_Post_GlassCopy(void);
 void GL3_Post_GlassBind(void);
 void GL3_Post_EndView(void);
+void GL3_Post_CaptureView(void);
 void GL3_Post_SSAO(void);
 void GL3_Post_Weather(void);
 void GL3_Post_WeatherFrame(void);

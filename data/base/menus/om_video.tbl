@@ -109,4 +109,5 @@ slider | menu_contrast | 0 | 1 | 0.1 | Contrast | Контраст | stage
 slider | menu_brightness | 0 | 1 | 0.1 | Brightness | Яркость | stage
 slider | menu_modulate | 0.4 | 4.0 | 0.1 | Light Intensity | Интенсивность света | stage
 slider | r_om_camera | 0 | 1 | 0.1 | Film Camera | Киноплёнка | requires=r_om_camera | tip=0: the plain picture, the original colours; 1: a film camera - soft highlights and the colour of the level/0: обычная картинка, исходные цвета; 1: киноплёнка - мягкие пересветы и цвет уровня
+list | r_om_motionblur | 0,0.25,0.5,1 | Off,Light,Film (180),Strong | Выкл,Лёгкое,Кино (180),Сильное | Motion Blur | Размытие в движении | requires=r_om_motionblur | tip=Camera motion blur like a film shutter: the blur follows the exposure time, not the frame rate/Размытие камеры как затвор киноаппарата: длина смаза зависит от выдержки, а не от FPS | pc
 rmf | <hbr><center><omcalib><hbr>
