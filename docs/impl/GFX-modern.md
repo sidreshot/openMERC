@@ -1775,3 +1775,10 @@ client fx module) to start an effect in front of the eye.
   medium/high -1, minimal/low 0. Menu: Render -> Temporal Antialiasing.
 * Cost: +0.1 ms (1080p). Laplacian energy of an arm1 crop (bricks, fence, sign): no MSAA + TAA 688, SMAA 401, none 475,
   MSAA 8x 445 - TAA keeps the texture detail that SMAA blurs. Fast drops leave a faint trail (reads as motion blur).
+
+## r_om_sss: light through skin (2026-11-11; the last feature of the Fox Engine / Decima list)
+
+* The PBR model shader (gl3_ghoulemu.c omLitPBR) gathers the light that wraps past the terminator,
+  (n.l + 0.5) / 1.5 - n.l per lamp (omScatter); after the texture, a skin texel (red over green over blue, not grey,
+  not white) takes it with the red of blood under it (1, 0.42, 0.28) x 1.6. A shaved head under the arm1 shop lamp:
+  the rim where the light leaves turns warm instead of grey; 2 is already orange. ALU only on model pixels.

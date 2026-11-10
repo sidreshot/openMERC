@@ -137,7 +137,7 @@ static struct
 	/* GFX-modern sun shadows (gl3_csm.c): the depth mask as set, whether the entity casts and whether its
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
-	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk, u_sunk, u_lsk;
+	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk, u_sunk, u_lsk, u_sssk;
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
@@ -809,7 +809,9 @@ static const char *emu_fs =
 	"uniform vec4 omSoftAddV;\n"   /* 1 / scene target size */
 	"uniform sampler2D omSoftAddDepth;\n"
 	"uniform int omPPL;\n"
-	"uniform float omPbrK;\n"   /* r_om_pbr_models: strength of the specular */
+	"uniform float omPbrK;\n"
+	/* r_om_sss: light scattered through skin (strength) */
+	"uniform float omSssK;\n"   /* r_om_pbr_models: strength of the specular */
 	"uniform float omSunK;\n"
 	"uniform float omLsK;\n"    /* r_om_pbr_shadows: the lamp shadows on models, 0 off */   /* r_om_pbr_sun x the sun shadows are on (gl3_csm.c), else 0 */
 	"uniform vec4 omL[48];\n"
@@ -914,6 +916,7 @@ static const char *emu_fs =
 	"}\n"
 #endif
 	"vec3 omSpec;\n"
+	"vec3 omScatter;\n"
 	"float omMetal;\n"   /* 1: a glossy SoF material - its highlight takes the texture colour (metal) */
 	"float omGGX(float nh, float a)\n"
 	"{\n"
@@ -983,6 +986,8 @@ static const char *emu_fs =
 	"		float nl = max(dot(n, L), 0.0);\n"
 	"		vec3 Lc = att * spot * lsv * omL[i * 6 + 2].rgb;\n"
 	"		c += att * spot * omL[i * 6 + 1].rgb * ma.rgb + nl * Lc * md.rgb;\n"
+	/* r_om_sss: the light that wraps past the terminator through skin (applied where the texture is skin, main) */
+	"		omScatter += Lc * md.rgb * max((dot(n, L) + 0.5) / 1.5 - nl, 0.0);\n"
 	"		if (nl > 0.0)\n"
 	"		{\n"
 	"			vec3 h = normalize(L + v);\n"
@@ -1057,6 +1062,7 @@ static const char *emu_fs =
 	"void main()\n"
 	"{\n"
 	"	omSpec = vec3(0.0);\n"
+	"	omScatter = vec3(0.0);\n"
 	"	omMetal = 0.0;\n"
 	"	vec4 c = (omPPL == 2) ? omLitPBR(vColor) : (omPPL != 0) ? omLit(vColor) : vColor;\n"
 	"	if (texenv != 0)\n"
@@ -1099,6 +1105,15 @@ static const char *emu_fs =
 	   the others is white like a dielectric's */
 	"	if (omPPL == 2 && (texenv == 0 || texenv == 1))\n"
 	"		c.rgb += omSpec * ((texenv == 1 && omMetal > 0.5) ? texture(tex, vTex).rgb * 1.6 : vec3(1.0));\n"
+	/* GFX-modern r_om_sss: skin - a warm texel (red over green over blue, not grey, not white) - takes the wrapped
+	   light with the red of blood under it: the terminator on a face turns soft and warm instead of a hard grey line
+	   (the cheap pre-integrated look of console-era skin) */
+	"	if (omPPL == 2 && omSssK > 0.0 && (texenv == 0 || texenv == 1))\n"
+	"	{\n"
+	"		vec3 tx = texture(tex, vTex).rgb;\n"
+	"		float sk = smoothstep(0.03, 0.12, tx.r - tx.g) * smoothstep(0.015, 0.07, tx.g - tx.b) * smoothstep(0.12, 0.25, tx.r) * (1.0 - smoothstep(0.75, 0.95, tx.g));\n"
+	"		c.rgb += omScatter * tx * vec3(1.0, 0.42, 0.28) * (1.6 * sk * omSssK);\n"
+	"	}\n"
 	"	vec3 omPre = (fogon != 0) ? c.rgb * vFog : c.rgb;\n"
 	"	if (fogon != 0) c.rgb = mix(fogcolor.rgb, c.rgb, vFog);\n"
 	"	if (omCsmRepl != 0 || omBeamN > 0)\n"
@@ -1332,6 +1347,7 @@ CreateObjects(void)
 	E.u_csmrepl = glGetUniformLocation(E.prog, "omCsmRepl");
 	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
 	E.u_pbrk = glGetUniformLocation(E.prog, "omPbrK");
+	E.u_sssk = glGetUniformLocation(E.prog, "omSssK");
 	E.u_sunk = glGetUniformLocation(E.prog, "omSunK");
 	E.u_lsk = glGetUniformLocation(E.prog, "omLsK");
 	E.u_pplL = glGetUniformLocation(E.prog, "omL");
@@ -2138,6 +2154,16 @@ Flush(void)
 
 		ppl = (E.lighting && E.ppl) ? ((r_om_pbr_models->value > 0) ? 2 : 1) : 0;
 		glUniform1f(E.u_pbrk, Q_clamp(r_om_pbr_models->value, 0.0f, 4.0f));
+		{
+			static cvar_t *r_om_sss;
+
+			if (!r_om_sss)
+			{
+				r_om_sss = ri.Cvar_Get("r_om_sss", "1", CVAR_ARCHIVE);
+			}
+
+			glUniform1f(E.u_sssk, Q_clamp(r_om_sss->value, 0.0f, 3.0f));
+		}
 		{
 			static cvar_t *r_om_pbr_sun;
 
