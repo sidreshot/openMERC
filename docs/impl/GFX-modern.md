@@ -1241,6 +1241,8 @@ correction away and put ours in its place".
 
 ## r_om_lightocc: map lamps no longer light models through walls (owner: "make the lamps not shine on characters through walls")
 
+* 2026-11-10: the switch is gone, the trace is always set (with ghl_shadows on it was set anyway: the paused A/B showed 0 pixels).
+
 * The Ghoul system picks a model's GL lights (BSP lump 20) by distance only (WorldLightGrid::Query). With
   `r_om_lightocc 1` (default) the renderer always hands it the world trace (render parameters 0x44; before only with
   ground shadows on) and GatherWorldLights keeps a light only when the ray from 4 units off the lamp to the model's

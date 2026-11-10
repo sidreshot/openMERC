@@ -121,17 +121,11 @@ qboolean
 GL3_Detail_InShader(msurface_t *surf, gl3image_t *image, gl3drawCmd_t *cmd)
 {
 	extern int gl3_shader_pdl;
-	static cvar_t *on;
 	int mode = gl_detailtexturing ? (int)gl_detailtexturing->value : 0;
 	gl3image_t *detail;
 	glpoly_t *p = surf->polys;
 
-	if (!on)
-	{
-		on = ri.Cvar_Get("r_om_detail_inshader", "1", 0);
-	}
-
-	if (!on->value || (gl3_shader_pdl != 1) || (mode < 1) || (mode > 2) || !image ||
+	if ((gl3_shader_pdl != 1) || (mode < 1) || (mode > 2) || !image ||
 		!(detail = image->detail) || (detail->softype == SOFIMG_ENV) || image->has_alpha || !p ||
 		(surf->texinfo->flags & (SOFSURF_NODETAIL | SOFSURF_FLOWING | SURF_FLOWING)))
 	{
