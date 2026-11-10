@@ -9494,7 +9494,11 @@ static const char *ssr_fs =
 	"	float k = refl + (min(0.85, refl * 3.0) - refl) * pow(1.0 - ndv, 5.0) * (1.0 - rough);\n"
 	/* r_om_probes: what the ray cannot find on the screen comes from the cube maps (a 128 cube: mip 1 sharp, 6 matte) */
 	"	bool pr = pcount > 0.5 && dbg == 0;\n"
-	"	bool probeonly = pr && rough > 0.6;\n"
+	/* walls, trims and ceilings: the cube maps only. A screen-space ray from an upright face mostly leaves the view or
+	   comes back at the eye: thin trims under a ceiling (jpn3) reflected in pieces that came and went while walking */
+	"	bool upright = (mat3(invview) * N).z < 0.7;\n"
+	"	if (upright && !pr) discard;\n"
+	"	bool probeonly = pr && (rough > 0.6 || upright);\n"
 	"	vec3 WP = (invview * vec4(P, 1.0)).xyz, WR = mat3(invview) * R;\n"
 	"	float plod = 1.0 + rough * 5.0;\n"
 	"	float pw = clamp(k * strength, 0.0, 0.85);\n"
@@ -11828,6 +11832,9 @@ static const char *skyrays_add_fs =
 	"uniform sampler2D raytex;\n"
 	"uniform vec4 color;\n"
 	"uniform vec4 sun;\n"   /* light on the view, aspect, the radius of its disc (no rays over the disc itself) */
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 drect;\n"  /* the view in the depth copy */
+	"uniform vec4 proj;\n"   /* P22, P32, depth min, depth max */
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -11838,6 +11845,11 @@ static const char *skyrays_add_fs =
 	"	v = mix(v, v * v * (3.0 - 2.0 * min(v, 1.0)), color.a);\n" /* soft knee: faint edges fall away, the cores stay */
 	"	vec2 d = (vuv - sun.xy) * vec2(sun.z, 1.0);\n"
 	"	v *= smoothstep(sun.w * 0.6, sun.w * 1.6, length(d));\n"
+	/* over buildings and hills only the air in front of them scatters: the rays at 40 % there (they ran down walls
+	   in bright stripes, sudctf1) */
+	"	float z = texture(depthtex, drect.xy + vuv * drect.zw).r;\n"
+	"	float ndc = (z - proj.z) / max(proj.w - proj.z, 1e-6) * 2.0 - 1.0;\n"
+	"	if ((proj.y / (ndc + proj.x)) < 20000.0) v *= 0.4;\n"
 	"	float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;\n"
 	"	outColor = vec4(max(color.rgb * v + n / 255.0, 0.0), 1.0);\n"
 	"	outEmissive = vec4(0.0);\n"
@@ -11930,6 +11942,178 @@ SkyRaysAddProgram(void)
 	return p;
 }
 
+/* r_om_skyrays without a "light" line for the sky: the sun or moon as the sky box paints it - the brightest spot of the
+   faces, found once per map over a grid of directions above -10 degrees. The map's _sun_angle (the CSM sun) need not
+   be where the artist painted it (sudctf1: the rays fanned out beside the sun disc). False where nothing stands out
+   (overcast, a night without a moon): then the map's sun */
+static qboolean
+SkyPaintedSun(vec3_t dir, vec3_t color)
+{
+	enum { AZ = 192, EL = 64 };
+	static const void *model;
+	static qboolean found;
+	static vec3_t fdir, fcol;
+	gl3image_t *imgs[6];
+	unsigned char *pix[6];
+	int iw[6], ih[6], nimg = 0, x, y, k;
+	float best = -1, lum[EL][AZ];
+	int bx = 0, by = 0;
+	double hist = 0;
+	int nh = 0;
+
+	if (model == (const void *)gl3_worldmodel)
+	{
+		if (found)
+		{
+			VectorCopy(fdir, dir);
+			VectorCopy(fcol, color);
+		}
+
+		return found;
+	}
+
+	model = gl3_worldmodel;
+	found = false;
+
+#ifdef YQ2_GL3_GLES3
+	return false; /* no texture read-back */
+#else
+	for (y = 0; y < EL; y++)
+	{
+		for (x = 0; x < AZ; x++)
+		{
+			float az = (x + 0.5f) / AZ * 2.0f * (float)M_PI, el = ((y + 0.5f) / EL * 100.0f - 10.0f) * (float)M_PI / 180.0f;
+			float s, t;
+			vec3_t d;
+			gl3image_t *im;
+
+			lum[y][x] = -1;
+			VectorSet(d, cosf(el) * cosf(az), cosf(el) * sinf(az), sinf(el));
+			im = GL3_SkyAt(d, &s, &t);
+
+			if (!im)
+			{
+				continue;
+			}
+
+			for (k = 0; (k < nimg) && (imgs[k] != im); k++)
+			{
+			}
+
+			if ((k == nimg) && (nimg < 6))
+			{
+				imgs[k] = im;
+				pix[k] = NULL;
+				GL3_SelectTMU(GL_TEXTURE0);
+				GL3_Bind(im->texnum);
+				iw[k] = ih[k] = 0;
+				glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &iw[k]);
+				glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ih[k]);
+
+				if ((iw[k] > 0) && (ih[k] > 0) && (iw[k] <= 4096) && (ih[k] <= 4096) &&
+					(pix[k] = malloc((size_t)iw[k] * ih[k] * 4)))
+				{
+					glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pix[k]);
+				}
+
+				nimg++;
+			}
+
+			if ((k < nimg) && pix[k])
+			{
+				const unsigned char *q = pix[k] + 4 * (Q_min((int)(t * ih[k]), ih[k] - 1) * iw[k] +
+					Q_min((int)(s * iw[k]), iw[k] - 1));
+				float l = 0.299f * q[0] + 0.587f * q[1] + 0.114f * q[2];
+
+				lum[y][x] = l;
+				hist += l;
+				nh++;
+
+				if (l > best)
+				{
+					best = l;
+					bx = x;
+					by = y;
+				}
+			}
+		}
+	}
+
+	/* a sun: near white and well above the sky around it */
+	if ((nh > 0) && (best >= 215.0f) && (best >= hist / nh + 70.0f))
+	{
+		vec3_t acc = {0, 0, 0};
+		float wsum = 0;
+		int dx, dy;
+
+		/* the centre of the bright spot around the brightest sample (within about 12 degrees) */
+		for (dy = -8; dy <= 8; dy++)
+		{
+			for (dx = -6; dx <= 6; dx++)
+			{
+				int yy = by + dy, xx = (bx + dx + AZ) % AZ;
+				float az, el, w;
+				vec3_t d;
+
+				if ((yy < 0) || (yy >= EL) || (lum[yy][xx] < best - 25.0f))
+				{
+					continue;
+				}
+
+				az = (xx + 0.5f) / AZ * 2.0f * (float)M_PI;
+				el = ((yy + 0.5f) / EL * 100.0f - 10.0f) * (float)M_PI / 180.0f;
+				VectorSet(d, cosf(el) * cosf(az), cosf(el) * sinf(az), sinf(el));
+				w = lum[yy][xx] - (best - 25.0f) + 1.0f;
+				VectorMA(acc, w, d, acc);
+				wsum += w;
+			}
+		}
+
+		if ((wsum > 0) && (VectorNormalize(acc) > 0))
+		{
+			float s, t;
+			gl3image_t *im = GL3_SkyAt(acc, &s, &t);
+
+			VectorCopy(acc, fdir);
+			VectorSet(fcol, 1, 1, 1);
+
+			for (k = 0; im && (k < nimg); k++)
+			{
+				if ((imgs[k] == im) && pix[k])
+				{
+					const unsigned char *q = pix[k] + 4 * (Q_min((int)(t * ih[k]), ih[k] - 1) * iw[k] +
+						Q_min((int)(s * iw[k]), iw[k] - 1));
+					float m = (float)Q_max(q[0], Q_max(q[1], q[2]));
+
+					if (m > 0)
+					{
+						VectorSet(fcol, q[0] / m, q[1] / m, q[2] / m);
+					}
+				}
+			}
+
+			found = true;
+			R_Printf(PRINT_DEVELOPER, "r_om_skyrays: the sky paints its light at (%.2f %.2f %.2f)\n", fdir[0], fdir[1], fdir[2]);
+		}
+	}
+
+	for (k = 0; k < nimg; k++)
+	{
+		free(pix[k]);
+	}
+
+	gl3state.currenttexture = -1;
+
+	if (found)
+	{
+		VectorCopy(fdir, dir);
+		VectorCopy(fcol, color);
+	}
+
+	return found;
+#endif
+}
+
 void
 GL3_Post_SkyRays(void)
 {
@@ -11950,8 +12134,8 @@ GL3_Post_SkyRays(void)
 		return;
 	}
 
-	/* the light: painted on the sky (its colour as given), else the map's sun */
-	painted = GL3_SkyLight(dir, color);
+	/* the light: given for the sky, else found painted on it, else the map's sun */
+	painted = GL3_SkyLight(dir, color) || SkyPaintedSun(dir, color);
 
 	if (!painted && !GL3_CSM_SunDir(dir, color))
 	{
@@ -12123,6 +12307,11 @@ GL3_Post_SkyRays(void)
 		0.5f * tanf((painted ? 4.5f : 1.0f) * (float)M_PI / 180.0f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f));
 	glUniform4f(glGetUniformLocation(SKR.padd, "color"), color[0] * inten, color[1] * inten, color[2] * inten,
 		Q_clamp(tune_knee, 0.0f, 1.0f));
+	glUniform1i(glGetUniformLocation(SKR.padd, "depthtex"), 1);
+	glUniform4fv(glGetUniformLocation(SKR.padd, "drect"), 1, rect);
+	glUniform4f(glGetUniformLocation(SKR.padd, "proj"), gl3state.projMat3D.Elements[2][2],
+		gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+	BindTex(GL_TEXTURE1, P.texdepthcopy);
 	BindTex(GL_TEXTURE0, SKR.tex[1]);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE);
