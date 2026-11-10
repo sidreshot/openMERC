@@ -1,39 +1,39 @@
 # OpenMerc GFX-modern r_om_look: the colour of the picture (gl3_look.c)
 #
-# The picture is graded in float at the end of the view; SoF's 8-bit colour table stays neutral. Edit this file
-# (a copy in the game folder, openmerc/looks/om_looks.txt, overrides the one in the pak) and type
-# r_om_looks_reload in the console. r_om_look_strength 0..1 (menu: Gloom) blends from neutral to the look;
-# r_om_look_preset <name> forces a look on every map; r_om_look 0 brings back the original colour table
+# The picture is graded in float at the end of the view, as a film camera; SoF's 8-bit colour table stays neutral.
+# Edit this file (a copy in the game folder, openmerc/looks/om_looks.txt, overrides the one in the pak) and type
+# r_om_looks_reload in the console. r_om_camera 0..1 (menu: Film Camera) blends from the plain picture to the camera;
+# r_om_look_preset <name> forces a grade on every map; r_om_look 0 brings back the original colour table
 # (renderer restart).
 #
-# look <name> <ev> <toe> <shoulder> <saturation> <shadow r g b> <highlight r g b> <vignette> <grain> <adapt> [lut]
-#   ev          exposure in stops (-0.5 = a third darker)
-#   toe         presses the blacks down, mid grey stays (0 none, 0.4 deep)
-#   shoulder    where the highlights start to roll off towards white (0.6 = the original curve)
-#   saturation  1 = as is, 0.7 = muted
-#   shadow      tint of the dark tones, highlight: tint of the light (luminance is kept; 1 1 1 = none)
-#   vignette    darkening towards the corners (0..1), grain: film grain (0.03 = fine)
-#   adapt       share of the automatic exposure (1 = full; 0.5 lets dark rooms stay dark)
-#   lut         optional strip of N slices of N x N (looks/neutral_lut.png graded in an image editor)
-# map <map name, '*' allowed> <look>      the first matching line wins
+# grade <name> <ev> <temperature> <tint> <saturation> <contrast> <vignette> <grain> [lut]
+#   ev           exposure in stops (-0.5 = a third darker)
+#   temperature  white balance: > 0 warm (sun, lamps), < 0 cold (night, snow); about -1..1
+#   tint         > 0 towards magenta, < 0 towards green; about -1..1
+#   saturation   1 = as is, 0.8 = muted
+#   contrast     around mid grey: 1 = the film curve as is, below 1 opens the shadows (SoF maps are dark)
+#   vignette     darkening towards the corners (0..1), grain: film grain (0.01 = fine)
+#   lut          optional strip of N slices of N x N (looks/neutral_lut.png graded in an image editor)
+# map <map name, '*' allowed> <grade>      the first matching line wins
 
-#      name      ev     toe   shoulder sat   shadow           highlight        vign  grain  adapt
-look   darkness  -0.15  0.25  0.55     0.75  0.88 0.97 1.12   1.12 1.00 0.86   0.32  0.025  0.75
-look   nyc       -0.12  0.25  0.55     0.78  0.86 0.97 1.15   1.16 1.00 0.80   0.30  0.025  0.75
-look   kosovo    -0.10  0.22  0.55     0.62  0.93 1.02 1.03   1.06 1.02 0.92   0.30  0.030  0.8
-look   desert    -0.05  0.20  0.55     0.82  0.95 0.97 1.06   1.12 1.02 0.84   0.25  0.020  0.85
-look   siberia   -0.10  0.22  0.55     0.68  0.86 0.97 1.18   1.00 1.02 1.06   0.30  0.025  0.8
-look   castle    -0.12  0.25  0.55     0.70  0.90 1.00 1.06   1.10 1.00 0.88   0.32  0.025  0.75
+#      name      ev     temp   tint   sat    contrast  vign   grain
+grade  standard  0.00   0.00   0.00   1.00   0.85      0.15   0.012
+grade  city      0.00   0.08   0.00   1.00   0.85      0.15   0.012
+grade  kosovo    0.00  -0.10  -0.08   0.92   0.88      0.15   0.015
+grade  desert    0.05   0.35   0.00   1.00   0.90      0.15   0.012
+grade  siberia   0.00  -0.30   0.05   0.92   0.88      0.15   0.012
+grade  castle    0.00   0.15   0.00   0.95   0.85      0.18   0.015
+grade  japan     0.00  -0.05   0.04   1.00   0.85      0.18   0.012
 
-map    tsr*      nyc
-map    nyc*      nyc
-map    arm*      nyc
-map    tut*      nyc
-map    trn*      nyc
+map    tsr*      city
+map    nyc*      city
+map    arm*      city
+map    tut*      city
+map    trn*      city
 map    kos*      kosovo
 map    sud*      desert
 map    irq*      desert
 map    sib*      siberia
 map    ger*      castle
-map    jpn*      darkness
-map    *         darkness
+map    jpn*      japan
+map    *         standard

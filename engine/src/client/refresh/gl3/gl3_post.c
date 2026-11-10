@@ -46,7 +46,7 @@ static cvar_t *r_om_softparticles_add, *r_om_post_debug, *r_om_gputime;
 static cvar_t *r_om_overbright, *r_om_overbright_scale, *r_om_overbright_models;
 static cvar_t *r_om_hdr, *r_om_hdr_key, *r_om_hdr_adapt, *r_om_hdr_min, *r_om_hdr_max, *r_om_hdr_saturation;
 static cvar_t *r_om_hdr_overbright, *r_om_hdr_debug, *r_om_hdr_adapt_strength;
-static cvar_t *r_om_hdr_curve, *r_om_hdr_shadows, *r_om_hdr_brightness;
+static cvar_t *r_om_hdr_shadows, *r_om_hdr_brightness;
 
 static qboolean VolFogWanted(void);
 static void VolFogShutdown(void);
@@ -68,6 +68,8 @@ static void SSRDeleteTargets(void);
 static void MirrorShutdown(void);
 static void TimersShutdown(void);
 static void SSRKeepColour(void);
+static void ProbesUniforms(GLuint prog);
+static void ProbesShutdown(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
 static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth, *r_om_ssr_temporal, *r_om_ssr_ripple, *r_om_ssr_checker;
 
@@ -934,39 +936,38 @@ static const char *post_comp_fs =
 	"uniform int mode;\n"    /* 0 scene, 1 scene + bloom, 2 emissive target, 3 bloom only */
 	"uniform int hdr;\n"     /* r_om_hdr: exposure and the filmic curve */
 	"uniform float saturation;\n"
-	"uniform vec4 grade;\n"  /* curve (0 shoulder, 1 ACES), shadow gamma, brightness, r_om_overbright (linear) */
+	"uniform vec4 grade;\n"  /* -, shadow gamma, brightness, r_om_overbright (linear) */
 	/* r_om_look (gl3_look.c): the picture graded in float instead of SoF's 8-bit colour table */
 	"uniform int look;\n"
-	"uniform vec4 look0;\n"  /* exposure (EV), toe, shoulder start, saturation */
-	"uniform vec4 look1;\n"  /* shadow tint rgb, menu contrast power */
-	"uniform vec4 look2;\n"  /* highlight tint rgb, menu gamma power (1 - vid_gamma) */
+	"uniform vec4 look0;\n"  /* exposure (EV), contrast, camera saturation, camera share (r_om_camera) */
+	"uniform vec4 look1;\n"  /* white balance rgb, menu contrast power */
+	"uniform vec4 look2;\n"  /* plain saturation, -, -, menu gamma power (1 - vid_gamma) */
 	"uniform vec4 look3;\n"  /* vignette, grain, time, LUT strength */
-	"uniform vec4 look4;\n"  /* aspect, LUT size, auto exposure share, menu brightness offset */
+	"uniform vec4 look4;\n"  /* aspect, LUT size, -, menu brightness offset */
 	"uniform sampler2D lut;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
-	/* ACES filmic curve (Narkowicz fit): soft shoulder for the highlights, a little more contrast in the mids */
-	"vec3 Aces(vec3 x) { return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }\n"
-	/* shoulder only: unchanged up to 0.6 (linear), above it rolls off smoothly towards white (no darkened toe:
-	   ACES made the dark SoF maps about a third darker in the shadows) */
+	"float Luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }\n"
+	/* shoulder only: unchanged up to 0.6 (linear), above it rolls off smoothly towards white (the plain picture: the
+	   original mid tones and shadows) */
 	"vec3 Shoulder(vec3 x)\n"
 	"{\n"
 	"	const float T = 0.6;\n"
 	"	vec3 s = T + (1.0 - T) * (1.0 - exp(-(x - T) / (1.0 - T)));\n"
 	"	return mix(x, s, step(T, x));\n"
 	"}\n"
-	"float Luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }\n"
-	/* a tint that keeps the luminance */
-	"vec3 Tint(vec3 t) { return t / max(Luma(t), 1e-3); }\n"
-	/* filmic curve: the toe presses the blacks down with mid grey (0.18) fixed, the shoulder rolls the highlights off
-	   from its start towards white */
-	"vec3 Film(vec3 x, float toe, float sh)\n"
+	/* the film camera: ACES RRT+ODT (Stephen Hill's fit, sRGB -> AP1 -> sRGB), pre-scaled so mid grey 0.18 stays 0.18;
+	   bright colours desaturate towards white the way film does */
+	"vec3 Camera(vec3 x)\n"
 	"{\n"
-	"	x = pow(max(x, vec3(0.0)) / 0.18, vec3(1.0 + toe)) * 0.18;\n"
-	"	vec3 s = sh + (1.0 - sh) * (1.0 - exp(-(x - sh) / max(1.0 - sh, 1e-3)));\n"
-	"	return clamp(mix(x, s, step(sh, x)), 0.0, 1.0);\n"
+	"	const mat3 I = mat3(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);\n"
+	"	const mat3 O = mat3(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);\n"
+	"	vec3 v = I * (x * 1.4619);\n"
+	"	v = (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081);\n"
+	"	return clamp(O * v, 0.0, 1.0);\n"
 	"}\n"
+	/* a tint that keeps the luminance */
 	/* the LUT strip: N slices of N x N, blue across the slices */
 	"vec3 Lut(vec3 c, float n)\n"
 	"{\n"
@@ -978,14 +979,15 @@ static const char *post_comp_fs =
 	"float Hash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }\n"
 	"vec3 Grade(vec3 c, float autoexp)\n"
 	"{\n"
-	/* the scene is display-encoded: to linear, exposure (auto by the look's share, look, menu brightness) */
-	"	vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * pow(autoexp, look4.z) * exp2(look0.x) * grade.w;\n"
-	/* split toning by luminance: cold shadows, warm light, luminance kept */
-	"	float y = Luma(l);\n"
-	"	float t = smoothstep(0.02, 0.35, pow(y, 1.0 / 2.2));\n"
-	"	l *= mix(Tint(look1.rgb), Tint(look2.rgb), t);\n"
-	"	l = max(mix(vec3(Luma(l)), l, look0.w), vec3(0.0));\n"
-	"	l = Film(l, look0.y, look0.z);\n"
+	/* the scene is display-encoded: to linear, exposure (auto, grade, menu brightness) */
+	"	vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * autoexp * exp2(look0.x) * grade.w;\n"
+	/* the plain picture: the shoulder curve */
+	"	vec3 p = Shoulder(max(mix(vec3(Luma(l)), l, look2.x), vec3(0.0)));\n"
+	/* the camera: white balance, saturation, contrast around mid grey, the filmic curve */
+	"	vec3 w = l * look1.rgb;\n"
+	"	w = max(mix(vec3(Luma(w)), w, look0.z), vec3(0.0));\n"
+	"	w = 0.18 * pow(w / 0.18, vec3(look0.y));\n"
+	"	l = (look0.w > 0.0) ? mix(p, Camera(w), look0.w) : p;\n"
 	"	vec3 d = pow(l, vec3(1.0 / 2.2));\n"
 	/* the menu's gamma, contrast and brightness as SoF's colour table had them (SPEC-413 В§9), in float: v^(1-g), an S
 	   curve of power k around the middle, an offset */
@@ -1018,7 +1020,7 @@ static const char *post_comp_fs =
 	"		{\n"
 	/* the scene is display-encoded (the shaders applied vid_gamma): to linear, expose, curve, back */
 	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r * grade.z * grade.w;\n"
-	"			l = grade.x > 0.5 ? Aces(l) : Shoulder(l);\n"
+	"			l = Shoulder(l);\n"
 	"			float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
 	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
 	/* shadow gamma in display space: below 1 opens the dark tones, white stays white */
@@ -1659,7 +1661,6 @@ GL3_Post_Init(void)
 	r_om_hdr_min = ri.Cvar_Get("r_om_hdr_min", "0.7", CVAR_ARCHIVE);
 	r_om_hdr_max = ri.Cvar_Get("r_om_hdr_max", "1.6", CVAR_ARCHIVE);
 	r_om_hdr_saturation = ri.Cvar_Get("r_om_hdr_saturation", "1.1", CVAR_ARCHIVE);
-	r_om_hdr_curve = ri.Cvar_Get("r_om_hdr_curve", "0", CVAR_ARCHIVE);
 	r_om_hdr_shadows = ri.Cvar_Get("r_om_hdr_shadows", "0.9", CVAR_ARCHIVE);
 	r_om_hdr_brightness = ri.Cvar_Get("r_om_hdr_brightness", "1.1", CVAR_ARCHIVE);
 	r_om_hdr_overbright = ri.Cvar_Get("r_om_hdr_overbright", "1", CVAR_ARCHIVE);
@@ -1714,6 +1715,7 @@ GL3_Post_Shutdown(void)
 	BeamShutdown();
 	SSAOShutdown();
 	SSRShutdown();
+	ProbesShutdown();
 
 	if ((gl3state.currentShaderProgram == P.progdown) || (gl3state.currentShaderProgram == P.progup) ||
 		(gl3state.currentShaderProgram == P.progcomp))
@@ -2342,13 +2344,12 @@ HDRExposure(void)
 	glUniform4f(P.exp_rect, 0, 0, 1, 1);
 	glUniform4f(P.exp_params, Q_max(r_om_hdr_key->value, 0.01f), ease, Q_max(r_om_hdr_min->value, 0.05f),
 		Q_max(r_om_hdr_max->value, r_om_hdr_min->value));
-	/* ACES(0.13) ~ 0.18: 0.72 keeps a mid grey; the lightmap headroom (overbright, display-encoded) is taken back */
-	/* neutral keeps the original mid tones: 1 for the shoulder curve (unchanged below its knee), 0.72 for ACES
-	   (ACES(0.13) ~ 0.18); the lightmap headroom (overbright, display-encoded) is taken back */
+	/* neutral keeps the original mid tones (both curves keep mid grey); the lightmap headroom (overbright,
+	   display-encoded) is taken back */
 	/* r_om_overbright (the brighter light of the menu) is not in the lightmaps while r_om_hdr gives them headroom:
 	   it comes back as part of the neutral exposure, so the adaptation measures the brighter scene and the curve
 	   rolls off what it pushes past white */
-	glUniform2f(P.exp_neutral, (r_om_hdr_curve->value > 0.5f ? 0.72f : 1.0f) / powf(GL3_Post_Overbright(), 2.2f) *
+	glUniform2f(P.exp_neutral, 1.0f / powf(GL3_Post_Overbright(), 2.2f) *
 		((r_om_overbright && r_om_overbright->value) ? powf(Q_clamp(r_om_overbright_scale->value, 1.0f, 4.0f), 2.2f) : 1.0f),
 		Q_max(r_om_hdr_adapt_strength->value, 0.0f));
 	BindTex(GL_TEXTURE1, P.exptex[P.expcur]);
@@ -3393,7 +3394,7 @@ GL3_Post_EndView(void)
 	{
 		float ob = 1.0f; /* (r_om_overbright is in the exposure, HDRExposure) */
 
-		glUniform4f(P.comp_grade, r_om_hdr_curve->value, Q_max(0.3f, Q_min(r_om_hdr_shadows->value, 2.0f)),
+		glUniform4f(P.comp_grade, 0.0f, Q_max(0.3f, Q_min(r_om_hdr_shadows->value, 2.0f)),
 			Q_max(0.1f, r_om_hdr_brightness->value), ob);
 	}
 	if (hdr)
@@ -9346,6 +9347,15 @@ static const char *ssr_fs =
 	"uniform vec4 texel;\n"         /* one pixel in view coordinates (x, y), colour copy height */
 	"uniform float frame;\n"
 	"uniform float strength;\n"
+	/* r_om_probes: the four nearest reflection probes (cube maps of the world), their places and boxes */
+	"uniform samplerCube pc0;\n"
+	"uniform samplerCube pc1;\n"
+	"uniform samplerCube pc2;\n"
+	"uniform samplerCube pc3;\n"
+	"uniform vec4 ppos[4];\n"       /* place, 1 = in use */
+	"uniform vec4 pmin[4];\n"
+	"uniform vec4 pmax[4];\n"
+	"uniform float pcount;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -9363,6 +9373,35 @@ static const char *ssr_fs =
 	"}\n"	/* a degenerate depth neighbourhood gives no normal (a NaN here spread through the frame and its mipmaps) */
 	"vec3 SafeN(vec3 c) { float l = length(c); return l > 1e-12 ? c / l : vec3(0.0, 0.0, 1.0); }\n"
 	"vec2 Proj(vec3 p) { return vec2(p.x * proj2.z, p.y * proj2.w) / -p.z * 0.5 + 0.5; }\n"
+	/* parallax: the direction from the reflecting point turned into the place on the probe's box it reaches, seen
+	   from the probe */
+	"vec3 PDir(vec4 o, vec4 bmin, vec4 bmax, vec3 wp, vec3 wr)\n"
+	"{\n"
+	"	vec3 r = wr + vec3(equal(wr, vec3(0.0))) * 1e-5;\n"
+	"	vec3 tf = max((bmax.xyz - wp) / r, (bmin.xyz - wp) / r);\n"
+	"	float t = max(min(min(tf.x, tf.y), tf.z), 0.0);\n"
+	"	return wp + wr * t - o.xyz;\n"
+	"}\n"
+	/* how much a probe speaks for a point: fully inside its box, fading out over 96 units outside it; a trace of
+	   the nearest one everywhere */
+	"float PW(vec4 o, vec4 bmin, vec4 bmax, vec3 wp)\n"
+	"{\n"
+	"	if (o.w < 0.5) return 0.0;\n"
+	"	vec3 q = max(max(bmin.xyz - wp, wp - bmax.xyz), vec3(0.0));\n"
+	"	vec3 e = wp - o.xyz;\n"
+	"	return 1.0 - smoothstep(0.0, 96.0, length(q)) + 1e-3 / (1.0 + dot(e, e) * 1e-5);\n"
+	"}\n"
+	"vec3 Probe(vec3 wp, vec3 wr, float lod)\n"
+	"{\n"
+	"	float w0 = PW(ppos[0], pmin[0], pmax[0], wp), w1 = PW(ppos[1], pmin[1], pmax[1], wp);\n"
+	"	float w2 = PW(ppos[2], pmin[2], pmax[2], wp), w3 = PW(ppos[3], pmin[3], pmax[3], wp);\n"
+	"	vec3 c = vec3(0.0);\n"
+	"	if (w0 > 0.0) c += w0 * textureLod(pc0, PDir(ppos[0], pmin[0], pmax[0], wp, wr), lod).rgb;\n"
+	"	if (w1 > 0.0) c += w1 * textureLod(pc1, PDir(ppos[1], pmin[1], pmax[1], wp, wr), lod).rgb;\n"
+	"	if (w2 > 0.0) c += w2 * textureLod(pc2, PDir(ppos[2], pmin[2], pmax[2], wp, wr), lod).rgb;\n"
+	"	if (w3 > 0.0) c += w3 * textureLod(pc3, PDir(ppos[3], pmin[3], pmax[3], wp, wr), lod).rgb;\n"
+	"	return c / max(w0 + w1 + w2 + w3, 1e-6);\n"
+	"}\n"
 	"void main()\n"
 	"{\n"
 	"	vec4 m = texture(mattex, vuv);\n"
@@ -9446,11 +9485,23 @@ static const char *ssr_fs =
 	"	float ndv = clamp(dot(N, V), 0.0, 1.0);\n"
 	/* Schlick towards grazing angles, at most three times the head-on value, less on rough faces */
 	"	float k = refl + (min(0.85, refl * 3.0) - refl) * pow(1.0 - ndv, 5.0) * (1.0 - rough);\n"
+	/* r_om_probes: what the ray cannot find on the screen comes from the cube maps (a 128 cube: mip 1 sharp, 6 matte) */
+	"	bool pr = pcount > 0.5 && dbg == 0;\n"
+	"	vec3 WP = (invview * vec4(P, 1.0)).xyz, WR = mat3(invview) * R;\n"
+	"	float plod = 1.0 + rough * 5.0;\n"
+	"	float pw = clamp(k * strength, 0.0, 0.85);\n"
+	"	vec4 pout = vec4(0.0);\n"
+	"	if (pr)\n"
+	"		pout = vec4(Probe(WP, WR, plod) * pw, pw * smoothstep(0.15, 0.45, refl));\n"
 	"	vec3 P0 = P + N * (0.5 + d * 0.002);\n"
 	"	float len = params.x;\n"
 	"	if (R.z > 0.0) len = min(len, (-P0.z - 2.0) / R.z);\n"   /* stay in front of the eye */
 	"	if (len < 2.0)\n"
-	"		discard;\n"
+	"	{\n"
+	"		if (!pr) discard;\n"
+	"		outColor = pout;\n"
+	"		return;\n"
+	"	}\n"
 	"	vec3 E = P0 + R * len;\n"
 	"	vec2 s0 = Proj(P0), s1 = Proj(E), ds = s1 - s0;\n"
 	/* the part of the ray on the screen */
@@ -9459,7 +9510,11 @@ static const char *ssr_fs =
 	"	if (ds.y > 0.0) tmax = min(tmax, (1.0 - s0.y) / ds.y); else if (ds.y < 0.0) tmax = min(tmax, -s0.y / ds.y);\n"
 	"	float lpx = length(ds / px) * tmax;\n"
 	"	if (lpx < 2.0)\n"
-	"		discard;\n"
+	"	{\n"
+	"		if (!pr) discard;\n"
+	"		outColor = pout;\n"
+	"		return;\n"
+	"	}\n"
 	"	float tmin = 1.5 / length(ds / px);\n"
 	"	float iz0 = 1.0 / P0.z, iz1 = 1.0 / E.z;\n"
 	/* rough faces read a blurred level of the colour: half the steps find the same */
@@ -9493,6 +9548,11 @@ static const char *ssr_fs =
 	"		tp = t;\n"
 	"		rdp = rd;\n"
 	"	}\n"
+	"	if (hit < 0.0 && pr)\n"
+	"	{\n"
+	"		outColor = pout;\n"
+	"		return;\n"
+	"	}\n"
 	"	if (hit < 0.0)\n"
 	"	{\n"
 	/* no hit (the ray left the view or went into the sky): mirrors take the blurred colour where it left, else a
@@ -9513,6 +9573,11 @@ static const char *ssr_fs =
 	"	vec2 sh = s0 + ds * b;\n"
 	"	vec3 H = Pos(sh);\n"
 	/* the sky: mirrors (water, puddles) show it where the ray reaches it, other faces keep the scene */
+	"	if (-H.z > params.z && pr)\n"
+	"	{\n"
+	"		outColor = pout;\n"
+	"		return;\n"
+	"	}\n"
 	"	if (-H.z > params.z)\n"
 	"	{\n"
 	"		if (refl < 0.2)\n"
@@ -9533,7 +9598,14 @@ static const char *ssr_fs =
 	"	float w = clamp(k * conf * strength, 0.0, 0.85);\n"
 	/* mirrors: towards the edges the hit fades into the colour a miss would take, not to nothing (a hard border
 	   between hit and miss rows showed as stripes on the water) */
-	"	if (refl >= 0.2)\n"
+	/* with probes the hit fades into the probe's colour towards the screen edges (a lamp leaving the view stays
+	   in the reflection) */
+	"	if (pr)\n"
+	"	{\n"
+	"		c = mix(pout.rgb / max(pw, 1e-4), c, conf);\n"
+	"		w = pw;\n"
+	"	}\n"
+	"	else if (refl >= 0.2)\n"
 	"	{\n"
 	"		vec3 fc = textureLod(coltex, clamp(s0 + ds * tmax, 0.0, 1.0), 4.0).rgb;\n"
 	"		float fw = 0.7 * (1.0 - smoothstep(0.35, 0.9, R.z));\n"
@@ -10153,6 +10225,7 @@ GL3_Post_SSR(void)
 			BindTex(GL_TEXTURE3, tile);
 		}
 	}
+	ProbesUniforms(SR.prog);
 	BindTex(GL_TEXTURE2, SR.coltex);
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
 	BindTex(GL_TEXTURE0, P.texdepthcopy);
@@ -10908,6 +10981,558 @@ GL3_Mirror_Render(void)
 	memcpy(MR.lplanes, planes, sizeof(MR.lplanes));
 	memcpy(MR.lrect, rect, sizeof(MR.lrect));
 	MR.lset = true;
+}
+
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_probes: reflection probes (the local cube maps of the
+ * Fox Engine). Where screen-space reflections cannot see (the ray leaves
+ * the view, turns towards the eye, or ends in the sky) they read a cube
+ * map of the room instead, so a lamp mirrored in the floor no longer
+ * vanishes when it leaves the screen.
+ *
+ * The probes are made around the player, lazily: the eye's cell of a
+ * PROBE_CELL grid (PROBE_CELLZ high) without a probe gets one at the
+ * cell's centre (the eye's height; the eye itself when that is in solid),
+ * one cube face per frame (no hitch), world and brush entities only, from
+ * the probe's own PVS, not while dynamic lights burn (a muzzle flash would
+ * stay in the room's reflection). Its box - the walls found by stepping
+ * from the probe along the six axes through the BSP - corrects the
+ * parallax: a direction from the reflecting point is turned into the
+ * place on the box it hits, seen from the probe. PROBE_MAX probes, the
+ * one farthest from the eye is reused. The SSR pass blends the four
+ * nearest by how far the point lies inside each box; the roughness picks
+ * the mip level (rough floors get a soft reflection).
+ * ------------------------------------------------------------------ */
+
+#define PROBE_MAX 16
+#define PROBE_SIZE 128
+#define PROBE_CELL 256.0f
+#define PROBE_CELLZ 128.0f
+#define PROBE_UNIT 24 /* 24..27: the four probes of the SSR pass */
+
+typedef struct
+{
+	GLuint tex;
+	vec3_t org;
+	float bmin[3], bmax[3];
+	int cell[3];
+	int cluster;
+	int faces;      /* faces drawn so far, 6 = ready */
+	qboolean used;
+} probe_t;
+
+static struct
+{
+	qboolean failed;
+	GLuint fbo, rbdepth;
+	GLenum fmt;
+	probe_t p[PROBE_MAX];
+	int capturing;  /* the probe being drawn, -1 none */
+	int waited;     /* frames held back by dynamic lights */
+	const void *world;
+	int bind[4], nbind;
+} RP = {false, 0, 0, 0, {{0}}, -1};
+
+static cvar_t *r_om_probes;
+
+static void
+ProbesCvars(void)
+{
+#ifdef YQ2_GL3_GLES3
+	r_om_probes = ri.Cvar_Get("r_om_probes", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
+#else
+	r_om_probes = ri.Cvar_Get("r_om_probes", "1", CVAR_ARCHIVE);
+#endif
+}
+
+static void
+ProbesShutdown(void)
+{
+	int i;
+
+	for (i = 0; i < PROBE_MAX; i++)
+	{
+		if (RP.p[i].tex)
+		{
+			glDeleteTextures(1, &RP.p[i].tex);
+		}
+	}
+
+	if (RP.fbo) glDeleteFramebuffers(1, &RP.fbo);
+	if (RP.rbdepth) glDeleteRenderbuffers(1, &RP.rbdepth);
+	memset(&RP, 0, sizeof(RP));
+	RP.capturing = -1;
+}
+
+static float
+ProbeDist(const vec3_t a, const vec3_t b)
+{
+	vec3_t d;
+
+	VectorSubtract(a, b, d);
+	return sqrtf(DotProduct(d, d));
+}
+
+static qboolean
+ProbeSolid(const vec3_t p)
+{
+	mleaf_t *leaf = Mod_PointInLeaf((vec_t *)p, gl3_worldmodel->nodes);
+
+	return !leaf || (leaf->contents & CONTENTS_SOLID) || (leaf->cluster < 0);
+}
+
+/* the walls around the probe: 8-unit steps along each axis up to 4096 */
+static void
+ProbeBox(probe_t *pr)
+{
+	int a, s;
+
+	for (a = 0; a < 3; a++)
+	{
+		for (s = 0; s < 2; s++)
+		{
+			vec3_t q;
+			float d;
+
+			VectorCopy(pr->org, q);
+
+			for (d = 8.0f; d < 4096.0f; d += 8.0f)
+			{
+				q[a] = pr->org[a] + (s ? d : -d);
+
+				if (ProbeSolid(q))
+				{
+					break;
+				}
+			}
+
+			if (s)
+			{
+				pr->bmax[a] = pr->org[a] + d;
+			}
+			else
+			{
+				pr->bmin[a] = pr->org[a] - d;
+			}
+		}
+	}
+}
+
+static qboolean
+ProbeTargets(void)
+{
+	if (RP.fbo)
+	{
+		return true;
+	}
+
+	glGenFramebuffers(1, &RP.fbo);
+	RP.rbdepth = NewRenderbuffer(GL_DEPTH24_STENCIL8, PROBE_SIZE, PROBE_SIZE, 0);
+	RP.fmt = GL_R11F_G11F_B10F;
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	return true;
+}
+
+static GLuint
+ProbeTexture(GLenum fmt)
+{
+	GLuint t;
+	int f;
+
+	glGenTextures(1, &t);
+	GL3_SelectTMU(GL_TEXTURE0 + PROBE_UNIT);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, t);
+
+	for (f = 0; f < 6; f++)
+	{
+		glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, fmt, PROBE_SIZE, PROBE_SIZE, 0, GL_RGB, GL_FLOAT, NULL);
+	}
+
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glGenerateMipmap(GL_TEXTURE_CUBE_MAP); /* complete from the start: a probe in the making is never read */
+	GL3_SelectTMU(GL_TEXTURE0);
+	return t;
+}
+
+/* one face of a probe: the world and the brush entities from its centre, 90 degrees, into the cube face */
+static void
+ProbeFace(probe_t *pr, int f)
+{
+	/* the GL cube map faces: direction and up (the usual capture set, sampled by world direction) */
+	static const float dirs[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+	static const float ups[6][3] = {{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}};
+	extern vec3_t vup, vpn, vright;
+	hmm_mat4 saveview = gl3state.viewMat3D, saveproj = gl3state.projMat3D;
+	hmm_mat4 savepv = gl3state.uni3DData.transProjViewMat4, view, proj;
+	cplane_t savefrustum[4];
+	vec3_t saveorg, saveglorg, savevpn, savevright, savevup, s, u, fw;
+	float zfar = (gl3depthmin > gl3depthmax) ? 0.0f : 1.0f, zn = 2.0f, zf = Q_max(r_farclipdist->value, 64.0f);
+	int savec1 = gl3_viewcluster, savec2 = gl3_viewcluster2;
+	float off[4] = {0, 0, 0, 0}, zero4[4] = {0, 0, 0, 0};
+
+	VectorCopy(dirs[f], fw);
+	CrossProduct(fw, ups[f], s);
+	VectorNormalize(s);
+	CrossProduct(s, fw, u);
+
+	memset(&view, 0, sizeof(view));
+	view.Elements[0][0] = s[0]; view.Elements[1][0] = s[1]; view.Elements[2][0] = s[2];
+	view.Elements[0][1] = u[0]; view.Elements[1][1] = u[1]; view.Elements[2][1] = u[2];
+	view.Elements[0][2] = -fw[0]; view.Elements[1][2] = -fw[1]; view.Elements[2][2] = -fw[2];
+	view.Elements[3][0] = -DotProduct(s, pr->org);
+	view.Elements[3][1] = -DotProduct(u, pr->org);
+	view.Elements[3][2] = DotProduct(fw, pr->org);
+	view.Elements[3][3] = 1.0f;
+
+	memset(&proj, 0, sizeof(proj));
+	proj.Elements[0][0] = 1.0f;
+	proj.Elements[1][1] = 1.0f;
+	proj.Elements[2][2] = -(zf + zn) / (zf - zn);
+	proj.Elements[2][3] = -1.0f;
+	proj.Elements[3][2] = -(2.0f * zf * zn) / (zf - zn);
+
+	VectorCopy(r_newrefdef.vieworg, saveorg);
+	VectorCopy(gl3_origin, saveglorg);
+	VectorCopy(vpn, savevpn);
+	VectorCopy(vright, savevright);
+	VectorCopy(vup, savevup);
+	memcpy(savefrustum, frustum, sizeof(savefrustum));
+
+	VectorCopy(pr->org, r_newrefdef.vieworg);
+	VectorCopy(pr->org, gl3_origin);
+	VectorCopy(fw, vpn);
+	VectorCopy(s, vright);
+	VectorCopy(u, vup);
+	R_SetFrustum(vup, vpn, vright, gl3_origin, 90.0f, 90.0f, frustum);
+
+	/* the probe's PVS */
+	gl3_viewcluster = gl3_viewcluster2 = pr->cluster;
+	GL3_MarkLeaves();
+
+	gl3state.viewMat3D = view;
+	gl3state.projMat3D = proj;
+	gl3state.uni3DData.transProjViewMat4 = HMM_MultiplyMat4(proj, view);
+	GL3_UpdateUBO3D();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, RP.fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, pr->tex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, RP.rbdepth);
+	{
+		static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+
+		glDrawBuffers(1, one);
+	}
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		R_Printf(PRINT_ALL, "r_om_probes: the cube face cannot be drawn into, no probes\n");
+		RP.failed = true; /* the face is drawn nowhere; the view goes on as before */
+	}
+
+	gl3_drawsamples = 0;
+	glViewport(0, 0, PROBE_SIZE, PROBE_SIZE);
+	glDisable(GL_SCISSOR_TEST);
+	{
+		float black[4] = {0, 0, 0, 1};
+
+		glClearBufferfv(GL_COLOR, 0, black);
+		glDepthMask(GL_TRUE);
+		glClearBufferfi(GL_DEPTH_STENCIL, 0, zfar, 0);
+	}
+	glCullFace(GL_FRONT);
+	/* no mirror images in the probe (the mirror pass sets them again for the view) */
+	GL3_SoF_MirrorUniforms(off, zero4, zero4, zero4, 0, 0);
+
+	MR.inpass = true;
+	GL3_FX_BeginFrame3D();
+	GL3_Fog_BeginFrame();
+	{
+		extern const hmm_mat4 *gl3_skypv_override;
+		static hmm_mat4 skypv;
+
+		skypv = HMM_MultiplyMat4(proj, view);
+		gl3_skypv_override = &skypv;
+		GL3_DrawWorld();
+		gl3_skypv_override = NULL;
+	}
+
+	if (r_drawentities->value)
+	{
+		int en;
+
+		glDepthMask(GL_TRUE);
+
+		for (en = 0; en < r_newrefdef.num_entities; en++)
+		{
+			entity_t *ent = &r_newrefdef.entities[en];
+
+			if (ent->model && !(ent->flags & (SOF_RF_GHOUL | SOF_RF_WEAPONMODEL | RF_TRANSLUCENT)) &&
+				(((gl3model_t *)ent->model)->type == mod_brush))
+			{
+				GL3_DrawBrushModel(ent, (gl3model_t *)ent->model);
+			}
+		}
+
+		GL3_FX_Flush();
+	}
+
+	GL3_Draw3DBatchesNow();
+	MR.inpass = false;
+
+	/* back to the eye */
+	VectorCopy(saveorg, r_newrefdef.vieworg);
+	VectorCopy(saveglorg, gl3_origin);
+	VectorCopy(savevpn, vpn);
+	VectorCopy(savevright, vright);
+	VectorCopy(savevup, vup);
+	memcpy(frustum, savefrustum, sizeof(savefrustum));
+	gl3_viewcluster = savec1;
+	gl3_viewcluster2 = savec2;
+	gl3_oldviewcluster = -2; /* the view's PVS is marked again */
+	GL3_MarkLeaves();
+	gl3state.viewMat3D = saveview;
+	gl3state.projMat3D = saveproj;
+	gl3state.uni3DData.transProjViewMat4 = savepv;
+	GL3_UpdateUBO3D();
+	GL3_FX_BeginFrame3D();
+	GL3_Fog_BeginFrame();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	gl3_drawsamples = P.samples;
+	SceneBuffers();
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	gl3state.currentlightmap = -1;
+	gl3state.currenttexture = -1;
+}
+
+/* before the world of the view: a face of the probe in the making, or a new probe for the eye's cell */
+void
+GL3_Probes_Frame(void)
+{
+	int i, cell[3];
+	float best;
+
+	RP.nbind = 0;
+
+	if (!r_om_probes)
+	{
+		ProbesCvars();
+	}
+
+	if (RP.failed || !r_om_probes->value || !P.bound || !P.mat || !SSRWanted() || !gl3_worldmodel ||
+		(r_newrefdef.rdflags & (RDF_NOWORLDMODEL | SOF_RDF_IRGOGGLES)) || (r_fullbright->value != 0) ||
+		(gl3_viewcluster < 0))
+	{
+		return;
+	}
+
+	/* a new map: every probe is free */
+	if (RP.world != (const void *)gl3_worldmodel)
+	{
+		RP.world = gl3_worldmodel;
+		RP.capturing = -1;
+
+		for (i = 0; i < PROBE_MAX; i++)
+		{
+			RP.p[i].used = false;
+			RP.p[i].faces = 0;
+		}
+	}
+
+	if (!ProbeTargets())
+	{
+		RP.failed = true;
+		return;
+	}
+
+	cell[0] = (int)floorf(r_newrefdef.vieworg[0] / PROBE_CELL);
+	cell[1] = (int)floorf(r_newrefdef.vieworg[1] / PROBE_CELL);
+	cell[2] = (int)floorf(r_newrefdef.vieworg[2] / PROBE_CELLZ);
+
+	if (RP.capturing < 0)
+	{
+		int slot = -1;
+
+		for (i = 0; i < PROBE_MAX; i++)
+		{
+			if (RP.p[i].used && (RP.p[i].cell[0] == cell[0]) && (RP.p[i].cell[1] == cell[1]) &&
+				(RP.p[i].cell[2] == cell[2]))
+			{
+				break;
+			}
+		}
+
+		if (i == PROBE_MAX)
+		{
+			/* a free slot, else the probe farthest from the eye */
+			best = -1;
+
+			for (i = 0; i < PROBE_MAX; i++)
+			{
+				float d;
+
+				if (!RP.p[i].used)
+				{
+					slot = i;
+					break;
+				}
+
+				d = ProbeDist(RP.p[i].org, r_newrefdef.vieworg);
+
+				if (d > best)
+				{
+					best = d;
+					slot = i;
+				}
+			}
+		}
+
+		if (slot >= 0)
+		{
+			probe_t *pr = &RP.p[slot];
+			mleaf_t *leaf;
+
+			pr->org[0] = (cell[0] + 0.5f) * PROBE_CELL;
+			pr->org[1] = (cell[1] + 0.5f) * PROBE_CELL;
+			pr->org[2] = r_newrefdef.vieworg[2];
+
+			if (ProbeSolid(pr->org))
+			{
+				VectorCopy(r_newrefdef.vieworg, pr->org);
+			}
+
+			leaf = Mod_PointInLeaf(pr->org, gl3_worldmodel->nodes);
+			pr->cluster = leaf ? leaf->cluster : -1;
+			memcpy(pr->cell, cell, sizeof(pr->cell));
+			pr->used = true;
+			pr->faces = 0;
+			ProbeBox(pr);
+
+			if (!pr->tex)
+			{
+				pr->tex = ProbeTexture(RP.fmt);
+			}
+
+			RP.capturing = slot;
+			RP.waited = 0;
+		}
+	}
+
+	/* a face of the probe in the making; held back while dynamic lights burn, at most 30 frames */
+	if (RP.capturing >= 0)
+	{
+		probe_t *pr = &RP.p[RP.capturing];
+
+		if ((r_newrefdef.num_dlights > 0) && (RP.waited < 30))
+		{
+			RP.waited++;
+		}
+		else
+		{
+			GL3_Draw3DBatchesNow();
+			ProbeFace(pr, pr->faces);
+
+			if (++pr->faces == 6)
+			{
+				GL3_SelectTMU(GL_TEXTURE0 + PROBE_UNIT);
+				glBindTexture(GL_TEXTURE_CUBE_MAP, pr->tex);
+				glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+				GL3_SelectTMU(GL_TEXTURE0);
+				RP.capturing = -1;
+			}
+		}
+	}
+
+	/* the four ready probes nearest to the eye */
+	for (RP.nbind = 0; RP.nbind < 4; RP.nbind++)
+	{
+		int k = -1;
+
+		best = 1e30f;
+
+		for (i = 0; i < PROBE_MAX; i++)
+		{
+			int j;
+			float d;
+
+			if (!RP.p[i].used || (RP.p[i].faces < 6))
+			{
+				continue;
+			}
+
+			for (j = 0; j < RP.nbind; j++)
+			{
+				if (RP.bind[j] == i)
+				{
+					break;
+				}
+			}
+
+			if (j < RP.nbind)
+			{
+				continue;
+			}
+
+			d = ProbeDist(RP.p[i].org, r_newrefdef.vieworg);
+
+			if (d < best)
+			{
+				best = d;
+				k = i;
+			}
+		}
+
+		if (k < 0)
+		{
+			break;
+		}
+
+		RP.bind[RP.nbind] = k;
+	}
+}
+
+/* the probes for the SSR trace program: samplers pc0..pc3 on PROBE_UNIT.., their places and boxes */
+static void
+ProbesUniforms(GLuint prog)
+{
+	static const char *const names[4] = {"pc0", "pc1", "pc2", "pc3"};
+	float pos[16], mn[16], mx[16];
+	int i;
+
+	memset(pos, 0, sizeof(pos));
+	memset(mn, 0, sizeof(mn));
+	memset(mx, 0, sizeof(mx));
+
+	for (i = 0; i < 4; i++)
+	{
+		/* every sampler gets a cube map (an unused one repeats the nearest probe with weight 0) */
+		const probe_t *pr = &RP.p[RP.bind[i < RP.nbind ? i : 0]];
+
+		glUniform1i(GL3_UniformLoc(prog, names[i]), PROBE_UNIT + i);
+
+		if (RP.nbind)
+		{
+			GL3_SelectTMU(GL_TEXTURE0 + PROBE_UNIT + i);
+			glBindTexture(GL_TEXTURE_CUBE_MAP, pr->tex);
+		}
+
+		if (i < RP.nbind)
+		{
+			memcpy(&pos[i * 4], pr->org, sizeof(vec3_t));
+			pos[i * 4 + 3] = 1.0f;
+			memcpy(&mn[i * 4], pr->bmin, sizeof(vec3_t));
+			memcpy(&mx[i * 4], pr->bmax, sizeof(vec3_t));
+		}
+	}
+
+	GL3_SelectTMU(GL_TEXTURE0);
+	glUniform4fv(GL3_UniformLoc(prog, "ppos"), 4, pos);
+	glUniform4fv(GL3_UniformLoc(prog, "pmin"), 4, mn);
+	glUniform4fv(GL3_UniformLoc(prog, "pmax"), 4, mx);
+	glUniform1f(GL3_UniformLoc(prog, "pcount"), (float)RP.nbind);
 }
 
 qboolean

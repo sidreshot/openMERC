@@ -2510,6 +2510,8 @@ GL3_RenderView(refdef_t *fd)
 	GL3_Mat_Frame();
 	GL3_Post_ProfMark("setup");
 
+	/* GFX-modern r_om_probes: a face of a reflection probe around the eye */
+	GL3_Probes_Frame();
 	/* GFX-modern: the world seen in the nearest mirror (r_om_mirror) */
 	GL3_Mirror_Render();
 	/* GFX-modern r_om_water_quality 3: the water's planar reflection */
