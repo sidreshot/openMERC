@@ -910,7 +910,11 @@ static const char *emu_fs =
 	"	vec4 ma = cm ? vc : omM[0];\n"
 	"	vec4 md = cm ? vc : omM[1];\n"
 	"	bool hasSpec = dot(omM[2].rgb, vec3(1.0)) > 0.003;\n"
-	"	float rough = hasSpec ? clamp(sqrt(2.0 / (max(omM[4].x, 1.0) + 2.0)), 0.15, 1.0) : 0.65;\n"
+	"	float rough = hasSpec ? clamp(sqrt(2.0 / (max(omM[4].x, 1.0) + 2.0)), 0.3, 1.0) : 0.65;\n"
+	/* the view weapon and the hands (drawn in a squeezed depth range, SOF_RF_DEPTHHACK): a big, low-poly model right
+	   at the eye - a broad, dim gloss, else the highlight outlines its triangles (the glove's knuckles) */
+	"	bool vm = abs(gl_DepthRange.diff) < 0.5;\n"
+	"	if (vm) rough = max(rough, 0.55);\n"
 	"	float a = rough * rough;\n"
 	"	vec3 F0 = hasSpec ? clamp(omM[2].rgb * 0.5, vec3(0.04), vec3(0.5)) : vec3(0.035);\n"
 	"	omMetal = hasSpec ? 1.0 : 0.0;\n"
@@ -993,17 +997,18 @@ static const char *emu_fs =
 	"	vec3 R = reflect(-v, n);\n"
 	"	vec3 Fe = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - nv, 5.0);\n"
 	/* the surroundings: the probe cube maps where there are any (mip by roughness, the gloss of the room the model
-	   stands in), else the ambient cube along the reflection */
+	   stands in), else the ambient cube along the reflection. Always blurred (mip 2.5 and up) and at most 0.6: the
+	   low-poly models' interpolated normals showed every triangle in a sharp reflection (the hands, the weapon) */
 	"	vec3 env = amb * omAmbK(R);\n"
 #ifndef YQ2_GL3_GLES3
 	"	if (pcount > 0.5)\n"
 	"	{\n"
 	"		vec4 wq = omInvPV * vPos;\n"
-	"		env = Probe(wq.xyz / wq.w, omE2W * R, 1.0 + rough * 5.0);\n"
+	"		env = Probe(wq.xyz / wq.w, omE2W * R, 2.5 + rough * 4.0);\n"
 	"	}\n"
 #endif
-	"	sp += env * Fe * (1.0 - 0.7 * rough);\n"
-	"	omSpec = sp * omPbrK;\n"
+	"	sp += env * Fe * (0.6 - 0.4 * rough);\n"
+	"	omSpec = sp * omPbrK * (vm ? 0.6 : 1.0);\n"
 	"	return vec4(min(c, vec3(2.0)), clamp(md.a, 0.0, 1.0));\n"
 	"}\n"
 	/* GFX-modern light beams (gl3_post.c): the lamp pools of the last view; a ground shadow in one gives
