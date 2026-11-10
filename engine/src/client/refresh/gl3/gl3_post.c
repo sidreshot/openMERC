@@ -11261,7 +11261,9 @@ ProbeTargets(void)
 	glGenFramebuffers(1, &RP.fbo);
 	RP.rbdepth = NewRenderbuffer(GL_DEPTH24_STENCIL8, PROBE_SIZE, PROBE_SIZE, 0);
 	RP.fmt = GL_R11F_G11F_B10F;
+#ifndef YQ2_GL3_GLES3 /* GLES 3 filters across cube faces always */
 	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+#endif
 	return true;
 }
 
