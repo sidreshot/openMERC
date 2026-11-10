@@ -10691,8 +10691,9 @@ static const char *uw_fs =
  *
  * The light painted on the sky box ("light" in pics/sky/<name>.txt) or else the map's sun (_sun_angle ...):
  * a quarter-size mask of the open sky around the light's place on the screen, blurred radially toward it, added
- * to the view in the light's colour - rays where hills, roofs, trees and characters cut the sky (MGS5 at night:
- * soft and few; r_om_skyrays_intensity). Nothing when the light is behind the view or no source is known.
+ * to the view in the light's colour - rays where hills, roofs, trees, characters and dark clouds cut the sky, and a
+ * slow fan of streaks around the light even in the open sky (MGS5 at night; r_om_skyrays_intensity, the knobs in
+ * r_om_skyrays_tune). Kept off what is already bright. Nothing when the light is behind the view, hidden, or unknown.
  * ------------------------------------------------------------------ */
 
 static const char *skyrays_mask_fs =
@@ -10701,7 +10702,8 @@ static const char *skyrays_mask_fs =
 	"uniform vec4 sun;\n"    /* light on the view (0..1), aspect, radius */
 	"uniform vec4 texel;\n"  /* one full-size texel in uv */
 	"uniform sampler2D scenetex;\n"
-	"uniform vec4 lum;\n"   /* threshold, gain, 1 = the view's colour is there */
+	"uniform vec4 lum;\n"   /* threshold, gain, 1 = the view's colour is there, the lit sky around it */
+	"uniform vec4 streak;\n" /* amount, -, time */
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -10724,10 +10726,18 @@ static const char *skyrays_mask_fs =
 	"	{\n"
 	"		vec3 c = texture(scenetex, uv).rgb;\n"
 	"		float L = dot(c, vec3(0.299, 0.587, 0.114));\n"
-	"		m = s * max(L - lum.x, 0.0) * lum.y * exp(-r2);\n"
+	/* the core (moon, halo) plus the lit sky further out, weighted by its own brightness: dark clouds and
+	   silhouettes in front of it leave the gaps that make the shafts (MGS5) */
+	"		m = s * (max(L - lum.x, 0.0) * lum.y * exp(-r2) + pow(L, 1.5) * lum.w * exp(-r2 * 0.5));\n"
 	"	}\n"
 	"	else\n"
 	"		m = s * (exp(-r2 * 4.0) * 0.5 + exp(-r2 * 30.0) * 0.6);\n"
+	/* streaks: the light broken up by the angle around it, as haze and far cloud do (MGS5's rays fanning out even in
+	   the open sky); drifts slowly */
+	"	float a = atan(d.y, d.x);\n"
+	"	float n = 0.5 + 0.5 * (0.45 * sin(a * 11.0 + streak.z * 0.07) + 0.35 * sin(a * 23.0 - streak.z * 0.05 + 1.7) +\n"
+	"		0.20 * sin(a * 41.0 + streak.z * 0.03 + 4.1));\n"
+	"	m *= mix(1.0, n * n * n * 3.2, streak.x);\n"
 	"	outColor = vec4(m, m, m, 1.0);\n"
 	"}\n";
 
@@ -10735,12 +10745,14 @@ static const char *skyrays_blur_fs =
 	"uniform sampler2D masktex;\n"
 	"uniform vec4 sun;\n"
 	"uniform vec4 prm;\n"    /* decay, length, weight, jitter */
+	"uniform sampler2D scenetex;\n"
+	"uniform vec4 srect;\n"  /* the view in the scene texture (z = 0: none) */
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
 	"void main()\n"
 	"{\n"
-	"	const int N = 48;\n"
+	"	const int N = 64;\n"
 	"	vec2 delta = (vuv - sun.xy) * prm.y / float(N);\n"
 	/* a per-pixel offset along the ray instead of banding from the 48 steps */
 	"	float j = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n"
@@ -10754,6 +10766,13 @@ static const char *skyrays_blur_fs =
 	"		c -= delta;\n"
 	"	}\n"
 	"	float v = sum / norm * prm.z;\n"
+	/* like a screen blend (the scene may be HDR, so done here): the light adds to the dark sky and silhouettes but
+	   never burns out what is already bright (the moon, its halo) */
+	"	if (srect.z > 0.0)\n"
+	"	{\n"
+	"		vec3 c = texture(scenetex, srect.xy + vuv * srect.zw).rgb;\n"
+	"		v *= 1.0 - clamp(dot(c, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);\n"
+	"	}\n"
 	"	outColor = vec4(v, v, v, 1.0);\n"
 	"}\n";
 
@@ -10768,9 +10787,9 @@ static const char *skyrays_add_fs =
 	"void main()\n"
 	"{\n"
 	"	float v = texture(raytex, vuv).r;\n"
-	"	v = v * v * (3.0 - 2.0 * min(v, 1.0));\n" /* soft knee: faint edges fall away, the cores stay */
+	"	v = mix(v, v * v * (3.0 - 2.0 * min(v, 1.0)), color.a);\n" /* soft knee: faint edges fall away, the cores stay */
 	"	vec2 d = (vuv - sun.xy) * vec2(sun.z, 1.0);\n"
-	"	v *= smoothstep(sun.w, sun.w * 2.5, length(d));\n"
+	"	v *= smoothstep(sun.w * 0.6, sun.w * 1.6, length(d));\n"
 	"	float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;\n"
 	"	outColor = vec4(max(color.rgb * v + n / 255.0, 0.0), 1.0);\n"
 	"	outEmissive = vec4(0.0);\n"
@@ -10855,7 +10874,7 @@ GL3_Post_SkyRays(void)
 	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
 	vec3_t dir, color;
 	float clip[4], sx, sy, facing, fade, aspect, rect[4], inten, edge;
-	float tune_thr, tune_len, tune_decay, tune_str;
+	float tune_thr, tune_len, tune_decay, tune_str, tune_broad, tune_knee, tune_streak;
 	const float *m;
 	int k, w, h;
 	qboolean painted;
@@ -10936,6 +10955,7 @@ GL3_Post_SkyRays(void)
 		glUniform1i(glGetUniformLocation(SKR.pmask, "scenetex"), 1);
 		GL3_UseProgram(SKR.pblur);
 		glUniform1i(glGetUniformLocation(SKR.pblur, "masktex"), 0);
+		glUniform1i(glGetUniformLocation(SKR.pblur, "scenetex"), 1);
 		GL3_UseProgram(SKR.padd);
 		glUniform1i(glGetUniformLocation(SKR.padd, "raytex"), 0);
 	}
@@ -10984,17 +11004,23 @@ GL3_Post_SkyRays(void)
 	}
 
 	{
-		float t[4] = {0.35f, 0.80f, 0.94f, 1.0f};
+		/* threshold, length, decay, strength, the lit sky around it, the knee, streaks */
+		float t[7] = {0.30f, 1.0f, 0.975f, 1.2f, 0.3f, 0.4f, 0.7f};
 
 		if (r_om_skyrays_tune->string[0])
 		{
-			sscanf(r_om_skyrays_tune->string, "%f %f %f %f", &t[0], &t[1], &t[2], &t[3]);
+			sscanf(r_om_skyrays_tune->string, "%f %f %f %f %f %f %f", &t[0], &t[1], &t[2], &t[3], &t[4], &t[5],
+				&t[6]);
 		}
+
+		tune_streak = t[6];
 
 		tune_thr = t[0];
 		tune_len = t[1];
 		tune_decay = t[2];
 		tune_str = t[3];
+		tune_broad = t[4];
+		tune_knee = t[5];
 	}
 
 	/* 1: the open sky around the light, a quarter of the size */
@@ -11004,10 +11030,12 @@ GL3_Post_SkyRays(void)
 	glUniform4fv(glGetUniformLocation(SKR.pmask, "rect"), 1, rect);
 	glUniform4f(glGetUniformLocation(SKR.pmask, "proj"), gl3state.projMat3D.Elements[2][2],
 		gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
-	glUniform4f(glGetUniformLocation(SKR.pmask, "sun"), sx, sy, aspect, 0.45f);
+	glUniform4f(glGetUniformLocation(SKR.pmask, "sun"), sx, sy, aspect, 0.55f);
 	glUniform4f(glGetUniformLocation(SKR.pmask, "texel"), 1.5f / P.w, 1.5f / P.h, 0, 0);
 	glUniform4f(glGetUniformLocation(SKR.pmask, "lum"), tune_thr, 1.0f / Q_max(1.0f - tune_thr, 0.05f),
-		P.texcolor ? 1.0f : 0.0f, 0);
+		P.texcolor ? 1.0f : 0.0f, tune_broad);
+	glUniform4f(glGetUniformLocation(SKR.pmask, "streak"), Q_clamp(tune_streak, 0.0f, 1.0f), 0,
+		r_newrefdef.time, 0);
 	BindTex(GL_TEXTURE1, P.texcolor);
 	BindTex(GL_TEXTURE0, P.texdepthcopy);
 	DrawQuad();
@@ -11018,6 +11046,15 @@ GL3_Post_SkyRays(void)
 	glUniform4f(glGetUniformLocation(SKR.pblur, "rect"), 0, 0, 1, 1);
 	glUniform4f(glGetUniformLocation(SKR.pblur, "sun"), sx, sy, aspect, 0);
 	glUniform4f(glGetUniformLocation(SKR.pblur, "prm"), tune_decay, tune_len, 1.6f, 1.0f);
+	if (P.texcolor)
+	{
+		glUniform4fv(glGetUniformLocation(SKR.pblur, "srect"), 1, rect);
+	}
+	else
+	{
+		glUniform4f(glGetUniformLocation(SKR.pblur, "srect"), 0, 0, 0, 0);
+	}
+	BindTex(GL_TEXTURE1, P.texcolor);
 	BindTex(GL_TEXTURE0, SKR.tex[0]);
 	DrawQuad();
 
@@ -11031,7 +11068,8 @@ GL3_Post_SkyRays(void)
 	/* the disc: the painted moon is about 4 degrees across in radius (train); half a degree for a sun */
 	glUniform4f(glGetUniformLocation(SKR.padd, "sun"), sx, sy, aspect,
 		0.5f * tanf((painted ? 4.5f : 1.0f) * (float)M_PI / 180.0f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f));
-	glUniform4f(glGetUniformLocation(SKR.padd, "color"), color[0] * inten, color[1] * inten, color[2] * inten, 0);
+	glUniform4f(glGetUniformLocation(SKR.padd, "color"), color[0] * inten, color[1] * inten, color[2] * inten,
+		Q_clamp(tune_knee, 0.0f, 1.0f));
 	BindTex(GL_TEXTURE0, SKR.tex[1]);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE);
