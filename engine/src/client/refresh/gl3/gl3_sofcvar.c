@@ -172,8 +172,8 @@ GL3_SoF_RegisterCvars(void)
 	   Existing CVAR_ARCHIVE configs keep their saved values. */
 	Get("r_om_bloom", "1", CVAR_ARCHIVE);
 	Get("r_om_bloom_threshold", "0", CVAR_ARCHIVE);
-	Get("r_om_bloom_intensity", "0.45", CVAR_ARCHIVE);
-	Get("r_om_bloom_radius", "1", CVAR_ARCHIVE);
+	Get("r_om_bloom_intensity", "0.55", CVAR_ARCHIVE);
+	Get("r_om_bloom_radius", "1.5", CVAR_ARCHIVE);
 	Get("r_om_bloom_surfscale", "1", CVAR_ARCHIVE); /* AMEND-016 gatekeeper: SURF_LIGHT is a default bloom seed */
 	Get("r_om_bloom_ghoulmin", "0.5", CVAR_ARCHIVE);
 	Get("r_om_bloom_fullbright", "1", CVAR_ARCHIVE);

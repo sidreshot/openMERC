@@ -946,6 +946,23 @@ Cvar_CompleteVariable(char *partial)
 	return NULL;
 }
 
+/* OpenMerc: om_resetcvars <name>...: the named cvars back to their defaults (the menus' "reset section") */
+static void
+Cvar_ResetList_f(void)
+{
+	int i;
+
+	for (i = 1; i < Cmd_Argc(); i++)
+	{
+		cvar_t *v = Cvar_Find(Cmd_Argv(i));
+
+		if (v && v->default_string && strcmp(v->string, v->default_string))
+		{
+			Cvar_Set(v->name, v->default_string);
+		}
+	}
+}
+
 void
 Cvar_Init(void)
 {
@@ -962,6 +979,7 @@ Cvar_Init(void)
 	Cmd_AddCommand("sset", Cvar_SSet_f);
 	Cmd_AddCommand("zero", Cvar_Zero_f);
 	Cmd_AddCommand("cvarlist", Cvar_List_f);
+	Cmd_AddCommand("om_resetcvars", Cvar_ResetList_f);
 }
 
 /*

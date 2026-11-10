@@ -17,13 +17,13 @@
 # map <map name, '*' allowed> <grade>      the first matching line wins
 
 #      name      ev     temp   tint   sat    contrast  vign   grain
-grade  standard  0.00   0.00   0.00   1.05   1.00      0.15   0.012
-grade  city      0.00   0.08   0.00   1.05   1.00      0.15   0.012
-grade  kosovo    0.00  -0.10  -0.08   0.98   1.00      0.15   0.015
-grade  desert    0.05   0.35   0.00   1.05   1.00      0.15   0.012
-grade  siberia   0.00  -0.30   0.05   0.98   1.00      0.15   0.012
-grade  castle    0.00   0.15   0.00   1.00   1.00      0.18   0.015
-grade  japan     0.00  -0.05   0.04   1.05   1.00      0.18   0.012
+grade  standard   0.00   0.00   0.00  0.97   1.10      0.24   0.016
+grade  city       0.00   0.08   0.00  0.97   1.10      0.24   0.016
+grade  kosovo     0.00  -0.10  -0.08  0.90   1.10      0.24   0.016
+grade  desert     0.05   0.35   0.00  0.97   1.10      0.24   0.016
+grade  siberia    0.00  -0.30   0.05  0.90   1.10      0.24   0.016
+grade  castle     0.00   0.15   0.00  0.92   1.10      0.24   0.016
+grade  japan      0.00  -0.05   0.04  0.97   1.10      0.24   0.016
 
 map    tsr*      city
 map    nyc*      city

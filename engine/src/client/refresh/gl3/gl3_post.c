@@ -1631,8 +1631,8 @@ GL3_Post_Init(void)
 	SkyraysCvars();
 	r_om_bloom = ri.Cvar_Get("r_om_bloom", "1", CVAR_ARCHIVE);
 	r_om_bloom_threshold = ri.Cvar_Get("r_om_bloom_threshold", "0", CVAR_ARCHIVE);
-	r_om_bloom_intensity = ri.Cvar_Get("r_om_bloom_intensity", "0.45", CVAR_ARCHIVE);
-	r_om_bloom_radius = ri.Cvar_Get("r_om_bloom_radius", "1", CVAR_ARCHIVE);
+	r_om_bloom_intensity = ri.Cvar_Get("r_om_bloom_intensity", "0.55", CVAR_ARCHIVE);
+	r_om_bloom_radius = ri.Cvar_Get("r_om_bloom_radius", "1.5", CVAR_ARCHIVE);
 	r_om_bloom_surfscale = ri.Cvar_Get("r_om_bloom_surfscale", "1", CVAR_ARCHIVE);
 	r_om_bloom_ghoulmin = ri.Cvar_Get("r_om_bloom_ghoulmin", "0.5", CVAR_ARCHIVE);
 	r_om_bloom_fullbright = ri.Cvar_Get("r_om_bloom_fullbright", "1", CVAR_ARCHIVE);
@@ -9926,7 +9926,9 @@ static const char *ssr_apply_fs =
 	"		float n = exp2(mix(11.0, 3.0, sqrt(rough)));\n"
 	"		float fr = refl + (min(1.0, refl * 3.0) - refl) * pow(1.0 - ndv, 5.0);\n"
 	"		vec3 acc = vec3(0.0);\n"
-	"		for (int i = 0; i < omBN; i++)\n"
+	/* level faces only: on walls and trims the screen-space test of the lamp (LampVis) came and went with every step,
+	   the glints flickered in pieces along a trim under the ceiling (jpn3) */
+	"		for (int i = 0; i < (N.z > 0.5 ? omBN : 0); i++)\n"
 	"		{\n"
 	"			vec3 Lp = omBL[i].xyz - wp;\n"
 	"			float dl = length(Lp);\n"

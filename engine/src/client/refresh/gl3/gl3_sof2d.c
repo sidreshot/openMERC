@@ -1596,9 +1596,15 @@ extern qboolean GL3_NextFreeName(char *path);
 #define MKDIR(p) mkdir(p, 0755)
 #endif
 
+/* OpenMerc: screenshots as JPEG (r_om_shotformat jpg, the default; tga: SoF's uncompressed 24-bit). stb_image_write
+   is compiled into the client too (vid.c): here static, the renderer is a module of its own */
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../../vid/header/stb_image_write.h"
+
 /*
- * screenshot [name]: <user dir>/scrnshot/sofNN.tga (or <name>.tga), uncompressed 24-bit, bottom row
- * first. The command only asks for it; the frame is read at the end of the next frame, before the
+ * screenshot [name]: <user dir>/scrnshot/sofNN.jpg (or .tga, r_om_shotformat; <name>.jpg for a name), JPEG quality
+ * 92 or uncompressed 24-bit TGA, bottom row first. The command only asks for it; the frame is read at the end of the next frame, before the
  * buffer swap (GL3_SoF_ScreenShotFrame): after the swap the back buffer is undefined with flip-model
  * presentation (DXGI), which gave black screenshots.
  */
@@ -1636,6 +1642,7 @@ GL3_SoF_ScreenShotFrame(void)
 	byte header[18], *buf;
 	int w, h, i;
 	FILE *f;
+	qboolean jpg, ok;
 
 	if (!shot_pending)
 	{
@@ -1643,16 +1650,28 @@ GL3_SoF_ScreenShotFrame(void)
 	}
 
 	shot_pending = 0;
+
+	{
+		static cvar_t *fmt;
+
+		if (!fmt)
+		{
+			fmt = ri.Cvar_Get("r_om_shotformat", "jpg", CVAR_ARCHIVE);
+		}
+
+		jpg = Q_stricmp(fmt->string, "tga") != 0;
+	}
+
 	Com_sprintf(path, sizeof(path), "%s/scrnshot", GL3_UserDir());
 	MKDIR(path);
 
 	if (shot_name[0])
 	{
-		Com_sprintf(path, sizeof(path), "%s/scrnshot/%s.tga", GL3_UserDir(), shot_name);
+		Com_sprintf(path, sizeof(path), "%s/scrnshot/%s.%s", GL3_UserDir(), shot_name, jpg ? "jpg" : "tga");
 	}
 	else
 	{
-		Com_sprintf(path, sizeof(path), "%s/scrnshot/sof00.tga", GL3_UserDir());
+		Com_sprintf(path, sizeof(path), "%s/scrnshot/sof00.%s", GL3_UserDir(), jpg ? "jpg" : "tga");
 
 		if (!GL3_NextFreeName(path))
 		{
@@ -1668,27 +1687,43 @@ GL3_SoF_ScreenShotFrame(void)
 		return;
 	}
 
-	for (i = 0; i < w * h; i++)
+	if (jpg)
 	{
-		byte t = buf[i * 3];
+		/* the rows bottom first as read */
+		stbi_flip_vertically_on_write(1);
+		ok = stbi_write_jpg(path, w, h, 3, buf, 92) != 0;
+		f = NULL;
+	}
+	else
+	{
+		for (i = 0; i < w * h; i++)
+		{
+			byte t = buf[i * 3];
 
-		buf[i * 3] = buf[i * 3 + 2];
-		buf[i * 3 + 2] = t;
+			buf[i * 3] = buf[i * 3 + 2];
+			buf[i * 3 + 2] = t;
+		}
+
+		memset(header, 0, sizeof(header));
+		header[2] = 2;
+		header[12] = w & 255;
+		header[13] = (w >> 8) & 255;
+		header[14] = h & 255;
+		header[15] = (h >> 8) & 255;
+		header[16] = 24;
+
+		f = Q_fopen(path, "wb");
+		ok = f && (fwrite(header, 1, 18, f) == 18) && (fwrite(buf, 1, (size_t)w * h * 3, f) == (size_t)w * h * 3);
+
+		if (f)
+		{
+			fclose(f);
+			f = NULL;
+		}
 	}
 
-	memset(header, 0, sizeof(header));
-	header[2] = 2;
-	header[12] = w & 255;
-	header[13] = (w >> 8) & 255;
-	header[14] = h & 255;
-	header[15] = (h >> 8) & 255;
-	header[16] = 24;
-
-	f = Q_fopen(path, "wb");
-
-	if (f && (fwrite(header, 1, 18, f) == 18) && (fwrite(buf, 1, (size_t)w * h * 3, f) == (size_t)w * h * 3))
+	if (ok)
 	{
-		fclose(f);
 		Com_Printf("Wrote %s\n", path);
 
 		/* OpenMerc: where it was taken, beside it (sofNN.txt): the map and the omsetpos line that returns there */
@@ -1717,11 +1752,6 @@ GL3_SoF_ScreenShotFrame(void)
 	}
 	else
 	{
-		if (f)
-		{
-			fclose(f);
-		}
-
 		Com_Printf("Error writing %s\n", path);
 	}
 

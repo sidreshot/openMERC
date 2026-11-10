@@ -667,6 +667,32 @@ static mtbuf_t mt_sec[MT_MAXSEC];
 static char mt_secname[MT_MAXSEC][64];
 static mtbuf_t *mt_cur;
 
+/* OpenMerc: the settings of the section being read, for its "reset section" button (om_resetcvars) */
+static char mt_seccvars[1536];
+
+/* the end of a section: a button that brings its settings back to their defaults */
+static void
+MT_SectionEnd(mtbuf_t *b, qboolean ru)
+{
+	char tmp[2048], l1[128];
+
+	if (mt_tabs && mt_cur)
+	{
+		b = mt_cur;
+	}
+
+	if (mt_seccvars[0])
+	{
+		MT_ToFont(ru ? "Сбросить раздел" : "Reset Section", l1, sizeof(l1));
+		Com_sprintf(tmp, sizeof(tmp), "<hbr>\n<center>\n<font type interface tint normaltext atint hilitetext>\n"
+				"<text \"%s\" key mouse1 \"om_resetcvars%s\" ombutton btint transgray width 360 height 26><br>\n"
+				"<font type title tint normaltext atint hilitetext>\n", l1, mt_seccvars);
+		MT_Add(b, tmp);
+	}
+
+	mt_seccvars[0] = 0;
+}
+
 static void
 MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 {
@@ -763,6 +789,11 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 		}
 	}
 
+	if (!Q_stricmp(k, "section"))
+	{
+		MT_SectionEnd(b, ru);
+	}
+
 	if (!Q_stricmp(k, "section") && mt_tabs)
 	{
 		/* tabbed table: a section starts a tab; the tab bar names it, no heading */
@@ -843,6 +874,14 @@ MT_Row(mtbuf_t *b, char **f, int n, qboolean ru)
 	}
 
 	MT_Add(b, tmp);
+
+	/* a setting of this section (not the staged menu_* cvars: the page's Apply sets those) */
+	if ((!Q_stricmp(k, "list") || !Q_stricmp(k, "slider")) && !stage &&
+		(strlen(mt_seccvars) + strlen(f[1]) + 2 < sizeof(mt_seccvars)))
+	{
+		Q_strlcat(mt_seccvars, " ", sizeof(mt_seccvars));
+		Q_strlcat(mt_seccvars, f[1], sizeof(mt_seccvars));
+	}
 }
 
 /* builds the RMF of a table; the result is malloc'ed (NULL: no file) */
@@ -861,6 +900,7 @@ MP_TableRMF(const char *path, const char *tabcvar)
 
 	MT_Add(&b, "");
 	mt_tabs = tabcvar && tabcvar[0];
+	mt_seccvars[0] = 0;
 	mt_nsec = 0;
 	mt_cur = NULL;
 
@@ -915,6 +955,7 @@ MP_TableRMF(const char *path, const char *tabcvar)
 	}
 
 	free(text);
+	MT_SectionEnd(&b, ru);
 
 	if (mt_tabs)
 	{
