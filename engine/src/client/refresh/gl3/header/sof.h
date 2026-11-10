@@ -236,7 +236,6 @@ void GL3_Fog_ViewTest(refdef_t *rd);
 int GL3_Fog_VolumeRegions(float *out, int max);
 float GL3_VolFog_OverlayDim(void);
 float GL3_Fog_DimAlpha(float a, float dim);
-void GL3_Seam_Invalidate(void);
 void GL3_BindUBO3D(void);
 void GL3_Ring3DReset(void);
 int GL3_CSM_StaticGen(void);
@@ -250,7 +249,6 @@ void GL3_Jobs_Shutdown(void);
 void GL3_Image_LoadDone(void); /* gl3_image.c: end of a registration */
 void GL3_CSM_Prewarm(void);      /* the first frame's builds, at the end of a registration */
 void GL3_WorldVBO_Prewarm(void);
-void GL3_Seams_Prewarm(void);
 void GL3_Mat_Prewarm(void);
 double GL3_LoadClockMs(void); /* r_om_loadtime (gl3_model.c) */
 qboolean GL3_RingsOn(void);

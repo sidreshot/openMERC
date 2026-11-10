@@ -14,7 +14,8 @@ maps already in single player.
   with `glBufferData(GL_STREAM_DRAW)` each flush (gl3_main.c:917). Nothing static lives on the GPU. A draw call
   breaks on any state change: texture, lightmap page, light styles, fog region, emissive, alpha.
   On a large detailed map the CPU (walk + copy + upload) is the wall long before the GPU.
-- Brush entities flush the batch one by one; seam strips are one draw each.
+- Brush entities flush the batch one by one. (Seam strips, one draw each, were removed with r_om_seams
+  on 2026-11-10: ~0.1% of the frame, 1.3 ms GPU + 1.5 ms CPU at 1080p.)
 
 ### Fog (the owner's "level draws through the fog, sections pop in")
 - **Measured 2026-11-04**: the fog overlay queue had a fixed 1024 faces (gl3_fog.c). sib1 needed 3000-5400 fogged
@@ -139,8 +140,8 @@ audit_run.ps1 / anom.py / regress.py, campath replay + per-frame AVI for motion)
   round trips in draw paths, uncached uniform lookups, cascade / mirror / beam redraw costs, GLES build.
 * Known, not done (in order of value):
   1. Static world in GPU buffers (phase 2.1): done for the vertices (r_om_worldvbo, a face adds only its indices;
-     world CPU -10..-30% in the heavy spots). Still per frame: the BSP walk and the per-face work (fog, detail,
-     seams queues) - per-leaf cached index lists would be the next step (phase 2.2).
+     world CPU -10..-30% in the heavy spots). Still per frame: the BSP walk and the per-face work (fog, detail
+     queues) - per-leaf cached index lists would be the next step (phase 2.2).
   2. Mobile tier: lamp shadows fit 16 texture units now (units 11 / 7, r_om_lshadow_compact); CSM 2048 x 8
      layers: DEPTH16 by default now (r_om_csm_depth16, 128 -> 64 MB; the low preset 1024 x 4 layers = 8 MB), MSAA via EXT_multisampled_render_to_texture, the Ghoul
      emulator's CPU tessellation path on GLES 3.0 (samplerBuffer is 3.2).

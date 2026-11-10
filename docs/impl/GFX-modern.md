@@ -1038,6 +1038,9 @@ correction away and put ours in its place".
 
 ## r_om_seams: soft seams between textures (owner: "smooth texture transitions by best practice" - hard seams between different textures on one surface, tiles next to concrete)
 
+* **Removed 2026-11-10** (r_om_seams, r_om_seams_width, si3DlmSeam and the strip code): ~0.1% of the frame, 1.3 ms
+  GPU + 1.5 ms CPU at 1080p (while on, detail textures also left the world shader for a full extra pass). History below.
+
 * A seam between two textures on one plane is always an edge two coplanar faces share (one texture per BSP face).
   At the first frame of a map (gl3_surf.c SeamBuild) every shared edge of two coplanar world faces is checked; for
   a seam that passes, a strip is cut on either face: the face clipped to r_om_seams_width (12) units from the edge,
@@ -1267,6 +1270,7 @@ correction away and put ours in its place".
 
 ## Texture seams found by position, height blend of both textures (owner: "smoothing of texture transitions is not done - find best practice and implement")
 
+* Removed 2026-11-10 with r_om_seams (see above).
 * r_om_seams matched only BSP edges two faces share by index; along a T-junction each face has its own edge. Now
   the sides of the faces are matched by position (collinear, overlapping, on one plane), the strip has caps at the
   overlap. tsr1: 86 -> 96 strips; most borders of different textures there are artist-fitted variants (1_tile,
@@ -1314,6 +1318,7 @@ correction away and put ours in its place".
 
 ## r_om_seams on one texture with a broken placement (owner's F11 shot: arm1 brick pillar, omsetpos 112 -103 37 213 -4)
 
+* Removed 2026-11-10 with r_om_seams (see above).
 * The pillar is armory/3_store_white_bottom on several coplanar faces with different texinfo: other offsets and
   mirrored axes (f1948 t -1.33 vs f1954 t +1.33 - the dark foot of the texture turned up to the ceiling on purpose).
   The retail 64x64 image is near noise, so the jumps never showed; the HD pack invented crisp bricks with white

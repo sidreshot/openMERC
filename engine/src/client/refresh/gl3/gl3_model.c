@@ -1243,8 +1243,7 @@ GL3_EndRegistration(void)
 		GL3_Mat_Prewarm();
 		GL3_WorldVBO_Prewarm();
 		GL3_CSM_Prewarm();
-		GL3_Seams_Prewarm();
-		GL3_LoadMark("first-frame builds (static shadows, world buffer, seams)");
+		GL3_LoadMark("first-frame builds (static shadows, world buffer)");
 	}
 
 	if (Mod_HasFreeSpace() && GL3_ImageHasFreeSpace())

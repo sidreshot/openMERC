@@ -2623,19 +2623,19 @@ static const presetkey_t preset_minimal[] = {
 	{"r_om_volfog", "0"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
 	{"r_om_beams", "0"}, {"r_om_beams_motes", "0"}, {"r_om_bloom", "0"},
 	{"r_om_mirror", "0"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
-	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"}, {"r_om_worldlite", "1"},
+	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_look", "0"}, {"r_om_worldlite", "1"},
 	{NULL, NULL}};
 
 static const presetkey_t preset_low[] = {
 	{"r_om_renderscale", "0.67"}, {"r_om_upscale", "2"},
 	{"r_om_csm", "1"}, {"r_om_csm_size", "1024"}, {"r_om_csm_cascades", "2"}, {"r_om_csm_soft", "1"},
-	/* measured on an Adreno 610 phone (2400x1080, arm1): lamp shadows 18 ms, seam strips 12 ms, look 8 ms */
+	/* measured on an Adreno 610 phone (2400x1080, arm1): lamp shadows 18 ms, seam strips (since removed) 12 ms, look 8 ms */
 	{"r_om_lshadow", "0"}, {"r_om_lshadow_size", "256"}, {"r_om_lshadow_lights", "2"}, {"r_om_lshadow_taps", "4"},
 	{"r_om_ssao", "0"}, {"r_om_ssao_quality", "1"}, {"r_om_ssr", "0"}, {"r_om_ssr_quality", "1"},
 	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "0"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
-	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_seams", "0"}, {"r_om_look", "0"},
+	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_look", "0"},
 	/* the light world shaders: 33 -> 23.5 ms per frame on the Adreno 610 phone (arm1) */
 	{"r_om_worldlite", "1"},
 	{NULL, NULL}};
@@ -2648,7 +2648,7 @@ static const presetkey_t preset_medium[] = {
 	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "1"},
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
-	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
+	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
 	{NULL, NULL}};
 
 static const presetkey_t preset_high[] = { /* the build's defaults */
@@ -2659,7 +2659,7 @@ static const presetkey_t preset_high[] = { /* the build's defaults */
 	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"},
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
-	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_seams", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
+	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
 	{NULL, NULL}};
 
 /* the tone of the picture: on phones minimal and low get the bright, saturated one in the spirit of the PlayStation

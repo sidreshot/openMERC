@@ -1652,38 +1652,37 @@ GL3_Mat_BatchEnd(void)
 	matbatch = false;
 }
 
-/* OpenMerc: the maps have two readers - the reflections (r_om_ssr; never on the GLES build) and the seam strips,
-   which compare the material classes (their rust measure). Without both a map load measured every world texture
-   for nothing (1.5 s of a PC load of tsr1; the mobile preset has neither). Skipped textures are measured once one of
-   them is turned on: GL3_Mat_Watch restarts the renderer, which loads the textures again. */
+/* OpenMerc: the maps have one reader - the reflections (r_om_ssr; never on the GLES build). Without it a map load
+   measured every world texture for nothing (1.5 s of a PC load of tsr1; the mobile preset has no reflections).
+   Skipped textures are measured once it is turned on: GL3_Mat_Watch restarts the renderer, which loads the
+   textures again. */
 static qboolean mat_skipped;
 
 qboolean
 GL3_Mat_Wanted(void)
 {
-	static cvar_t *ssr, *seams;
+#ifdef YQ2_GL3_GLES3
+	return false;
+#else
+	static cvar_t *ssr;
 
 	if (!ssr)
 	{
 		ssr = ri.Cvar_Get("r_om_ssr", "1", CVAR_ARCHIVE);
-		seams = ri.Cvar_Get("r_om_seams", "1", CVAR_ARCHIVE);
 	}
 
-#ifdef YQ2_GL3_GLES3
-	return seams->value != 0;
-#else
-	return (ssr->value > 0) || (seams->value != 0);
+	return ssr->value > 0;
 #endif
 }
 
-/* once a frame: a reader turned on after textures were loaded without their maps */
+/* once a frame: the reader turned on after textures were loaded without their maps */
 void
 GL3_Mat_Watch(void)
 {
 	if (mat_skipped && GL3_Mat_Wanted())
 	{
 		mat_skipped = false;
-		R_Printf(PRINT_ALL, "material maps: the textures are loaded again for the reflections / seams\n");
+		R_Printf(PRINT_ALL, "material maps: the textures are loaded again for the reflections\n");
 		ri.Cmd_ExecuteText(EXEC_APPEND, "vid_restart\n");
 	}
 }

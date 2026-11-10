@@ -69,7 +69,7 @@
 	"precision highp sampler3D;\n"
 
 #ifdef YQ2_GL3_GLES3
-/* GLES 3.0 has no per-buffer colour mask (its users - SSR material writes, the seam pass - are desktop paths) */
+/* GLES 3.0 has no per-buffer colour mask (its user - the SSR material writes - is a desktop path) */
 #define glColorMaski(i, r, g, b, a) ((void)0)
 #endif
 
@@ -485,7 +485,6 @@ typedef struct
 	gl3ShaderInfo_t si3Dturb;      // for water etc - always without lightmap
 	gl3ShaderInfo_t si3DlmFlow;    // for flowing/scrolling things with lightmap (conveyor, ..?)
 	gl3ShaderInfo_t si3DlmTrans;   // OpenMerc: translucent surface with lightmap (SoF stores lightmaps for them)
-	gl3ShaderInfo_t si3DlmSeam;    // OpenMerc GFX-modern r_om_seams: a strip of the neighbour's texture over a seam
 	gl3ShaderInfo_t si3DtransFlow; // for transparent flowing/scrolling things (=> no lightmap)
 	gl3ShaderInfo_t si3Dsky;       // guess what..
 	gl3ShaderInfo_t si3Dsprite;    // for sprites

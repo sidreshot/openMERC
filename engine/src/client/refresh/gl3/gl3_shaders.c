@@ -603,16 +603,6 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 		// OpenMerc: 1 for translucent surfaces with lightmap (si3DlmTrans)
 		uniform int omTranslucent;
 
-		// OpenMerc GFX-modern r_om_seams: 1 for the strips that blend a texture seam (si3DlmSeam, gl3_surf.c);
-		// the seam line (a point on it, the strip width) and the direction into the face
-		uniform int omSeam;
-		uniform vec4 omSeamP;
-		uniform vec4 omSeamD;
-		// the face's own texture (GL_TEXTURE10) and its texture axes divided by the image size
-		uniform sampler2D omSeamOwn;
-		uniform vec4 omSeamS;
-		uniform vec4 omSeamT;
-
 		// OpenMerc: SPEC-410 lightmap colour correction (256 x 1, GL_TEXTURE5;
 		// all 255 for r_fullbright and night vision)
 		uniform sampler2D omColorTable;
@@ -783,39 +773,6 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			// keeps its value as under the pass (its neutral 0.5)
 			if(omDetailP.x != 0.0)
 				outColor.rgb *= 2.0 * texture(omDetail, passTexCoord * omDetailP.xy + omDetailP.zw).rgb;
-			// OpenMerc GFX-modern r_om_seams: height blend of the two textures (Mishkinis, "Advanced Terrain Texture
-			// Splatting"; Unity "Material by Height"): each texture's height (texel brightness above its mean) plus
-			// its share - the neighbour's half at the seam, none at the strip's inner end, a world-space noise moving
-			// the line - and only the higher one shows, mixed within a narrow depth: stones of one side poke into
-			// the grout of the other instead of a straight cross-fade
-			if(omSeam != 0)
-			{
-				float omSb = clamp(1.0 - dot(passWorldCoord - omSeamP.xyz, omSeamD.xyz) / omSeamP.w, 0.0, 1.0);
-				vec3 omLw = vec3(0.3, 0.59, 0.11);
-				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw);
-				vec2 omOwnTc = vec2(dot(passWorldCoord, omSeamS.xyz) + omSeamS.w, dot(passWorldCoord, omSeamT.xyz) + omSeamT.w);
-				float omOh = dot(texture(omSeamOwn, omOwnTc).rgb - textureLod(omSeamOwn, omOwnTc, 12.0).rgb, omLw);
-				vec3 omQ = passWorldCoord * 0.11;
-				vec3 omQi = floor(omQ);
-				vec3 omQf = fract(omQ);
-				omQf = omQf * omQf * (3.0 - 2.0 * omQf);
-				vec4 omHk = vec4(0.0, 1.0, 57.0, 58.0) + dot(omQi, vec3(1.0, 57.0, 113.0));
-				vec4 omN0 = fract(sin(omHk) * 43758.5453);
-				vec4 omN1 = fract(sin(omHk + 113.0) * 43758.5453);
-				vec4 omNz = mix(omN0, omN1, omQf.z);
-				vec2 omNy = mix(omNz.xz, omNz.yw, omQf.x);
-				float omSn = mix(omNy.x, omNy.y, omQf.y);
-				float omSm = omSb * (1.0 - omSb) * 4.0;
-				float omA2 = clamp(0.5 * omSb + omSm * 0.35 * (omSn - 0.5), 0.0, 1.0);
-				float omH2 = omA2 + 1.5 * omSh * omSm, omH1 = (1.0 - omA2) + 1.5 * omOh * omSm;
-				float omHm = max(omH1, omH2) - 0.12;
-				float omW1 = max(omH1 - omHm, 0.0), omW2 = max(omH2 - omHm, 0.0);
-				outColor.a = omW2 / max(omW1 + omW2, 1e-4);
-				if(outColor.a < 0.004)
-					discard;
-				if(omSeam == 2)
-					outColor.rgb = vec3(1.0, 0.0, 0.0); // r_om_seams 2: where the strips lie
-			}
 		}
 );
 
@@ -1060,16 +1017,6 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 		// OpenMerc: 1 for translucent surfaces with lightmap (si3DlmTrans)
 		uniform int omTranslucent;
 
-		// OpenMerc GFX-modern r_om_seams: 1 for the strips that blend a texture seam (si3DlmSeam, gl3_surf.c);
-		// the seam line (a point on it, the strip width) and the direction into the face
-		uniform int omSeam;
-		uniform vec4 omSeamP;
-		uniform vec4 omSeamD;
-		// the face's own texture (GL_TEXTURE10) and its texture axes divided by the image size
-		uniform sampler2D omSeamOwn;
-		uniform vec4 omSeamS;
-		uniform vec4 omSeamT;
-
 		// OpenMerc: SPEC-410 lightmap colour correction (256 x 1, GL_TEXTURE5;
 		// all 255 for r_fullbright and night vision)
 		uniform sampler2D omColorTable;
@@ -1243,39 +1190,6 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			// keeps its value as under the pass (its neutral 0.5)
 			if(omDetailP.x != 0.0)
 				outColor.rgb *= 2.0 * texture(omDetail, passTexCoord * omDetailP.xy + omDetailP.zw).rgb;
-			// OpenMerc GFX-modern r_om_seams: height blend of the two textures (Mishkinis, "Advanced Terrain Texture
-			// Splatting"; Unity "Material by Height"): each texture's height (texel brightness above its mean) plus
-			// its share - the neighbour's half at the seam, none at the strip's inner end, a world-space noise moving
-			// the line - and only the higher one shows, mixed within a narrow depth: stones of one side poke into
-			// the grout of the other instead of a straight cross-fade
-			if(omSeam != 0)
-			{
-				float omSb = clamp(1.0 - dot(passWorldCoord - omSeamP.xyz, omSeamD.xyz) / omSeamP.w, 0.0, 1.0);
-				vec3 omLw = vec3(0.3, 0.59, 0.11);
-				float omSh = dot(texture(tex, passTexCoord).rgb - textureLod(tex, passTexCoord, 12.0).rgb, omLw);
-				vec2 omOwnTc = vec2(dot(passWorldCoord, omSeamS.xyz) + omSeamS.w, dot(passWorldCoord, omSeamT.xyz) + omSeamT.w);
-				float omOh = dot(texture(omSeamOwn, omOwnTc).rgb - textureLod(omSeamOwn, omOwnTc, 12.0).rgb, omLw);
-				vec3 omQ = passWorldCoord * 0.11;
-				vec3 omQi = floor(omQ);
-				vec3 omQf = fract(omQ);
-				omQf = omQf * omQf * (3.0 - 2.0 * omQf);
-				vec4 omHk = vec4(0.0, 1.0, 57.0, 58.0) + dot(omQi, vec3(1.0, 57.0, 113.0));
-				vec4 omN0 = fract(sin(omHk) * 43758.5453);
-				vec4 omN1 = fract(sin(omHk + 113.0) * 43758.5453);
-				vec4 omNz = mix(omN0, omN1, omQf.z);
-				vec2 omNy = mix(omNz.xz, omNz.yw, omQf.x);
-				float omSn = mix(omNy.x, omNy.y, omQf.y);
-				float omSm = omSb * (1.0 - omSb) * 4.0;
-				float omA2 = clamp(0.5 * omSb + omSm * 0.35 * (omSn - 0.5), 0.0, 1.0);
-				float omH2 = omA2 + 1.5 * omSh * omSm, omH1 = (1.0 - omA2) + 1.5 * omOh * omSm;
-				float omHm = max(omH1, omH2) - 0.12;
-				float omW1 = max(omH1 - omHm, 0.0), omW2 = max(omH2 - omHm, 0.0);
-				outColor.a = omW2 / max(omW1 + omW2, 1e-4);
-				if(outColor.a < 0.004)
-					discard;
-				if(omSeam == 2)
-					outColor.rgb = vec3(1.0, 0.0, 0.0); // r_om_seams 2: where the strips lie
-			}
 		}
 );
 
@@ -2253,12 +2167,6 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 		glUniform1i(mmLoc, 14);
 	}
 
-	GLint soLoc = glGetUniformLocation(prog, "omSeamOwn"); /* r_om_seams: the face's own texture (gl3_surf.c SeamDraw) */
-	if(soLoc != -1)
-	{
-		glUniform1i(soLoc, 10);
-	}
-
 	/* OpenMerc (I4c): dynamic light layer of the lightmap page on GL_TEXTURE6 (gl3_dynlight.c) */
 	GLint dlLoc = glGetUniformLocation(prog, "omDynLight");
 	if(dlLoc != -1)
@@ -2355,9 +2263,8 @@ qboolean gl3_world_lite = false; /* r_om_worldlite: the world shaders without su
 
 
 /* OpenMerc: a variant of the lightmapped world shader with its per-program switches as constants. omTranslucent
-   (si3DlmTrans) and omSeam (si3DlmSeam) are set once per program and never change, but as uniforms every world
-   pixel carried the seam blend's code and registers: the compiler now drops the paths a program cannot take
-   (Adreno 610: the seam path alone was 0.7 ms of a 28 ms frame). translucent: 0 or 1; seam: keep the seam path. */
+   (si3DlmTrans) is set once per program and never changes, but as a uniform every world pixel carried the code and
+   registers of both paths: the compiler now drops the path a program cannot take. translucent: 0 or 1. */
 /* the gl_monolightmap mode folded into the world programs (0: the colour-table path alone), -1 = all modes */
 int gl3_shader_mono = -1;
 /* the dynamic light path folded into the world programs: 1 per pixel (r_om_pdlight on a SoF world), 0 the CPU
@@ -2378,7 +2285,7 @@ FoldAll(char *out, const char *from, const char *to)
 }
 
 static char *
-LmVariant(const char *src, int translucent, qboolean seam)
+LmVariant(const char *src, int translucent)
 {
 	static const char *const fold[2][2][2] = {
 		{{"omTranslucent == 0", "true "}, {"omTranslucent != 0", "false"}},
@@ -2422,17 +2329,6 @@ LmVariant(const char *src, int translucent, qboolean seam)
 	{
 		FoldAll(out, "omPdl.x < 0.5", gl3_shader_pdl ? "false" : "true");
 		FoldAll(out, "omPdl.x > 0.5", gl3_shader_pdl ? "true" : "false");
-	}
-
-	if (!seam)
-	{
-		static const char *const from = "if(omSeam != 0)", *const to = "if(false)";
-
-		while ((at = strstr(out, from)) != NULL)
-		{
-			memcpy(at, to, strlen(to));
-			memset(at + strlen(to), ' ', strlen(from) - strlen(to));
-		}
 	}
 
 	return out;
@@ -2530,21 +2426,19 @@ static qboolean createShaders(void)
 	{
 		return false;
 	}
-	/* the world programs' variants (LmVariant): opaque and flowing faces, translucent faces, seam strips */
-	static char *lmMain = NULL, *lmTrans = NULL, *lmSeamSrc = NULL;
+	/* the world programs' variants (LmVariant): opaque and flowing faces, translucent faces */
+	static char *lmMain = NULL, *lmTrans = NULL;
 	free(lmMain);
 	free(lmTrans);
-	free(lmSeamSrc);
 	{
 		extern int gl3_monolightmap_mode;
 
 		gl3_shader_mono = (gl3_monolightmap_mode == 0) ? 0 : -1;
 		gl3_shader_pdl = GL3_DynLight_ShaderWants();
 	}
-	lmMain = LmVariant(lmFragCsm, 0, false);
-	lmTrans = LmVariant(lmFragCsm, 1, false);
-	lmSeamSrc = LmVariant(lmFragCsm, 0, true);
-	if(!lmMain || !lmTrans || !lmSeamSrc)
+	lmMain = LmVariant(lmFragCsm, 0);
+	lmTrans = LmVariant(lmFragCsm, 1);
+	if(!lmMain || !lmTrans)
 	{
 		return false;
 	}
@@ -2639,22 +2533,6 @@ static qboolean createShaders(void)
 		{
 			glUseProgram(gl3state.si3DlmTrans.shaderProgram);
 			glUniform1i(transLoc, 1);
-		}
-	}
-	// OpenMerc GFX-modern r_om_seams: same lightmapped shader, its alpha the blend over a texture seam (gl3_surf.c)
-	if(!initShader3D(&gl3state.si3DlmSeam, vertexSrc3Dlm, lmSeamSrc))
-	{
-		Com_Printf("WARNING: Failed to create shader program for texture seam blending!\n");
-		return false;
-	}
-	else
-	{
-		GLint seamLoc = glGetUniformLocation(gl3state.si3DlmSeam.shaderProgram, "omSeam");
-
-		if(seamLoc != -1)
-		{
-			glUseProgram(gl3state.si3DlmSeam.shaderProgram);
-			glUniform1i(seamLoc, 1);
 		}
 	}
 	if(!initShader3D(&gl3state.si3DtransFlow, vertexSrc3Dflow, fragmentSrc3D))
@@ -2948,10 +2826,10 @@ void GL3_UpdateUBOLights(void)
 /* GFX-modern r_om_rain (gl3_post.c): the strike's shadow map (texture unit 9) and its view-projection */
 void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
 {
-	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -2977,10 +2855,10 @@ void GL3_SoF_LightningShadow(const float *shvp, GLuint shtex)
    and strength (w 0 = none), colour, the top-down depth map (texture unit 12) and its view-projection */
 void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const float *occvp, GLuint occtex)
 {
-	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -3013,10 +2891,10 @@ void GL3_SoF_LightningUniforms(const float *bolt, const float *color, const floa
 void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *plane2, const float *rect, GLuint tex,
 	GLuint tex2)
 {
-	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -3052,10 +2930,10 @@ void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *pl
 /* GFX-modern r_om_ssr: the parameters of the material classes (gl3_material.c) */
 void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 {
-	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -3073,10 +2951,10 @@ void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 /* GFX-modern r_om_ssr: reflections on, rain wetness (gl3_post.c) */
 void GL3_SoF_SSRUniforms(const float *ssr)
 {
-	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int i;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
@@ -3114,13 +2992,13 @@ GL3_WorldShaderFor(const gl3image_t *image)
 void GL3_SoF_ApplyMonoLightmap(qboolean fullbright)
 {
 	extern int gl3_monolightmap_mode;
-	gl3ShaderInfo_t *si[6] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmSeam, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
 	int mode = fullbright ? 0 : gl3_monolightmap_mode;
 	int i;
 
 	worldmono = mode;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 5; i++)
 	{
 		GLint loc;
 
