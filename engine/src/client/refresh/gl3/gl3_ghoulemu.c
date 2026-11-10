@@ -137,7 +137,7 @@ static struct
 	/* GFX-modern sun shadows (gl3_csm.c): the depth mask as set, whether the entity casts and whether its
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
-	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk;
+	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk, u_sunk;
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
@@ -787,6 +787,7 @@ static const char *emu_fs =
 	"in vec3 vEP;\n"
 	"uniform int omPPL;\n"
 	"uniform float omPbrK;\n"   /* r_om_pbr_models: strength of the specular */
+	"uniform float omSunK;\n"   /* r_om_pbr_sun x the sun shadows are on (gl3_csm.c), else 0 */
 	"uniform vec4 omL[48];\n"
 	"uniform vec4 omM[6];\n"
 	/* r_om_ambcube: the ambient factors along +x -x +y -y +z -z of the world and the eye to world rotation */
@@ -952,6 +953,32 @@ static const char *emu_fs =
 	"			float nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);\n"
 	"			vec3 F = F0 + (vec3(1.0) - F0) * pow(1.0 - vh, 5.0);\n"
 	"			sp += min(Lc * nl * F * (3.14159 * omGGX(nh, a) * omVis(nl, nv, a)), vec3(3.0));\n"
+	"		}\n"
+	"	}\n"
+	/* the sun (Ghoul never lit models by it): a directional light where the static world lets it through (the sun
+	   shadow map, gl3_csm.c - not the dynamic layer: a model would shadow itself), the ambient a little lower there
+	   (the lightmap under the model already holds part of the sun) */
+	"	if (omSunK > 0.0 && omCsmSun.w > 0.5 && omCsmAmb.w > 0.0)\n"
+	"	{\n"
+	"		vec4 wq = omInvPV * vPos;\n"
+	"		vec3 wp = wq.xyz / wq.w, nw = omE2W * n;\n"
+	"		float fade;\n"
+	"		int cc = omCsmCascade(wp, fade);\n"
+	"		float vis = (cc < 0) ? 0.0 : omCsmStatic(cc, wp, nw) * fade;\n"
+	"		if (vis > 0.0)\n"
+	"		{\n"
+	"			float sk = omCsmAmb.w * omSunK * vis;\n"
+	"			vec3 Ls = transpose(omE2W) * omCsmSun.xyz;\n"
+	"			float nl = max(dot(n, Ls), 0.0);\n"
+	"			c *= 1.0 - 0.3 * sk;\n"
+	"			c += nl * sk * md.rgb;\n"
+	"			if (nl > 0.0)\n"
+	"			{\n"
+	"				vec3 h = normalize(Ls + v);\n"
+	"				float nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);\n"
+	"				vec3 F = F0 + (vec3(1.0) - F0) * pow(1.0 - vh, 5.0);\n"
+	"				sp += min(vec3(sk) * nl * F * (3.14159 * omGGX(nh, a) * omVis(nl, nv, a)), vec3(3.0));\n"
+	"			}\n"
 	"		}\n"
 	"	}\n"
 	"	vec3 R = reflect(-v, n);\n"
@@ -1255,6 +1282,7 @@ CreateObjects(void)
 	E.u_csmrepl = glGetUniformLocation(E.prog, "omCsmRepl");
 	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
 	E.u_pbrk = glGetUniformLocation(E.prog, "omPbrK");
+	E.u_sunk = glGetUniformLocation(E.prog, "omSunK");
 	E.u_pplL = glGetUniformLocation(E.prog, "omL");
 	E.u_pplM = glGetUniformLocation(E.prog, "omM");
 	E.u_ambon = glGetUniformLocation(E.prog, "omAmbOn");
@@ -2021,6 +2049,16 @@ Flush(void)
 
 		ppl = (E.lighting && E.ppl) ? ((r_om_pbr_models->value > 0) ? 2 : 1) : 0;
 		glUniform1f(E.u_pbrk, Q_clamp(r_om_pbr_models->value, 0.0f, 4.0f));
+		{
+			static cvar_t *r_om_pbr_sun;
+
+			if (!r_om_pbr_sun)
+			{
+				r_om_pbr_sun = ri.Cvar_Get("r_om_pbr_sun", "0.8", CVAR_ARCHIVE);
+			}
+
+			glUniform1f(E.u_sunk, GL3_CSM_Active() ? Q_clamp(r_om_pbr_sun->value, 0.0f, 4.0f) : 0.0f);
+		}
 
 		U1i(E.u_ppl, ppl);
 

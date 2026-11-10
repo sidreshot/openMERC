@@ -1533,3 +1533,17 @@ CPU 3.96 -> 3.95 ms (noise either way per map). Eleven DM maps have no info_play
 nycctf1, nycdm1, raven, sibctf1, sudctf1, suddm1-3): started in single player the game stops with "Couldn't find
 spawn point", as the original does; the harness starts them with deathmatch 1.
 
+
+## r_om_pbr_models: physically based light on Ghoul models (gl3_ghoulemu.c omLitPBR, 2026-11-10)
+
+* The per-pixel path (r_om_ppl_models) with omPPL 2: the same Ghoul lights, Lambert diffuse, GGX specular (Smith,
+  Schlick) added after the texture (glossy SoF materials - specular in the material - get a texture-coloured, metal
+  highlight at half the material's level; the rest a dielectric sheen, roughness 0.65), no clamp to 1, lamps fading
+  to 0 over the last quarter of their radius (GL's 1/(1+d/r) was still half bright at the cut: light jumped).
+* Surroundings in the gloss: the r_om_probes cube maps (desktop, units 24..27, GL3_Probes_Uniforms once per frame),
+  else the ambient cube along the reflection.
+* r_om_pbr_sun (0.8): the sun (or moon) of the CSM as a directional light where the static shadow map lets it
+  through (not the dynamic layer: self-shadowing), ambient x (1 - 0.3 x sun) there. Only while the CSM is active.
+* GL3_SoF_LightPoint (floor light of models and effects) blends the 8 corners of the 32-unit grid (solid corners
+  left out) instead of one value per cell: walking characters no longer step in brightness.
+* r_om_pbr_models 0 brings the GL 1.1 emulation back; values above 1 scale the specular.
