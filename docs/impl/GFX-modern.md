@@ -1678,7 +1678,7 @@ client fx module) to start an effect in front of the eye.
 
 ## r_om_dof: depth of field in cut scenes and through the scope (2026-11-11)
 
-* When: cl_cinematicfreeze (the game's cut scenes) or fov_x < 40 (zoom); r_om_dof 2 = always (test). Not in normal
+* When: cl_cinematicfreeze (the game's cut scenes) or fov_y < 50 (zoom; the sniper scope starts at fov 60 = fov_y ~47, normal 95 = ~78); r_om_dof 2 = always (test). Not in normal
   play - a first-person fight needs a sharp frame.
 * Focus: a 1x1 pass takes the nearest of 3x3 depths in the middle of the frame (past 24 units: not the weapon), read
   back through two pixel buffers a frame apart (no stall) and eased on the CPU in 1/distance (a focus ring turns in

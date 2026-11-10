@@ -3655,7 +3655,7 @@ MotionBlurUniforms(GLuint prog)
 /* ------------------------------------------------------------------
  * GFX-modern r_om_dof: depth of field where a film camera would use it -
  * the game's cut scenes (cl_cinematicfreeze) and a zoomed view (the scope,
- * fov under 40). The focus is pulled like a focus puller does: a 1x1 pass
+ * vertical fov under 50: the sniper scope starts at 60 of 95). The focus is pulled like a focus puller does: a 1x1 pass
  * finds the nearest thing in the middle of the frame, read back without a
  * stall (two pixel buffers, a frame apart), eased on the CPU (~0.25 s).
  * ------------------------------------------------------------------ */
@@ -3714,7 +3714,7 @@ DofWanted(void)
 		return true; /* test: always */
 	}
 
-	return (r_om_dof->value > 0) && ((cinfreeze->value != 0) || (r_newrefdef.fov_x < 40.0f));
+	return (r_om_dof->value > 0) && ((cinfreeze->value != 0) || (r_newrefdef.fov_y < 50.0f));
 }
 
 /* the 1x1 focus pass on the finished depth; the eased focus distance of this view */
