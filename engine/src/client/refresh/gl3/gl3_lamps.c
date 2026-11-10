@@ -15,7 +15,10 @@ typedef struct
 	vec3_t origin;
 	vec3_t color;
 	float radius;
+	float fade;   /* 0..1: the lamp's glints coming (picked) or going (dropped) - never at once */
 } lamp_t;
+
+#define LAMPS_FADE 0.4f /* seconds */
 
 static lamp_t *lamps;
 static int numlamps;
@@ -70,6 +73,7 @@ GL3_Lamps_Set(const byte *lights, int len)
 
 		/* reach: points their intensity, surface patches more (their light falls off as 1/d) */
 		l->radius = (type == 0) ? fminf(sqrtf(intensity) * 8.0f, 600.0f) : fminf(intensity, 800.0f);
+		l->fade = 0;
 		numlamps++;
 	}
 }
@@ -148,9 +152,17 @@ LampSeen(const lamp_t *l, const float *eye)
 void
 GL3_Lamps_View(GLuint prog, const float *eye)
 {
-	float pos[LAMPS_MAX_VIEW * 4], col[LAMPS_MAX_VIEW * 4], score[LAMPS_MAX_VIEW];
-	int i, j, n = 0;
+	/* the best LAMPS_MAX_VIEW lamps (light over distance, seen from the eye) are the target; every lamp fades toward
+	   being in it or not over LAMPS_FADE - picked at once, a lamp turning a corner made its glints on the floor
+	   appear and vanish in the middle of the room. A fading lamp keeps its place until it is out */
+	static float lasttime = -1;
+	float pos[LAMPS_MAX_VIEW * 4], col[LAMPS_MAX_VIEW * 4], score[LAMPS_MAX_VIEW], dt;
+	int pick[LAMPS_MAX_VIEW], out[LAMPS_MAX_VIEW];
+	int i, j, n = 0, no = 0;
 	GLint loc;
+
+	dt = ((lasttime < 0) || (r_newrefdef.time < lasttime)) ? 1.0f : Q_min(r_newrefdef.time - lasttime, 0.1f);
+	lasttime = r_newrefdef.time;
 
 	for (i = 0; i < numlamps; i++)
 	{
@@ -179,14 +191,12 @@ GL3_Lamps_View(GLuint prog, const float *eye)
 			continue;
 		}
 
-		/* insertion into the best LAMPS_MAX_VIEW by score */
 		for (j = n; j > 0 && score[j - 1] < s; j--)
 		{
 			if (j < LAMPS_MAX_VIEW)
 			{
 				score[j] = score[j - 1];
-				memcpy(pos + j * 4, pos + (j - 1) * 4, sizeof(float) * 4);
-				memcpy(col + j * 4, col + (j - 1) * 4, sizeof(float) * 4);
+				pick[j] = pick[j - 1];
 			}
 		}
 
@@ -196,14 +206,7 @@ GL3_Lamps_View(GLuint prog, const float *eye)
 		}
 
 		score[j] = s;
-		pos[j * 4 + 0] = l->origin[0];
-		pos[j * 4 + 1] = l->origin[1];
-		pos[j * 4 + 2] = l->origin[2];
-		pos[j * 4 + 3] = l->radius;
-		col[j * 4 + 0] = l->color[0];
-		col[j * 4 + 1] = l->color[1];
-		col[j * 4 + 2] = l->color[2];
-		col[j * 4 + 3] = 1.0f;
+		pick[j] = i;
 
 		if (n < LAMPS_MAX_VIEW)
 		{
@@ -211,21 +214,82 @@ GL3_Lamps_View(GLuint prog, const float *eye)
 		}
 	}
 
-	loc = GL3_UniformLoc(prog, "omBL");
-	if (loc != -1 && n > 0)
+	/* the fades; what is lit: the faded-in lamps, the strongest first */
+	for (i = 0; i < numlamps; i++)
 	{
-		glUniform4fv(loc, n, pos);
+		lamp_t *l = &lamps[i];
+		qboolean want = false;
+		vec3_t d;
+		float s;
+
+		for (j = 0; j < n; j++)
+		{
+			want |= (pick[j] == i);
+		}
+
+		l->fade = Q_clamp(l->fade + (want ? dt : -dt) / LAMPS_FADE, 0.0f, 1.0f);
+
+		if (l->fade <= 0)
+		{
+			continue;
+		}
+
+		VectorSubtract(l->origin, eye, d);
+		s = l->fade * l->radius / (VectorLength(d) + 64.0f);
+
+		for (j = no; j > 0 && score[j - 1] < s; j--)
+		{
+			if (j < LAMPS_MAX_VIEW)
+			{
+				score[j] = score[j - 1];
+				out[j] = out[j - 1];
+			}
+		}
+
+		if (j >= LAMPS_MAX_VIEW)
+		{
+			continue;
+		}
+
+		score[j] = s;
+		out[j] = i;
+
+		if (no < LAMPS_MAX_VIEW)
+		{
+			no++;
+		}
+	}
+
+	for (j = 0; j < no; j++)
+	{
+		const lamp_t *l = &lamps[out[j]];
+		float k = l->fade * l->fade * (3.0f - 2.0f * l->fade);
+
+		pos[j * 4 + 0] = l->origin[0];
+		pos[j * 4 + 1] = l->origin[1];
+		pos[j * 4 + 2] = l->origin[2];
+		pos[j * 4 + 3] = l->radius;
+		col[j * 4 + 0] = l->color[0] * k;
+		col[j * 4 + 1] = l->color[1] * k;
+		col[j * 4 + 2] = l->color[2] * k;
+		col[j * 4 + 3] = 1.0f;
+	}
+
+	loc = GL3_UniformLoc(prog, "omBL");
+	if (loc != -1 && no > 0)
+	{
+		glUniform4fv(loc, no, pos);
 	}
 
 	loc = GL3_UniformLoc(prog, "omBC");
-	if (loc != -1 && n > 0)
+	if (loc != -1 && no > 0)
 	{
-		glUniform4fv(loc, n, col);
+		glUniform4fv(loc, no, col);
 	}
 
 	loc = GL3_UniformLoc(prog, "omBN");
 	if (loc != -1)
 	{
-		glUniform1i(loc, n);
+		glUniform1i(loc, no);
 	}
 }

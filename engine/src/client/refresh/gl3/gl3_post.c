@@ -9393,10 +9393,10 @@ static const char *ssr_fs =
 	   the nearest one everywhere */
 	"float PW(vec4 o, vec4 bmin, vec4 bmax, vec3 wp)\n"
 	"{\n"
-	"	if (o.w < 0.5) return 0.0;\n"
+	"	if (o.w <= 0.0) return 0.0;\n"
 	"	vec3 q = max(max(bmin.xyz - wp, wp - bmax.xyz), vec3(0.0));\n"
 	"	vec3 e = wp - o.xyz;\n"
-	"	return 1.0 - smoothstep(0.0, 96.0, length(q)) + 1e-3 / (1.0 + dot(e, e) * 1e-5);\n"
+	"	return o.w * (1.0 - smoothstep(0.0, 96.0, length(q)) + 1e-3 / (1.0 + dot(e, e) * 1e-5));\n"
 	"}\n"
 	"vec3 Probe(vec3 wp, vec3 wr, float lod)\n"
 	"{\n"
@@ -11151,6 +11151,7 @@ typedef struct
 	int cell[3];
 	int cluster;
 	int faces;      /* faces drawn so far, 6 = ready */
+	float fade;     /* 0..1 after it is ready: a new probe comes into the reflections over half a second */
 	qboolean used;
 } probe_t;
 
@@ -11544,6 +11545,7 @@ GL3_Probes_Frame(void)
 			memcpy(pr->cell, cell, sizeof(pr->cell));
 			pr->used = true;
 			pr->faces = 0;
+			pr->fade = 0;
 			ProbeBox(pr);
 
 			if (!pr->tex)
@@ -11581,6 +11583,22 @@ GL3_Probes_Frame(void)
 		}
 	}
 
+	/* the fade-in of the ready probes */
+	{
+		static float last = -1;
+		float dt = ((last < 0) || (r_newrefdef.time < last)) ? 0.0f : Q_min(r_newrefdef.time - last, 0.1f);
+
+		last = r_newrefdef.time;
+
+		for (i = 0; i < PROBE_MAX; i++)
+		{
+			if (RP.p[i].used && (RP.p[i].faces == 6))
+			{
+				RP.p[i].fade = Q_min(RP.p[i].fade + dt / 0.5f, 1.0f);
+			}
+		}
+	}
+
 	/* the four ready probes nearest to the eye */
 	for (RP.nbind = 0; RP.nbind < 4; RP.nbind++)
 	{
@@ -11593,7 +11611,7 @@ GL3_Probes_Frame(void)
 			int j;
 			float d;
 
-			if (!RP.p[i].used || (RP.p[i].faces < 6))
+			if (!RP.p[i].used || (RP.p[i].faces < 6) || (RP.p[i].fade <= 0))
 			{
 				continue;
 			}
@@ -11664,7 +11682,7 @@ ProbesUniforms(GLuint prog)
 		if (i < RP.nbind)
 		{
 			memcpy(&pos[i * 4], pr->org, sizeof(vec3_t));
-			pos[i * 4 + 3] = 1.0f;
+			pos[i * 4 + 3] = pr->fade * pr->fade * (3.0f - 2.0f * pr->fade);
 			memcpy(&mn[i * 4], pr->bmin, sizeof(vec3_t));
 			memcpy(&mx[i * 4], pr->bmax, sizeof(vec3_t));
 		}

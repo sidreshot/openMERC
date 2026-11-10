@@ -56,7 +56,7 @@ LSEnoughUnits(int maxunits)
 #define LS_TAN 1.08f        /* tan of half the face field of view: a little over 90 degrees for the filter taps */
 #define LS_NEAR 2.0f
 #define LS_FIXTURE 16.0f    /* a caster this close to its lamp is the lamp's own fixture or chain: no shadow */
-#define LS_FADETIME 0.35f   /* seconds a lamp's shadow takes to come and go */
+#define LS_FADETIME 0.8f    /* seconds a lamp's shadow takes to come and go (0.35 read as shadows popping up while walking) */
 
 #ifndef GL_TEXTURE_2D_ARRAY
 #define GL_TEXTURE_2D_ARRAY 0x8C1A
