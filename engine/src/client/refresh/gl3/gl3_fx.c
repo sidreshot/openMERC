@@ -2370,7 +2370,8 @@ GL3_FX_ScreenOverlays(void)
 		}
 	}
 
-	if (blend[3] != 0)
+	/* r_om_hitfx: the composite drew the game's tint (a hit as a dark red vignette); warnings still fill */
+	if ((blend[3] != 0) && !(GL3_Post_TintHandled() && !memcmp(blend, r_newrefdef.blend, sizeof(blend))))
 	{
 		byte c[4];
 		int i;

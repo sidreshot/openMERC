@@ -103,6 +103,7 @@ static struct
 	GLint lum_tex, lum_rect, exp_lum, exp_prev, exp_params, exp_rect, exp_neutral;
 
 	qboolean bound, bloomthis, depthcopied;
+	qboolean tinthandled; /* r_om_hitfx: the composite drew the game's screen tint this frame */
 	/* r_om_water 2: half-size copy of the scene under translucent water (refraction), made at the first such
 	   surface of the view (GL_TEXTURE11) */
 	qboolean watercopied;
@@ -963,6 +964,9 @@ static const char *post_comp_fs =
 	"uniform vec4 rect;\n"
 	/* r_om_lens: x chromatic aberration, y ghosts and halo, z lens dirt, w aspect of the view */
 	"uniform vec4 lens;\n"
+	/* r_om_hitfx: the game's screen tint (rgb, alpha); x 1 = a hit */
+	"uniform vec4 tint;\n"
+	"uniform vec4 tintk;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -1145,6 +1149,23 @@ static const char *post_comp_fs =
 	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
 	"			c = pow(l, vec3(grade.y));\n"
 	"		}\n"
+	"	}\n"
+	/* r_om_hitfx: the screen tint of the game (r_newrefdef.blend) here instead of a flat fill over the frame. tintk.x 1:
+	   a hit (red) - the picture loses its colour, the edges sink into a dark red, the middle stays readable (the MGS5
+	   way); else the plain fill the game asked for (pickups, water) */
+	"	if (tint.a > 0.0)\n"
+	"	{\n"
+	"		if (tintk.x > 0.5)\n"
+	"		{\n"
+	"			vec2 tv = (vuv - 0.5) * vec2(lens.w, 1.0);\n"
+	"			float edge = smoothstep(0.18, 0.95, length(tv));\n"
+	"			float t = clamp(tint.a * 1.6, 0.0, 1.0);\n"
+	"			c = mix(c, vec3(Luma(c)), t * 0.7);\n"
+	"			c = mix(c, c * vec3(1.0, 0.82, 0.8), t * 0.6);\n"
+	"			c = mix(c, c * vec3(0.5, 0.05, 0.04) + vec3(0.09, 0.0, 0.0), edge * t);\n"
+	"		}\n"
+	"		else\n"
+	"			c = mix(c, tint.rgb, tint.a);\n"
 	"	}\n"
 	"	outColor = vec4(c, 1.0);\n"
 	"}\n";
@@ -1483,6 +1504,13 @@ GL3_Post_SceneDrawBuffers(void)
 }
 
 /* r_om_ssr: this view writes the material target */
+/* r_om_hitfx: the screen tint of this frame was drawn by the composite */
+qboolean
+GL3_Post_TintHandled(void)
+{
+	return P.tinthandled;
+}
+
 qboolean
 GL3_Post_SSRActive(void)
 {
@@ -1856,6 +1884,7 @@ GL3_Post_BeginView(int x, int y, int w, int h)
 
 	gl3post.active = gl3post.bloom = gl3post.soft = gl3post.volfog = false;
 	P.bound = P.depthcopied = P.depthfinal = P.watercopied = false;
+	P.tinthandled = false;
 
 	if (windowsamples < 0)
 	{
@@ -3725,6 +3754,7 @@ GL3_Post_EndView(void)
 	{
 		static cvar_t *ca, *fl, *dirt;
 		qboolean nv = (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES) != 0;
+		float cabump = 0;
 
 		if (!ca)
 		{
@@ -3733,7 +3763,31 @@ GL3_Post_EndView(void)
 			dirt = ri.Cvar_Get("r_om_lens_dirt", "0.3", CVAR_ARCHIVE);
 		}
 
-		glUniform4f(GL3_UniformLoc(P.progcomp, "lens"), (dbg || nv) ? 0.0f : Q_clamp(ca->value, 0.0f, 4.0f),
+		/* r_om_hitfx: the game's screen tint in the composite (gl3_fx.c then draws no flat fill); a red one is a hit:
+		   a short pulse of chromatic aberration with it */
+		{
+			static cvar_t *hitfx;
+			const float *b = r_newrefdef.blend;
+			float dmg = 0;
+
+			if (!hitfx)
+			{
+				hitfx = ri.Cvar_Get("r_om_hitfx", "1", CVAR_ARCHIVE);
+			}
+
+			P.tinthandled = (hitfx->value != 0) && !nv && !dbg;
+
+			if (P.tinthandled && (b[3] > 0) && (b[0] > 1.5f * b[1]) && (b[0] > 1.5f * b[2]))
+			{
+				dmg = 1;
+			}
+
+			glUniform4f(GL3_UniformLoc(P.progcomp, "tint"), b[0], b[1], b[2], P.tinthandled ? Q_clamp(b[3], 0.0f, 1.0f) : 0.0f);
+			glUniform4f(GL3_UniformLoc(P.progcomp, "tintk"), dmg, 0, 0, 0);
+			cabump = dmg * Q_clamp(b[3], 0.0f, 1.0f) * 4.0f;
+		}
+
+		glUniform4f(GL3_UniformLoc(P.progcomp, "lens"), (dbg || nv) ? 0.0f : Q_clamp(ca->value + cabump, 0.0f, 6.0f),
 			(dbg || nv || !P.bloomthis) ? 0.0f : Q_clamp(fl->value, 0.0f, 2.0f),
 			(dbg || nv || !P.bloomthis) ? 0.0f : Q_clamp(dirt->value, 0.0f, 2.0f), (float)P.vw / (float)Q_max(P.vh, 1));
 	}

@@ -1666,3 +1666,12 @@ client fx module) to start an effect in front of the eye.
   of random discs, 36 hashes a pixel everywhere) cost +0.6..0.9 ms.
 * Defaults 0.5 / 0.35 / 0.3 (medium, high presets); minimal / low (phones) 0. Menu: Colour -> Lens Flares,
   Chromatic Aberration.
+
+## r_om_hitfx: the screen tint in the composite, hits as a dark red vignette (2026-11-11)
+
+* Before: r_newrefdef.blend as a flat 2D fill over the finished frame and the HUD (a hit: the whole screen red).
+* Now the composite takes it (gl3_fx.c draws no fill when GL3_Post_TintHandled): a red tint (r > 1.5 g, 1.5 b) is a
+  hit - colour drained (x 0.7 of the strength), the middle a little warmer, the edges (radius 0.18..0.95) sink into
+  a dark red; a short chromatic aberration pulse (lens CA + 4 x strength). Any other tint (pickups, water) is the same
+  mix the fill gave, under the HUD. Night vision and r_warnings keep the fill. Cost: none measurable (ALU only).
+* Test aid r_om_hitfx_test r,g,b,a (commas: `set` takes one word) forces the game's tint every frame.

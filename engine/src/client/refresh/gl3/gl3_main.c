@@ -2455,6 +2455,21 @@ GL3_RenderView(refdef_t *fd)
 	r_newrefdef = *fd;
 	GL3_Fog_ViewTest(&r_newrefdef);
 	GL3_DynLight_TestLight(&r_newrefdef); /* GFX-modern: r_om_pdlight_test A/B light */
+	/* test aid r_om_hitfx_test "r g b a": the game's screen tint of every frame (a hit without taking one) */
+	{
+		static cvar_t *ht;
+
+		if (!ht)
+		{
+			ht = ri.Cvar_Get("r_om_hitfx_test", "", 0);
+		}
+
+		if (ht->string[0])
+		{
+			sscanf(ht->string, "%f%*[ ,]%f%*[ ,]%f%*[ ,]%f", &r_newrefdef.blend[0], &r_newrefdef.blend[1], &r_newrefdef.blend[2],
+				&r_newrefdef.blend[3]);
+		}
+	}
 
 	if (!gl3_worldmodel && !(r_newrefdef.rdflags & RDF_NOWORLDMODEL))
 	{
