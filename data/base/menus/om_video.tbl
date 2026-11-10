@@ -62,10 +62,10 @@ section | ATMOSPHERE | АТМОСФЕРА | requires=r_om_bloom
 list | r_om_bloom | 0,1 | Off,On | Выкл,Вкл | Bloom | Свечение | requires=r_om_bloom
 slider | r_om_bloom_intensity | 0.1 | 1.0 | 0.05 | Bloom Intensity | Сила свечения | requires=r_om_bloom
 list | r_om_bloom_radius | 0.5,1,1.5,2 | Small,Normal,Wide,Widest | Малый,Обычный,Широкий,Очень широкий | Bloom Radius | Радиус свечения | requires=r_om_bloom
-list | r_om_glints | 0,1 | Off,On | Выкл,Вкл | Lamp Glints | Блики ламп | requires=r_om_glints | pc | tip=Small bright lamps, LEDs and switches give a thin streak of their colour/Маленькие яркие лампочки, индикаторы и выключатели дают тонкий блик своего цвета
-slider | r_om_glints_intensity | 0.1 | 3.0 | 0.1 | Glint Intensity | Сила бликов | requires=r_om_glints | pc
-list | r_om_skyrays | 0,1 | Off,On | Выкл,Вкл | Sun and Moon Rays | Лучи солнца и луны | requires=r_om_skyrays | pc | tip=Rays from the sun or the moon in the sky, cut by clouds and walls/Лучи от солнца или луны на небе, их режут облака и стены
-slider | r_om_skyrays_intensity | 0.1 | 3.0 | 0.1 | Sky Ray Intensity | Сила лучей | requires=r_om_skyrays | pc
+list | r_om_glints | 0,1 | Off,On | Выкл,Вкл | Lamp Glints | Блики ламп | requires=r_om_glints | tip=Small bright lamps, LEDs and switches give a thin streak of their colour/Маленькие яркие лампочки, индикаторы и выключатели дают тонкий блик своего цвета
+slider | r_om_glints_intensity | 0.1 | 3.0 | 0.1 | Glint Intensity | Сила бликов | requires=r_om_glints
+list | r_om_skyrays | 0,1 | Off,On | Выкл,Вкл | Sun and Moon Rays | Лучи солнца и луны | requires=r_om_skyrays | tip=Rays from the sun or the moon in the sky, cut by clouds and walls/Лучи от солнца или луны на небе, их режут облака и стены
+slider | r_om_skyrays_intensity | 0.1 | 3.0 | 0.1 | Sky Ray Intensity | Сила лучей | requires=r_om_skyrays
 list | r_om_volfog | 0,1 | Off,On | Выкл,Вкл | Volumetric Fog | Объёмный туман | requires=r_om_volfog
 list | r_om_volfog_quality | 1,2 | Half resolution,Full resolution | Половинное разрешение,Полное разрешение | Fog Quality | Качество тумана | requires=r_om_volfog | pc
 list | r_om_volfog_shafts | 0,1 | Off,On | Выкл,Вкл | Light Shafts | Лучи света | requires=r_om_volfog

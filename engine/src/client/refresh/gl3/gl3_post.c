@@ -2109,7 +2109,7 @@ static void
 GlintsCvars(void)
 {
 #ifdef YQ2_GL3_GLES3
-	r_om_glints = ri.Cvar_Get("r_om_glints", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
+	r_om_glints = ri.Cvar_Get("r_om_glints", "1", CVAR_ARCHIVE); /* phones too (2026-11-10) */
 #else
 	r_om_glints = ri.Cvar_Get("r_om_glints", "1", CVAR_ARCHIVE);
 #endif
@@ -11871,7 +11871,7 @@ static void
 SkyraysCvars(void)
 {
 #ifdef YQ2_GL3_GLES3
-	r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
+	r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "1", CVAR_ARCHIVE); /* phones too: the pass copies the depth itself */
 #else
 	r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "1", CVAR_ARCHIVE);
 #endif
