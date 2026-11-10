@@ -1615,3 +1615,12 @@ client fx module) to start an effect in front of the eye.
   Blood marks (sprite bld*, *blood*) now write a wet material (reflectivity 0.45 x r_om_wetblood, roughness 0.18):
   the traced reflection and the lamp glints run over fresh blood. Other marks unchanged.
 * Test aid `om_decal <sprite> [size] [alpha] [r g b]` (client fx): a mark where the view meets the world.
+
+## Walls that must not shine (owner, 2026-11-10: "how can painted brick shine?", kos1 walls)
+
+* Both highlights (baked r_om_deluxe, dynamic lights) now follow the class reflectivity: smoothstep(0, 0.2, refl)
+  for the baked one, 15%..100% for the dynamic one. Damp sewer walls (refl ~0.03 from their dampness) had got a
+  full dielectric highlight.
+* om_materials.txt reviewed by eye for the glossy classes: concrete block (jpn1 kitchen 1_kitchblock*), white
+  plaster (2_cleanwall1*), a slab and old planks were sorted as tiles/varnish/polished - now stone/wood/
+  smoothcon (22 textures). The metal class (618) is not reviewed yet.

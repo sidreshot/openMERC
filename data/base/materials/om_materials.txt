@@ -43,6 +43,8 @@ class   fabric     0.00  0.90  0.30  0.15  0.0    0.0   0.0  0.0
 class   plastic    0.10  0.25  0.50  0.30  1.0    0.5   0.0  0.8
 class   sky        0.00  1.00  0.00  0.00  0.0    0.0   0.0  0.0
 
+# 2026-11-10 owner: painted block, plaster and concrete never shine - moved out of tiles by eye
+
 # --- polished (29)
 tex castle/decfloor                          polished
 tex castle/floordesign                       polished
@@ -55,7 +57,7 @@ tex castle/marbfloor4                        polished
 tex castle/marbfloor5                        polished
 tex castle/marbfloor6                        polished
 tex castle/tilefloor                         polished
-tex subway/1_lobby_floor_edge                polished
+tex subway/1_lobby_floor_edge                smoothcon
 tex tokyo/1_kitchfloor1                      polished
 tex tokyo/1_kitchfloor1trim                  polished
 tex tokyo/2_checkfloor                       polished
@@ -77,7 +79,7 @@ tex tokyo/marblewall_trim2                   polished
 # --- tiles (99)
 tex armory/1_2_subfloor1                     tiles
 tex armory/1_bathroom_men                    tiles
-tex armory/1_lobby3                          tiles
+tex armory/1_lobby3                          smoothcon
 tex armory/1_tile                            tiles
 tex armory/1_tile_bottom                     tiles
 tex castle/bathroom2_tile                    tiles
@@ -148,23 +150,23 @@ tex subway/1_tilegraf18                      tiles
 tex subway/1_tilegraf19                      tiles
 tex subway/1_tilegraf19b                     tiles
 tex subway/1_tilegraf20                      tiles
-tex tokyo/1_kitchblock                       tiles
-tex tokyo/1_kitchblock2                      tiles
-tex tokyo/1_kitchblock2_top                  tiles
-tex tokyo/1_kitchblock2a                     tiles
-tex tokyo/1_kitchblock2b                     tiles
-tex tokyo/1_kitchblock2c                     tiles
-tex tokyo/1_kitchblock3                      tiles
-tex tokyo/1_kitchblock_blue                  tiles
-tex tokyo/1_kitchblock_flr                   tiles
-tex tokyo/1_kitchblock_red                   tiles
-tex tokyo/2_clean_pillar1a                   tiles
-tex tokyo/2_cleanwall1                       tiles
-tex tokyo/2_cleanwall1_bot                   tiles
-tex tokyo/2_cleanwall1_bot2                  tiles
-tex tokyo/2_cleanwall1_top1                  tiles
-tex tokyo/2_cleanwall1_top2                  tiles
-tex tokyo/2_cleanwall1_top3                  tiles
+tex tokyo/1_kitchblock                       stone
+tex tokyo/1_kitchblock2                      stone
+tex tokyo/1_kitchblock2_top                  stone
+tex tokyo/1_kitchblock2a                     stone
+tex tokyo/1_kitchblock2b                     stone
+tex tokyo/1_kitchblock2c                     stone
+tex tokyo/1_kitchblock3                      stone
+tex tokyo/1_kitchblock_blue                  stone
+tex tokyo/1_kitchblock_flr                   smoothcon
+tex tokyo/1_kitchblock_red                   stone
+tex tokyo/2_clean_pillar1a                   plastic
+tex tokyo/2_cleanwall1                       stone
+tex tokyo/2_cleanwall1_bot                   stone
+tex tokyo/2_cleanwall1_bot2                  stone
+tex tokyo/2_cleanwall1_top1                  stone
+tex tokyo/2_cleanwall1_top2                  metal
+tex tokyo/2_cleanwall1_top3                  varnish
 tex tokyo/2_floor_tile                       tiles
 tex tokyo/bath_porclin                       tiles
 tex tokyo/bathroom_flr1                      tiles
@@ -179,8 +181,8 @@ tex tokyo/bathroomwall_3a                    tiles
 tex armory/desktop1                          varnish
 tex armory/desktop2                          varnish
 tex armory/desktop3                          varnish
-tex bosnia/1_3_stairslab                     varnish
-tex bosnia/1_3_stairtop_wood                 varnish
+tex bosnia/1_3_stairslab                     stone
+tex bosnia/1_3_stairtop_wood                 wood
 tex castle/deskwood                          varnish
 tex castle/deskwood_side                     varnish
 tex castle/dining_table                      varnish
@@ -193,7 +195,7 @@ tex tokyo/1_cabinet2                         varnish
 tex tokyo/1_desktop                          varnish
 tex tokyo/1_kitchcounter                     varnish
 tex tokyo/3_dresser                          varnish
-tex uganda/1_2_woodfloor                     varnish
+tex uganda/1_2_woodfloor                     wood
 tex uganda/desktop                           varnish
 
 # --- smoothcon (7)

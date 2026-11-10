@@ -889,7 +889,9 @@ static const char* fragmentSrcOmPdl =
 	"			spec += E * (nl * min(a2 / (dd * dd) * fr * 0.25 / max(vh * vh, 0.1), 4.0));\n"
 	"		}\n"
 	"	}\n"
-	"	spec *= omPdl.y * omPdl.z;\n"
+	/* by the class's reflectivity (f0 = 0.04 + 0.4 refl): polished floors in full, matte concrete and brick keep only
+	   a broad 15% sheen (owner: walls must not shine) */
+	"	spec *= omPdl.y * omPdl.z * mix(0.15, 1.0, smoothstep(0.0, 0.2, (f0 - 0.04) * 2.5));\n"
 	"	return sum * omPdl.y;\n"
 	"}\n"
 	;
@@ -1000,7 +1002,9 @@ static const char* fragmentSrcOmWorld =
 	"	float vh = max(dot(V, H), 0.0);\n"
 	"	float f0 = 0.04 + 0.5 * refl;\n"
 	"	float F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);\n"
-	"	return lm * (k * min(a2 / (dd * dd) * F * 0.25 / max(vh * vh, 0.1), 6.0));\n"
+	/* by the class's reflectivity: a full dielectric highlight on every face with any material made damp sewer walls
+	   (refl ~0.03) shine (owner, kos1); polished floors (0.28) keep it all, tiled walls (0.05) a quarter */
+	"	return lm * (k * min(a2 / (dd * dd) * F * 0.25 / max(vh * vh, 0.1), 6.0) * smoothstep(0.0, 0.2, refl));\n"
 	"}\n"
 	"uniform vec4 omSsr;\n"   /* x reflections on (0 = off), y rain wetness (0 = dry) */
 	/* GFX-modern r_om_mirror: the world seen in the mirror plane (gl3_post.c), replaces the faces on that plane */
