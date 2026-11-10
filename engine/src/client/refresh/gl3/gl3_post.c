@@ -9818,7 +9818,7 @@ static const char *ssr_apply_fs =
 	"uniform vec4 size;\n"     /* half size: width, height, 1/width, 1/height */
 	"uniform vec2 texel;\n"    /* one full-size pixel in view coordinates */
 	"uniform mat4 invview;\n"  /* view space -> world */
-	"uniform vec4 glint;\n"    /* glint strength, wet darkening, debug */
+	"uniform vec4 glint;\n"    /* glint strength, wet darkening, debug, 1 = r_om_ssr_blur ran */
 	"uniform vec4 omBL[8];\n"
 	"uniform vec4 omBC[8];\n"
 	"uniform int omBN;\n"
@@ -9877,7 +9877,8 @@ static const char *ssr_apply_fs =
 	/* blurred by as much as the trace resolution is reduced (half size: one trace pixel, the stair of the upsampling;
 	   full size: none), depth-aware like the taps above */
 	"	float br = max(size.z / texel.x - 1.0, 0.0);\n"
-	"	if (br > 0.01)\n"
+	/* not after r_om_ssr_blur (glint.w 1): its Gaussian already softened the trace pixels */
+	"	if (br > 0.01 && glint.w < 0.5)\n"
 	"	{\n"
 	"		vec4 acc = vec4(0.0);\n"
 	"		float ws = 0.0;\n"
@@ -10419,7 +10420,7 @@ GL3_Post_SSR(void)
 		glUniformMatrix4fv(SR.a_inv, 1, GL_FALSE, &inv.Elements[0][0]);
 	}
 	glUniform4f(SR.a_glint, Q_max(0.0f, r_om_ssr_glint->value), 0.3f,
-		(float)dbg, 0);
+		(float)dbg, SR.blurred ? 1.0f : 0.0f);
 	GL3_Lamps_View(SR.progapply, r_newrefdef.vieworg);
 	BindTex(GL_TEXTURE2, P.texdepthcopy);
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
