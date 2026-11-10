@@ -1725,3 +1725,6 @@ client fx module) to start an effect in front of the eye.
 * The world is drawn before the models: the capsules of the last frame (8 nearest within 1500 units) are used.
 * Cost: world pass +0.1..0.3 ms (jpn1 kitchen, 1080p). Presets medium/high on, minimal/low off; GLES default off.
 * Debug: r_om_capsule 2 prints the capsules once a second, 3 the boxes, 4 every Ghoul entity and the entity list.
+* Corpses (checked on kos1: grunt killed with omkill, origin 11 units over the ledge): the lying capsule is built
+  along the body's yaw directly, r 9, half-length 26 - the axis-aligned box of a body turned 45 degrees is square and
+  was refused by the size test. The ground under the legs darkens; r_om_capsule 3 prints every model's box.

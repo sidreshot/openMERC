@@ -842,6 +842,12 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		Ghl_Bounds(inst, GL3_GameTime(), &P.entityToWorld, mins, maxs);
 		VectorSubtract(maxs, mins, size);
 
+		if (r_om_capsule->value >= 3)
+		{
+			R_Printf(PRINT_ALL, "  model at (%.0f %.0f %.0f) box %.0f %.0f %.0f flags %x\n", e->origin[0], e->origin[1],
+				e->origin[2], size[0], size[1], size[2], flags);
+		}
+
 		if ((maxs[0] > mins[0]) && (Q_max(size[0], size[1]) >= 100) && (size[2] >= 60) && (size[2] <= 160))
 		{
 			vec3_t start, end, cmin, cmax;
@@ -859,15 +865,24 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 				VectorSet(cmin, e->origin[0] - 14, e->origin[1] - 14, feet);
 				VectorSet(cmax, e->origin[0] + 14, e->origin[1] + 14, feet + 64);
 			}
-			else
+			else if (numcaps[capcur] < MAX_CAPS)
 			{
-				float dx = fabsf(cosf(yaw)) * 28 + 9, dy = fabsf(sinf(yaw)) * 28 + 9;
+				/* lying: the capsule along the body's yaw itself (a box of a body turned 45 degrees is square) */
+				float *ca = capa[capcur][numcaps[capcur]], *cb = capb[capcur][numcaps[capcur]];
+				float hx = cosf(yaw) * 26, hy = sinf(yaw) * 26;
 
-				VectorSet(cmin, e->origin[0] - dx, e->origin[1] - dy, feet);
-				VectorSet(cmax, e->origin[0] + dx, e->origin[1] + dy, feet + 16);
+				VectorSet(ca, e->origin[0] - hx, e->origin[1] - hy, feet + 9);
+				VectorSet(cb, e->origin[0] + hx, e->origin[1] + hy, feet + 9);
+				ca[3] = 9;
+				cb[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.85f;
+				numcaps[capcur]++;
+				capsuled = true;
 			}
 
-			capsuled = CapsuleAdd(cmin, cmax);
+			if (e->origin[2] - feet >= 14)
+			{
+				capsuled = CapsuleAdd(cmin, cmax);
+			}
 		}
 		/* props keep their blob: a capsule of a flat thing (a fish on the jpn1 kitchen table) smudged the table */
 	}
