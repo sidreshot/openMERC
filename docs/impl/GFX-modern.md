@@ -1653,3 +1653,16 @@ client fx module) to start an effect in front of the eye.
   at the clear depth (sky faces, holes); covered pixels fail early. The hole now shows the painted New York skyline.
 * Rain drops: behind x 0.7 + blur x 0.25 (gain under 1, the loop through the last frame always converges) + the rain
   colour x 0.25 (not fed back) for their sheen.
+
+## r_om_lens: chromatic aberration, flares, lens dirt (2026-11-11)
+
+* All in the composite pass, no new targets. r_om_lens_ca: red and blue sampled apart along the radius, offset ~ r^2
+  (none in the middle, early out under 0.5 px), 2 fetches. r_om_lens_flare: three ghosts of the bloom image mirrored
+  through the centre (the bloom holds only emissive light - lamps, flashes, fire - so nothing else flares), each its
+  own tint and scale, fading to the image edge, plus a thin halo ring at 0.42 of the height. r_om_lens_dirt: the bloom
+  x (1 + dirt x smudge mask), the mask two octaves of value noise thresholded into blobs, evaluated only where the
+  bloom is above 0.02.
+* Cost (1080p composite, one run): all on +0.14 ms (0.70 -> 0.84), CA alone +0.04 ms. The first dirt mask (3x3 cells
+  of random discs, 36 hashes a pixel everywhere) cost +0.6..0.9 ms.
+* Defaults 0.5 / 0.35 / 0.3 (medium, high presets); minimal / low (phones) 0. Menu: Colour -> Lens Flares,
+  Chromatic Aberration.

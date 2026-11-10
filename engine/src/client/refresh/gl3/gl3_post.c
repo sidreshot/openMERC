@@ -961,6 +961,8 @@ static const char *post_comp_fs =
 	"uniform vec4 mbP;\n"
 	"uniform mat4 mbM;\n"
 	"uniform vec4 rect;\n"
+	/* r_om_lens: x chromatic aberration, y ghosts and halo, z lens dirt, w aspect of the view */
+	"uniform vec4 lens;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -968,9 +970,55 @@ static const char *post_comp_fs =
 	/* the scene seen through an open shutter: up to 8 taps along the pixel's motion, centred, jittered per pixel (no
 	   steps), in linear light (the target holds display-encoded colour); taps on the weapon are left out. A still
 	   camera costs one depth fetch */
+	/* the lens: red and blue focus a little apart towards the frame's edges (radius squared, none in the middle) */
+	"vec3 LensScene(vec2 tuv)\n"
+	"{\n"
+	"	vec3 c = texture(scene, tuv).rgb;\n"
+	"	if (lens.x <= 0.0) return c;\n"
+	"	vec2 dv = (vuv - 0.5) * vec2(lens.w, 1.0);\n"
+	"	vec2 o = (vuv - 0.5) * dot(dv, dv) * lens.x * 0.012 * rect.zw;\n"
+	"	if (dot(o, o) * 1e6 < 0.25) return c;\n"
+	"	c.r = texture(scene, clamp(tuv + o, rect.xy, rect.xy + rect.zw)).r;\n"
+	"	c.b = texture(scene, clamp(tuv - o, rect.xy, rect.xy + rect.zw)).b;\n"
+	"	return c;\n"
+	"}\n"
+	/* ghosts and a halo of what glows (the bloom image holds only emissive light: lamps, flashes, fire), mirrored
+	   through the centre as the elements of a lens reflect it, each element its own tint and size; fades towards the
+	   edge of the image */
+	"vec3 LensGhosts(vec2 v)\n"
+	"{\n"
+	"	vec2 g = vec2(1.0) - v;\n"
+	"	vec2 dir = g - 0.5;\n"
+	"	vec3 acc = vec3(0.0);\n"
+	"	acc += texture(bloom, 0.5 + dir * 0.55).rgb * vec3(0.9, 0.55, 0.3) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.55)));\n"
+	"	acc += texture(bloom, 0.5 - dir * 0.3).rgb * vec3(0.35, 0.65, 0.9) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.3)));\n"
+	"	acc += texture(bloom, 0.5 + dir * 1.45).rgb * vec3(0.5, 0.8, 0.45) * 0.6 * (1.0 - smoothstep(0.1, 0.55, length(dir * 1.45)));\n"
+	/* the halo: a thin ring a set distance from the centre, from the light on the far side */
+	"	float dl = length(dir * vec2(lens.w, 1.0));\n"
+	"	vec2 hd = dl > 1e-4 ? dir / dl : vec2(0.0);\n"
+	"	vec2 hp = g - hd * vec2(1.0 / lens.w, 1.0) * 0.42;\n"
+	"	float hw = pow(1.0 - min(abs(length((hp - 0.5) * vec2(lens.w, 1.0)) - 0.42) * 5.0, 1.0), 4.0);\n"
+	"	acc += texture(bloom, hp).rgb * vec3(0.7, 0.75, 1.0) * hw * 0.5;\n"
+	"	return acc;\n"
+	"}\n"
+	/* dust and smudges on the front element: seen only where bright light falls on it (a mask on the bloom) */
+	"float LHash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }\n"
+	"float LNoise(vec2 p)\n"
+	"{\n"
+	"	vec2 i = floor(p), f = fract(p);\n"
+	"	f = f * f * (3.0 - 2.0 * f);\n"
+	"	return mix(mix(LHash(i), LHash(i + vec2(1.0, 0.0)), f.x), mix(LHash(i + vec2(0.0, 1.0)), LHash(i + vec2(1.0)), f.x), f.y);\n"
+	"}\n"
+	/* smudges: two octaves of value noise, thresholded into soft blobs (8 hashes; only where something glows) */
+	"float LensDirt(vec2 v)\n"
+	"{\n"
+	"	vec2 p = v * vec2(lens.w, 1.0);\n"
+	"	float n = LNoise(p * 4.0 + 17.0) * 0.65 + LNoise(p * 13.0 + 3.0) * 0.35;\n"
+	"	return 0.15 + smoothstep(0.5, 0.78, n);\n"
+	"}\n"
 	"vec3 MotionScene(vec2 tuv)\n"
 	"{\n"
-	"	vec3 c0 = texture(scene, tuv).rgb;\n"
+	"	vec3 c0 = LensScene(tuv);\n"
 	"	if (mb0.x <= 0.0) return c0;\n"
 	"	float z = texture(mbdepth, tuv).r;\n"
 	"	if (z < mb0.w) return c0;\n"
@@ -1070,7 +1118,12 @@ static const char *post_comp_fs =
 	"	else\n"
 	"	{\n"
 	"		c = MotionScene(uv);\n"
-	"		if (mode == 1) c += texture(bloom, vuv).rgb * intensity;\n"
+	"		if (mode == 1)\n"
+	"		{\n"
+	"			vec3 bl = texture(bloom, vuv).rgb;\n"
+	"			c += bl * intensity * ((lens.z > 0.0 && dot(bl, vec3(1.0)) > 0.02) ? 1.0 + lens.z * LensDirt(vuv) : 1.0);\n"
+	"			if (lens.y > 0.0) c += LensGhosts(vuv) * intensity * lens.y;\n"
+	"		}\n"
 	"		if (look != 0)\n"
 	"			c = Grade(c, hdr == 1 ? texture(exptex, vec2(0.5)).r : 1.0);\n"
 	"		else if (hdr == 1)\n"
@@ -3668,6 +3721,22 @@ GL3_Post_EndView(void)
 	glUniform4f(P.comp_rect, P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
 	glUniform1f(P.comp_intensity, r_om_bloom_intensity->value * 2.0f / (float)Q_max(P.nlevels, 1));
 	glUniform1i(P.comp_mode, mode);
+	/* r_om_lens: chromatic aberration, ghosts and halo of what glows, lens dirt (not over debug views or night vision) */
+	{
+		static cvar_t *ca, *fl, *dirt;
+		qboolean nv = (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES) != 0;
+
+		if (!ca)
+		{
+			ca = ri.Cvar_Get("r_om_lens_ca", "0.5", CVAR_ARCHIVE);
+			fl = ri.Cvar_Get("r_om_lens_flare", "0.35", CVAR_ARCHIVE);
+			dirt = ri.Cvar_Get("r_om_lens_dirt", "0.3", CVAR_ARCHIVE);
+		}
+
+		glUniform4f(GL3_UniformLoc(P.progcomp, "lens"), (dbg || nv) ? 0.0f : Q_clamp(ca->value, 0.0f, 4.0f),
+			(dbg || nv || !P.bloomthis) ? 0.0f : Q_clamp(fl->value, 0.0f, 2.0f),
+			(dbg || nv || !P.bloomthis) ? 0.0f : Q_clamp(dirt->value, 0.0f, 2.0f), (float)P.vw / (float)Q_max(P.vh, 1));
+	}
 	{
 		static cvar_t *vivid;
 
