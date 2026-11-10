@@ -344,6 +344,7 @@ float gl3_skyscale = 1.0f;
 /* OpenMerc GFX-modern r_om_skyrays: the light painted on the sky box ("light <x y z> [<r g b>]" in
    pics/sky/<name>.txt: the direction toward the moon or sun, in the world's axes, and its colour) */
 static qboolean skylight_valid;
+static float skywind_angle; /* r_om_skyflow: the wind of the sky, from its name */
 static vec3_t skylight_dir, skylight_color;
 
 qboolean
@@ -370,6 +371,17 @@ GL3_SoF_SetSky(const char *name, float rotate, vec3_t axis)
 	VectorCopy(axis, skyaxis);
 	gl3_skyscale = 1.0f;
 	skylight_valid = false;
+	{
+		unsigned h = 2166136261u;
+		const char *c;
+
+		for (c = name; *c; c++)
+		{
+			h = (h ^ (unsigned char)*c) * 16777619u;
+		}
+
+		skywind_angle = (float)(h % 6283u) * 0.001f;
+	}
 
 	for (face = 0; face < 6; face++)
 	{
@@ -938,6 +950,26 @@ GL3_DrawSkyBox(void)
 		{
 			GL3_UseProgram(prog);
 			glUniform1f(loc, gl3_skyscale);
+
+			/* r_om_skyflow: the wind of this sky (a fixed direction per sky name), drift and cycle */
+			{
+				static cvar_t *r_om_skyflow;
+				GLint fl = GL3_UniformLoc(prog, "omSkyFlow");
+
+				if (!r_om_skyflow)
+				{
+					r_om_skyflow = ri.Cvar_Get("r_om_skyflow", "1", CVAR_ARCHIVE);
+				}
+
+				if (fl != -1)
+				{
+					float a = skywind_angle;
+
+					/* strength 0.6 of the masses, drift 0.03 plane units a second (slow, low weather) */
+					glUniform4f(fl, cosf(a), sinf(a), (skyrotate != 0.0f) ? 0.0f :
+						0.6f * Q_clamp(r_om_skyflow->value, 0.0f, 2.0f), 0.03f);
+				}
+			}
 		}
 	}
 

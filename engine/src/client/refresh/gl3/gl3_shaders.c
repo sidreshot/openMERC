@@ -474,6 +474,20 @@ static const char* vertexSrc3D = MULTILINE_STRING(
 		}
 );
 
+// OpenMerc GFX-modern r_om_skyflow: the sky box with the direction of each vertex (the sky's own rotation included)
+static const char* vertexSrc3Dsky = MULTILINE_STRING(
+
+		// it gets attributes and uniforms from vertexCommon3D
+		out vec3 passSkyDir;
+
+		void main()
+		{
+			passTexCoord = texCoord;
+			passSkyDir = mat3(transModel) * position;
+			gl_Position = transProjView * transModel * vec4(position, 1.0);
+		}
+);
+
 static const char* vertexSrc3Dflow = MULTILINE_STRING(
 
 		// it gets attributes and uniforms from vertexCommon3D
@@ -1336,10 +1350,34 @@ static const char* fragmentSrc3Dsky = MULTILINE_STRING(
 		uniform sampler2D tex;
 		uniform vec4 omSkyTint; // OpenMerc GFX-modern r_om_rain: overcast sky, lightning flash (gl3_post.c)
 		uniform float omSkyScale; // OpenMerc GFX-modern: the sky's brightness (pics/sky/<name>.txt "scale", gl3_warp.c)
+		// OpenMerc GFX-modern r_om_skyflow: a layer of cloud masses drifting with a wind over the painted sky - value-noise
+		// fbm on a plane overhead (the direction over its height: no seams between the faces of the box), lightening and
+		// darkening what is painted. xy the wind (world, unit), z strength, w speed. Only above the horizon: a painted
+		// city skyline stays as it is. (A flow-map drift of the painted clouds themselves doubled them when made visible)
+		uniform vec4 omSkyFlow;
+		in vec3 passSkyDir;
+
+		float SkyHash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+		float SkyNoise(vec2 p)
+		{
+			vec2 i = floor(p), f = fract(p);
+			f = f * f * (3.0 - 2.0 * f);
+			return mix(mix(SkyHash(i), SkyHash(i + vec2(1.0, 0.0)), f.x), mix(SkyHash(i + vec2(0.0, 1.0)), SkyHash(i + vec2(1.0)), f.x), f.y);
+		}
 
 		void main()
 		{
 			vec4 texel = texture(tex, passTexCoord);
+			vec3 D = normalize(passSkyDir);
+			float k = smoothstep(0.08, 0.35, D.z) * omSkyFlow.z;
+			if (k > 0.0)
+			{
+				vec2 w = omSkyFlow.xy * (time * omSkyFlow.w);
+				vec2 P = D.xy / max(D.z, 0.12) * 1.3;
+				// the layers move at their own speeds (higher clouds slower): the sky does not slide as one sheet
+				float f = SkyNoise(P + w) * 0.5 + SkyNoise(P * 2.1 + w * 1.35 + 7.3) * 0.3 + SkyNoise(P * 4.7 + w * 1.8 + 3.1) * 0.2;
+				texel.rgb *= mix(1.0, 0.6 + 0.8 * smoothstep(0.25, 0.75, f), min(k, 1.0));
+			}
 
 			// TODO: something about GL_BLEND vs GL_ALPHATEST etc
 
@@ -2673,7 +2711,7 @@ static qboolean createShaders(void)
 		Com_Printf("WARNING: Failed to create shader program for scrolling textured translucent 3D rendering!\n");
 		return false;
 	}
-	if(!initShader3D(&gl3state.si3Dsky, vertexSrc3D, fragmentSrc3Dsky))
+	if(!initShader3D(&gl3state.si3Dsky, vertexSrc3Dsky, fragmentSrc3Dsky))
 	{
 		Com_Printf("WARNING: Failed to create shader program for sky rendering!\n");
 		return false;

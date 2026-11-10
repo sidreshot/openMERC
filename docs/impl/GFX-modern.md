@@ -1694,3 +1694,13 @@ client fx module) to start an effect in front of the eye.
   at 90 degrees 3 px, under 40 degrees the 14 px cap. The fixed 9 px made the tsr1 intro's high wide shots look like
   a tilt-shift model; now wide shots stay nearly sharp and long lenses (close-ups, the scope) blur the background.
   Checked on the tsr1 intro (cl_cinematicfreeze 1 there).
+
+## r_om_skyflow: drifting cloud masses over the painted sky (2026-11-11)
+
+* The sky box shader has its own vertex shader now (vertexSrc3Dsky: the direction of each vertex, the sky's rotation
+  included). A layer of value-noise fbm (3 octaves, each drifting at its own speed) on a plane overhead (direction /
+  its height: continuous across the faces) lightens and darkens the painted sky (x 0.6..1.4), only above ~5 degrees
+  (a painted skyline stays). Wind direction from the sky's name (fixed per sky), 0.03 plane units a second; rotating
+  skies (trn1) keep their own motion. Cost: sky pixels only, ALU.
+* Tried first and dropped: a flow-map drift of the painted clouds (two phases half a cycle apart) - invisible at a
+  small drift, doubled the clouds at a visible one.
