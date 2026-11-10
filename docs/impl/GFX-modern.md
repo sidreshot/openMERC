@@ -1711,3 +1711,17 @@ client fx module) to start an effect in front of the eye.
   noise; kos1 +0.3 ms. Still camera: motion blur costs nothing.
 * The motion blur / depth of field depth copy at EndView is skipped when SSAO, SSR or the rain already copied the
   finished depth (P.depthfinal; all run after the sorted pass, the view weapon is in it) - the weapon stays sharp.
+
+## r_om_capsule: soft contact shadows of bodies instead of the Ghoul blob (2026-11-11)
+
+* Each body near the eye is a capsule, the world shaders (both lightmapped ones) darken the baked light by the
+  occlusion of a sphere at the capsule's nearest point: cos x (1.4 r)^2 / l^2, cut at 5 r, x 0.85 (omCapsuleAO). It
+  lies on what the body stands on (a table, a step), follows the surface normal (a wall beside a body darkens a little,
+  the wall behind the camera not) and never spills like the flat blob quad. The blob is not drawn for such bodies.
+* Bodies: Ghl_Bounds of a character spans its whole animation (about 200 x 200 x 104 - such a capsule darkened the
+  floor around a grunt; the exact box of the pose, exact = 1, returns nothing). A Ghoul model with such a box is a
+  body placed by its origin and the floor under it (WorldTrace down 128): upright 64 high, r 11; lying along its yaw
+  where the origin is within 14 units of the floor. Props keep the blob (a fish's capsule smudged the jpn1 table).
+* The world is drawn before the models: the capsules of the last frame (8 nearest within 1500 units) are used.
+* Cost: world pass +0.1..0.3 ms (jpn1 kitchen, 1080p). Presets medium/high on, minimal/low off; GLES default off.
+* Debug: r_om_capsule 2 prints the capsules once a second, 3 the boxes, 4 every Ghoul entity and the entity list.

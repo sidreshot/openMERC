@@ -747,6 +747,9 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
+			// GFX-modern r_om_capsule: the soft contact shadows of the models in the baked (ambient) light
+			if(omCapN > 0)
+				lmTex.rgb *= omCapsuleAO(passWorldCoord, passNormal);
 			// GFX-modern r_om_deluxe: the highlight of the baked light (before the dynamic lights join the lightmap)
 			vec3 omDxS = vec3(0.0);
 			if(omDlx.x > 0.5 && omMat.x > 0.001)
@@ -996,6 +999,31 @@ static const char* fragmentSrcOmWorld =
 	   glints (r_om_ssr) light level faces already (less here); omEyeW the eye of the view; GL_TEXTURE10.
    No 1/pi in D: SoF draws the diffuse light as lightmap x texture, so the lightmap holds E/pi and the highlight
    D F V x E is D F V x pi x lightmap (with the 1/pi it stayed under the frame noise on brick and plaster) */
+	/* GFX-modern r_om_capsule: soft contact shadows of characters and props in the ambient light - each model a capsule
+	   (omCapA: segment start, radius; omCapB: segment end, strength), the occlusion of a sphere at the capsule's
+	   nearest point: cos x (1.4 r)^2 / l^2 (the share of the sky it hides, a little wider: soft bodies), cut at 5 radii. Replaces the flat Ghoul blob */
+	"uniform int omCapN;\n"
+	"uniform vec4 omCapA[8];\n"
+	"uniform vec4 omCapB[8];\n"
+	"float omCapsuleAO(vec3 P, vec3 Nn)\n"
+	"{\n"
+	"	vec3 N = normalize(Nn);\n"
+	"	float vis = 1.0;\n"
+	"	for (int i = 0; i < omCapN; i++)\n"
+	"	{\n"
+	"		vec3 a = omCapA[i].xyz, ab = omCapB[i].xyz - a;\n"
+	"		float r = omCapA[i].w;\n"
+	"		vec3 c = a + ab * clamp(dot(P - a, ab) / max(dot(ab, ab), 1e-3), 0.0, 1.0);\n"
+	"		vec3 dv = c - P;\n"
+	"		float l2 = dot(dv, dv);\n"
+	"		if (l2 > 25.0 * r * r) continue;\n"
+	"		float l = sqrt(l2);\n"
+	"		float occ = clamp(dot(N, dv) / max(l, 1e-3), 0.0, 1.0) * min(1.96 * r * r / max(l2, 1e-3), 1.0);\n"
+	"		occ *= 1.0 - smoothstep(3.5 * r, 5.0 * r, l);\n"
+	"		vis *= 1.0 - occ * omCapB[i].w;\n"
+	"	}\n"
+	"	return vis;\n"
+	"}\n"
 	"uniform vec4 omDlx;\n"
 	"uniform vec4 omEyeW;\n"
 	"uniform sampler2D omDeluxe;\n"
@@ -1264,6 +1292,9 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
+			// GFX-modern r_om_capsule: the soft contact shadows of the models in the baked (ambient) light
+			if(omCapN > 0)
+				lmTex.rgb *= omCapsuleAO(passWorldCoord, passNormal);
 			// GFX-modern r_om_deluxe: the highlight of the baked light (before the dynamic lights join the lightmap)
 			vec3 omDxS = vec3(0.0);
 			if(omDlx.x > 0.5 && omMat.x > 0.001)
@@ -3126,6 +3157,32 @@ void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 }
 
 /* GFX-modern r_om_deluxe: the eye of the view and the baked highlight's switches, per view (gl3_dynlight.c) */
+/* GFX-modern r_om_capsule: the capsules of the world shaders (gl3_ghoul.c), per frame */
+void GL3_SoF_CapsuleUniforms(int n, const float *a, const float *b)
+{
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	int i;
+
+	for (i = 0; i < 5; i++)
+	{
+		GLint loc;
+
+		if (!si[i]->shaderProgram || (loc = GL3_UniformLoc(si[i]->shaderProgram, "omCapN")) == -1)
+		{
+			continue;
+		}
+
+		GL3_UseProgram(si[i]->shaderProgram);
+		glUniform1i(loc, n);
+
+		if (n > 0)
+		{
+			glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omCapA"), n, a);
+			glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omCapB"), n, b);
+		}
+	}
+}
+
 void GL3_SoF_WorldViewUniforms(const float *eye, const float *dlx)
 {
 	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};

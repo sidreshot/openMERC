@@ -84,6 +84,13 @@ Ghl_Bounds(void *inst, float time, const ghlmatrix_t *root, float *mins, float *
 	((ghl_bounds_t)GHL_VT(inst, 51))(inst GHL_EDXARG, time, root, mins, maxs, 0, 0);
 }
 
+/* the exact box (the posed vertices): animated characters give no plain box */
+static void
+Ghl_BoundsExact(void *inst, float time, const ghlmatrix_t *root, float *mins, float *maxs)
+{
+	((ghl_bounds_t)GHL_VT(inst, 51))(inst GHL_EDXARG, time, root, mins, maxs, 0, 1);
+}
+
 /* ------------------------------------------------------------------
  * render-cull objects (SPEC-011 render parameters, entry 0)
  * ------------------------------------------------------------------ */
@@ -600,12 +607,182 @@ DebugPrint(const entity_t *e, const ghlparams_t *p)
 /* GFX-modern r_om_mirror: set while the models are drawn into a mirror image (gl3_post.c) */
 qboolean gl3_ghoul_mirror;
 
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_capsule: every model's box of this frame becomes a
+ * capsule (upright: along z; lying: along its longer level axis); the
+ * world of the next frame (it is drawn before the models) takes the eight
+ * nearest to the eye. The flat ground blob is not drawn for them.
+ * ------------------------------------------------------------------ */
+#define MAX_CAPS 64
+static float capa[2][MAX_CAPS][4], capb[2][MAX_CAPS][4];
+static int numcaps[2], capcur;
+static cvar_t *r_om_capsule;
+
+static qboolean
+CapsuleOn(void)
+{
+	if (!r_om_capsule)
+	{
+#ifdef YQ2_GL3_GLES3
+		r_om_capsule = ri.Cvar_Get("r_om_capsule", "0", CVAR_ARCHIVE);
+#else
+		r_om_capsule = ri.Cvar_Get("r_om_capsule", "1", CVAR_ARCHIVE);
+#endif
+	}
+
+	return r_om_capsule->value > 0;
+}
+
+/* a model's world box: true when it got a capsule */
+static qboolean
+CapsuleAdd(const vec3_t mins, const vec3_t maxs)
+{
+	vec3_t size, c;
+	float *a, *b, r;
+	int big, i;
+
+	VectorSubtract(maxs, mins, size);
+
+	if (r_om_capsule->value >= 3)
+	{
+		R_Printf(PRINT_ALL, "  box (%.0f %.0f %.0f) size %.0f %.0f %.0f\n", mins[0], mins[1], mins[2], size[0], size[1],
+			size[2]);
+	}
+
+	/* bodies only: upright 40..110 high and at most 56 wide, or lying (a corpse) 40..110 long, under 40 high. A big
+	   prop's box is a poor capsule (a heap of junk on kos1 darkened the floor around it as one 50-unit sphere) */
+	{
+		float lo = Q_min(size[0], size[1]), hi = Q_max(size[0], size[1]);
+		qboolean upright = (size[2] >= 40) && (size[2] <= 110) && (hi <= 56) && (lo >= 8);
+		qboolean lying = (hi >= 40) && (hi <= 110) && (lo <= 56) && (size[2] >= 6) && (size[2] < 40);
+
+		if ((!upright && !lying) || (numcaps[capcur] >= MAX_CAPS))
+		{
+			return false;
+		}
+	}
+
+	for (i = 0; i < 3; i++)
+	{
+		c[i] = 0.5f * (mins[i] + maxs[i]);
+	}
+
+	a = capa[capcur][numcaps[capcur]];
+	b = capb[capcur][numcaps[capcur]];
+
+	if (size[2] >= 0.8f * Q_max(size[0], size[1]))
+	{
+		/* upright: as wide as the smaller level extent (a body seen from above), from the feet to the head */
+		r = 0.4f * Q_min(size[0], size[1]);
+		VectorSet(a, c[0], c[1], mins[2] + r);
+		VectorSet(b, c[0], c[1], Q_max(maxs[2] - r, mins[2] + r));
+	}
+	else
+	{
+		/* lying (a corpse, a crate): along the longer level axis, as thick as it is high */
+		big = (size[0] >= size[1]) ? 0 : 1;
+		r = 0.5f * Q_min(size[2], size[big ^ 1]);
+		VectorCopy(c, a);
+		VectorCopy(c, b);
+		a[2] = b[2] = mins[2] + r;
+		a[big] = c[big] - Q_max(0.5f * size[big] - r, 0.0f);
+		b[big] = c[big] + Q_max(0.5f * size[big] - r, 0.0f);
+	}
+
+	a[3] = r;
+	b[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.85f;
+	numcaps[capcur]++;
+	return true;
+}
+
+/* before the world of a frame: last frame's capsules, the eight nearest the eye, to the world shaders */
+void
+GL3_Ghoul_CapsuleFrame(void)
+{
+	float a[8][4], b[8][4], dist[8];
+	int last = capcur, n = 0, i, j;
+
+	capcur ^= 1;
+	numcaps[capcur] = 0;
+
+	if (!CapsuleOn() || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
+	{
+		GL3_SoF_CapsuleUniforms(0, NULL, NULL);
+		return;
+	}
+
+	for (i = 0; i < numcaps[last]; i++)
+	{
+		vec3_t m, dv;
+		float dd;
+
+		for (j = 0; j < 3; j++)
+		{
+			m[j] = 0.5f * (capa[last][i][j] + capb[last][i][j]);
+		}
+
+		VectorSubtract(m, r_newrefdef.vieworg, dv);
+		dd = DotProduct(dv, dv);
+
+		if (dd > 1500.0f * 1500.0f)
+		{
+			continue;
+		}
+
+		/* insertion into the eight nearest */
+		for (j = n; (j > 0) && (dist[j - 1] > dd); j--)
+		{
+			if (j < 8)
+			{
+				memcpy(a[j], a[j - 1], sizeof(a[j]));
+				memcpy(b[j], b[j - 1], sizeof(b[j]));
+				dist[j] = dist[j - 1];
+			}
+		}
+
+		if (j < 8)
+		{
+			memcpy(a[j], capa[last][i], sizeof(a[j]));
+			memcpy(b[j], capb[last][i], sizeof(b[j]));
+			dist[j] = dd;
+			n = Q_min(n + 1, 8);
+		}
+	}
+
+	if (r_om_capsule->value >= 2)
+	{
+		static float next;
+
+		if (r_newrefdef.time >= next)
+		{
+			next = r_newrefdef.time + 1.0f;
+			R_Printf(PRINT_ALL, "OMCAPS %d of %d\n", n, numcaps[last]);
+
+			for (i = 0; (r_om_capsule->value >= 4) && (i < r_newrefdef.num_entities); i++)
+			{
+				const entity_t *en = &r_newrefdef.entities[i];
+
+				R_Printf(PRINT_ALL, "  ent %d at (%.0f %.0f %.0f) flags %x model %p frame %d\n", i, en->origin[0],
+					en->origin[1], en->origin[2], en->flags, (void *)en->model, en->frame);
+			}
+
+			for (i = 0; i < n; i++)
+			{
+				R_Printf(PRINT_ALL, "  cap (%.0f %.0f %.0f)-(%.0f %.0f %.0f) r %.1f\n", a[i][0], a[i][1], a[i][2], b[i][0],
+					b[i][1], b[i][2], a[i][3]);
+			}
+		}
+	}
+
+	GL3_SoF_CapsuleUniforms(n, &a[0][0], &b[0][0]);
+}
+
 void
 GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 {
 	ghlparams_t P;
 	void *inst;
-	qboolean weapon, fullbright, nocull, fog = false, wire, hack;
+	qboolean weapon, fullbright, nocull, fog = false, wire, hack, capsuled;
 	float m, darkness;
 	int flags = e->flags, mode;
 	vec3_t color;
@@ -645,6 +822,55 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 	/* step 3: orientation */
 	EntityMatrix(e, &P.entityToWorld);
+
+	/* GFX-modern r_om_capsule: the box of every model (also one outside the view: its shadow may be in it) */
+	capsuled = false;
+
+	if (CapsuleOn() && (r_om_capsule->value >= 4))
+	{
+		R_Printf(PRINT_ALL, "  ghoul at (%.0f %.0f %.0f) flags %x weapon %d mirror %d\n", e->origin[0], e->origin[1],
+			e->origin[2], flags, weapon, gl3_ghoul_mirror);
+	}
+
+	if (!weapon && !gl3_ghoul_mirror && CapsuleOn())
+	{
+		vec3_t mins = {0, 0, 0}, maxs = {0, 0, 0}, size;
+
+		/* a character's box spans its whole animation (about 200 x 200 x 104 - as a capsule it darkened the floor all
+		   around a standing grunt; the exact box of the pose is not offered): a body is placed by its origin and the
+		   floor under it instead - upright 64 high, or lying along its yaw where the origin is down at the floor */
+		Ghl_Bounds(inst, GL3_GameTime(), &P.entityToWorld, mins, maxs);
+		VectorSubtract(maxs, mins, size);
+
+		if ((maxs[0] > mins[0]) && (Q_max(size[0], size[1]) >= 100) && (size[2] >= 60) && (size[2] <= 160))
+		{
+			vec3_t start, end, cmin, cmax;
+			float f, feet, yaw = e->angles[1] * (float)M_PI / 180.0f;
+
+			VectorCopy(e->origin, start);
+			VectorCopy(e->origin, end);
+			start[2] += 8;
+			end[2] -= 128;
+			f = WorldTrace(start, end);
+			feet = ((f >= 0) && (f < 1)) ? start[2] + (end[2] - start[2]) * f : mins[2];
+
+			if (e->origin[2] - feet >= 14)
+			{
+				VectorSet(cmin, e->origin[0] - 14, e->origin[1] - 14, feet);
+				VectorSet(cmax, e->origin[0] + 14, e->origin[1] + 14, feet + 64);
+			}
+			else
+			{
+				float dx = fabsf(cosf(yaw)) * 28 + 9, dy = fabsf(sinf(yaw)) * 28 + 9;
+
+				VectorSet(cmin, e->origin[0] - dx, e->origin[1] - dy, feet);
+				VectorSet(cmax, e->origin[0] + dx, e->origin[1] + dy, feet + 16);
+			}
+
+			capsuled = CapsuleAdd(cmin, cmax);
+		}
+		/* props keep their blob: a capsule of a flat thing (a fish on the jpn1 kitchen table) smudged the table */
+	}
 
 	/* step 4: pre-cull with the instance's box at the frame's game clock */
 	if ((ghl_pre_cull->value > 0.5f) && !weapon && !nocull)
@@ -688,8 +914,8 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		mode = 2;
 	}
 
-	/* no ground shadows in a mirror image */
-	if ((ghl_shadow_darkness->value <= 0) || gl3_ghoul_mirror)
+	/* no ground shadows in a mirror image; none where the capsule shades the ground (r_om_capsule) */
+	if ((ghl_shadow_darkness->value <= 0) || gl3_ghoul_mirror || capsuled)
 	{
 		mode = 0;
 	}
