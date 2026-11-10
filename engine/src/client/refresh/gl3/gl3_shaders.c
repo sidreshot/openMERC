@@ -758,7 +758,14 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 
 			outColor.a = (omTranslucent != 0) ? texel.a*alpha : omCov; // OpenMerc: SoF translucent surfaces have lightmaps (opaque: 1, or the r_om_a2c coverage)
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
-			if(omEmissive > 0.0)
+			if(omEmissive > 50.0) // a little lamp by its name (100 + weight): lit by itself, not by the room
+			{
+				// only its lit pixels (bright and coloured, or near white), not the casing around them
+				float hi = max(texel.r, max(texel.g, texel.b)), lo = min(texel.r, min(texel.g, texel.b));
+				float lit = smoothstep(0.2, 0.6, hi) * max((hi - lo) / max(hi, 0.001), smoothstep(0.82, 0.95, lo));
+				outEmissive = vec4(pow(texel.rgb, vec3(gamma)) * (omFogK * (omEmissive - 100.0) * lit), outColor.a);
+			}
+			else if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
 			if(omTranslucent == 0)
 				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
@@ -1211,7 +1218,14 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 
 			outColor.a = (omTranslucent != 0) ? texel.a*alpha : omCov; // OpenMerc: SoF translucent surfaces have lightmaps (opaque: 1, or the r_om_a2c coverage)
 			// OpenMerc GFX-modern: SURF_LIGHT faces are bloom sources, hidden by the fog in front of them
-			if(omEmissive > 0.0)
+			if(omEmissive > 50.0) // a little lamp by its name (100 + weight): lit by itself, not by the room
+			{
+				// only its lit pixels (bright and coloured, or near white), not the casing around them
+				float hi = max(texel.r, max(texel.g, texel.b)), lo = min(texel.r, min(texel.g, texel.b));
+				float lit = smoothstep(0.2, 0.6, hi) * max((hi - lo) / max(hi, 0.001), smoothstep(0.82, 0.95, lo));
+				outEmissive = vec4(pow(texel.rgb, vec3(gamma)) * (omFogK * (omEmissive - 100.0) * lit), outColor.a);
+			}
+			else if(omEmissive > 0.0)
 				outEmissive = vec4(pow(lmTex.rgb * texel.rgb, vec3(gamma)) * (omFogK * omEmissive), outColor.a);
 			if(omTranslucent == 0)
 				outMaterial = vec4(omMat.rg * omFogK, omWetK * omFogK, clamp(dot(lmTex.rgb, vec3(0.3, 0.5, 0.2)), 0.0, 1.0)); // OpenMerc GFX-modern r_om_ssr: reflectivity, x roughness, wetness, light
@@ -2292,7 +2306,7 @@ err_cleanup:
 static void initUBOs(void)
 {
 	/* OpenMerc: SoF applies gamma, brightness and contrast to the images when
-	   they are loaded (SPEC-413 §9), not in the shaders */
+	   they are loaded (SPEC-413 В§9), not in the shaders */
 	gl3state.uniCommonData.gamma = 1.0f;
 	gl3state.uniCommonData.intensity = 1.0f;
 	gl3state.uniCommonData.intensity2D = 1.0f;

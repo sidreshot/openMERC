@@ -649,8 +649,48 @@ float
 GL3_Post_SurfEmissive(const msurface_t *surf)
 {
 	float v;
+	gl3image_t *img;
 
-	if (!gl3post.bloom || !surf->texinfo || !(surf->texinfo->flags & SURF_LIGHT))
+	if (!gl3post.bloom || !surf->texinfo)
+	{
+		return 0.0f;
+	}
+
+	/* the little lamps (red / green indicators, lit buttons and switches), by the texture's name: many are not
+	   marked as light or only faintly (castle red lights: value 2), and they sit in dark corners - they glow by
+	   their own lit pixels and get their glints (r_om_glints); an "off" frame is dark and stays dark */
+	img = surf->texinfo->image;
+
+	if (img)
+	{
+		if (!img->omlamp)
+		{
+			char n[MAX_QPATH];
+			const char *b;
+			int i;
+
+			for (i = 0; img->name[i] && (i < MAX_QPATH - 1); i++)
+			{
+				n[i] = (char)tolower((unsigned char)img->name[i]);
+			}
+
+			n[i] = 0;
+			b = strrchr(n, '/');
+			b = b ? b + 1 : n;
+			img->omlamp = (strstr(b, "redlight") || strstr(b, "greenlight") || strstr(b, "bluelight") ||
+				strstr(b, "light_tiny") || strstr(b, "blink") ||
+				((strstr(b, "button") || strstr(b, "switch")) && (strstr(b, "_on") || strstr(b, "_off") ||
+				strstr(b, "green") || strstr(b, "red")))) ? 2 : 1;
+		}
+
+		/* 100 + the weight: the world shader takes the texture's own colour */
+		if (img->omlamp == 2)
+		{
+			return 100.0f + 2.5f * r_om_bloom_surfscale->value;
+		}
+	}
+
+	if (!(surf->texinfo->flags & SURF_LIGHT))
 	{
 		return 0.0f;
 	}
@@ -947,7 +987,7 @@ static const char *post_comp_fs =
 	"	l = max(mix(vec3(Luma(l)), l, look0.w), vec3(0.0));\n"
 	"	l = Film(l, look0.y, look0.z);\n"
 	"	vec3 d = pow(l, vec3(1.0 / 2.2));\n"
-	/* the menu's gamma, contrast and brightness as SoF's colour table had them (SPEC-413 §9), in float: v^(1-g), an S
+	/* the menu's gamma, contrast and brightness as SoF's colour table had them (SPEC-413 В§9), in float: v^(1-g), an S
 	   curve of power k around the middle, an offset */
 	"	d = pow(max(d, vec3(0.0)), vec3(look2.a));\n"
 	"	vec3 e = pow(abs(2.0 * d - 1.0), vec3(look1.a));\n"
@@ -1983,6 +2023,215 @@ PostDiscard(GLenum attachment)
 #endif
 }
 
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_glints: lens glints of small lights (MGS5)
+ *
+ * Lamps, indicator lights, blinking switches, coronas: the small bright spots of the emissive target (the bloom
+ * levels before they are blurred up: half size minus its wide surround, so lit panels and big light faces stay out)
+ * get a thin horizontal streak and a short vertical one in their own colour, added to the bloom. They follow the
+ * source, so a blinking lamp blinks its glint. r_om_glints_intensity; r_om_glints_tune "threshold length
+ * height surround".
+ * ------------------------------------------------------------------ */
+
+static const char *glint_src_fs =
+	"uniform sampler2D l0;\n"
+	"uniform sampler2D l2;\n"
+	"uniform sampler2D l3;\n"
+	"uniform vec4 prm;\n"   /* threshold, surround weight */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec3 c = texture(l0, uv).rgb;\n"
+	"	vec3 s = 0.5 * (texture(l2, uv).rgb + texture(l3, uv).rgb);\n"
+	"	vec3 p = max(c - s * prm.y, 0.0);\n"
+	"	float L = max(max(p.r, p.g), p.b);\n"
+	"	p *= smoothstep(prm.x, prm.x * 3.0, L);\n"
+	/* the lamp's own hue, a little richer */
+	"	float m = dot(p, vec3(0.333));\n"
+	"	p = max(mix(vec3(m), p, 1.25), 0.0);\n"
+	"	outColor = vec4(min(p, vec3(4.0)), 1.0);\n"
+	"}\n";
+
+static const char *glint_streak_fs =
+	"uniform sampler2D src;\n"
+	"uniform vec4 texel;\n" /* one source texel (x, y); horizontal and vertical falloff (in texels) */
+	"uniform vec4 gain;\n"  /* rgb tint * strength */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec3 h = vec3(0.0), v = vec3(0.0);\n"
+	"	for (int i = 1; i <= 40; i++)\n"
+	"	{\n"
+	"		float fi = float(i);\n"
+	"		vec2 o = vec2(texel.x * fi, 0.0);\n"
+	"		h += (texture(src, uv + o).rgb + texture(src, uv - o).rgb) * exp(-fi / texel.z);\n"
+	"	}\n"
+	"	for (int i = 1; i <= 10; i++)\n"
+	"	{\n"
+	"		float fi = float(i);\n"
+	"		vec2 o = vec2(0.0, texel.y * fi);\n"
+	"		v += (texture(src, uv + o).rgb + texture(src, uv - o).rgb) * exp(-fi / texel.w);\n"
+	"	}\n"
+	"	vec3 c = texture(src, uv).rgb;\n"
+	/* the long streak cools a little toward its ends, as an anamorphic flare does */
+	"	vec3 r = c * 0.6 + h * mix(vec3(1.0), vec3(0.75, 0.9, 1.2), 0.35) * 0.22 + v * 0.18;\n"
+	"	outColor = vec4(r * gain.rgb, 1.0);\n"
+	"}\n";
+
+static struct
+{
+	qboolean failed, have;
+	GLuint psrc, pstreak;
+	GLuint tex, fbo;
+	int w, h;
+} GLT;
+
+static cvar_t *r_om_glints, *r_om_glints_intensity, *r_om_glints_tune;
+
+static void
+GlintsTune(float t[4])
+{
+	t[0] = 0.08f; /* threshold */
+	t[1] = 14.0f; /* horizontal falloff, quarter texels */
+	t[2] = 3.0f;  /* vertical falloff */
+	t[3] = 1.1f;  /* surround weight */
+
+	if (r_om_glints_tune && r_om_glints_tune->string[0])
+	{
+		sscanf(r_om_glints_tune->string, "%f %f %f %f", &t[0], &t[1], &t[2], &t[3]);
+	}
+}
+
+/* in the bloom, after the down chain: the small bright spots into the glint source (quarter size) */
+static void
+GlintsSource(void)
+{
+	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+	float t[4];
+	int w, h;
+
+	GLT.have = false;
+
+	if (!r_om_glints)
+	{
+#ifdef YQ2_GL3_GLES3
+		r_om_glints = ri.Cvar_Get("r_om_glints", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
+#else
+		r_om_glints = ri.Cvar_Get("r_om_glints", "1", CVAR_ARCHIVE);
+#endif
+		r_om_glints_intensity = ri.Cvar_Get("r_om_glints_intensity", "1", CVAR_ARCHIVE);
+		r_om_glints_tune = ri.Cvar_Get("r_om_glints_tune", "", 0);
+	}
+
+	if (GLT.failed || (r_om_glints->value <= 0) || (r_om_glints_intensity->value <= 0) || (P.nlevels < 4) ||
+		(r_newrefdef.rdflags & SOF_RDF_IRGOGGLES))
+	{
+		return;
+	}
+
+	if (!GLT.psrc)
+	{
+		GLT.psrc = LinkPost(glint_src_fs);
+		GLT.pstreak = LinkPost(glint_streak_fs);
+
+		if (!GLT.psrc || !GLT.pstreak)
+		{
+			R_Printf(PRINT_ALL, "r_om_glints: shader failed, no glints\n");
+			GLT.failed = true;
+			return;
+		}
+
+		GL3_UseProgram(GLT.psrc);
+		glUniform1i(glGetUniformLocation(GLT.psrc, "l0"), 0);
+		glUniform1i(glGetUniformLocation(GLT.psrc, "l2"), 1);
+		glUniform1i(glGetUniformLocation(GLT.psrc, "l3"), 2);
+		GL3_UseProgram(GLT.pstreak);
+		glUniform1i(glGetUniformLocation(GLT.pstreak, "src"), 0);
+	}
+
+	w = P.lw[1];
+	h = P.lh[1];
+
+	if (!GLT.tex || (GLT.w != w) || (GLT.h != h))
+	{
+		if (GLT.fbo) glDeleteFramebuffers(1, &GLT.fbo);
+		if (GLT.tex) glDeleteTextures(1, &GLT.tex);
+#ifdef YQ2_GL3_GLES3
+		GLT.tex = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, GL_LINEAR);
+#else
+		GLT.tex = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR);
+#endif
+		glGenFramebuffers(1, &GLT.fbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, GLT.fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, GLT.tex, 0);
+		glDrawBuffers(1, one);
+
+		if (!Complete("glints"))
+		{
+			GLT.failed = true;
+			return;
+		}
+
+		GLT.w = w;
+		GLT.h = h;
+	}
+
+	GlintsTune(t);
+	glBindFramebuffer(GL_FRAMEBUFFER, GLT.fbo);
+	PostDiscard(GL_COLOR_ATTACHMENT0);
+	glViewport(0, 0, w, h);
+	glDisable(GL_BLEND);
+	GL3_UseProgram(GLT.psrc);
+	glUniform4f(glGetUniformLocation(GLT.psrc, "rect"), 0, 0, 1, 1);
+	glUniform4f(glGetUniformLocation(GLT.psrc, "prm"), Q_max(t[0], 0.001f), Q_max(t[3], 0.0f), 0, 0);
+	BindTex(GL_TEXTURE2, P.leveltex[3]);
+	BindTex(GL_TEXTURE1, P.leveltex[2]);
+	BindTex(GL_TEXTURE0, P.leveltex[0]);
+	DrawQuad();
+	GLT.have = true;
+}
+
+/* after the up chain: the streaks added into the finished bloom (half size), in the composite's own scale */
+static void
+GlintsApply(void)
+{
+	float t[4], k, comp;
+
+	if (!GLT.have)
+	{
+		return;
+	}
+
+	GlintsTune(t);
+	comp = r_om_bloom_intensity->value * 2.0f / (float)Q_max(P.nlevels, 1);
+
+	if (comp <= 0.0f)
+	{
+		return;
+	}
+
+	/* the glint's strength on the screen, whatever the bloom's intensity */
+	k = Q_clamp(r_om_glints_intensity->value, 0.0f, 4.0f) * 0.5f / comp;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.levelfbo[0]);
+	glViewport(0, 0, P.lw[0], P.lh[0]);
+	GL3_UseProgram(GLT.pstreak);
+	glUniform4f(glGetUniformLocation(GLT.pstreak, "rect"), 0, 0, 1, 1);
+	glUniform4f(glGetUniformLocation(GLT.pstreak, "texel"), 1.0f / GLT.w, 1.0f / GLT.h, Q_max(t[1], 0.5f),
+		Q_max(t[2], 0.5f));
+	glUniform4f(glGetUniformLocation(GLT.pstreak, "gain"), k, k, k, 0);
+	BindTex(GL_TEXTURE0, GLT.tex);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+	DrawQuad();
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+}
+
 static void
 Bloom(void)
 {
@@ -2025,6 +2274,8 @@ Bloom(void)
 		DrawQuad();
 	}
 
+	GlintsSource();
+
 	/* up the chain, each level adds the blurred smaller one */
 	GL3_UseProgram(P.progup);
 	glUniform1i(P.up_tex, 0);
@@ -2043,6 +2294,8 @@ Bloom(void)
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDisable(GL_BLEND);
+
+	GlintsApply();
 }
 
 /* r_om_hdr: mean log luminance of the view, then the exposure eased towards key / mean */

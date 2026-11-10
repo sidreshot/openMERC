@@ -653,6 +653,8 @@ typedef struct image_s
 	float detail_scroll[2];
 	int omgloss;                        /* GFX-modern r_om_ssr: material class + 1 (0 = not worked out yet) */
 	int omglossgen;                     /* ... for this generation of the material table (gl3_material.c) */
+	int omlamp;                         /* GFX-modern: a little lamp by its name (indicator, switch, button lit):
+	                                       0 = not worked out yet, 1 = no, 2 = yes */
 } gl3image_t;
 
 enum {MAX_GL3TEXTURES = 1024};
