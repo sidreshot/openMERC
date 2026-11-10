@@ -1763,3 +1763,15 @@ client fx module) to start an effect in front of the eye.
   (the mark's vertex colour) as a lip, the upper one sinks into shadow. A painted hole now reads as a crater on the
   arm1 brick wall (om_decal bhole_mtl / bhole2 / bhole_wd). Cost: two texture fetches on the holes' own pixels.
 * First version only multiplied the colour: a dark hole changed by one grey level - the lit lip is what shows.
+
+## r_om_taa: temporal antialiasing (2026-11-11; the one signature of the Fox Engine / Decima frame we lacked)
+
+* SetupGL jitters the 3D projection by Halton(2,3) x 8 (GL3_Post_TAAJitter; the weapon's own projection is not
+  jittered). The composite goes to the FXAA texture; TaaEnd blends it with the history reprojected through the
+  finished depth (unjittered matrices; nearer than 24 units = the weapon: no reprojection), the history clipped to the
+  current 3x3 variance box (1.25 sigma), current weight 0.1..0.3 by the motion, sharpened against the neighbourhood
+  mean inside its range (+0.35); a cut drops the history. FXAA / SMAA do not run under it.
+* r_om_taa -1 (default): only without MSAA - over 8x MSAA it mostly softened the frame; 1 always, 0 off. Presets:
+  medium/high -1, minimal/low 0. Menu: Render -> Temporal Antialiasing.
+* Cost: +0.1 ms (1080p). Laplacian energy of an arm1 crop (bricks, fence, sign): no MSAA + TAA 688, SMAA 401, none 475,
+  MSAA 8x 445 - TAA keeps the texture detail that SMAA blurs. Fast drops leave a faint trail (reads as motion blur).

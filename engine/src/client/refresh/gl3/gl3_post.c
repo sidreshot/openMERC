@@ -69,6 +69,7 @@ static void MirrorShutdown(void);
 static void TimersShutdown(void);
 static void SSRKeepColour(void);
 static void DofShutdown(void);
+static void TaaShutdown(void);
 static void ProbesUniforms(GLuint prog);
 void GL3_Probes_Uniforms(GLuint prog);
 static void ProbesShutdown(void);
@@ -1899,6 +1900,7 @@ GL3_Post_Shutdown(void)
 {
 	DeleteTargets();
 	DofShutdown(); /* r_om_dof */
+	TaaShutdown(); /* r_om_taa */
 
 	if (P.progdown) glDeleteProgram(P.progdown);
 	if (P.progup) glDeleteProgram(P.progup);
@@ -2758,6 +2760,242 @@ FxaaShutdown(void)
 }
 
 /* true when this view goes through FXAA (its framebuffer is then bound) */
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_taa: temporal antialiasing (the Fox Engine / Decima way of
+ * a calm film frame: no crawling texels, glints or wires). The projection is
+ * jittered by a Halton(2,3) sub-pixel pattern of 8; the composite goes to the
+ * FXAA texture and this pass blends it with the history reprojected through
+ * the depth (camera motion; the weapon, nearer than 24 units, keeps its place),
+ * the history clipped to the variance box of the current 3x3 neighbourhood
+ * (no ghosts of what moved), more of the current frame while things move.
+ * ------------------------------------------------------------------ */
+
+static const char *taa_fs =
+	"uniform sampler2D cur;\n"
+	"uniform sampler2D hist;\n"
+	"uniform sampler2D depth;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 pz;\n"     /* P00 P11 P22 P32 of the (unjittered) projection */
+	"uniform mat4 reproj;\n" /* this view space -> last frame's clip space */
+	"uniform vec4 prm;\n"    /* one texel (x, y), window depth of the near mask, 1 = a history exists */
+	"uniform vec2 vsize;\n"  /* view size in pixels */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	vec3 c = texture(cur, uv).rgb;\n"
+	"	vec3 m1 = vec3(0.0), m2 = vec3(0.0), mn = c, mx = c;\n"
+	"	for (int y = -1; y <= 1; y++)\n"
+	"		for (int x = -1; x <= 1; x++)\n"
+	"		{\n"
+	"			vec3 s = texture(cur, uv + vec2(float(x), float(y)) * prm.xy).rgb;\n"
+	"			m1 += s;\n"
+	"			m2 += s * s;\n"
+	"			mn = min(mn, s);\n"
+	"			mx = max(mx, s);\n"
+	"		}\n"
+	"	vec3 mu = m1 / 9.0, sg = sqrt(max(m2 / 9.0 - mu * mu, vec3(0.0)));\n"
+	"	mn = max(mn, mu - 1.25 * sg);\n"
+	"	mx = min(mx, mu + 1.25 * sg);\n"
+	"	if (prm.w < 0.5)\n"
+	"	{\n"
+	"		outColor = vec4(c, 1.0);\n"
+	"		return;\n"
+	"	}\n"
+	"	vec2 puv = vuv;\n"
+	"	float z = texture(depth, uv).r;\n"
+	"	if (z >= prm.z)\n"
+	"	{\n"
+	"		vec2 ndc = vuv * 2.0 - 1.0;\n"
+	"		float vz = -pz.w / ((z * 2.0 - 1.0) + pz.z);\n"
+	"		vec4 pc = reproj * vec4(-ndc.x * vz / pz.x, -ndc.y * vz / pz.y, vz, 1.0);\n"
+	"		if (pc.w <= 0.01)\n"
+	"		{\n"
+	"			outColor = vec4(c, 1.0);\n"
+	"			return;\n"
+	"		}\n"
+	"		puv = pc.xy / pc.w * 0.5 + 0.5;\n"
+	"	}\n"
+	"	if (any(lessThan(puv, vec2(0.0))) || any(greaterThan(puv, vec2(1.0))))\n"
+	"	{\n"
+	"		outColor = vec4(c, 1.0);\n"
+	"		return;\n"
+	"	}\n"
+	"	vec3 h = clamp(texture(hist, rect.xy + puv * rect.zw).rgb, mn, mx);\n"
+	"	float vel = length((puv - vuv) * vsize);\n"
+	"	float a = mix(0.1, 0.3, clamp(vel / 12.0, 0.0, 1.0));\n"
+	"	vec3 o = mix(h, c, a);\n"
+	/* the history is a little soft: sharpened against the neighbourhood mean, kept inside its range (no halo) */
+	"	o = clamp(o + (o - mu) * 0.35, mn, mx);\n"
+	"	outColor = vec4(o, 1.0);\n"
+	"}\n";
+
+static struct
+{
+	GLuint prog, tex[2], fbo[2];
+	int w, h, cur, phase;
+	qboolean tried, valid, active;
+	hmm_mat4 proj, prevvp; /* this view's projection before the jitter; last frame's (unjittered) projection x view */
+	vec3_t preveye;
+} TA;
+
+static cvar_t *r_om_taa;
+static hmm_mat4 ViewInverse(void);
+
+static qboolean
+TaaWanted(void)
+{
+	if (!r_om_taa)
+	{
+#ifdef YQ2_GL3_GLES3
+		r_om_taa = ri.Cvar_Get("r_om_taa", "0", CVAR_ARCHIVE);
+#else
+		/* -1: when the window has no MSAA (over 8x MSAA it mostly softens), 1 always, 0 off */
+		r_om_taa = ri.Cvar_Get("r_om_taa", "-1", CVAR_ARCHIVE);
+#endif
+	}
+
+	return ((r_om_taa->value > 0) || ((r_om_taa->value < 0) && !P.samples)) && !(TA.tried && !TA.prog) && (r_om_post_debug->value == 0) &&
+		!(r_newrefdef.rdflags & RDF_NOWORLDMODEL) && (gl3depthmin == 0) && (gl3depthmax == 1);
+}
+
+/* SetupGL: the sub-pixel jitter of this frame on the 3D projection (keeps the plain one for the reprojection) */
+void
+GL3_Post_TAAJitter(hmm_mat4 *proj)
+{
+	static const float hx[8] = {0.5f, 0.25f, 0.75f, 0.125f, 0.625f, 0.375f, 0.875f, 0.0625f};
+	static const float hy[8] = {0.3333f, 0.6667f, 0.1111f, 0.4444f, 0.7778f, 0.2222f, 0.5556f, 0.8889f};
+	float w, h;
+
+	TA.proj = *proj;
+	TA.active = false;
+
+	if (!P.bound || !TaaWanted())
+	{
+		return;
+	}
+
+	w = (float)Q_max(P.vw, 1); /* the scene's own size (r_om_renderscale draws it smaller) */
+	h = (float)Q_max(P.vh, 1);
+
+	TA.phase = (TA.phase + 1) & 7;
+	proj->Elements[2][0] += (hx[TA.phase] - 0.5f) * 2.0f / w;
+	proj->Elements[2][1] += (hy[TA.phase] - 0.5f) * 2.0f / h;
+	TA.active = true;
+}
+
+static void
+TaaShutdown(void)
+{
+	if (TA.prog) glDeleteProgram(TA.prog);
+	if (TA.tex[0]) glDeleteTextures(2, TA.tex);
+	if (TA.fbo[0]) glDeleteFramebuffers(2, TA.fbo);
+	TA.prog = TA.tex[0] = TA.tex[1] = TA.fbo[0] = TA.fbo[1] = 0;
+	TA.w = TA.h = 0;
+	TA.valid = TA.tried = false;
+}
+
+/* the composite in FA.tex -> the antialiased view into dst (and the next history) */
+static qboolean
+TaaEnd(GLuint dst, int vx, int vy, int vw, int vh)
+{
+	float fw = (float)P.w, fh = (float)P.h;
+	int next = TA.cur ^ 1, i;
+	hmm_mat4 cur = HMM_MultiplyMat4(TA.proj, gl3state.viewMat3D), inv = ViewInverse(), rp;
+	vec3_t dv;
+
+	if (!TA.prog)
+	{
+		if (TA.tried)
+		{
+			return false;
+		}
+
+		TA.tried = true;
+		TA.prog = LinkPost(taa_fs);
+
+		if (!TA.prog)
+		{
+			R_Printf(PRINT_ALL, "r_om_taa: the shader did not link, TAA is off\n");
+			return false;
+		}
+	}
+
+	if (!TA.fbo[0] || (TA.w != P.w) || (TA.h != P.h))
+	{
+		static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
+
+		if (TA.tex[0]) glDeleteTextures(2, TA.tex);
+		if (TA.fbo[0]) glDeleteFramebuffers(2, TA.fbo);
+		glGenFramebuffers(2, TA.fbo);
+
+		for (i = 0; i < 2; i++)
+		{
+			TA.tex[i] = NewTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, P.w, P.h, GL_LINEAR);
+			glBindFramebuffer(GL_FRAMEBUFFER, TA.fbo[i]);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, TA.tex[i], 0);
+			glDrawBuffers(1, one);
+		}
+
+		TA.w = P.w;
+		TA.h = P.h;
+		TA.valid = false;
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			TaaShutdown();
+			TA.tried = true;
+			R_Printf(PRINT_ALL, "r_om_taa: no framebuffer, TAA is off\n");
+			return false;
+		}
+	}
+
+	/* a cut (a teleport, a level start): no history */
+	VectorSubtract(r_newrefdef.vieworg, TA.preveye, dv);
+	if (DotProduct(dv, dv) > 96.0f * 96.0f)
+	{
+		TA.valid = false;
+	}
+
+	rp = HMM_MultiplyMat4(TA.prevvp, inv);
+	glBindFramebuffer(GL_FRAMEBUFFER, TA.fbo[next]);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	GL3_UseProgram(TA.prog);
+	glUniform1i(GL3_UniformLoc(TA.prog, "cur"), 0);
+	glUniform1i(GL3_UniformLoc(TA.prog, "hist"), 1);
+	glUniform1i(GL3_UniformLoc(TA.prog, "depth"), 2);
+	glUniform4f(GL3_UniformLoc(TA.prog, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	glUniform4f(GL3_UniformLoc(TA.prog, "pz"), TA.proj.Elements[0][0], TA.proj.Elements[1][1], TA.proj.Elements[2][2],
+		TA.proj.Elements[3][2]);
+	glUniformMatrix4fv(GL3_UniformLoc(TA.prog, "reproj"), 1, GL_FALSE, (const float *)rp.Elements);
+	{
+		float d = 24.0f, nz = (TA.proj.Elements[2][2] * -d + TA.proj.Elements[3][2]) / d;
+
+		glUniform4f(GL3_UniformLoc(TA.prog, "prm"), 1.0f / fw, 1.0f / fh, nz * 0.5f + 0.5f,
+			(TA.valid && P.depthfinal) ? 1.0f : 0.0f);
+	}
+	glUniform2f(GL3_UniformLoc(TA.prog, "vsize"), (float)P.vw, (float)P.vh);
+	BindTex(GL_TEXTURE2, P.texdepthcopy);
+	BindTex(GL_TEXTURE1, TA.tex[TA.cur]);
+	BindTex(GL_TEXTURE0, FA.tex);
+	DrawQuad();
+
+	/* to the destination: the view rectangle as it is (the upscale or the window takes it from there) */
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, TA.fbo[next]);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst);
+	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, vx, vy, vx + vw, vy + vh, GL_COLOR_BUFFER_BIT,
+		(vw == P.vw && vh == P.vh) ? GL_NEAREST : GL_LINEAR);
+	glBindFramebuffer(GL_FRAMEBUFFER, dst);
+
+	TA.cur = next;
+	TA.valid = true;
+	TA.prevvp = cur;
+	VectorCopy(r_newrefdef.vieworg, TA.preveye);
+	return true;
+}
+
 static qboolean
 FxaaBegin(void)
 {
@@ -2766,7 +3004,8 @@ FxaaBegin(void)
 		r_om_fxaa = ri.Cvar_Get("r_om_fxaa", "-1", CVAR_ARCHIVE);
 	}
 
-	if (!r_om_fxaa->value || ((r_om_fxaa->value < 0) && P.samples) || (r_om_post_debug->value != 0))
+	if ((!r_om_fxaa->value || ((r_om_fxaa->value < 0) && P.samples) || (r_om_post_debug->value != 0)) &&
+		!(TA.active && TaaWanted()))
 	{
 		return false;
 	}
@@ -3244,6 +3483,12 @@ static void
 FxaaEnd(GLuint dst, int vx, int vy, int vw, int vh)
 {
 	float fw = (float)FA.w, fh = (float)FA.h;
+
+	/* r_om_taa: the temporal pass takes the composite (FXAA / SMAA are not needed under it) */
+	if (TA.active && TaaWanted() && TaaEnd(dst, vx, vy, vw, vh))
+	{
+		return;
+	}
 
 	if (r_om_postaa && (r_om_postaa->value >= 2.0f) && SmaaEnd(dst, vx, vy, vw, vh))
 	{
@@ -3857,7 +4102,7 @@ GL3_Post_EndView(void)
 	/* r_om_motionblur: the composite reads the finished depth, view weapon included */
 	GL3_UseProgram(P.progcomp);
 	dofon = DofWanted();
-	if (MotionBlurUniforms(P.progcomp) || dofon)
+	if (MotionBlurUniforms(P.progcomp) || dofon || (TA.active && TaaWanted()))
 	{
 		/* SSAO, SSR or the rain already copied the finished depth (after the sorted pass: the weapon is in it) */
 		if (!P.depthfinal)
