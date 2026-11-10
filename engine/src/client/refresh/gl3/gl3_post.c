@@ -990,7 +990,7 @@ static const char *post_comp_fs =
 	/* the film curve presses the dark tones (0.02 -> 0.006): SoF's dark rooms went black. Below mid grey the
 	   camera follows the plain curve (the original shadows), the film shoulder and colour from there up */
 	"	vec3 cw = Camera(w);\n"
-	"	cw = mix(Shoulder(w), cw, smoothstep(0.03, 0.30, Luma(w)));\n"
+	"	cw = mix(Shoulder(w), cw, smoothstep(0.008, 0.12, Luma(w)));\n"
 	"	l = (look0.w > 0.0) ? mix(p, cw, look0.w) : p;\n"
 	"	vec3 d = pow(l, vec3(1.0 / 2.2));\n"
 	/* the menu's gamma, contrast and brightness as SoF's colour table had them (SPEC-413 В§9), in float: v^(1-g), an S
@@ -9322,8 +9322,10 @@ static struct
 	int cw, ch, vw, vh;
 	GLuint colortex;   /* scene texture the apply framebuffer was made for */
 	GLuint coltex, colfbo, applyfbo, reftex, reffbo, smtex[2], smfbo[2], histtex[2], histfbo[2];
+	GLuint blurtex[2], blurfbo[2], progblur; /* r_om_ssr_blur */
+	vec3_t lastorg, lastang;                 /* the eye of the last frame (r_om_ssr_checker only while it stands) */
 	int histcur;
-	qboolean havehist;
+	qboolean havehist, blurred;
 	qboolean havecol;  /* coltex holds the last frame (seen through prevpv) */
 	hmm_mat4 prevpv;
 	float frame;
@@ -9491,6 +9493,7 @@ static const char *ssr_fs =
 	"	float k = refl + (min(0.85, refl * 3.0) - refl) * pow(1.0 - ndv, 5.0) * (1.0 - rough);\n"
 	/* r_om_probes: what the ray cannot find on the screen comes from the cube maps (a 128 cube: mip 1 sharp, 6 matte) */
 	"	bool pr = pcount > 0.5 && dbg == 0;\n"
+	"	bool probeonly = pr && rough > 0.6;\n"
 	"	vec3 WP = (invview * vec4(P, 1.0)).xyz, WR = mat3(invview) * R;\n"
 	"	float plod = 1.0 + rough * 5.0;\n"
 	"	float pw = clamp(k * strength, 0.0, 0.85);\n"
@@ -9500,7 +9503,7 @@ static const char *ssr_fs =
 	"	vec3 P0 = P + N * (0.5 + d * 0.002);\n"
 	"	float len = params.x;\n"
 	"	if (R.z > 0.0) len = min(len, (-P0.z - 2.0) / R.z);\n"   /* stay in front of the eye */
-	"	if (len < 2.0)\n"
+	"	if (len < 2.0 || probeonly)\n"
 	"	{\n"
 	"		if (!pr) discard;\n"
 	"		outColor = pout;\n"
@@ -9709,6 +9712,7 @@ static const char *ssr_temporal_fs =
 	"uniform vec4 size;\n"     /* half size: width, height, 1/width, 1/height */
 	"uniform mat4 reproj;\n"   /* this view space -> last frame's clip space */
 	"uniform float keep;\n"
+	"uniform float hold;\n"    /* pixels of screen motion over which the history is let go */
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
 	"out vec4 outColor;\n"
@@ -9742,10 +9746,63 @@ static const char *ssr_temporal_fs =
 	"		if (all(greaterThan(pu, vec2(0.0))) && all(lessThan(pu, vec2(1.0))))\n"
 	"		{\n"
 	"			vec4 h = clamp(texture(hist, pu), mn, mx);\n"
-	"			outColor = mix(c, h, skip ? max(keep, 0.6) : keep);\n"
+	/* a reflection moves on the screen otherwise than the surface it lies on: the farther the surface moved, the
+	   less of the old reflection is kept (it trailed behind the eye when walking) */
+	"			float mv = length((pu - vuv) * size.xy);\n"
+	"			float k = keep * (1.0 - smoothstep(0.5, hold, mv));\n"
+	"			outColor = mix(c, h, skip ? max(k, 0.6) : k);\n"
 	"		}\n"
 	"	}\n"
 	"	if (any(isnan(outColor)) || any(isinf(outColor))) outColor = vec4(0.0);\n"
+	"}\n";
+
+/* r_om_ssr_blur: the reflections blurred by a Gaussian whose width grows with the roughness of the surface (a dull
+   floor gets a soft reflection, a polished one stays nearly sharp), one axis per pass, 9 taps, only between samples
+   at about the same depth and on reflective pixels (no halo from the wall or a character in front) */
+static const char *ssr_blur_fs =
+	"uniform sampler2D src;\n"
+	"uniform sampler2D smtex;\n"
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 proj;\n"
+	"uniform vec4 size;\n"     /* half size: width, height, 1/width, 1/height */
+	"uniform vec4 params;\n"   /* direction x, y; sigma per roughness, least sigma (half-size pixels) */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"float Dist(vec2 v)\n"
+	"{\n"
+	"	float z = texture(depthtex, rect.xy + v * rect.zw).r;\n"
+	"	float ndc = (z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0;\n"
+	"	return proj.y / (ndc + proj.x);\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"	vec4 c0 = texture(src, vuv);\n"
+	"	vec4 m = texture(smtex, vuv);\n"
+	"	float rough = m.r > 0.003 ? clamp(m.g / m.r, 0.0, 1.0) : 0.0;\n"
+	"	float sigma = params.w + rough * params.z;\n"
+	"	if (sigma < 0.35 || m.r < 0.015)\n"
+	"	{\n"
+	"		outColor = c0;\n"
+	"		return;\n"
+	"	}\n"
+	"	float d0 = Dist(vuv);\n"
+	"	float st = max(sigma * 0.5, 1.0);\n"
+	"	vec4 acc = c0;\n"
+	"	float ws = 1.0;\n"
+	"	for (int i = 1; i <= 4; i++)\n"
+	"		for (int sg = -1; sg <= 1; sg += 2)\n"
+	"		{\n"
+	"			float o = float(i * sg) * st;\n"
+	"			vec2 t = vuv + params.xy * o * size.zw;\n"
+	"			float w = exp(-0.5 * o * o / (sigma * sigma));\n"
+	"			w *= exp(-abs(Dist(t) - d0) / (d0 * 0.02 + 2.0));\n"
+	"			w *= step(0.015, texture(smtex, t).r);\n"
+	"			acc += texture(src, t) * w;\n"
+	"			ws += w;\n"
+	"		}\n"
+	"	outColor = acc / ws;\n"
 	"}\n";
 
 /* over the scene at full size: the half-size reflections and smoothed material, upsampled where the depth agrees
@@ -9924,6 +9981,9 @@ SSRDeleteTargets(void)
 	if (SR.smtex[0]) glDeleteTextures(2, SR.smtex);
 	if (SR.histfbo[0]) glDeleteFramebuffers(2, SR.histfbo);
 	if (SR.histtex[0]) glDeleteTextures(2, SR.histtex);
+	if (SR.blurfbo[0]) glDeleteFramebuffers(2, SR.blurfbo);
+	if (SR.blurtex[0]) glDeleteTextures(2, SR.blurtex);
+	SR.blurfbo[0] = SR.blurfbo[1] = SR.blurtex[0] = SR.blurtex[1] = 0;
 	SR.histfbo[0] = SR.histfbo[1] = SR.histtex[0] = SR.histtex[1] = 0;
 	SR.havehist = false;
 	SR.colfbo = SR.coltex = SR.applyfbo = SR.reffbo = SR.reftex = 0;
@@ -9996,6 +10056,17 @@ SSRTargets(void)
 			{
 				return false;
 			}
+
+			SR.blurtex[i] = NewTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, GL_LINEAR);
+			glGenFramebuffers(1, &SR.blurfbo[i]);
+			glBindFramebuffer(GL_FRAMEBUFFER, SR.blurfbo[i]);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, SR.blurtex[i], 0);
+			glDrawBuffers(1, one);
+
+			if (!Complete("ssr blur"))
+			{
+				return false;
+			}
 		}
 	}
 
@@ -10055,8 +10126,9 @@ GL3_Post_SSR(void)
 		}
 		SR.progsmooth = LinkPost(ssr_smooth_fs);
 		SR.progtemp = LinkPost(ssr_temporal_fs);
+		SR.progblur = LinkPost(ssr_blur_fs);
 
-		if (!SR.prog || !SR.progapply || !SR.progsmooth || !SR.progtemp)
+		if (!SR.prog || !SR.progapply || !SR.progsmooth || !SR.progtemp || !SR.progblur)
 		{
 			SR.failed = true;
 			return;
@@ -10204,8 +10276,19 @@ GL3_Post_SSR(void)
 	glUniform4f(SR.u_params, Q_max(r_om_ssr_dist->value, 64.0f), (float)(q == 1 ? 16 : q == 2 ? 24 : 40),
 		r_farclipdist->value * 0.98f, (float)dbg);
 	/* w: r_om_ssr_checker (only with a history to fill the gaps from) */
-	glUniform4f(SR.u_texel, 1.0f / P.vw, 1.0f / P.vh, (float)SR.ch,
-		(r_om_ssr_checker->value && SR.havehist && !dbg && r_om_ssr_temporal->value > 0) ? 1.0f : 0.0f);
+	{
+		/* r_om_ssr_checker halves the rays only while the eye stands: moving, every pixel is traced each frame */
+		vec3_t dv, da;
+		qboolean still;
+
+		VectorSubtract(r_newrefdef.vieworg, SR.lastorg, dv);
+		VectorSubtract(r_newrefdef.viewangles, SR.lastang, da);
+		still = (DotProduct(dv, dv) < 0.25f) && (fabsf(da[0]) + fabsf(da[1]) < 0.2f);
+		VectorCopy(r_newrefdef.vieworg, SR.lastorg);
+		VectorCopy(r_newrefdef.viewangles, SR.lastang);
+		glUniform4f(SR.u_texel, 1.0f / P.vw, 1.0f / P.vh, (float)SR.ch,
+			(r_om_ssr_checker->value && still && SR.havehist && !dbg && r_om_ssr_temporal->value > 0) ? 1.0f : 0.0f);
+	}
 	SR.frame = (SR.frame >= 1000.0f) ? 0.0f : SR.frame + 1.0f;
 	glUniform1f(SR.u_frame, SR.frame);
 	glUniform1f(SR.u_strength, Q_min(r_om_ssr->value, 4.0f));
@@ -10255,6 +10338,7 @@ GL3_Post_SSR(void)
 		glUniform4f(SR.t_size, (float)SR.cw, (float)SR.ch, 1.0f / SR.cw, 1.0f / SR.ch);
 		glUniformMatrix4fv(SR.t_reproj, 1, GL_FALSE, &reproj.Elements[0][0]);
 		glUniform1f(SR.t_keep, (SR.havehist && !dbg) ? Q_max(0.0f, Q_min(r_om_ssr_temporal->value, 0.95f)) : 0.0f);
+		glUniform1f(GL3_UniformLoc(SR.progtemp, "hold"), 6.0f);
 		BindTex(GL_TEXTURE2, P.texdepthcopy);
 		BindTex(GL_TEXTURE1, SR.histtex[SR.histcur]);
 		BindTex(GL_TEXTURE0, SR.reftex);
@@ -10264,6 +10348,47 @@ GL3_Post_SSR(void)
 	}
 
 	GL3_Post_ProfMark("ssr_temporal");
+
+	/* r_om_ssr_blur: horizontal, then vertical, into blurtex[1] (the history keeps the sharp result) */
+	{
+		static cvar_t *r_om_ssr_blur;
+		float bs;
+		int i;
+
+		if (!r_om_ssr_blur)
+		{
+			r_om_ssr_blur = ri.Cvar_Get("r_om_ssr_blur", "1", CVAR_ARCHIVE);
+		}
+
+		bs = Q_clamp(r_om_ssr_blur->value, 0.0f, 4.0f);
+		SR.blurred = (bs > 0.0f) && !dbg;
+
+		if (SR.blurred)
+		{
+			GL3_UseProgram(SR.progblur);
+			glUniform1i(GL3_UniformLoc(SR.progblur, "src"), 0);
+			glUniform1i(GL3_UniformLoc(SR.progblur, "smtex"), 1);
+			glUniform1i(GL3_UniformLoc(SR.progblur, "depthtex"), 2);
+			glUniform4f(GL3_UniformLoc(SR.progblur, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+			glUniform4f(GL3_UniformLoc(SR.progblur, "proj"), gl3state.projMat3D.Elements[2][2],
+				gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+			glUniform4f(GL3_UniformLoc(SR.progblur, "size"), (float)SR.cw, (float)SR.ch, 1.0f / SR.cw, 1.0f / SR.ch);
+			BindTex(GL_TEXTURE2, P.texdepthcopy);
+			BindTex(GL_TEXTURE1, SR.smtex[1]);
+			glViewport(0, 0, SR.cw, SR.ch);
+
+			for (i = 0; i < 2; i++)
+			{
+				/* sigma in half-size pixels: 1.5 everywhere (soft, no stair steps), up to +10 on fully rough faces */
+				glBindFramebuffer(GL_FRAMEBUFFER, SR.blurfbo[i]);
+				glUniform4f(GL3_UniformLoc(SR.progblur, "params"), i ? 0.0f : 1.0f, i ? 1.0f : 0.0f, 10.0f * bs, 1.5f * bs);
+				BindTex(GL_TEXTURE0, i ? SR.blurtex[0] : SR.histtex[SR.histcur]);
+				DrawQuad();
+			}
+		}
+	}
+
+	GL3_Post_ProfMark("ssr_blur");
 
 	/* over the scene */
 	if (P.samples)
@@ -10298,7 +10423,7 @@ GL3_Post_SSR(void)
 	GL3_Lamps_View(SR.progapply, r_newrefdef.vieworg);
 	BindTex(GL_TEXTURE2, P.texdepthcopy);
 	BindTex(GL_TEXTURE1, SR.smtex[1]);
-	BindTex(GL_TEXTURE0, SR.histtex[SR.histcur]);
+	BindTex(GL_TEXTURE0, SR.blurred ? SR.blurtex[1] : SR.histtex[SR.histcur]);
 
 	if (!dbg)
 	{
@@ -10356,7 +10481,8 @@ SSRShutdown(void)
 	SSRDeleteTargets();
 
 	if ((gl3state.currentShaderProgram == SR.prog) || (gl3state.currentShaderProgram == SR.progapply) ||
-		(gl3state.currentShaderProgram == SR.progsmooth) || (gl3state.currentShaderProgram == SR.progtemp))
+		(gl3state.currentShaderProgram == SR.progsmooth) || (gl3state.currentShaderProgram == SR.progtemp) ||
+		(gl3state.currentShaderProgram == SR.progblur))
 	{
 		gl3state.currentShaderProgram = 0;
 	}
@@ -10365,6 +10491,7 @@ SSRShutdown(void)
 	if (SR.progapply) { ViewFogForget(SR.progapply); glDeleteProgram(SR.progapply); }
 	if (SR.progsmooth) glDeleteProgram(SR.progsmooth);
 	if (SR.progtemp) glDeleteProgram(SR.progtemp);
+	if (SR.progblur) glDeleteProgram(SR.progblur);
 
 	memset(&SR, 0, sizeof(SR));
 }
