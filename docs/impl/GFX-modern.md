@@ -1675,3 +1675,18 @@ client fx module) to start an effect in front of the eye.
   a dark red; a short chromatic aberration pulse (lens CA + 4 x strength). Any other tint (pickups, water) is the same
   mix the fill gave, under the HUD. Night vision and r_warnings keep the fill. Cost: none measurable (ALU only).
 * Test aid r_om_hitfx_test r,g,b,a (commas: `set` takes one word) forces the game's tint every frame.
+
+## r_om_dof: depth of field in cut scenes and through the scope (2026-11-11)
+
+* When: cl_cinematicfreeze (the game's cut scenes) or fov_x < 40 (zoom); r_om_dof 2 = always (test). Not in normal
+  play - a first-person fight needs a sharp frame.
+* Focus: a 1x1 pass takes the nearest of 3x3 depths in the middle of the frame (past 24 units: not the weapon), read
+  back through two pixel buffers a frame apart (no stall) and eased on the CPU in 1/distance (a focus ring turns in
+  diopters), ~8/s; a jump after a pause (a cut) is in focus at once.
+* Blur (composite, DofScene): circle of confusion = aperture x |d - f| / d px (scope 14, cut scenes 9 at 1080p, max
+  14), 8 taps on a golden-angle spiral over the frame's mip chain (generated only while on; lod = log2(coc x 0.45)),
+  linear light; a nearer tap counts only where its own circle reaches the pixel, so a sharp subject does not smear
+  over the blurred background. Motion blur is off while the depth of field is on.
+* Cost (1080p, whole frame out of focus, worst case): 16 full-res taps +1.4..2.1 ms; with the mip chain and 8 taps
+  +0.6..0.9 ms. Only in cut scenes / zoom.
+* Presets: medium/high on, minimal/low off. Menu: Colour -> Depth of Field.

@@ -68,6 +68,7 @@ static void SSRDeleteTargets(void);
 static void MirrorShutdown(void);
 static void TimersShutdown(void);
 static void SSRKeepColour(void);
+static void DofShutdown(void);
 static void ProbesUniforms(GLuint prog);
 void GL3_Probes_Uniforms(GLuint prog);
 static void ProbesShutdown(void);
@@ -966,6 +967,9 @@ static const char *post_comp_fs =
 	"uniform vec4 lens;\n"
 	/* r_om_hitfx: the game's screen tint (rgb, alpha); x 1 = a hit */
 	"uniform vec4 tint;\n"
+	/* r_om_dof: x on, y focus distance (units), z aperture (circle of confusion in pixels where the point is twice
+	   the focus distance away), w largest circle in pixels */
+	"uniform vec4 dof;\n"
 	"uniform vec4 tintk;\n"
 	"in vec2 uv;\n"
 	"in vec2 vuv;\n"
@@ -1019,6 +1023,39 @@ static const char *post_comp_fs =
 	"	vec2 p = v * vec2(lens.w, 1.0);\n"
 	"	float n = LNoise(p * 4.0 + 17.0) * 0.65 + LNoise(p * 13.0 + 3.0) * 0.35;\n"
 	"	return 0.15 + smoothstep(0.5, 0.78, n);\n"
+	"}\n"
+	/* depth of field (cut scenes, the scope): each pixel's circle of confusion from its distance to the focus (thin
+	   lens: |d - f| / d), gathered over a 16-tap golden-angle spiral in linear light; a nearer tap counts only where its
+	   own circle reaches this pixel (an object in focus does not smear over the blurred background) */
+	"float DofDist(vec2 s) { return mbP.w / ((texture(mbdepth, s).r * 2.0 - 1.0) + mbP.z); }\n"
+	"float DofCoc(float dd) { return dd < 24.0 ? 0.0 : min(dof.w, dof.z * abs(dd - dof.y) / dd); }\n"
+	"vec3 DofScene(vec2 tuv)\n"
+	"{\n"
+	"	vec3 c0 = texture(scene, tuv).rgb;\n"
+	"	float dd = DofDist(tuv);\n"
+	"	float coc = DofCoc(dd);\n"
+	"	if (coc < 0.75) return c0;\n"
+	"	vec3 c1 = max(c0, vec3(0.0));\n"
+	"	vec3 acc = c1 * c1;\n"
+	"	float ws = 1.0;\n"
+	"	float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853;\n"
+	"	vec2 px = rect.zw / mb1.xy;\n"
+	/* 8 taps on the mip chain of the frame (made only while the depth of field is on): each tap already the mean of
+	   a cell about as wide as the gap between taps - smooth, few taps, few cache misses */
+	"	float lod = max(0.0, log2(coc * 0.45));\n"
+	"	for (int i = 0; i < 8; i++)\n"
+	"	{\n"
+	"		float r = sqrt((float(i) + 0.5) / 8.0) * coc;\n"
+	"		float a = float(i) * 2.3999632 + j;\n"
+	"		vec2 s = clamp(tuv + vec2(cos(a), sin(a)) * r * px, rect.xy, rect.xy + rect.zw);\n"
+	"		float sd = DofDist(s);\n"
+	"		float w = sd >= dd - 2.0 ? 1.0 : clamp(DofCoc(sd) - r + 1.0, 0.0, 1.0);\n"
+	"		if (sd < 24.0) w = 0.0;\n"
+	"		vec3 c = max(textureLod(scene, s, lod).rgb, vec3(0.0));\n"
+	"		acc += c * c * w;\n"
+	"		ws += w;\n"
+	"	}\n"
+	"	return sqrt(acc / ws);\n"
 	"}\n"
 	"vec3 MotionScene(vec2 tuv)\n"
 	"{\n"
@@ -1121,7 +1158,7 @@ static const char *post_comp_fs =
 	"	else if (mode == 3) c = texture(bloom, vuv).rgb * intensity;\n"
 	"	else\n"
 	"	{\n"
-	"		c = MotionScene(uv);\n"
+	"		c = dof.x > 0.5 ? DofScene(uv) : MotionScene(uv);\n"
 	"		if (mode == 1)\n"
 	"		{\n"
 	"			vec3 bl = texture(bloom, vuv).rgb;\n"
@@ -1838,6 +1875,7 @@ void
 GL3_Post_Shutdown(void)
 {
 	DeleteTargets();
+	DofShutdown(); /* r_om_dof */
 
 	if (P.progdown) glDeleteProgram(P.progdown);
 	if (P.progup) glDeleteProgram(P.progup);
@@ -3614,9 +3652,167 @@ MotionBlurUniforms(GLuint prog)
 	return on != 0;
 }
 
+/* ------------------------------------------------------------------
+ * GFX-modern r_om_dof: depth of field where a film camera would use it -
+ * the game's cut scenes (cl_cinematicfreeze) and a zoomed view (the scope,
+ * fov under 40). The focus is pulled like a focus puller does: a 1x1 pass
+ * finds the nearest thing in the middle of the frame, read back without a
+ * stall (two pixel buffers, a frame apart), eased on the CPU (~0.25 s).
+ * ------------------------------------------------------------------ */
+
+static const char *dof_focus_fs =
+	"uniform sampler2D depth;\n"
+	"uniform vec4 rect;\n"
+	"uniform vec4 pz;\n" /* P22, P32 of the projection */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"void main()\n"
+	"{\n"
+	"	float best = 1e9;\n"
+	"	for (int y = -1; y <= 1; y++)\n"
+	"		for (int x = -1; x <= 1; x++)\n"
+	"		{\n"
+	"			vec2 v = vec2(0.5) + vec2(float(x) * 0.025, float(y) * 0.04);\n"
+	"			float z = texture(depth, rect.xy + v * rect.zw).r;\n"
+	"			float d = pz.y / ((z * 2.0 - 1.0) + pz.x);\n"
+	"			if (d > 24.0) best = min(best, d);\n"
+	"		}\n"
+	"	outColor = vec4(best > 1e8 ? 4096.0 : best, 0.0, 0.0, 1.0);\n"
+	"}\n";
+
+static struct
+{
+	GLuint prog, tex, fbo, pbo[2];
+	int cur, filled;
+	float focus, time;
+	qboolean failed;
+} DF;
+
+static cvar_t *r_om_dof, *r_om_dof_aperture;
+
+static qboolean
+DofWanted(void)
+{
+	static cvar_t *cinfreeze;
+
+	if (!r_om_dof)
+	{
+		r_om_dof = ri.Cvar_Get("r_om_dof", "1", CVAR_ARCHIVE);
+		r_om_dof_aperture = ri.Cvar_Get("r_om_dof_aperture", "1", CVAR_ARCHIVE);
+		cinfreeze = ri.Cvar_Get("cl_cinematicfreeze", "0", 0);
+	}
+
+	if (DF.failed || !P.texdepthcopy || (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES) || (gl3depthmin != 0) ||
+		(gl3depthmax != 1))
+	{
+		return false;
+	}
+
+	if (r_om_dof->value >= 2)
+	{
+		return true; /* test: always */
+	}
+
+	return (r_om_dof->value > 0) && ((cinfreeze->value != 0) || (r_newrefdef.fov_x < 40.0f));
+}
+
+/* the 1x1 focus pass on the finished depth; the eased focus distance of this view */
+static float
+DofFocus(void)
+{
+	float now = r_newrefdef.time, dt;
+
+	if (!DF.prog)
+	{
+		DF.prog = LinkPost(dof_focus_fs);
+		DF.tex = NewTexture(GL_R32F, GL_RED, GL_FLOAT, 1, 1, GL_NEAREST);
+		glGenFramebuffers(1, &DF.fbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, DF.fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, DF.tex, 0);
+		glGenBuffers(2, DF.pbo);
+
+		for (DF.cur = 0; DF.cur < 2; DF.cur++)
+		{
+			glBindBuffer(GL_PIXEL_PACK_BUFFER, DF.pbo[DF.cur]);
+			glBufferData(GL_PIXEL_PACK_BUFFER, 4 * sizeof(float), NULL, GL_STREAM_READ);
+		}
+
+		glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+		DF.cur = DF.filled = 0;
+		DF.focus = 0;
+
+		if (!DF.prog || (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE))
+		{
+			DF.failed = true;
+			return 0;
+		}
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, DF.fbo);
+	glViewport(0, 0, 1, 1);
+	GL3_UseProgram(DF.prog);
+	glUniform1i(GL3_UniformLoc(DF.prog, "depth"), 0);
+	glUniform4f(GL3_UniformLoc(DF.prog, "rect"), P.vx / (float)P.w, P.vy / (float)P.h, P.vw / (float)P.w,
+		P.vh / (float)P.h);
+	glUniform4f(GL3_UniformLoc(DF.prog, "pz"), gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2], 0, 0);
+	BindTex(GL_TEXTURE0, P.texdepthcopy);
+	DrawQuad();
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, DF.fbo);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, DF.pbo[DF.cur]);
+	glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, NULL);
+
+	if (DF.filled & (1 << (DF.cur ^ 1)))
+	{
+		const float *v;
+
+		glBindBuffer(GL_PIXEL_PACK_BUFFER, DF.pbo[DF.cur ^ 1]);
+		v = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, 4 * sizeof(float), GL_MAP_READ_BIT);
+
+		if (v)
+		{
+			float target = Q_clamp(v[0], 24.0f, 8192.0f);
+
+			dt = now - DF.time;
+			if ((DF.focus <= 0) || (dt < 0) || (dt > 0.5f))
+			{
+				DF.focus = target; /* a new shot: in focus at once */
+			}
+			else
+			{
+				/* eased in 1/distance (a focus ring turns in diopters): near subjects are pulled quickly */
+				float k = 1.0f - expf(-dt * 8.0f);
+				DF.focus = 1.0f / (1.0f / DF.focus + (1.0f / target - 1.0f / DF.focus) * k);
+			}
+
+			glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+		}
+	}
+
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	DF.filled |= 1 << DF.cur;
+	DF.cur ^= 1;
+	DF.time = now;
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	return DF.focus;
+}
+
+static void
+DofShutdown(void)
+{
+	if (DF.prog) glDeleteProgram(DF.prog);
+	if (DF.tex) glDeleteTextures(1, &DF.tex);
+	if (DF.fbo) glDeleteFramebuffers(1, &DF.fbo);
+	if (DF.pbo[0]) glDeleteBuffers(2, DF.pbo);
+	memset(&DF, 0, sizeof(DF));
+}
+
 void
 GL3_Post_EndView(void)
 {
+	qboolean dofon, dofmips = false;
 	float fw, fh;
 	int mode, dbg;
 	qboolean hdr, fxaa, scaled;
@@ -3636,7 +3832,8 @@ GL3_Post_EndView(void)
 
 	/* r_om_motionblur: the composite reads the finished depth, view weapon included */
 	GL3_UseProgram(P.progcomp);
-	if (MotionBlurUniforms(P.progcomp))
+	dofon = DofWanted();
+	if (MotionBlurUniforms(P.progcomp) || dofon)
 	{
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
@@ -3649,6 +3846,30 @@ GL3_Post_EndView(void)
 	else
 	{
 		mbbind = false;
+	}
+
+	/* r_om_dof: the focus, then the lens of this view (the composite program again: the focus pass used its own) */
+	{
+		float focus = dofon ? DofFocus() : 0;
+		float sc = (float)P.vh / 1080.0f;
+
+		GL3_UseProgram(P.progcomp);
+		dofmips = dofon && (focus > 0) && !DF.failed;
+		if (dofmips)
+		{
+			glUniform4f(GL3_UniformLoc(P.progcomp, "mbP"), gl3state.projMat3D.Elements[0][0],
+				gl3state.projMat3D.Elements[1][1], gl3state.projMat3D.Elements[2][2], gl3state.projMat3D.Elements[3][2]);
+			glUniform4f(GL3_UniformLoc(P.progcomp, "mb1"), (float)P.vw, (float)P.vh, 0, 0);
+			glUniform1i(GL3_UniformLoc(P.progcomp, "mbdepth"), 5);
+			/* the scope: a long lens wide open; cut scenes: a portrait aperture */
+			glUniform4f(GL3_UniformLoc(P.progcomp, "dof"), 1, focus,
+				Q_clamp(r_om_dof_aperture->value, 0.0f, 4.0f) * ((r_newrefdef.fov_x < 40.0f) ? 14.0f : 9.0f) * sc,
+				14.0f * sc);
+		}
+		else
+		{
+			glUniform4f(GL3_UniformLoc(P.progcomp, "dof"), 0, 0, 0, 0);
+		}
 	}
 
 	PostDiscard(GL_DEPTH_STENCIL_ATTACHMENT);
@@ -3829,7 +4050,16 @@ GL3_Post_EndView(void)
 		BindTex(GL_TEXTURE5, P.texdepthcopy); /* r_om_motionblur */
 	}
 	BindTex(GL_TEXTURE0, P.texcolor);
+	if (dofmips)
+	{
+		glGenerateMipmap(GL_TEXTURE_2D); /* r_om_dof: the frame's mip chain for the blur taps */
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	}
 	DrawQuad();
+	if (dofmips)
+	{
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	}
 	GL3_Post_ProfMark("post_composite");
 
 	if (fxaa)
