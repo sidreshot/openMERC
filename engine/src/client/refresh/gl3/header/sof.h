@@ -416,6 +416,8 @@ void GL3_SoF_MirrorUniforms(const float *on, const float *plane, const float *pl
 	GLuint tex2);
 void GL3_Post_SSR(void);
 void GL3_SoF_SSRUniforms(const float *ssr);
+void GL3_SoF_WorldViewUniforms(const float *eye, const float *dlx);
+qboolean GL3_LM_DeluxeOn(void);
 float GL3_Post_SurfEmissive(const msurface_t *surf);
 void GL3_Post_EmisForBlend(GLenum src, GLenum dst, qboolean blend, float glow, float out[4]);
 void GL3_Post_FxEmis(int blend, float out[4]);

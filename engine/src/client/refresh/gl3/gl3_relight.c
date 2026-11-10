@@ -20,8 +20,9 @@
  * the one baked from (another version of the map) is re-baked, and so is a
  * version-1 cache without directions.
  *
- * The renderer does not use the directions (they lit the removed r_om_bump
- * relief); the format keeps them so existing caches stay valid.
+ * The directions feed r_om_deluxe (the highlight of the baked light on the
+ * world, gl3_shaders.c omDeluxeSpec): kept for the map loaded with the cache
+ * (GL3_Relight_Deluxe), in the lighting lump's layout.
  *
  * A cache is checked against the map's own lighting before use (Relight_Guard):
  * a bake that lost the lamps is not used, darker face blocks are lifted to 80%.
@@ -52,6 +53,9 @@ enum { RELIGHT_VERSION = 2, RELIGHT_HEADER = 20, RELIGHT_MAXSPAWN = 64 };
 static cvar_t *r_om_relight;
 static cvar_t *r_om_relight_minfit; /* lowest R2 of the bake's fit ("fit 2" line of the log) that is used */
 static char spawned[RELIGHT_MAXSPAWN][MAX_QPATH];
+/* r_om_deluxe: the light directions of the map loaded last with a cache (NULL: none), the lump's size */
+static byte *deluxe;
+static int deluxesize;
 static int numspawned;
 
 static unsigned long long
@@ -475,6 +479,10 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *fa
 		r_om_relight = ri.Cvar_Get("r_om_relight", "1", CVAR_ARCHIVE);
 	}
 
+	free(deluxe);
+	deluxe = NULL;
+	deluxesize = 0;
+
 	if (!r_om_relight->value || !Relight_CacheName(mapname, cachename, sizeof(cachename)))
 	{
 		return;
@@ -497,6 +505,14 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *fa
 			if ((version == RELIGHT_VERSION) && (ll == size) && (stored == hash))
 			{
 				float fp, fs, fsun, fspot, r2;
+
+				/* r_om_deluxe: the directions follow the lump (same layout); they describe where the light comes
+				   from also where the map keeps its own lightmaps (a loose fit, a guarded bake) */
+				if ((deluxe = malloc(size)) != NULL)
+				{
+					memcpy(deluxe, buf + RELIGHT_HEADER + size, size);
+					deluxesize = size;
+				}
 
 				/* a bake whose light model fits the map's own lightmaps badly lights each face of a
 				   rock wall differently (owner on sib1, R2 0.50: "the drawing on the snow levels is
@@ -538,6 +554,19 @@ GL3_Relight_Apply(const char *mapname, byte *lightdata, int size, const byte *fa
 	{
 		Relight_Spawn(mapname, cachename);
 	}
+}
+
+/* r_om_deluxe: the light directions of lightmap samples at offset ofs of the lighting lump (byte = 128 + 127 x,
+   world space, length = directional share), NULL without a used cache or outside it */
+const byte *
+GL3_Relight_Deluxe(int ofs, int bytes)
+{
+	if (!deluxe || (ofs < 0) || (bytes < 0) || (ofs + bytes > deluxesize))
+	{
+		return NULL;
+	}
+
+	return deluxe + ofs;
 }
 
 /* the light model weights omlight fitted to the map's own lightmaps (the "fit 2" line of its log: point, surface,

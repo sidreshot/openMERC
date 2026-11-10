@@ -733,6 +733,13 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
+			// GFX-modern r_om_deluxe: the highlight of the baked light (before the dynamic lights join the lightmap)
+			vec3 omDxS = vec3(0.0);
+			if(omDlx.x > 0.5 && omMat.x > 0.001)
+			{
+				float omLvl = (omDlx.z > 0.5 && normalize(passNormal).z > 0.5) ? 0.4 : 1.0;
+				omDxS = omDeluxeSpec(lmTex.rgb, passNormal, passLMcoord, omMat.x, omMat.y / omMat.x) * (omDlx.y * omLvl);
+			}
 			// GFX-modern r_om_dlight_model 1: the dynamic lights in linear light, their highlight by the material
 			vec3 omDlS = vec3(0.0);
 			if(OM_DLNEW != 0 && passLightFlags != 0u)
@@ -741,7 +748,11 @@ static const char* fragmentSrc3Dlm = MULTILINE_STRING(
 				lmTex.rgb += omDlightsNew(passLightFlags, clamp(omRf, 0.22, 1.0), 0.04 + 0.4 * omMat.x, omDlS) * overbrightbits;
 			}
 			outColor = lmTex*texel;
-			outColor.rgb += omDlS;
+			outColor.rgb += omDlS + omDxS;
+			if(omDlx.y < -1.5) // r_om_deluxe -2: the baked highlight alone (x 10, material or not)
+				outColor.rgb = omDeluxeSpec(lmTex.rgb, passNormal, passLMcoord, max(omMat.x, 0.1), (omMat.x > 0.001) ? omMat.y / omMat.x : 0.3) * 10.0;
+			else if(omDlx.y < 0.0) // r_om_deluxe -1: the light directions (grey 0.5 = none)
+				outColor.rgb = texture(omDeluxe, passLMcoord).rgb;
 			if(OM_DLNEW != 0 && omPdl.z < 0.0) // r_om_dlight_spec -1: the normal (rgb) where a dlight is flagged
 				outColor.rgb = (passLightFlags != 0u) ? normalize(passNormal) * 0.5 + 0.5 : vec3(0.0);
 			float omFogK = 1.0;
@@ -959,6 +970,36 @@ static const char* fragmentSrcOmWorld =
 	/* GFX-modern r_om_ssr: what the reflection pass (gl3_post.c) gets from a face: reflectivity and roughness by the
 	   SoF material class and how smooth the texture is (little fine detail = polished), floors more than walls;
 	   under the rain (the same top-down map as the lightning) open ground is wet, with puddles from a noise */
+	/* GFX-modern r_om_deluxe: the highlight of the baked light. The re-bake (omlight) keeps per lightmap sample the
+	   mean direction the light comes from and how directional it is (the length); the lightmap is the light that
+	   reached the face, so its reflection toward the eye is lightmap x directional share x GGX (D F V, Kelemen
+	   visibility) along that direction - on the smoothed normal, roughness at least 0.15 so the 16-unit sample grid
+	   never draws its squares into a highlight. x on (the map has directions), y strength, z 1 = the traced lamp
+	   glints (r_om_ssr) light level faces already (less here); omEyeW the eye of the view; GL_TEXTURE10.
+   No 1/pi in D: SoF draws the diffuse light as lightmap x texture, so the lightmap holds E/pi and the highlight
+   D F V x E is D F V x pi x lightmap (with the 1/pi it stayed under the frame noise on brick and plaster) */
+	"uniform vec4 omDlx;\n"
+	"uniform vec4 omEyeW;\n"
+	"uniform sampler2D omDeluxe;\n"
+	"vec3 omDeluxeSpec(vec3 lm, vec3 nrm, vec2 lmc, float refl, float rough)\n"
+	"{\n"
+	"	vec3 d = texture(omDeluxe, lmc).rgb * (255.0 / 127.0) - (128.0 / 127.0);\n"
+	"	float k = min(length(d), 1.0);\n"
+	"	if (k < 0.05) return vec3(0.0);\n"
+	"	vec3 L = normalize(d);\n"
+	"	vec3 N = normalize(nrm);\n"
+	"	vec3 V = normalize(omEyeW.xyz - passWorldCoord);\n"
+	"	if (dot(N, L) <= 0.0 || dot(N, V) <= 0.0) return vec3(0.0);\n"
+	"	vec3 H = normalize(L + V);\n"
+	"	float a = max(rough, 0.15);\n"
+	"	float a2 = a * a * a * a;\n"
+	"	float nh = max(dot(N, H), 0.0);\n"
+	"	float dd = nh * nh * (a2 - 1.0) + 1.0;\n"
+	"	float vh = max(dot(V, H), 0.0);\n"
+	"	float f0 = 0.04 + 0.5 * refl;\n"
+	"	float F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);\n"
+	"	return lm * (k * min(a2 / (dd * dd) * F * 0.25 / max(vh * vh, 0.1), 6.0));\n"
+	"}\n"
 	"uniform vec4 omSsr;\n"   /* x reflections on (0 = off), y rain wetness (0 = dry) */
 	/* GFX-modern r_om_mirror: the world seen in the mirror plane (gl3_post.c), replaces the faces on that plane */
 	"uniform vec4 omMirror;\n"       /* x first plane on, y second plane on */
@@ -1203,6 +1244,13 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 			// and the lamp glints (gl3_post.c)
 			float omWetK = 0.0;
 			vec4 omMat = (omTranslucent == 0) ? omMaterial(passWorldCoord, passNormal, omWetK) : vec4(0.0);
+			// GFX-modern r_om_deluxe: the highlight of the baked light (before the dynamic lights join the lightmap)
+			vec3 omDxS = vec3(0.0);
+			if(omDlx.x > 0.5 && omMat.x > 0.001)
+			{
+				float omLvl = (omDlx.z > 0.5 && normalize(passNormal).z > 0.5) ? 0.4 : 1.0;
+				omDxS = omDeluxeSpec(lmTex.rgb, passNormal, passLMcoord, omMat.x, omMat.y / omMat.x) * (omDlx.y * omLvl);
+			}
 			// GFX-modern r_om_dlight_model 1: the dynamic lights in linear light, their highlight by the material
 			vec3 omDlS = vec3(0.0);
 			if(OM_DLNEW != 0 && passLightFlags != 0u)
@@ -1211,7 +1259,11 @@ static const char* fragmentSrc3DlmNoColor = MULTILINE_STRING(
 				lmTex.rgb += omDlightsNew(passLightFlags, clamp(omRf, 0.22, 1.0), 0.04 + 0.4 * omMat.x, omDlS) * overbrightbits;
 			}
 			outColor = lmTex*texel;
-			outColor.rgb += omDlS;
+			outColor.rgb += omDlS + omDxS;
+			if(omDlx.y < -1.5) // r_om_deluxe -2: the baked highlight alone (x 10, material or not)
+				outColor.rgb = omDeluxeSpec(lmTex.rgb, passNormal, passLMcoord, max(omMat.x, 0.1), (omMat.x > 0.001) ? omMat.y / omMat.x : 0.3) * 10.0;
+			else if(omDlx.y < 0.0) // r_om_deluxe -1: the light directions (grey 0.5 = none)
+				outColor.rgb = texture(omDeluxe, passLMcoord).rgb;
 			if(OM_DLNEW != 0 && omPdl.z < 0.0) // r_om_dlight_spec -1: the normal (rgb) where a dlight is flagged
 				outColor.rgb = (passLightFlags != 0u) ? normalize(passNormal) * 0.5 + 0.5 : vec3(0.0);
 			float omFogK = 1.0;
@@ -2224,6 +2276,12 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 		glUniform1i(ctLoc, 5);
 	}
 
+	GLint dxLoc = glGetUniformLocation(prog, "omDeluxe"); /* r_om_deluxe: the light directions (gl3_lightmap.c) */
+	if(dxLoc != -1)
+	{
+		glUniform1i(dxLoc, 10);
+	}
+
 	GLint mmLoc = glGetUniformLocation(prog, "omMatMap"); /* r_om_ssr: material map of the texture (gl3_material.c) */
 	if(mmLoc != -1)
 	{
@@ -3020,6 +3078,27 @@ void GL3_SoF_MaterialUniforms(const float *a, const float *b, int n)
 		GL3_UseProgram(si[i]->shaderProgram);
 		glUniform4fv(loc, n, a);
 		glUniform4fv(GL3_UniformLoc(si[i]->shaderProgram, "omMatB[0]"), n, b);
+	}
+}
+
+/* GFX-modern r_om_deluxe: the eye of the view and the baked highlight's switches, per view (gl3_dynlight.c) */
+void GL3_SoF_WorldViewUniforms(const float *eye, const float *dlx)
+{
+	gl3ShaderInfo_t *si[5] = {&gl3state.si3Dlm, &gl3state.si3DlmFlow, &gl3state.si3DlmTrans, &gl3state.si3DlmOpaque, &gl3state.si3DlmNoDl};
+	int i;
+
+	for (i = 0; i < 5; i++)
+	{
+		GLint loc;
+
+		if (!si[i]->shaderProgram || (loc = GL3_UniformLoc(si[i]->shaderProgram, "omDlx")) == -1)
+		{
+			continue;
+		}
+
+		GL3_UseProgram(si[i]->shaderProgram);
+		glUniform4fv(loc, 1, dlx);
+		glUniform4f(GL3_UniformLoc(si[i]->shaderProgram, "omEyeW"), eye[0], eye[1], eye[2], 1.0f);
 	}
 }
 

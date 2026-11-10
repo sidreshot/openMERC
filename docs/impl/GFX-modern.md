@@ -1595,3 +1595,15 @@ client fx module) to start an effect in front of the eye.
   they cut into the world (scene depth, 16 units). The view weapon (own depth range) is left alone - muzzle flashes
   unchanged. r_om_fxsoft_debug 1 prints the blend of the next 60 blended Ghoul passes.
 * Soft particles (r_om_softparticles) stay off: the explosion's hard edge was the model, not the sprites.
+
+## Baked light highlight (r_om_deluxe, owner's point 4, 2026-11-10)
+
+* omlight already stores per lightmap sample the mean light direction and its directional share (cache version 2).
+  gl3_relight.c keeps that block for the loaded map (also when the map's own lightmaps are used: loose fit or
+  guard), gl3_lightmap.c builds an RGBA8 atlas of the same layout as the lightmap pages, bound on GL_TEXTURE10.
+* World shaders (omDeluxeSpec): lightmap x directional share x GGX (D F, Kelemen V) along that direction, on the
+  smoothed normal, reflectivity/roughness from omMaterial, roughness >= 0.15 so the 16-unit grid never shows.
+  Where the r_om_ssr lamp glints already light floors, 0.4 of it. No 1/pi in D: SoF draws diffuse as lightmap x
+  texture, so the lightmap holds E/pi (with the 1/pi the highlight stayed under frame noise).
+* r_om_deluxe 1 default (strength; 3 is already too much), 0 off, -1 shows the directions, -2 the highlight alone x10.
+  PC only (GLES builds without the atlas). Cost: kos1 1080p, one run on/off/on 8.76/8.76/8.90 ms GPU.

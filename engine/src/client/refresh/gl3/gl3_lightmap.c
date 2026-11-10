@@ -46,10 +46,105 @@ GL3_LM_InitBlock(void)
 	memset(gl3_lms.allocated, 0, sizeof(gl3_lms.allocated));
 }
 
+/* GFX-modern r_om_deluxe: the light directions of the re-bake in an atlas of the same layout as the lightmap pages
+   (style 0), RGBA8 (128 = 0; alpha 255 where a face has directions), bound on GL_TEXTURE10 with the page */
+static byte deluxebuf[4 * BLOCK_WIDTH * BLOCK_HEIGHT];
+static GLuint deluxetex[MAX_LIGHTMAPS];
+static int deluxegen[MAX_LIGHTMAPS];
+static qboolean deluxemap;     /* the map being built has directions */
+static qboolean deluxeany;     /* ... and at least one face got them */
+static gl3model_t *deluxemodel;
+
+qboolean
+GL3_LM_DeluxeOn(void)
+{
+	return deluxeany;
+}
+
+static void
+DeluxeClear(void)
+{
+	int i;
+
+	for (i = 0; i < BLOCK_WIDTH * BLOCK_HEIGHT; i++)
+	{
+		deluxebuf[i * 4 + 0] = deluxebuf[i * 4 + 1] = deluxebuf[i * 4 + 2] = 128;
+		deluxebuf[i * 4 + 3] = 0;
+	}
+}
+
+/* the directions of a face's style-0 samples into the page buffer at its place */
+static void
+DeluxeFill(const msurface_t *surf)
+{
+	int smax = surf->lmsize[0], tmax = surf->lmsize[1], i, j;
+	const byte *src;
+
+	if (!deluxemap || !surf->samples || !deluxemodel || !deluxemodel->lightdata)
+	{
+		return;
+	}
+
+	src = GL3_Relight_Deluxe((int)(surf->samples - deluxemodel->lightdata), smax * tmax * 3);
+
+	if (!src)
+	{
+		return;
+	}
+
+	for (i = 0; i < tmax; i++)
+	{
+		byte *dst = deluxebuf + ((surf->light_t + i) * BLOCK_WIDTH + surf->light_s) * 4;
+
+		for (j = 0; j < smax; j++, dst += 4, src += 3)
+		{
+			dst[0] = src[0];
+			dst[1] = src[1];
+			dst[2] = src[2];
+			dst[3] = 255;
+		}
+	}
+
+	deluxeany = true;
+}
+
+/* binds the page's directions (GL_TEXTURE10), with the lightmaps */
+void
+GL3_LM_BindDeluxe(int page)
+{
+	if (!deluxeany || (page < 0) || (page >= MAX_LIGHTMAPS) || !deluxetex[page] || (deluxegen[page] != gl3_contextgen))
+	{
+		return;
+	}
+
+	GL3_SelectTMU(GL_TEXTURE10);
+	glBindTexture(GL_TEXTURE_2D, deluxetex[page]);
+}
+
 void
 GL3_LM_UploadBlock(void)
 {
 	int map;
+
+	if (deluxemap)
+	{
+		int page = gl3_lms.current_lightmap_texture;
+
+		if (!deluxetex[page] || (deluxegen[page] != gl3_contextgen))
+		{
+			glGenTextures(1, &deluxetex[page]);
+			deluxegen[page] = gl3_contextgen;
+		}
+
+		GL3_SelectTMU(GL_TEXTURE10);
+		glBindTexture(GL_TEXTURE_2D, deluxetex[page]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, BLOCK_WIDTH, BLOCK_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, deluxebuf);
+		DeluxeClear();
+	}
 
 	// NOTE: we don't use the dynamic lightmap anymore - all lightmaps are loaded at level load
 	//       and not changed after that. they're blended dynamically depending on light styles
@@ -255,6 +350,7 @@ GL3_LM_CreateSurfaceLightmap(msurface_t *surf)
 	surf->lightmaptexturenum = gl3_lms.current_lightmap_texture;
 
 	GL3_BuildLightMap(surf, (surf->light_t * BLOCK_WIDTH + surf->light_s) * LIGHTMAP_BYTES, BLOCK_WIDTH * LIGHTMAP_BYTES);
+	DeluxeFill(surf); /* GFX-modern r_om_deluxe */
 }
 
 void
@@ -285,6 +381,16 @@ GL3_LM_BeginBuildingLightmaps(gl3model_t *m)
 
 	gl3_lms.current_lightmap_texture = 0;
 
+	/* GFX-modern r_om_deluxe: the re-bake's directions, PC only (the highlight needs the reflection material) */
+#ifdef YQ2_GL3_GLES3
+	deluxemap = false;
+#else
+	deluxemap = m && m->lightdata && (GL3_Relight_Deluxe(0, 1) != NULL);
+#endif
+	deluxeany = false;
+	deluxemodel = m;
+	DeluxeClear();
+
 	/* OpenMerc (I4c): the texel and upload format of SoF lightmaps follow the first character of
 	   gl_monolightmap when the lightmaps are built (SPEC-410 Lightmaps): 0 colour table, L, I, C, A, other */
 	switch ((gl_monolightmap && gl_monolightmap->string) ? gl_monolightmap->string[0] : '0')
@@ -304,6 +410,7 @@ void
 GL3_LM_EndBuildingLightmaps(void)
 {
 	GL3_LM_UploadBlock();
+	R_Printf(PRINT_DEVELOPER, "r_om_deluxe: directions %s\n", deluxeany ? "on" : (deluxemap ? "in the cache, no face" : "none"));
 }
 
 /*

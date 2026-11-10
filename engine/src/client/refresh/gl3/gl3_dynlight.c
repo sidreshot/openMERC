@@ -345,6 +345,23 @@ GL3_DynLight_SetupView(gl3Uni3D_t *u)
 	u->omPdl.W = Q_max(0.0f, Q_min(r_om_pdlight_soft->value, 128.0f));
 	u->omTexDim.X = u->omTexDim.Y = 0.0f;
 
+	/* r_om_deluxe: the baked light's highlight, per view (a mirror pass has an eye of its own) */
+	{
+		static cvar_t *r_om_deluxe, *r_om_ssr_glint;
+		float dlx[4] = {0, 0, 0, 0};
+
+		if (!r_om_deluxe)
+		{
+			r_om_deluxe = ri.Cvar_Get("r_om_deluxe", "1", CVAR_ARCHIVE);
+			r_om_ssr_glint = ri.Cvar_Get("r_om_ssr_glint", "1", CVAR_ARCHIVE);
+		}
+
+		dlx[0] = (r_om_deluxe->value != 0) && GL3_LM_DeluxeOn() && !(r_newrefdef.rdflags & RDF_NOWORLDMODEL) ? 1.0f : 0.0f;
+		dlx[1] = Q_clamp(r_om_deluxe->value, -2.0f, 4.0f);
+		dlx[2] = (GL3_Post_SSRActive() && r_om_ssr_glint->value) ? 1.0f : 0.0f;
+		GL3_SoF_WorldViewUniforms(r_newrefdef.vieworg, dlx);
+	}
+
 	/* r_om_dlight_model 1: z the highlight's strength, the eye in omTexDim.zw and omPdl.w (the SoF rule's normal
 	   term and soft edge are not used there) */
 	{
