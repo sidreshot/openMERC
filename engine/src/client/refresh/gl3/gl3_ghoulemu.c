@@ -137,7 +137,7 @@ static struct
 	/* GFX-modern sun shadows (gl3_csm.c): the depth mask as set, whether the entity casts and whether its
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
-	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk, u_sunk;
+	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk, u_sunk, u_lsk;
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
@@ -787,7 +787,8 @@ static const char *emu_fs =
 	"in vec3 vEP;\n"
 	"uniform int omPPL;\n"
 	"uniform float omPbrK;\n"   /* r_om_pbr_models: strength of the specular */
-	"uniform float omSunK;\n"   /* r_om_pbr_sun x the sun shadows are on (gl3_csm.c), else 0 */
+	"uniform float omSunK;\n"
+	"uniform float omLsK;\n"    /* r_om_pbr_shadows: the lamp shadows on models, 0 off */   /* r_om_pbr_sun x the sun shadows are on (gl3_csm.c), else 0 */
 	"uniform vec4 omL[48];\n"
 	"uniform vec4 omM[6];\n"
 	/* r_om_ambcube: the ambient factors along +x -x +y -y +z -z of the world and the eye to world rotation */
@@ -917,6 +918,14 @@ static const char *emu_fs =
 	"	vec3 amb = ma.rgb * omM[5].rgb;\n"
 	"	vec3 c = omM[3].rgb + amb * omAmbK(n);\n"
 	"	vec3 sp = vec3(0.0);\n"
+	/* r_om_pbr_shadows: the lamp shadows (gl3_lshadow.c) on the lamps' light - the share of it the shadow cubes let
+	   through, weighted by each lamp's light here (the Ghoul lights are not matched one by one) */
+	"	float lsv = 1.0;\n"
+	"	if (omLsK > 0.0)\n"
+	"	{\n"
+	"		vec4 wq = omInvPV * vPos;\n"
+	"		lsv = mix(1.0, omLsModelVis(wq.xyz / wq.w, omE2W * n), omLsK);\n"
+	"	}\n"
 	"	for (int i = 0; i < 8; i++)\n"
 	"	{\n"
 	"		if (omL[i * 6 + 1].w < 0.5) continue;\n"
@@ -945,7 +954,7 @@ static const char *emu_fs =
 	"			spot = (cs < sd.w) ? 0.0 : pow(max(cs, 0.0), omL[i * 6 + 5].w);\n"
 	"		}\n"
 	"		float nl = max(dot(n, L), 0.0);\n"
-	"		vec3 Lc = att * spot * omL[i * 6 + 2].rgb;\n"
+	"		vec3 Lc = att * spot * lsv * omL[i * 6 + 2].rgb;\n"
 	"		c += att * spot * omL[i * 6 + 1].rgb * ma.rgb + nl * Lc * md.rgb;\n"
 	"		if (nl > 0.0)\n"
 	"		{\n"
@@ -1283,6 +1292,7 @@ CreateObjects(void)
 	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
 	E.u_pbrk = glGetUniformLocation(E.prog, "omPbrK");
 	E.u_sunk = glGetUniformLocation(E.prog, "omSunK");
+	E.u_lsk = glGetUniformLocation(E.prog, "omLsK");
 	E.u_pplL = glGetUniformLocation(E.prog, "omL");
 	E.u_pplM = glGetUniformLocation(E.prog, "omM");
 	E.u_ambon = glGetUniformLocation(E.prog, "omAmbOn");
@@ -2058,6 +2068,17 @@ Flush(void)
 			}
 
 			glUniform1f(E.u_sunk, GL3_CSM_Active() ? Q_clamp(r_om_pbr_sun->value, 0.0f, 4.0f) : 0.0f);
+		}
+		{
+			static cvar_t *r_om_pbr_shadows;
+
+			if (!r_om_pbr_shadows)
+			{
+				r_om_pbr_shadows = ri.Cvar_Get("r_om_pbr_shadows", "1", CVAR_ARCHIVE);
+			}
+
+			/* not into the shadow cubes themselves (a caster pass) */
+			glUniform1f(E.u_lsk, GL3_LShadow_Capturing() ? 0.0f : Q_clamp(r_om_pbr_shadows->value, 0.0f, 1.0f));
 		}
 
 		U1i(E.u_ppl, ppl);

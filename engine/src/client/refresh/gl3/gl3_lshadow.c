@@ -672,11 +672,63 @@ static const char *ls_glsl =
 	/* r_om_lshadow_debug: red = the darkening, green = a lamp's share of the light, blue = a caster blocks a lamp */
 	"	if (omLsP2.y > 0.5) { lm = dbg; return; }\n"
 	"	if (keep < 1.0) lm = max(lm * keep, min(lm, lm0 * omLsP.z));\n"
+	"}\n"
+	/* GFX-modern r_om_pbr_models: how much of the shadowed lamps' light reaches a point of a model - each lamp in
+	   reach weighted by its light there, seen through the static layer (walls, crates: the legs behind a crate) and
+	   the dynamic one (other characters and props; a little more offset toward the lamp than for the world, a model
+	   would otherwise shadow its own skin). 1 without lamps */
+	"float omLsModelVis(vec3 wp, vec3 N)\n"
+	"{\n"
+	"	int n = int(omLsP.x + 0.5);\n"
+	"	if (n <= 0) return 1.0;\n"
+	"	float tot = 0.0, vis = 0.0;\n"
+	"	for (int i = 0; i < 8; i++)\n"
+	"	{\n"
+	"		if (i >= n) break;\n"
+	"		vec3 L = omLsPos[i].xyz - wp;\n"
+	"		float d = length(L);\n"
+	"		if (d >= omLsPos[i].w || d < 1.0) continue;\n"
+	"		vec3 l = L / d;\n"
+	"		float c;\n"
+	"		if (omLsCol[i].w > 1.5)\n"
+	"		{\n"
+	"			float ce = dot(omLsA[i].xyz, -l);\n"
+	"			if (ce <= 0.0) continue;\n"
+	"			c = omLsA[i].w * ce / max(d, 16.0);\n"
+	"		}\n"
+	"		else\n"
+	"		{\n"
+	"			c = max(omLsA[i].x - d * omLsA[i].y, 0.0);\n"
+	"			if (omLsCol[i].w > 0.5)\n"
+	"			{\n"
+	"				float ca = dot(-l, omLsDir[i].xyz);\n"
+	"				if (ca < omLsA[i].w || ca <= 0.0) continue;\n"
+	"				c *= pow(ca, omLsA[i].z);\n"
+	"			}\n"
+	"		}\n"
+	"		float ci = max(max(omLsCol[i].r, omLsCol[i].g), omLsCol[i].b) * c;\n"
+	"		if (ci < 0.002) continue;\n"
+	"		vec3 p = wp + (N * 0.5 + l) * (3.0 * d * omLsP.w);\n"
+	"		vec3 v = p - omLsPos[i].xyz;\n"
+	"		vec3 a = abs(v);\n"
+	"		int f = (a.x >= a.y && a.x >= a.z) ? (v.x < 0.0 ? 1 : 0) : ((a.y >= a.z) ? (v.y < 0.0 ? 3 : 2) : (v.z < 0.0 ? 5 : 4));\n"
+	"		vec4 sc = omLsVP[i * 6 + f] * vec4(p, 1.0);\n"
+	"		vec3 uvz = sc.xyz / sc.w * 0.5 + 0.5;\n"
+	"		float layer = float(i * 12 + f);\n"
+	"		float st = texture(omLsMap, vec4(uvz.xy, layer, uvz.z));\n"
+	"		float dy = 0.0;\n"
+	"		for (int k = 0; k < 4; k++)\n"
+	"			dy += texture(omLsMap, vec4(uvz.xy + omLsDisk[k * 4] * omLsP2.x * 1.5, layer + 6.0, uvz.z));\n"
+	"		tot += ci;\n"
+	"		vis += ci * st * (dy * 0.25);\n"
+	"	}\n"
+	"	return (tot > 0.0) ? vis / tot : 1.0;\n"
 	"}\n";
 
 /* a GPU without the two texture units: the world shaders get an empty function */
 static const char *ls_glsl_none =
-	"void omLsApply(inout vec3 lm, vec3 lm0, vec3 wp, vec3 nrm) {}\n";
+	"void omLsApply(inout vec3 lm, vec3 lm0, vec3 wp, vec3 nrm) {}\n"
+	"float omLsModelVis(vec3 wp, vec3 N) { return 1.0; }\n";
 
 const char *
 GL3_LShadow_GlslNone(void)
