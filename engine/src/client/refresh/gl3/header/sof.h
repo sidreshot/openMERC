@@ -199,6 +199,9 @@ typedef struct
 	/* r_om_water: x 1 = the planar reflection (r_om_water_quality 3) on GL_TEXTURE3, y z 1 / scene target size,
 	   w 1 = the ripple tile on GL_TEXTURE2 (gl3_liquid.c binds both) */
 	float liqrefl[4];
+	/* GFX-modern r_om_holes: the relief of a bullet hole - the world's up in the mark's texture axes (xy, length 1 on a
+	   wall, 0 on a floor), z strength (0 off) */
+	float relief[4];
 } gl3fxstate_t;
 qboolean GL3_Post_SSRActive(void);
 qboolean GL3_Post_TintHandled(void);

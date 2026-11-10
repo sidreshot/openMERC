@@ -1795,6 +1795,10 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		}
 
 		uniform vec4 omFxMat; // GFX-modern r_om_ssr: reflectivity, roughness of liquids (0 = the default material)
+		// GFX-modern r_om_holes: a bullet hole lit as a hole - its depth from the texture (coverage x darkness), the
+		// rim facing the light from above lighter, the far rim in shadow (gl3_fx.c: xy the world's up in the
+		// texture's axes, z strength)
+		uniform vec4 omRelief;
 
 		// GFX-modern r_om_water (gl3_liquid.c): x mode (0 off, 1 water, 2 the full set: r_om_water_quality), y time
 		// (s), z highlight strength, w 1 = the traced reflection (r_om_ssr) reflects; eye xyz, w 1 = depth effects
@@ -1974,6 +1978,21 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 				vec4 t = texture(tex, passTexCoord + liqN.xy * 0.03);
 				liqT = t;
 				c = (texmode == 1) ? t : t * passColor;
+				if(omRelief.z > 0.0)
+				{
+					vec2 ts = 1.0 / vec2(textureSize(tex, 0));
+					vec4 tx = texture(tex, passTexCoord + vec2(ts.x, 0.0)), ty = texture(tex, passTexCoord + vec2(0.0, ts.y));
+					// depth: covered and dark is deep
+					float h0 = t.a * (1.0 - 0.6 * dot(t.rgb, vec3(0.3, 0.5, 0.2)));
+					float hx = tx.a * (1.0 - 0.6 * dot(tx.rgb, vec3(0.3, 0.5, 0.2)));
+					float hy = ty.a * (1.0 - 0.6 * dot(ty.rgb, vec3(0.3, 0.5, 0.2)));
+					// light from above into a hole on a wall: where the depth grows toward the light (the lower rim) the
+					// inner wall faces up and is lit, the upper inner wall faces down and is in shadow
+					float e = dot(vec2(hx - h0, hy - h0), omRelief.xy) * omRelief.z;
+					// a dark hole hardly changes when multiplied: the lit lip also catches the light of the spot
+					// (the vertex colour of a lit mark), the shadowed one sinks
+					c.rgb = c.rgb * clamp(1.0 + e * 5.0, 0.25, 2.0) + passColor.rgb * max(e, 0.0) * 1.2;
+				}
 			}
 
 			if(alphatest != 0 && c.a <= 0.05)

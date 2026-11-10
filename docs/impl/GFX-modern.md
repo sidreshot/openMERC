@@ -1753,3 +1753,13 @@ client fx module) to start an effect in front of the eye.
 * Exact cost with a fixed load (test aid r_om_capsule_test N: N bodies in a row 100 units ahead; arm1 street, still
   camera, 1080p, r_om_capsule_max 8, A/B alternated): world pass 4 capsules 3.63 / 3.35 ms, 8 capsules 3.63 / 3.86,
   none 3.58 / 3.83 / 3.63 - within the run's noise (+-0.25 ms) even at eight after the sphere early-out.
+
+## r_om_holes: bullet holes with depth (owner's point 3, 2026-11-11)
+
+* A bullet hole mark (sprite bhole*, not the glass crack) gets the world's up projected into its plane, in its
+  texture axes (gl3_fx.c DecalRelief; BillboardVerts lays s along sA + cB, t along cA - sB): length 1 on a wall, 0 on a
+  floor or ceiling. The effect shader takes the hole's depth from the texture (coverage x darkness), its slope from
+  two neighbour texels, and lights it from above: the lower inner wall faces up and catches the light of the spot
+  (the mark's vertex colour) as a lip, the upper one sinks into shadow. A painted hole now reads as a crater on the
+  arm1 brick wall (om_decal bhole_mtl / bhole2 / bhole_wd). Cost: two texture fetches on the holes' own pixels.
+* First version only multiplied the colour: a dark hole changed by one grey level - the lit lip is what shows.

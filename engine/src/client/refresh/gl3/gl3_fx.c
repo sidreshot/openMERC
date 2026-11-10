@@ -41,6 +41,7 @@ static qboolean fxstate_valid;
 
 static GLint u_texmode, u_alphatest, u_fogmode, u_fogstart, u_fogend, u_fogcolor, u_fogplane;
 static GLint u_emis, u_softp, u_softv, u_depth, u_fxmat; /* GFX-modern (gl3_post.c) */
+static GLint u_relief; /* GFX-modern r_om_holes */
 static GLint u_liq, u_liqeye, u_liqrefl, u_liqrip; /* GFX-modern r_om_water (gl3_liquid.c) */
 static GLint u_pf0, u_pf1, u_pf2, u_pfpl; /* GFX-modern r_om_ppfog (gl3_fog.c) */
 static GLint u_fogtab; /* r_om_ppfog region table (GL_TEXTURE4) */
@@ -62,6 +63,7 @@ QueryUniforms(void)
 	u_fogplane = glGetUniformLocation(prog, "fogplane");
 	u_emis = glGetUniformLocation(prog, "omEmis");
 	u_fxmat = glGetUniformLocation(prog, "omFxMat");
+	u_relief = glGetUniformLocation(prog, "omRelief");
 	u_liq = glGetUniformLocation(prog, "omLiq");
 	u_liqeye = glGetUniformLocation(prog, "omLiqEye");
 	u_liqrefl = glGetUniformLocation(prog, "omLiqRefl");
@@ -263,6 +265,7 @@ uploaded:
 		GL3_Post_FxEmis(st->blend, emis);
 		glUniform4fv(u_emis, 1, emis);
 		glUniform4f(u_fxmat, st->matrefl, st->matrough, 0, 0);
+		glUniform4fv(u_relief, 1, st->relief);
 		glUniform4fv(u_liq, 1, st->liq);
 
 		if (st->liq[0] > 0)
@@ -1383,6 +1386,60 @@ DecalMaterial(const sofalphaquad_t *q, const gl3image_t *image, int blend, gl3fx
 	}
 }
 
+/* GFX-modern r_om_holes: a bullet hole (sprite bhole*, not the glass crack) gets the world's up in its texture axes,
+   as BillboardVerts lays the quad: s along sA + cB, t along cA - sB (A, B the plane's axes, c s the rotation) */
+static void
+DecalRelief(const sofalphaquad_t *q, const gl3image_t *image, gl3fxstate_t *st)
+{
+	static cvar_t *r_om_holes;
+	const char *n;
+	vec3_t nn, axis = {0, 0, 0}, A, B, S, T, up;
+	float c = q->f18, s = q->f1c, d;
+	int k = 0;
+
+	if (!(q->flags & SOF_AQ_DECAL) || !(q->flags & SOF_AQ_ORIENTED) || !image)
+	{
+		return;
+	}
+
+	if (!r_om_holes)
+	{
+		r_om_holes = ri.Cvar_Get("r_om_holes", "1", CVAR_ARCHIVE);
+	}
+
+	n = strrchr(image->name, '/');
+	n = n ? n + 1 : image->name;
+
+	if ((r_om_holes->value <= 0) || Q_strncasecmp(n, "bhole", 5) || Q_strcasestr(n, "glass"))
+	{
+		return;
+	}
+
+	VectorCopy(q->normal, nn);
+	if (fabsf(nn[1]) < fabsf(nn[k])) k = 1;
+	if (fabsf(nn[2]) < fabsf(nn[k])) k = 2;
+	axis[k] = 1;
+	d = DotProduct(axis, nn);
+	VectorMA(axis, -d, nn, B);
+	VectorNormalize(B);
+	CrossProduct(nn, B, A);
+
+	VectorScale(A, s, S);
+	VectorMA(S, c, B, S);
+	VectorScale(A, c, T);
+	VectorMA(T, -s, B, T);
+	VectorNormalize(S);
+	VectorNormalize(T);
+	/* the light from above, in the mark's plane: full on a wall, none on a floor or a ceiling */
+	VectorSet(up, 0, 0, 1);
+	VectorMA(up, -nn[2], nn, up);
+
+	st->relief[0] = DotProduct(up, S);
+	st->relief[1] = DotProduct(up, T);
+	st->relief[2] = Q_clamp(r_om_holes->value, 0.0f, 2.0f);
+	st->relief[3] = 0;
+}
+
 /* one alpha quad drawn alone (SPEC-412 §8) */
 static void
 DrawAlphaQuad(sofalphaquad_t *q)
@@ -1410,6 +1467,7 @@ DrawAlphaQuad(sofalphaquad_t *q)
 	st.polyoffset = (q->flags & SOF_AQ_DECAL) &&
 		((gl_offsetfactor->value != 0) || (gl_offsetunits->value != 0));
 	DecalMaterial(q, image, blend, &st);
+	DecalRelief(q, image, &st);
 	SetPointFog(&st, QuadFog(q), q->origin, blend);
 	/* GFX-modern: camera-facing smoke, dust and blood fade where they cut into the world */
 	st.soft = GL3_Post_SoftMode(blend, (q->flags & SOF_AQ_BILLBOARD) &&
@@ -1551,6 +1609,7 @@ DrawQuadChain(sofquadchain_t *chain)
 	st.alphatest = (blend == 1);
 	st.depthtest = !(first->flags & SOF_AQ_NODEPTH);
 	DecalMaterial(first, image, blend, &st);
+	DecalRelief(first, image, &st);
 	SetPointFog(&st, QuadFog(first), first->origin, blend);
 	st.soft = GL3_Post_SoftMode(blend, billboard && !(first->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)),
 		st.depthtest);
