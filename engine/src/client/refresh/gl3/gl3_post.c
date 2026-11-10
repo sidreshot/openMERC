@@ -1613,9 +1613,15 @@ CreateChain(int vw, int vh)
 int gl3_drawsamples;
 static int windowsamples = -1;
 
+/* registered at start so the video menu sees them (the effects also register them on first use) */
+static void GlintsCvars(void);
+static void SkyraysCvars(void);
+
 void
 GL3_Post_Init(void)
 {
+	GlintsCvars();
+	SkyraysCvars();
 	r_om_bloom = ri.Cvar_Get("r_om_bloom", "1", CVAR_ARCHIVE);
 	r_om_bloom_threshold = ri.Cvar_Get("r_om_bloom_threshold", "0", CVAR_ARCHIVE);
 	r_om_bloom_intensity = ri.Cvar_Get("r_om_bloom_intensity", "0.45", CVAR_ARCHIVE);
@@ -2093,6 +2099,18 @@ static struct
 static cvar_t *r_om_glints, *r_om_glints_intensity, *r_om_glints_tune;
 
 static void
+GlintsCvars(void)
+{
+#ifdef YQ2_GL3_GLES3
+	r_om_glints = ri.Cvar_Get("r_om_glints", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
+#else
+	r_om_glints = ri.Cvar_Get("r_om_glints", "1", CVAR_ARCHIVE);
+#endif
+	r_om_glints_intensity = ri.Cvar_Get("r_om_glints_intensity", "1", CVAR_ARCHIVE);
+	r_om_glints_tune = ri.Cvar_Get("r_om_glints_tune", "", 0);
+}
+
+static void
 GlintsTune(float t[4])
 {
 	t[0] = 0.08f; /* threshold */
@@ -2117,15 +2135,7 @@ GlintsSource(void)
 	GLT.have = false;
 
 	if (!r_om_glints)
-	{
-#ifdef YQ2_GL3_GLES3
-		r_om_glints = ri.Cvar_Get("r_om_glints", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
-#else
-		r_om_glints = ri.Cvar_Get("r_om_glints", "1", CVAR_ARCHIVE);
-#endif
-		r_om_glints_intensity = ri.Cvar_Get("r_om_glints_intensity", "1", CVAR_ARCHIVE);
-		r_om_glints_tune = ri.Cvar_Get("r_om_glints_tune", "", 0);
-	}
+		GlintsCvars();
 
 	if (GLT.failed || (r_om_glints->value <= 0) || (r_om_glints_intensity->value <= 0) || (P.nlevels < 4) ||
 		(r_newrefdef.rdflags & SOF_RDF_IRGOGGLES))
@@ -11057,6 +11067,20 @@ static struct
 } SKR;
 
 static cvar_t *r_om_skyrays, *r_om_skyrays_intensity, *r_om_skyrays_tune;
+
+static void
+SkyraysCvars(void)
+{
+#ifdef YQ2_GL3_GLES3
+	r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
+#else
+	r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "1", CVAR_ARCHIVE);
+#endif
+	r_om_skyrays_intensity = ri.Cvar_Get("r_om_skyrays_intensity", "1", CVAR_ARCHIVE);
+	/* threshold, length, decay, strength (tuning; empty = the defaults) */
+	r_om_skyrays_tune = ri.Cvar_Get("r_om_skyrays_tune", "", 0);
+}
+
 extern vec3_t vpn; /* gl3_main.c, the view of this frame */
 
 static qboolean
@@ -11133,16 +11157,7 @@ GL3_Post_SkyRays(void)
 	qboolean painted;
 
 	if (!r_om_skyrays)
-	{
-#ifdef YQ2_GL3_GLES3
-		r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "0", CVAR_ARCHIVE); /* not yet seen on a phone */
-#else
-		r_om_skyrays = ri.Cvar_Get("r_om_skyrays", "1", CVAR_ARCHIVE);
-#endif
-		r_om_skyrays_intensity = ri.Cvar_Get("r_om_skyrays_intensity", "1", CVAR_ARCHIVE);
-		/* threshold, length, decay, strength (tuning; empty = the defaults) */
-		r_om_skyrays_tune = ri.Cvar_Get("r_om_skyrays_tune", "", 0);
-	}
+		SkyraysCvars();
 
 	if (!P.bound || SKR.failed || (r_om_skyrays->value <= 0) || !gl3_worldmodel || !P.depthfbo || !P.texdepthcopy ||
 		(r_newrefdef.rdflags & (RDF_NOWORLDMODEL | RDF_UNDERWATER | SOF_RDF_IRGOGGLES)))
