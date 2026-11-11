@@ -2,7 +2,7 @@
 // OpenMerc game module, package G3 - the human bodies (male soldier, civilian/officer, female, armoured boss):
 // hit location and damage on human bodies, set-up requests, animation choices, reactions, deaths and dying,
 // voices, faces, weapons, armour and precache.
-// Implements: SPEC-720 Behaviour 10, 11, 12 (armoured boss), SPEC-721 §2-§10 (as callers), SPEC-722 human part
+// Implements: SPEC-720 Behaviour 10, 11, 12 (armoured boss), SPEC-721 В§2-В§10 (as callers), SPEC-722 human part
 #include "g3_local.h"
 
 using namespace ghoul;
@@ -910,8 +910,8 @@ public:
 	}
 
 	// 0 front, 1 behind, 2 right side, 3 left side
-	// 0 front, 1 behind, 2 right, 3 left: c = horizontal direction · target forward (> 0.707 behind, < -0.707
-	// front), "right" when the direction · right <= 0. The first estimator (and the torso blast) use the direction
+	// 0 front, 1 behind, 2 right, 3 left: c = horizontal direction В· target forward (> 0.707 behind, < -0.707
+	// front), "right" when the direction В· right <= 0. The first estimator (and the torso blast) use the direction
 	// from the damage origin to the target's origin, the second estimator the one to the hit point (SPEC-AMEND-006
 	// G3.21).
 	int Side(const G3Hit &h, bool toPoint = false)
@@ -930,7 +930,7 @@ public:
 			return 1;
 		if (df < -0.707f)
 			return 0;
-		return DotProduct(d, l) >= 0 ? 2 : 3; // d · right = -(d · left) <= 0
+		return DotProduct(d, l) >= 0 ? 2 : 3; // d В· right = -(d В· left) <= 0
 	}
 
 	// shuffle `size` candidates and take the first k (k = irand(1, size))
@@ -1469,9 +1469,9 @@ public:
 					damage /= 2;
 			}
 		}
-		// 11.5 hit effects (SPEC-AMEND-005 G3.7, G3.6): the per-hit debris puff — TE 18 at the damage point, direction
+		// 11.5 hit effects (SPEC-AMEND-005 G3.7, G3.6): the per-hit debris puff вЂ” TE 18 at the damage point, direction
 		// (0,0,0), irand(0, 5) chunks (0 is sent too) of size class 4, flesh (32), no extents, material 35, through the
-		// game-wide TE 18 filter — then the blood splat (TE 3) from the blood point on every hit that has one
+		// game-wide TE 18 filter вЂ” then the blood splat (TE 3) from the blood point on every hit that has one
 		if (h.point[0] != 0 || h.point[1] != 0 || h.point[2] != 0)
 			G3FX_Debris(h.point, vec3_origin, G3_irand(0, 5), 4, 32, vec3_origin, 35);
 		if (haveBlood)
@@ -1551,7 +1551,7 @@ public:
 			}
 		}
 		// 11.10 wounds, severing. Also after a full gib in this hit: the original then still wounds the zones (wound
-		// meshes, killing-blow clouds, exit wound with its bolt-on) — observed black box, DM self-rocket.
+		// meshes, killing-blow clouds, exit wound with its bolt-on) вЂ” observed black box, DM self-rocket.
 		if (gore) {
 			bool armouredPlayer = t->client && Dmg_RealisticDamage() && t->client->inv && t->client->inv->Armor() > 0;
 			if (nz > 0)
@@ -2226,11 +2226,17 @@ public:
 			float len = VectorNormalize(d);
 			if (len < 4 || len > 96)
 				continue;
+			/* a bolt is the middle of the part (the head's centre, the shoulder joint): the drawn part reaches some 12
+			   units further (jpn2 intro: the shot hostage's head bolt stayed clear while head and shoulders were in
+			   the wall) */
+			vec3_t far;
+			float reach = len + 12.0f;
+			VectorMA(start, reach, d, far);
 			trace_t tr;
-			gix.trace(start, NULL, NULL, bp, ent, MASK_SOLID, &tr);
+			gix.trace(start, NULL, NULL, far, ent, MASK_SOLID, &tr);
 			if (tr.startsolid || tr.allsolid || tr.fraction >= 1.0f)
 				continue;
-			float depth = (1.0f - tr.fraction) * len + 2.0f;
+			float depth = (1.0f - tr.fraction) * reach + 2.0f;
 			if (depth > worst) {
 				worst = depth;
 				VectorScale(d, -1.0f, push);
@@ -2564,8 +2570,9 @@ public:
 		}
 		if (AnimDone() && expr != EXPR_DEAD && (committed || now - playStart > 10.0f))
 			SetExpression(EXPR_DEAD, 999999.9f, false);
-		/* out of the walls: a little each think while falling, the rest when it has come to rest */
-		if (frozenAt == 0 && !G3_Cinematic())
+		/* out of the walls: a little each think while falling, the rest when it has come to rest - in scripted scenes
+		   too (jpn2 intro: the hostage Dekker shoots fell back with head and shoulders into the wall) */
+		if (frozenAt == 0)
 			SettleCorpse(6.0f);
 		/* (not while the fall waits in the air: the body would stay on its standing frame). Only a finished DEATH
 		   animation freezes: ChooseDeath runs this before the death is set, and a pre-death idle or walk that had
@@ -2575,9 +2582,8 @@ public:
 		   the end of the death - its exit follows (DyingFollowUp) - so it never freezes the corpse */
 		if (frozenAt == 0 && ((AnimDone() && cur && cur->cls == ANIMCLS_DEATH && !(cur->flags & ANIMF_LOOP)) ||
 		                      (!pauseKind && now - deathTime > 7.0f))) {
-			if (!G3_Cinematic())
-				for (int k = 0; k < 3; k++)
-					SettleCorpse(40.0f);
+			for (int k = 0; k < 3; k++)
+				SettleCorpse(40.0f);
 			IGhoulInst *inst = Inst();
 			if (inst) {
 				inst->Pause(now);
@@ -2592,7 +2598,7 @@ public:
 			frozenAt = now;
 			G3_DPrintf("corpse %s frozen on %s (cls %d) after %.1f s\n", ent->classname, cur ? cur->name : "-",
 				cur ? cur->cls : -1, now - deathTime);
-			// the corpse has come to rest: its blood pool (SPEC-721 §7; human models have no `ooze` note, issue #8)
+			// the corpse has come to rest: its blood pool (SPEC-721 В§7; human models have no `ooze` note, issue #8)
 			if (!pooled && !gibbed) {
 				pooled = true;
 				BloodPool();
