@@ -70,6 +70,9 @@ void OMGhoul_Init(const om_ghoul_host_t *host);
 /* Destroy every object and free every cache. */
 void OMGhoul_Shutdown(void);
 
+/* openMERC: seconds over which a sequence switch blends the old pose out (0: the original snap; cvar ghl_blend) */
+void OMGhoul_SetBlendTime(float seconds);
+
 /* The three system objects (SPEC-010 A). Return the C++ interface pointer (ghoul::IGhoulSystem *). */
 void *OMGhoul_GetSystem(int role);
 

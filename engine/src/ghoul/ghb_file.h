@@ -201,7 +201,19 @@ struct FramePair
 {
 	uint32_t a = 0, b = 0;
 	float w = 1.0f;
+	// openMERC: a transition between two sequences of one file - the pose (c, d, w2) the instance had when the new
+	// sequence started, mixed in by k (1 at the switch, 0 when it is over). k = 0: the original single pair
+	uint32_t c = 0, d = 0;
+	float w2 = 1.0f, k = 0.0f;
 	uint32_t Dominant() const { return w >= 0.5f ? a : b; }
+	FramePair Second() const
+	{
+		FramePair s;
+		s.a = c;
+		s.b = d;
+		s.w = w2;
+		return s;
+	}
 };
 
 // One loaded .ghb file
@@ -255,6 +267,7 @@ public:
 	// Node matrix at one frame / blended frame pair (SPEC-014 behaviour), model space
 	void NodeMatrix(const GhbNode &n, uint32_t frame, Matrix4 &out) const;
 	void NodeMatrixPose(const GhbNode &n, const FramePair &fp, Matrix4 &out) const;
+	void NodeMatrixPair(const GhbNode &n, const FramePair &fp, Matrix4 &out) const; // one pair, no transition
 	bool NodeWords(const GhbNode &n, uint32_t frame, uint32_t &w0, uint32_t &w1) const;
 
 	size_t MemoryUse() const { return bytes_.size(); }

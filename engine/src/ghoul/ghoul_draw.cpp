@@ -20,8 +20,29 @@ extern int g_drawRole;
 
 // ------------------------------------------------------------------ posed geometry (SPEC-012 section 4)
 
+static void EvalGeometryPair(const GhbFile &f, const FramePair &fp, std::vector<float> &apos,
+	std::vector<float> &anorm, std::vector<float> &atex);
+
+// openMERC: a transition (fp.k > 0) mixes the old pose's geometry in
 void EvalGeometry(const GhbFile &f, const FramePair &fp, std::vector<float> &apos, std::vector<float> &anorm,
 	std::vector<float> &atex)
+{
+	EvalGeometryPair(f, fp, apos, anorm, atex);
+	if (fp.k <= 0.0f)
+		return;
+	static thread_local std::vector<float> p2, n2, t2;
+	EvalGeometryPair(f, fp.Second(), p2, n2, t2);
+	float k = fp.k;
+	for (size_t i = 0; i < apos.size() && i < p2.size(); i++)
+		apos[i] += (p2[i] - apos[i]) * k;
+	for (size_t i = 0; i < anorm.size() && i < n2.size(); i++)
+		anorm[i] += (n2[i] - anorm[i]) * k;
+	for (size_t i = 0; i < atex.size() && i < t2.size(); i++)
+		atex[i] += (t2[i] - atex[i]) * k;
+}
+
+static void EvalGeometryPair(const GhbFile &f, const FramePair &fp, std::vector<float> &apos,
+	std::vector<float> &anorm, std::vector<float> &atex)
 {
 	const GhbGeometry &g = f.geo;
 	apos.resize(g.nApos * 3);
@@ -67,13 +88,23 @@ template <class T> static T Blend(const Track<T> &t, const FramePair &fp)
 	if (t.constant || t.v.size() <= 1)
 		return t.v[0];
 	const T &a = t.At(fp.a), &b = t.At(fp.b);
-	return b + (a - b) * fp.w;
+	T v = b + (a - b) * fp.w;
+	if (fp.k > 0.0f)
+	{
+		const T &c = t.At(fp.c), &e = t.At(fp.d);
+		T o = e + (c - e) * fp.w2;
+		v = v + (o - v) * fp.k;
+	}
+	return v;
 }
 static float BlendF(const Track<float> &t, const FramePair &fp)
 {
 	if (t.constant || t.v.size() <= 1)
 		return t.v[0];
-	return t.At(fp.b) + (t.At(fp.a) - t.At(fp.b)) * fp.w;
+	float v = t.At(fp.b) + (t.At(fp.a) - t.At(fp.b)) * fp.w;
+	if (fp.k > 0.0f)
+		v += (t.At(fp.d) + (t.At(fp.c) - t.At(fp.d)) * fp.w2 - v) * fp.k;
+	return v;
 }
 
 // ------------------------------------------------------------------ lights

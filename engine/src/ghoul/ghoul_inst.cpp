@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 #include "ghoul_internal.h"
@@ -170,6 +171,23 @@ void Inst::Play(GhoulID s, float t, float offset, bool restart, int m, bool matc
 		return;
 	if (s == seq && m == mode && rev == reverse && !restart)
 		return; // keeps its phase
+	/* openMERC: the pose being shown now, mixed out over the first moments of the new sequence - the original
+	   snapped from one sequence to the next (a gunman's shot cut straight into his walk, a hit froze the run) */
+	xfStart = -1.0f;
+	if (g_ghoulBlendTime > 0.0f && seq && on)
+	{
+		Pose cur;
+		if (EvalPose(t, cur) && cur.valid)
+		{
+			xfFrom = cur.fp;
+			if (cur.fp.k > 0.5f)
+				xfFrom = cur.fp.Second(); /* still mostly the one before: keep blending from that */
+			xfFrom.c = xfFrom.d = 0;
+			xfFrom.k = 0.0f;
+			xfFile = cur.file;
+			xfStart = t;
+		}
+	}
 	// old raw cycle phase at t (for matchPhase)
 	bool match = matchPhase && seq && (s != seq || rev != reverse);
 	float phase = 0.0f;
@@ -865,6 +883,21 @@ NetState Inst::Capture() const
 
 void Inst::Apply(const NetState &s, bool)
 {
+	/* openMERC: a client instance changes sequence here (the server's Play arrives as state): the pose last drawn
+	   is mixed out from the next drawn frame on, as for a local Play */
+	if (g_ghoulBlendTime > 0.0f && on && seq && s.on && s.seq && (lastEvalT > 0.0f) &&
+		((s.seq != seq) || (s.mode != mode) || (s.S != S && s.mode != 3)))
+	{
+		Pose cur;
+		if (EvalPose(lastEvalT, cur) && cur.valid)
+		{
+			xfFrom = cur.fp.k > 0.5f ? cur.fp.Second() : cur.fp;
+			xfFrom.c = xfFrom.d = 0;
+			xfFrom.k = 0.0f;
+			xfFile = cur.file;
+			xfStart = -2.0f;
+		}
+	}
 	on = s.on;
 	speed = s.speed;
 	paused = s.paused;

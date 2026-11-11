@@ -6,6 +6,7 @@
 #include "ghb_file.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace ghoul {
@@ -857,6 +858,53 @@ void GhbFile::NodeMatrix(const GhbNode &n, uint32_t frame, Matrix4 &out) const
 }
 
 void GhbFile::NodeMatrixPose(const GhbNode &n, const FramePair &fp, Matrix4 &out) const
+{
+	NodeMatrixPair(n, fp, out);
+	if (fp.k <= 0.0f)
+		return;
+	// openMERC transition: the old pose's matrix mixed in, the rotation rows made orthonormal again (a straight
+	// mix of two rotations shrinks the bone at large angles)
+	Matrix4 o;
+	NodeMatrixPair(n, fp.Second(), o);
+	float k = fp.k;
+	float len[3];
+	for (int r = 0; r < 3; r++)
+	{
+		float l1 = std::sqrt(out.m[r][0] * out.m[r][0] + out.m[r][1] * out.m[r][1] + out.m[r][2] * out.m[r][2]);
+		float l2 = std::sqrt(o.m[r][0] * o.m[r][0] + o.m[r][1] * o.m[r][1] + o.m[r][2] * o.m[r][2]);
+		len[r] = l1 + (l2 - l1) * k;
+	}
+	for (int r = 0; r < 4; r++)
+		for (int c = 0; c < 4; c++)
+			out.m[r][c] += (o.m[r][c] - out.m[r][c]) * k;
+	float *x = out.m[0], *y = out.m[1], *z = out.m[2];
+	float lx = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+	float lz0 = std::sqrt(z[0] * z[0] + z[1] * z[1] + z[2] * z[2]);
+	if (lx > 1e-6f && lz0 > 1e-6f)
+	{
+		// keep each row's own length (a scaled bone stays scaled), straighten the directions
+		float ex[3] = {x[0] / lx, x[1] / lx, x[2] / lx};
+		float dyx = (y[0] * ex[0] + y[1] * ex[1] + y[2] * ex[2]);
+		float ey[3] = {y[0] - dyx * ex[0], y[1] - dyx * ex[1], y[2] - dyx * ex[2]};
+		float ly = std::sqrt(ey[0] * ey[0] + ey[1] * ey[1] + ey[2] * ey[2]);
+		if (ly > 1e-6f)
+		{
+			float ez[3] = {ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]};
+			float lez = std::sqrt(ez[0] * ez[0] + ez[1] * ez[1] + ez[2] * ez[2]);
+			float sgn = (ez[0] * z[0] + ez[1] * z[1] + ez[2] * z[2]) < 0.0f ? -1.0f : 1.0f;
+			float tx = len[0], ty = len[1], tz = len[2];
+			for (int i = 0; i < 3; i++)
+			{
+				x[i] = ex[i] * tx;
+				y[i] = ey[i] / ly * ty;
+				z[i] = ez[i] / lez * tz * sgn;
+			}
+		}
+	}
+	MatUpdateFlags(out);
+}
+
+void GhbFile::NodeMatrixPair(const GhbNode &n, const FramePair &fp, Matrix4 &out) const
 {
 	if (n.ncomp)
 	{

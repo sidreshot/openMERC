@@ -41,6 +41,7 @@
 #include "fx/cl_fx.h" /* OpenMerc (I5) */
 #include "header/cl_ghoul.h" /* I1c */
 #include "header/cl_player.h" /* I1d */
+#include "../ghoul/ghoul_host.h" /* openMERC: ghl_blend */
 
 void CL_ForwardToServer_f(void);
 void CL_Changing_f(void);
@@ -661,6 +662,23 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 	if (dedicated->value)
 	{
 		return;
+	}
+
+	/* openMERC: animation transitions of the Ghoul models (seconds; 0 = the original snap between sequences) */
+	{
+		static cvar_t *ghl_blend;
+
+		if (!ghl_blend)
+		{
+			ghl_blend = Cvar_Get("ghl_blend", "0.18", CVAR_ARCHIVE);
+			ghl_blend->modified = true;
+		}
+
+		if (ghl_blend->modified)
+		{
+			ghl_blend->modified = false;
+			OMGhoul_SetBlendTime(ghl_blend->value);
+		}
 	}
 
 	// Calculate simulation time.

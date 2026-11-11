@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 #include "ghoul_internal.h"
@@ -172,6 +173,8 @@ bool Inst::PoseAtFraction(float f, Pose &p) const
 	return true;
 }
 
+float g_ghoulBlendTime = 0.0f; /* the original snap until the host sets it (engine: cvar ghl_blend) */
+
 bool Inst::EvalPose(float t, Pose &p) const
 {
 	if (!on || !seq)
@@ -179,7 +182,25 @@ bool Inst::EvalPose(float t, Pose &p) const
 		p = Pose();
 		return false;
 	}
-	return PoseAtFraction(Fraction(t), p);
+	if (!PoseAtFraction(Fraction(t), p))
+		return false;
+	lastEvalT = t;
+	if (xfStart == -2.0f)
+		xfStart = t;
+	/* openMERC: a sequence switch mixes the old pose out (same file only: the frame numbers are that file's) */
+	if ((xfStart >= 0.0f) && (p.file == xfFile) && (g_ghoulBlendTime > 0.0f))
+	{
+		float u = (t - xfStart) / g_ghoulBlendTime;
+		if ((u >= 0.0f) && (u < 1.0f))
+		{
+			float s = u * u * (3.0f - 2.0f * u);
+			p.fp.c = xfFrom.a;
+			p.fp.d = xfFrom.b;
+			p.fp.w2 = xfFrom.w;
+			p.fp.k = 1.0f - s;
+		}
+	}
+	return true;
 }
 
 // ------------------------------------------------------------------ bolts (SPEC-012 section 6)

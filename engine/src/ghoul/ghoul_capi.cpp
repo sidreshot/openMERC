@@ -29,6 +29,11 @@ void OMGhoul_Init(const om_ghoul_host_t *host)
 		GetSystemObject(r);
 }
 
+void OMGhoul_SetBlendTime(float seconds)
+{
+	ghoul::g_ghoulBlendTime = seconds < 0.0f ? 0.0f : (seconds > 0.5f ? 0.5f : seconds);
+}
+
 void OMGhoul_Shutdown(void)
 {
 	DestroySystems();

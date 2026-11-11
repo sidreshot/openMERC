@@ -343,6 +343,8 @@ struct RenderCache
 };
 
 // Pose of an instance at a time (SPEC-012 sections 3-4)
+extern float g_ghoulBlendTime; // openMERC: seconds a sequence switch blends over (0: the original snap)
+
 struct Pose
 {
 	bool valid = false; // has a sequence, is on, file present
@@ -431,6 +433,11 @@ public:
 	std::map<std::pair<int, int>, int> skinOverrides;
 	uint8_t tint[4] = {255, 255, 255, 255};
 	int seq = 0, mode = 0;
+	// openMERC: the pose when the last Play switched sequences (mixed out over g_ghoulBlendTime, EvalPose)
+	FramePair xfFrom;
+	GhbFile *xfFile = nullptr;
+	mutable float xfStart = -1.0f; // -2: begins at the next EvalPose (a switch received from the server)
+	mutable float lastEvalT = -1.0f; // the time the pose was last evaluated at (the client's render clock)
 	float S = 0, A = 0, pauseEnd = 0;
 	bool paused = true, reverse = false;
 	float D = 0, F = 0;
