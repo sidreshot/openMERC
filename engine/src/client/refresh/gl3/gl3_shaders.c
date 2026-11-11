@@ -1385,6 +1385,7 @@ static const char* fragmentSrc3Dsky = MULTILINE_STRING(
 		uniform sampler2D tex;
 		uniform vec4 omSkyTint; // OpenMerc GFX-modern r_om_rain: overcast sky, lightning flash (gl3_post.c)
 		uniform float omSkyScale; // OpenMerc GFX-modern: the sky's brightness (pics/sky/<name>.txt "scale", gl3_warp.c)
+		uniform vec3 omSkyFill; // with omSkyScale -1: the colour of the fog the holes of the map are filled with
 		// OpenMerc GFX-modern r_om_skyflow: a layer of cloud masses drifting with a wind over the painted sky - value-noise
 		// fbm on a plane overhead (the direction over its height: no seams between the faces of the box), lightening and
 		// darkening what is painted. xy the wind (world, unit), z strength, w speed. Only above the horizon: a painted
@@ -1420,6 +1421,7 @@ static const char* fragmentSrc3Dsky = MULTILINE_STRING(
 			// texel.rgb *= intensity; // TODO: really no intensity for sky?
 			vec3 omTint = (omSkyTint.r + omSkyTint.g + omSkyTint.b > 0.0) ? omSkyTint.rgb : vec3(1.0);
 			outColor.rgb = pow(texel.rgb * omTint * (omSkyScale > 0.0 ? omSkyScale : 1.0), vec3(gamma));
+			if (omSkyScale < -0.5) outColor.rgb = omSkyFill; // -1: the holes of the map inside an opaque fog (gl3_warp.c)
 			outColor.a = texel.a*alpha; // I think alpha shouldn't be modified by gamma and intensity
 		}
 );

@@ -3000,24 +3000,7 @@ GL3_Clear(void)
 		}
 		else
 		{
-			/* GFX-modern: from inside a fog region the holes of the map are the fog's colour (r_om_skyfill leaves
-			   them to the fog there; without the volumetric fog they kept old frames - the tsr1 train tunnel) */
-			int reg = (gl3_worldmodel && !(r_newrefdef.rdflags & RDF_NOWORLDMODEL)) ?
-				GL3_Fog_RegionOfPoint(r_newrefdef.vieworg) : -1;
-
-			if ((reg >= 0) && (reg < GL3_Fog_NumRegions()))
-			{
-				float fs, fe, fc[4] = {0, 0, 0, 0};
-
-				/* the colour target only (the scene's emissive and material targets stay clear) */
-				GL3_Fog_HardwareParams(reg, &fs, &fe, fc);
-				glClear(GL_DEPTH_BUFFER_BIT);
-				glClearBufferfv(GL_COLOR, 0, fc);
-			}
-			else
-			{
-				glClear(GL_DEPTH_BUFFER_BIT);
-			}
+			glClear(GL_DEPTH_BUFFER_BIT);
 		}
 
 		gl3depthmin = 0;

@@ -874,6 +874,24 @@ GL3_Fog_ViewFog(float out[7])
 	return true;
 }
 
+/* the colour (0..1) of the fog the eye is in; false outside one (r_om_skyfill fills the map's holes with it) */
+qboolean
+GL3_Fog_ViewColor(float c[3])
+{
+	float start, range, maxalpha, color[4];
+
+	if (!fogworld || (fogworld != gl3_worldmodel) || (viewregion < 0) || (viewregion >= numregions))
+	{
+		return false;
+	}
+
+	Params(&regions[viewregion], &start, &range, &maxalpha, color);
+	c[0] = color[0] / 255.0f;
+	c[1] = color[1] / 255.0f;
+	c[2] = color[2] / 255.0f;
+	return true;
+}
+
 int
 GL3_Fog_NumRegions(void)
 {

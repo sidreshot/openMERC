@@ -890,7 +890,7 @@ GL3_DrawSkyBox(void)
 	   depth clear: the sky faces and the holes of a map, which otherwise kept old frames (Quake's hall of mirrors; on
 	   arm1 the rain drops then built such a hole up to a white wall). Covered pixels fail the early depth test */
 	static cvar_t *r_om_skyfill;
-	qboolean wholeface;
+	qboolean wholeface, fogfill = false;
 
 	if (!r_om_skyfill)
 	{
@@ -909,9 +909,27 @@ GL3_DrawSkyBox(void)
 		{
 			wholeface = true;
 		}
+		else
+		{
+			/* the holes still get filled - with the fog's colour, when no real sky face is in view (left alone
+			   they kept old frames: flickering noise without the volumetric fog) */
+			for (i = 0; i < 6; i++)
+			{
+				if ((skymins[0][i] < skymaxs[0][i]) && (skymins[1][i] < skymaxs[1][i]))
+				{
+					break;
+				}
+			}
+
+			if (i == 6)
+			{
+				wholeface = true;
+				fogfill = true;
+			}
+		}
 	}
 
-	if (skyrotate && !gl3_skypv_override)
+	if (skyrotate && !gl3_skypv_override && !fogfill)
 	{   /* check for no sky at all */
 		for (i = 0; i < 6; i++)
 		{
@@ -960,7 +978,15 @@ GL3_DrawSkyBox(void)
 		if (loc != -1)
 		{
 			GL3_UseProgram(prog);
-			glUniform1f(loc, gl3_skyscale);
+			glUniform1f(loc, fogfill ? -1.0f : gl3_skyscale);
+
+			if (fogfill)
+			{
+				float fc[3] = {0, 0, 0};
+
+				GL3_Fog_ViewColor(fc);
+				glUniform3f(GL3_UniformLoc(prog, "omSkyFill"), fc[0], fc[1], fc[2]);
+			}
 
 			/* r_om_skyflow: the wind of this sky (a fixed direction per sky name), drift and cycle */
 			{

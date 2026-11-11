@@ -1802,6 +1802,7 @@ client fx module) to start an effect in front of the eye.
   (before: past the nearest four it had no shadow at all - the tsr1 intro walkers' shadows came and went), the
   selection keeps last frame's bodies (distance x 0.5). The contact shadow is tighter: r^2 / l^2, fading 2..3.5 r,
   strength 0.7 (was 1.4 r wide to 5 r, 0.85: "the shadows are too big").
-* r_om_skyfill is off while the eye is in an opaque fog (tsr1 train tunnel showed the city skyline through its gaps);
-  the frame is cleared to the fog's colour there (colour target only).
+* r_om_skyfill inside an opaque fog (tsr1 train tunnel showed the city skyline through its gaps): when no real sky
+  face is in view the sky box still fills the holes, but with the colour of the eye's fog (omSkyScale -1 + omSkyFill,
+  GL3_Fog_ViewColor) - with or without the volumetric fog the gaps read as fog (left unfilled they kept old frames).
 * Test aid: console `cinskip` skips a running cinematic (engine).
