@@ -1782,3 +1782,26 @@ client fx module) to start an effect in front of the eye.
   (n.l + 0.5) / 1.5 - n.l per lamp (omScatter); after the texture, a skin texel (red over green over blue, not grey,
   not white) takes it with the red of blood under it (1, 0.42, 0.28) x 1.6. A shaved head under the arm1 shop lamp:
   the rim where the light leaves turns warm instead of grey; 2 is already orange. ALU only on model pixels.
+
+## Owner's bug round (2026-11-11): glare, 30 fps, shadows, tessellation, tunnel sky
+
+* Lens glare (tsr1 car windows "glare into the eyes"): the ghosts and halo mirrored the whole bloom image - a room
+  with many lamps got a veil. Ghost sources now pass a soft threshold (only cores that stand out), the ghosts and the
+  dirt are scaled by 1 / (1 + 10 x the glow of the frame) (nine fixed bloom taps), the dirt lights only under strong
+  light; the glint streak re-adds less of the lamp (0.6 -> 0.25) and is shorter. tsr1 platform mean brightness with
+  the lens on was +13 % over lens off, now +1..2 %.
+* jpn1 club 30 fps: each aquarium pane (8, r_om_glass) cleared the "water copy" flag, so every water face after it
+  copied the whole view again. The water copy now stays valid (only its texture unit is re-bound): club GPU 11.9 ->
+  9.2 ms, ents 4.9 -> 2.5 ms. The glass copy covers only the pane's screen box (+0.04 for the refraction), the far side
+  of a glass brush is not drawn. r_om_glass_debug 1 prints the panes.
+* r_vsync 1 is adaptive (swap interval -1, strict 1 as a fallback): a frame a little over 16.7 ms no longer drops to
+  30 fps; r_vsync 3 = strict vsync.
+* Round props (om_round.txt) with split normals (jpn1 trash cans, 34 triangles): the corners get the mean normal of
+  the faces there before the PN tessellation, and round props keep the full level at any size. r_om_tessdebug 2/3.
+* r_om_capsule: a body only loses its ground blob when its capsule is among the ones the world shades with this frame
+  (before: past the nearest four it had no shadow at all - the tsr1 intro walkers' shadows came and went), the
+  selection keeps last frame's bodies (distance x 0.5). The contact shadow is tighter: r^2 / l^2, fading 2..3.5 r,
+  strength 0.7 (was 1.4 r wide to 5 r, 0.85: "the shadows are too big").
+* r_om_skyfill is off while the eye is in an opaque fog (tsr1 train tunnel showed the city skyline through its gaps);
+  the frame is cleared to the fog's colour there (colour target only).
+* Test aid: console `cinskip` skips a running cinematic (engine).

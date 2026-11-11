@@ -60,6 +60,8 @@ static glassvtx_t verts[GLASS_MAXVERTS];
 /* this view: the copies made, the screen box (NDC) of the panes drawn since the last copy */
 static int copies, ndrawn;
 static qboolean copied;
+static float have[GLASS_MAXBOX][4]; /* the screen boxes copied this view (each copy covers only its pane) */
+static int nhave;
 static float drawn[GLASS_MAXBOX][4]; /* each pane on its own: the box of a whole window's grid covered the panes
                                         between, every pane of it copied the scene again (FPS) */
 static int lampframe = -1, probeframe = -1;
@@ -332,7 +334,7 @@ GL3_Glass_PaneStats(gl3image_t *image, const byte *rgba, int w, int h)
 void
 GL3_Glass_BeginFrame(void)
 {
-	copies = ndrawn = 0;
+	copies = ndrawn = nhave = 0;
 	copied = false;
 }
 
@@ -486,45 +488,6 @@ GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int f
 		return true;
 	}
 
-	GL3_FX_Flush();
-	GL3_Draw3DBatchesNow();
-
-	/* the scene under it: copied at the first pane, again for a pane over one drawn since the last copy */
-	ScreenBox(verts, nv, box);
-
-	{
-		qboolean over = false;
-		int i;
-
-		/* over a pane drawn since the last copy (panes side by side only touch: a margin) */
-		for (i = 0; (i < ndrawn) && !over && copied && (copies <= GLASS_MAXCOPY); i++)
-		{
-			over = (box[0] < drawn[i][2] - 0.004f) && (box[2] > drawn[i][0] + 0.004f) &&
-				(box[1] < drawn[i][3] - 0.004f) && (box[3] > drawn[i][1] + 0.004f);
-		}
-
-		if (!copied || over)
-		{
-			if (!GL3_Post_GlassCopy())
-			{
-				return false;
-			}
-
-			copied = true;
-			copies++;
-			ndrawn = 0;
-		}
-		else
-		{
-			GL3_Post_GlassBind();
-		}
-
-		if (ndrawn < GLASS_MAXBOX)
-		{
-			memcpy(drawn[ndrawn++], box, sizeof(drawn[0]));
-		}
-	}
-
 	/* the normal toward the eye */
 	{
 		vec3_t n0;
@@ -545,8 +508,102 @@ GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int f
 
 	if (DotProduct(nrm, r_newrefdef.vieworg) - DotProduct(nrm, verts[0].pos) < 0)
 	{
-		VectorNegate(nrm, nrm);
+		/* the far side of a glass brush (the back of an aquarium, a window's other face) seen through its near side:
+		   the near pane already bends and tints the view - a second layer only cost a copy of the scene and a full
+		   glass shader over it (jpn1 club aquarium: 8 panes, 3 copies, ~2.7 ms) */
+		return true;
 	}
+
+	/* test aid r_om_glass_debug 1: the panes of a view, once a second */
+	{
+		static cvar_t *dbg;
+		static float next;
+
+		if (!dbg)
+		{
+			dbg = ri.Cvar_Get("r_om_glass_debug", "0", 0);
+		}
+
+		if (dbg->value > 0)
+		{
+			if (r_newrefdef.time >= next)
+			{
+				next = r_newrefdef.time + 1.0f;
+			}
+
+			if (r_newrefdef.time + 1.0f >= next - 0.001f && r_newrefdef.time + 1.0f <= next + 0.001f)
+			{
+				R_Printf(PRINT_ALL, "OMGLASS %s verts %d copies %d drawn %d\n", image->name, nv, copies, ndrawn);
+			}
+		}
+	}
+
+	GL3_FX_Flush();
+	GL3_Draw3DBatchesNow();
+
+	/* the scene under it: copied at the first pane, again for a pane over one drawn since the last copy */
+	ScreenBox(verts, nv, box);
+
+	{
+		qboolean over = false, inside = false;
+		float need[4];
+		int i;
+
+		/* over a pane drawn since the last copy (panes side by side only touch: a margin) */
+		for (i = 0; (i < ndrawn) && !over && copied && (copies <= GLASS_MAXCOPY); i++)
+		{
+			over = (box[0] < drawn[i][2] - 0.004f) && (box[2] > drawn[i][0] + 0.004f) &&
+				(box[1] < drawn[i][3] - 0.004f) && (box[3] > drawn[i][1] + 0.004f);
+		}
+
+		/* the copy reaches as far as the refraction looks aside (0.012 of the screen, the frosting a few texels) */
+		need[0] = box[0] - 0.04f;
+		need[1] = box[1] - 0.04f;
+		need[2] = box[2] + 0.04f;
+		need[3] = box[3] + 0.04f;
+
+		for (i = 0; (i < nhave) && !inside; i++)
+		{
+			inside = (need[0] >= have[i][0]) && (need[1] >= have[i][1]) && (need[2] <= have[i][2]) &&
+				(need[3] <= have[i][3]);
+		}
+
+		if (!copied || over || !inside)
+		{
+			if (!GL3_Post_GlassCopy(need))
+			{
+				return false;
+			}
+
+			if (over)
+			{
+				ndrawn = 0;
+				nhave = 0; /* the copies before hold the scene without the pane drawn since */
+			}
+
+			if (!copied || over)
+			{
+				copies++;
+			}
+
+			copied = true;
+
+			if (nhave < GLASS_MAXBOX)
+			{
+				memcpy(have[nhave++], need, sizeof(need));
+			}
+		}
+		else
+		{
+			GL3_Post_GlassBind();
+		}
+
+		if (ndrawn < GLASS_MAXBOX)
+		{
+			memcpy(drawn[ndrawn++], box, sizeof(drawn[0]));
+		}
+	}
+
 
 	GL3_UseProgram(prog);
 	MakeVAO();

@@ -616,6 +616,10 @@ qboolean gl3_ghoul_mirror;
 #define MAX_CAPS 64
 static float capa[2][MAX_CAPS][4], capb[2][MAX_CAPS][4];
 static int numcaps[2], capcur;
+/* the instance of each capsule, and the ones the world of this frame shades with: only those lose their ground
+   blob (a body past the nearest r_om_capsule_max had neither - shadows came and went under the walkers of the
+   tsr1 intro as the camera moved) */
+static int capid[2][MAX_CAPS], selid[8], nsel, capinst;
 static cvar_t *r_om_capsule;
 
 static qboolean
@@ -690,7 +694,8 @@ CapsuleAdd(const vec3_t mins, const vec3_t maxs)
 	}
 
 	a[3] = r;
-	b[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.85f;
+	b[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.7f;
+	capid[capcur][numcaps[capcur]] = capinst;
 	numcaps[capcur]++;
 	return true;
 }
@@ -701,10 +706,12 @@ GL3_Ghoul_CapsuleFrame(void)
 {
 	static cvar_t *capmax;
 	float a[8][4], b[8][4], dist[8];
-	int last = capcur, n = 0, i, j, cmax;
+	int last = capcur, n = 0, i, j, cmax, ids[8], prevsel[8], nprev = nsel;
 
 	capcur ^= 1;
 	numcaps[capcur] = 0;
+	memcpy(prevsel, selid, sizeof(prevsel));
+	nsel = 0;
 
 	if (!CapsuleOn() || (r_newrefdef.rdflags & RDF_NOWORLDMODEL))
 	{
@@ -776,6 +783,16 @@ GL3_Ghoul_CapsuleFrame(void)
 			continue;
 		}
 
+		/* a body shaded last frame keeps its place against one barely nearer (no swapping back and forth) */
+		for (j = 0; j < nprev; j++)
+		{
+			if (prevsel[j] == capid[last][i])
+			{
+				dd *= 0.5f;
+				break;
+			}
+		}
+
 		/* reach outside the view frustum: nothing it shades is seen (the last frame's frustum, a frame old at most) */
 		{
 			vec3_t h;
@@ -783,7 +800,7 @@ GL3_Ghoul_CapsuleFrame(void)
 			int p;
 
 			VectorSubtract(capb[last][i], capa[last][i], h);
-			R = 0.5f * VectorLength(h) + 5.0f * capa[last][i][3];
+			R = 0.5f * VectorLength(h) + 3.5f * capa[last][i][3];
 
 			for (p = 0; p < 4; p++)
 			{
@@ -807,6 +824,7 @@ GL3_Ghoul_CapsuleFrame(void)
 				memcpy(a[j], a[j - 1], sizeof(a[j]));
 				memcpy(b[j], b[j - 1], sizeof(b[j]));
 				dist[j] = dist[j - 1];
+				ids[j] = ids[j - 1];
 			}
 		}
 
@@ -815,6 +833,7 @@ GL3_Ghoul_CapsuleFrame(void)
 			memcpy(a[j], capa[last][i], sizeof(a[j]));
 			memcpy(b[j], capb[last][i], sizeof(b[j]));
 			dist[j] = dd;
+			ids[j] = capid[last][i];
 			n = Q_min(n + 1, cmax);
 		}
 	}
@@ -844,6 +863,8 @@ GL3_Ghoul_CapsuleFrame(void)
 		}
 	}
 
+	memcpy(selid, ids, sizeof(selid));
+	nsel = n;
 	GL3_SoF_CapsuleUniforms(n, &a[0][0], &b[0][0]);
 }
 
@@ -895,6 +916,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 	/* GFX-modern r_om_capsule: the box of every model (also one outside the view: its shadow may be in it) */
 	capsuled = false;
+	capinst = (short)(e->frame & 0xFFFF);
 
 	if (CapsuleOn() && (r_om_capsule->value >= 4))
 	{
@@ -944,7 +966,8 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 				VectorSet(ca, e->origin[0] - hx, e->origin[1] - hy, feet + 9);
 				VectorSet(cb, e->origin[0] + hx, e->origin[1] + hy, feet + 9);
 				ca[3] = 9;
-				cb[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.85f;
+				cb[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.7f;
+				capid[capcur][numcaps[capcur]] = capinst;
 				numcaps[capcur]++;
 				capsuled = true;
 			}
@@ -955,6 +978,23 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			}
 		}
 		/* props keep their blob: a capsule of a flat thing (a fish on the jpn1 kitchen table) smudged the table */
+
+		/* the blob gives way only where the world is shaded by this body's capsule now */
+		if (capsuled)
+		{
+			int k;
+
+			capsuled = false;
+
+			for (k = 0; k < nsel; k++)
+			{
+				if (selid[k] == capinst)
+				{
+					capsuled = true;
+					break;
+				}
+			}
+		}
 	}
 
 	/* step 4: pre-cull with the instance's box at the frame's game clock */
@@ -1305,7 +1345,9 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			   twice; three characters close by at level 3 took 4.8 ms on a GTX 1050 Ti, at level 2 2.4). A man-high
 			   model taller than 600 pixels (an arm's length) keeps the level, from 100 pixels at most 2, smaller
 			   ones none - their facets are a pixel or two */
-			if ((level > 1) && !weapon)
+			/* (a round prop is a few dozen triangles - a jpn1 trash can 34: the full level costs nothing and level 2
+			   left it a prism) */
+			if ((level > 1) && !weapon && !(round && !(flags & SOF_RF_CASTSHADOW)))
 			{
 				vec3_t d;
 				float dist, px;
@@ -1314,6 +1356,13 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 				dist = Q_max(VectorLength(d), 1.0f);
 				px = 64.0f / dist * (r_newrefdef.height * 0.5f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f);
 				level = (px > 600.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
+			}
+
+			if (ri.Cvar_Get("r_om_tessdebug", "0", 0)->value >= 2)
+			{
+				R_Printf(PRINT_ALL, "OMTESSENT inst %d at (%.0f %.0f %.0f) round %d castshadow %d level %d\n",
+					(int)(short)(e->frame & 0xFFFF), e->origin[0], e->origin[1], e->origin[2], round,
+					(flags & SOF_RF_CASTSHADOW) != 0, level);
 			}
 
 			GL3_GhoulEmu_SetTess(level, k);

@@ -1845,6 +1845,44 @@ Flush(void)
 
 	sawround |= E.texture2d && IsRound(E.boundtex);
 
+	/* a round prop modelled with split normals (the jpn1 trash cans: every side its own normal) gives the PN
+	   surface nothing to curve - "the tessellation does not work" there. Each of its corners gets one normal, the
+	   mean of the faces meeting there: the sides curve into a barrel and the rims round off; every triangle at a
+	   corner takes the same normal, so neighbours still meet without cracks */
+	if ((mode == GL_TRIANGLES) && (E.tess > 1) && E.texture2d && IsRound(E.boundtex) && (n <= 3072))
+	{
+		static float sm[3072][3];
+		int a, b;
+
+		for (a = 0; a < n; a++)
+		{
+			VectorClear(sm[a]);
+
+			for (b = 0; b < n; b++)
+			{
+				if ((fabsf(out[a].eye[0] - out[b].eye[0]) < 0.01f) && (fabsf(out[a].eye[1] - out[b].eye[1]) < 0.01f) &&
+					(fabsf(out[a].eye[2] - out[b].eye[2]) < 0.01f))
+				{
+					VectorAdd(sm[a], out[b].en, sm[a]);
+				}
+			}
+		}
+
+		for (a = 0; a < n; a++)
+		{
+			if (VectorNormalize(sm[a]) > 0.01f)
+			{
+				VectorCopy(sm[a], out[a].en);
+			}
+		}
+
+		if (r_om_tessdebug && (r_om_tessdebug->value >= 3))
+		{
+			R_Printf(PRINT_ALL, "OMROUND prim %d verts %d tris %d n0 %.2f %.2f %.2f\n", E.prim, count, n / 3, out[0].en[0],
+				out[0].en[1], out[0].en[2]);
+		}
+	}
+
 	/* the shadow passes take the triangles as modelled: curved silhouettes are lost in a shadow map's texels,
 	   the tessellated ones cost the cube and cascade passes many times over */
 	flat = out;

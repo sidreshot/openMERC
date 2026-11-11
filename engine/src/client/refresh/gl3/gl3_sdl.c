@@ -142,13 +142,16 @@ void GL3_SetVsync(void)
 	// value is SDL compatible...
 	int vsync = 0;
 
-	if (r_vsync->value == 1)
-	{
-		vsync = 1;
-	}
-	else if (r_vsync->value == 2)
+	/* OpenMerc: 1 is adaptive where the driver offers it - a frame a little over the refresh is shown at once
+	   (a short tear at the top) instead of waiting a whole refresh: strict vsync halved 60 fps to 30 in the jpn1
+	   club at 17-18 ms frames. 2: adaptive too (Yamagi's value). 3: strict vsync as before */
+	if ((r_vsync->value == 1) || (r_vsync->value == 2))
 	{
 		vsync = -1;
+	}
+	else if (r_vsync->value == 3)
+	{
+		vsync = 1;
 	}
 
 #ifdef USE_SDL3

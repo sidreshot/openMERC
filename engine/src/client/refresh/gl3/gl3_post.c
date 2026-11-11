@@ -111,6 +111,7 @@ static struct
 	/* r_om_water 2: half-size copy of the scene under translucent water (refraction), made at the first such
 	   surface of the view (GL_TEXTURE11) */
 	qboolean watercopied;
+	qboolean waterbound; /* GL_TEXTURE11 holds the water copy (the glass copy takes the unit too) */
 	GLuint texwater, waterfbo;
 	/* r_om_glass: the scene drawn so far under a pane of glass (full size; half on phones), made again for a pane
 	   over another one (gl3_glass.c) */
@@ -997,21 +998,41 @@ static const char *post_comp_fs =
 	/* ghosts and a halo of what glows (the bloom image holds only emissive light: lamps, flashes, fire), mirrored
 	   through the centre as the elements of a lens reflect it, each element its own tint and size; fades towards the
 	   edge of the image */
+	/* only what stands out: a lamp's core, not the general glow of a lit room (a subway car's row of windows or a lit
+	   corridor mirrored whole through the centre washed the frame) */
+	"vec3 GhostSrc(vec2 p)\n"
+	"{\n"
+	"	vec3 b = texture(bloom, p).rgb * intensity;\n"
+	"	float l = max(max(b.r, b.g), b.b);\n"
+	"	return b * smoothstep(0.25, 0.9, l);\n"
+	"}\n"
+	/* how much of the frame glows (nine fixed taps, the same texels for every pixel): the more lights in view, the
+	   less each one flares - a lens flares from one strong light, many lights would only veil the picture */
+	"float GlowField()\n"
+	"{\n"
+	"	float s = 0.0;\n"
+	"	for (int i = 0; i < 9; i++)\n"
+	"	{\n"
+	"		vec3 b = texture(bloom, vec2(0.2 + 0.3 * float(i % 3), 0.2 + 0.3 * float(i / 3))).rgb * intensity;\n"
+	"		s += max(max(b.r, b.g), b.b);\n"
+	"	}\n"
+	"	return s / 9.0;\n"
+	"}\n"
 	"vec3 LensGhosts(vec2 v)\n"
 	"{\n"
 	"	vec2 g = vec2(1.0) - v;\n"
 	"	vec2 dir = g - 0.5;\n"
 	"	vec3 acc = vec3(0.0);\n"
-	"	acc += texture(bloom, 0.5 + dir * 0.55).rgb * vec3(0.9, 0.55, 0.3) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.55)));\n"
-	"	acc += texture(bloom, 0.5 - dir * 0.3).rgb * vec3(0.35, 0.65, 0.9) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.3)));\n"
-	"	acc += texture(bloom, 0.5 + dir * 1.45).rgb * vec3(0.5, 0.8, 0.45) * 0.6 * (1.0 - smoothstep(0.1, 0.55, length(dir * 1.45)));\n"
+	"	acc += GhostSrc(0.5 + dir * 0.55) * vec3(0.9, 0.55, 0.3) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.55)));\n"
+	"	acc += GhostSrc(0.5 - dir * 0.3) * vec3(0.35, 0.65, 0.9) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.3)));\n"
+	"	acc += GhostSrc(0.5 + dir * 1.45) * vec3(0.5, 0.8, 0.45) * 0.6 * (1.0 - smoothstep(0.1, 0.55, length(dir * 1.45)));\n"
 	/* the halo: a thin ring a set distance from the centre, from the light on the far side */
 	"	float dl = length(dir * vec2(lens.w, 1.0));\n"
 	"	vec2 hd = dl > 1e-4 ? dir / dl : vec2(0.0);\n"
 	"	vec2 hp = g - hd * vec2(1.0 / lens.w, 1.0) * 0.42;\n"
 	"	float hw = pow(1.0 - min(abs(length((hp - 0.5) * vec2(lens.w, 1.0)) - 0.42) * 5.0, 1.0), 4.0);\n"
-	"	acc += texture(bloom, hp).rgb * vec3(0.7, 0.75, 1.0) * hw * 0.5;\n"
-	"	return acc;\n"
+	"	acc += GhostSrc(hp) * vec3(0.7, 0.75, 1.0) * hw * 0.5;\n"
+	"	return acc * 0.6;\n"
 	"}\n"
 	/* dust and smudges on the front element: seen only where bright light falls on it (a mask on the bloom) */
 	"float LHash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }\n"
@@ -1165,9 +1186,12 @@ static const char *post_comp_fs =
 	"		c = dof.x > 0.5 ? DofScene(uv) : MotionScene(uv);\n"
 	"		if (mode == 1)\n"
 	"		{\n"
-	"			vec3 bl = texture(bloom, vuv).rgb;\n"
-	"			c += bl * intensity * ((lens.z > 0.0 && dot(bl, vec3(1.0)) > 0.02) ? 1.0 + lens.z * LensDirt(vuv) : 1.0);\n"
-	"			if (lens.y > 0.0) c += LensGhosts(vuv) * intensity * lens.y;\n"
+	"			vec3 bl = texture(bloom, vuv).rgb * intensity;\n"
+	"			float calm = (lens.y > 0.0 || lens.z > 0.0) ? 1.0 / (1.0 + 10.0 * GlowField()) : 1.0;\n"
+	/* the dirt lights up only under a strong light, not over every glowing wall */
+	"			float bm = max(max(bl.r, bl.g), bl.b);\n"
+	"			c += bl * ((lens.z > 0.0 && bm > 0.1) ? 1.0 + lens.z * LensDirt(vuv) * smoothstep(0.1, 0.8, bm) * calm : 1.0);\n"
+	"			if (lens.y > 0.0) c += LensGhosts(vuv) * lens.y * calm;\n"
 	"		}\n"
 	"		if (look != 0)\n"
 	"			c = Grade(c, hdr == 1 ? texture(exptex, vec2(0.5)).r : 1.0);\n"
@@ -2143,6 +2167,18 @@ GL3_Post_WaterCopy(void)
 
 	if (P.watercopied)
 	{
+		/* the copy of this view stands: a pane of glass drawn since only took its unit (re-copying the whole view
+		   for every water face after a pane cost the jpn1 club aquarium ~3 ms) */
+		if (!P.waterbound)
+		{
+			GL3_SelectTMU(GL_TEXTURE11);
+			glBindTexture(GL_TEXTURE_2D, P.texwater);
+			GL3_SelectTMU(GL_TEXTURE7);
+			glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+			GL3_SelectTMU(GL_TEXTURE0);
+			P.waterbound = true;
+		}
+
 		return true;
 	}
 
@@ -2200,16 +2236,16 @@ GL3_Post_WaterCopy(void)
 	GL3_SelectTMU(GL_TEXTURE7);
 	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
 	GL3_SelectTMU(GL_TEXTURE0);
-	P.watercopied = P.depthcopied = true;
+	P.watercopied = P.depthcopied = P.waterbound = true;
 	return true;
 }
 
 /* r_om_glass: the scene drawn so far (the world, everything farther in the sorted pass) into the glass copy, and the
    depth copy again (with the models); false when the post path does not draw this view */
 qboolean
-GL3_Post_GlassCopy(void)
+GL3_Post_GlassCopy(const float *box)
 {
-	int w, h, div;
+	int w, h, div, x0, y0, x1, y1;
 
 	if (!P.bound || !P.texdepthcopy)
 	{
@@ -2245,14 +2281,34 @@ GL3_Post_GlassCopy(void)
 
 	GL3_Draw3DBatchesNow();
 
+	/* only the pane's screen box (NDC, the caller adds the refraction's reach): an aquarium of eight panes made three
+	   whole-screen colour + depth copies a frame (jpn1 club, ~2 ms). Kept even for the half size copy */
+	x0 = P.vx;
+	y0 = P.vy;
+	x1 = P.vx + P.vw;
+	y1 = P.vy + P.vh;
+
+	if (box)
+	{
+		x0 = Q_max(P.vx + (int)floorf((Q_clamp(box[0], -1.0f, 1.0f) * 0.5f + 0.5f) * P.vw), P.vx) & ~1;
+		y0 = Q_max(P.vy + (int)floorf((Q_clamp(box[1], -1.0f, 1.0f) * 0.5f + 0.5f) * P.vh), P.vy) & ~1;
+		x1 = Q_min((P.vx + (int)ceilf((Q_clamp(box[2], -1.0f, 1.0f) * 0.5f + 0.5f) * P.vw) + 1) & ~1, P.vx + P.vw);
+		y1 = Q_min((P.vy + (int)ceilf((Q_clamp(box[3], -1.0f, 1.0f) * 0.5f + 0.5f) * P.vh) + 1) & ~1, P.vy + P.vh);
+
+		if ((x1 <= x0) || (y1 <= y0))
+		{
+			GL3_Post_GlassBind();
+			return true;
+		}
+	}
+
 	/* multisampled at half size: resolved first (a scaled blit cannot resolve); at full size the resolve is the copy
 	   (same format) */
 	if (P.samples && (div != 1))
 	{
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.resolvefbo[0]);
-		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
-			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBlitFramebuffer(x0, y0, x1, y1, x0, y0, x1, y1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.resolvefbo[0]);
 	}
 	else
@@ -2261,13 +2317,12 @@ GL3_Post_GlassCopy(void)
 	}
 
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.glassfbo);
-	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx / div, P.vy / div, (P.vx + P.vw) / div,
-		(P.vy + P.vh) / div, GL_COLOR_BUFFER_BIT, (div == 1) ? GL_NEAREST : GL_LINEAR);
+	glBlitFramebuffer(x0, y0, x1, y1, x0 / div, y0 / div, x1 / div, y1 / div, GL_COLOR_BUFFER_BIT,
+		(div == 1) ? GL_NEAREST : GL_LINEAR);
 
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
-	glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
-		GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBlitFramebuffer(x0, y0, x1, y1, x0, y0, x1, y1, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
 	P.depthcopied = true;
 	GL3_Post_GlassBind();
@@ -2284,7 +2339,7 @@ GL3_Post_GlassBind(void)
 	GL3_SelectTMU(GL_TEXTURE7);
 	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
 	GL3_SelectTMU(GL_TEXTURE0);
-	P.watercopied = false; /* unit 11 no longer holds the water copy */
+	P.waterbound = false; /* unit 11 no longer holds the water copy */
 }
 
 static void
@@ -2389,7 +2444,9 @@ static const char *glint_streak_fs =
 	"	}\n"
 	"	vec3 c = texture(src, uv).rgb;\n"
 	/* the long streak cools a little toward its ends, as an anamorphic flare does */
-	"	vec3 r = c * 0.6 + h * mix(vec3(1.0), vec3(0.75, 0.9, 1.2), 0.35) * 0.22 + v * 0.18;\n"
+	/* softer than before: the lamp itself is already in the bloom, and a row of lit windows streaked across the frame
+	   (tsr1 - "glares in the eyes") */
+	"	vec3 r = c * 0.25 + h * mix(vec3(1.0), vec3(0.75, 0.9, 1.2), 0.35) * 0.12 + v * 0.1;\n"
 	"	outColor = vec4(r * gain.rgb, 1.0);\n"
 	"}\n";
 

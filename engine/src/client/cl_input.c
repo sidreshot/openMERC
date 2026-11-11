@@ -785,6 +785,7 @@ void
 CL_InitInput(void)
 {
 	Cmd_AddCommand("centerview", IN_CenterView);
+	Cmd_AddCommand("cinskip", CL_RequestCinematicSkip); /* test aid: skip a running cinematic as its key does */
 
 	Cmd_AddCommand("+moveup", IN_UpDown);
 	Cmd_AddCommand("-moveup", IN_UpUp);

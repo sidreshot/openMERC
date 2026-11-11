@@ -897,8 +897,19 @@ GL3_DrawSkyBox(void)
 		r_om_skyfill = ri.Cvar_Get("r_om_skyfill", "1", CVAR_ARCHIVE);
 	}
 
-	wholeface = (skyrotate != 0.0f) || (r_newrefdef.fov_x < 90) || (gl3_skypv_override != NULL) ||
-		(r_om_skyfill->value != 0);
+	wholeface = (skyrotate != 0.0f) || (r_newrefdef.fov_x < 90) || (gl3_skypv_override != NULL);
+
+	/* not from inside an opaque fog: there the holes of a map are the fog's (the tsr1 train tunnel showed the city
+	   skyline through its gaps - "the sky box at the screen edges in the subway") */
+	if (r_om_skyfill->value != 0)
+	{
+		float vf[7];
+
+		if (!GL3_Fog_ViewFog(vf) || (vf[2] < 0.9f))
+		{
+			wholeface = true;
+		}
+	}
 
 	if (skyrotate && !gl3_skypv_override)
 	{   /* check for no sky at all */

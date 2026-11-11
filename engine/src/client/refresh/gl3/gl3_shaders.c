@@ -1001,7 +1001,8 @@ static const char* fragmentSrcOmWorld =
    D F V x E is D F V x pi x lightmap (with the 1/pi it stayed under the frame noise on brick and plaster) */
 	/* GFX-modern r_om_capsule: soft contact shadows of characters and props in the ambient light - each model a capsule
 	   (omCapA: segment start, radius; omCapB: segment end, strength), the occlusion of a sphere at the capsule's
-	   nearest point: cos x (1.4 r)^2 / l^2 (the share of the sky it hides, a little wider: soft bodies), cut at 5 radii. Replaces the flat Ghoul blob */
+	   nearest point: cos x r^2 / l^2 (the share of the sky it hides), faded out between 2 and 3.5 radii - a contact shadow
+	   close under the body (cut at 5 radii and 1.4 r wide it spread a dark pool twice the body's width: "too big") */
 	"uniform int omCapN;\n"
 	"uniform vec4 omCapA[8];\n"
 	"uniform vec4 omCapB[8];\n"
@@ -1019,10 +1020,10 @@ static const char* fragmentSrcOmWorld =
 	"		vec3 c = a + ab * clamp(dot(P - a, ab) / max(dot(ab, ab), 1e-3), 0.0, 1.0);\n"
 	"		vec3 dv = c - P;\n"
 	"		float l2 = dot(dv, dv);\n"
-	"		if (l2 > 25.0 * r * r) continue;\n"
+	"		if (l2 > 12.25 * r * r) continue;\n"
 	"		float l = sqrt(l2);\n"
-	"		float occ = clamp(dot(N, dv) / max(l, 1e-3), 0.0, 1.0) * min(1.96 * r * r / max(l2, 1e-3), 1.0);\n"
-	"		occ *= 1.0 - smoothstep(3.5 * r, 5.0 * r, l);\n"
+	"		float occ = clamp(dot(N, dv) / max(l, 1e-3), 0.0, 1.0) * min(r * r / max(l2, 1e-3), 1.0);\n"
+	"		occ *= 1.0 - smoothstep(2.0 * r, 3.5 * r, l);\n"
 	"		vis *= 1.0 - occ * omCapB[i].w;\n"
 	"	}\n"
 	"	return vis;\n"
@@ -3207,7 +3208,7 @@ void GL3_SoF_CapsuleUniforms(int n, const float *a, const float *b)
 			{
 				const float *ka = a + k * 4, *kb = b + k * 4;
 				float hx = 0.5f * (kb[0] - ka[0]), hy = 0.5f * (kb[1] - ka[1]), hz = 0.5f * (kb[2] - ka[2]);
-				float R = sqrtf(hx * hx + hy * hy + hz * hz) + 5.0f * ka[3];
+				float R = sqrtf(hx * hx + hy * hy + hz * hz) + 3.5f * ka[3];
 
 				sp[k][0] = ka[0] + hx;
 				sp[k][1] = ka[1] + hy;
