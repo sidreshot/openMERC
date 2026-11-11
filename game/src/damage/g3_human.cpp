@@ -2468,6 +2468,19 @@ public:
 		return a;
 	}
 
+	/* openMERC: a falling death that has the body on the floor (the last 30 %): it takes shots as a lying body does.
+	   tsr1 intro: the executioner's shots into the fallen officer did nothing until std_sthroat_2side (~4 s) ended -
+	   the body reacted from the third or fifth shot on */
+	bool DeathAlmostDown(float since)
+	{
+		if (!cur || cur->cls != ANIMCLS_DEATH || (cur->flags & ANIMF_LOOP))
+			return false;
+		IGhoulInst *inst = Inst();
+		GhoulID sq = inst ? G3G_Sequence(inst, modelDir, cur->name) : 0;
+		float dur = sq ? inst->SequenceDuration(sq, kPlayOnce, NULL) : 0;
+		return dur > 0 && since >= 0.7f * dur;
+	}
+
 	const G3Anim *DyingFollowUp(int dflags)
 	{
 		float since = G3_Time() - playStart;
@@ -2488,7 +2501,7 @@ public:
 		}
 		if (cur == Anim_Human("lb_sautofire_loop_n_n") && since > 0.3f && (a = LoopExit("lb_sautofire_end_n_n")))
 			return a;
-		if (cur && ((cur->flags & ANIMF_REHITTABLE) || AnimDone()) &&
+		if (cur && ((cur->flags & ANIMF_REHITTABLE) || AnimDone() || DeathAlmostDown(since)) &&
 		    (cur->posture == POSTURE_ONBACK || cur->posture == POSTURE_ONSIDE) && since > 0.1f &&
 		    G3_Time() - lastHitTime <= 0.1f) {
 			if (cur->posture == POSTURE_ONSIDE)
@@ -2502,7 +2515,8 @@ public:
 		}
 		if (cur == Anim_Human("lf_sautofire_loop_n_n") && since > 0.3f && (a = Avail("lf_sautofire_end_n_n")))
 			return a;
-		if (cur && cur->posture == POSTURE_FACEDOWN && ((cur->flags & ANIMF_REHITTABLE) || AnimDone()) &&
+		if (cur && cur->posture == POSTURE_FACEDOWN && ((cur->flags & ANIMF_REHITTABLE) || AnimDone() ||
+		    DeathAlmostDown(since)) &&
 		    G3_Time() - lastHitTime <= 0.1f) {
 			if ((dflags & DMGF_DANCE) && (a = Avail("lf_sautofire_loop_n_n")))
 				return a;
