@@ -141,7 +141,7 @@ typedef struct
 	vec3_t origin, mangle;
 	qboolean hasorigin, hasmangle, hasangle;
 	float angle, cone, focus, fade;
-	int style;
+	int style, falloff; /* _falloff: 0 linear (the lamp's reach is intensity / fade), 1 1/d, 2 1/d^2 */
 } lsent_t;
 
 static lsent_t *
@@ -188,6 +188,7 @@ ParseEntities(const char *ents, int len, int *count)
 			else if (!Q_stricmp(key, "_focus")) e.focus = (float)atof(val);
 			else if (!Q_stricmp(key, "_fade")) e.fade = (float)atof(val);
 			else if (!Q_stricmp(key, "style")) e.style = atoi(val);
+			else if (!Q_stricmp(key, "_falloff")) e.falloff = atoi(val);
 		}
 
 		if (num == cap)
@@ -351,6 +352,8 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 
 		if ((type == 1) || (type == 2))
 		{
+			qboolean areafill = false;
+
 			lt.kind = LS_POINT;
 
 			for (j = 0; j < nents; j++)
@@ -366,6 +369,7 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 
 				lt.fade = (le->fade > 0) ? le->fade : 1;
 				lt.style = le->style;
+				areafill = (le->falloff <= 1) && (lt.intensity / lt.fade > 1500.0f);
 
 				if (type == 2)
 				{
@@ -415,10 +419,11 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 			/* linear falloff: dark where intensity - fade x distance reaches 0 */
 			lt.radius = fminf(lt.intensity / lt.fade, 1200.0f);
 
-			/* a reach past 1500 units is no lamp but the mapper's fill for a whole area (irq1a: intensity 5000 at 138
-			   above the courtyard, standing in for the sun): from such a low point every caster threw its shadow
-			   across half the map. The sun's shadows are the cascades' (r_om_csm) */
-			if ((lt.radius < 48) || (lt.intensity / lt.fade > 1500.0f))
+			/* a linear or 1/d lamp of more than 1500 is no lamp but the mapper's fill for a whole area (irq1a: a caged
+			   light of 5000, _falloff 1, 138 above the courtyard, standing in for the sun): from such a low point every
+			   caster threw its shadow across half the map. The sun's shadows are the cascades' (r_om_csm). 1/d^2 lamps
+			   stay (jpn2's lobby ceiling: 15000-45000, _falloff 2, dark within some 200 units) */
+			if ((lt.radius < 48) || areafill)
 			{
 				continue;
 			}

@@ -1810,8 +1810,9 @@ client fx module) to start an effect in front of the eye.
 ## irq1a shadows and sun rays (owner, 2026-11-11: "shadows across half the map, come and go; the sun washes out")
 
 * The long streaks across the courtyard were lamp shadows (r_om_lshadow) from light 691: intensity 5000, reach 1200,
-  138 units above the ground - the mapper's fill standing in for the sun. A "lamp" reaching past 1500 units is no
-  longer a shadow lamp (the sun's shadows are the cascades'). Lamp shadow tails also fade with the distance from the
+  138 units above the ground, _falloff 1 - the mapper's fill standing in for the sun. A linear or 1/d light of more
+  than 1500 is no longer a shadow lamp (the sun's shadows are the cascades'); 1/d^2 lamps stay (jpn2's lobby ceiling,
+  15000-45000, _falloff 2: all 821 jpn2 lamps kept, irq1a 876 -> 875). Lamp shadow tails also fade with the distance from the
   caster (full to 48 units, gone at 160): far from the caster the room's fill owns the floor.
 * r_om_capsule no longer removes the Ghoul ground shadow (only the nearest bodies have capsules - the others' shadows
   came and went as one walked); the capsule's strength is 0.5 under it.
