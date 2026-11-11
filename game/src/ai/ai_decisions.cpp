@@ -686,8 +686,17 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 			if (dt < -0.717f) {
 				VectorCopy(target->s.origin, face);
 				if (!BodyHasSeq(ai, "std_rbackaim_n_mrs_2") && !BodyHasSeq(ai, "std_rbackaim_n_p_2") &&
-				    !BodyHasSeq(ai, "std_rbackaim_n_l_2"))
-					stepd = 4;
+				    !BodyHasSeq(ai, "std_rbackaim_n_l_2")) {
+					/* openMERC: no back-pedal sequence - the move facing the target got the forward run, so the
+					   "retreat" ran AT the target: tsr1's end tunnel skinheads (point_combat beside the car, the
+					   player on the ledge above) ran under the player's feet, into the car's space, out of sight,
+					   and never fired ("buried in the train"). They hold their ground and fight instead */
+					if (may_attack && ClearShotTo(ent, ai, nullptr, target, target_pos))
+						PlanAttack(ent, ai, target, target_pos, CrouchAllowed(ai), nullptr);
+					else
+						PlanStand(ent, ai, target->s.origin, target, false, nullptr);
+					return;
+				}
 			} else if (dt > 0.717f) {
 				VectorMA(ent->s.origin, 2440, r, face);
 			} else {
