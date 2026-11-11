@@ -394,6 +394,21 @@ bool StepMove(edict_t *ent, AI *ai, const vec3_t move, int flags)
 				return false;
 			if (tr.fraction == 1.0f) {
 				VectorCopy(tr.endpos, ent->s.origin);
+				/* openMERC: a scripted actor without clipping that walks on (not rising) with its feet a little above
+				   a floor is set down on it. ger1 intro: Mullins' ledge climb (std_eclimbledge_up_a_n) is authored for
+				   a higher ledge; its root ends 8 units over the pier and he walked the last 40 units in the air until
+				   the next animation dropped him (the original module too) */
+				if ((ent->movetype == MOVETYPE_NOCLIP) && (ent->health > 0) && (move[2] <= 0.5f) &&
+				    (move[0] * move[0] + move[1] * move[1] > 0.01f)) {
+					vec3_t down;
+					VectorCopy(ent->s.origin, down);
+					down[2] -= 16.0f;
+					trace_t fl = Trace(ent->s.origin, ent->mins, ent->maxs, down, ent, 0x2020003);
+					/* eased down, at most 3 units a step: no visible drop */
+					if (!fl.startsolid && !fl.allsolid && fl.fraction > 0.0f && fl.fraction < 1.0f &&
+					    fl.plane.normal[2] > 0.7f)
+						ent->s.origin[2] -= fminf(ent->s.origin[2] - fl.endpos[2], 3.0f);
+				}
 				gi.linkentity(ent);
 				G_TouchTriggers(ent);
 				return true;
