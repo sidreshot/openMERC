@@ -1806,3 +1806,13 @@ client fx module) to start an effect in front of the eye.
   face is in view the sky box still fills the holes, but with the colour of the eye's fog (omSkyScale -1 + omSkyFill,
   GL3_Fog_ViewColor) - with or without the volumetric fog the gaps read as fog (left unfilled they kept old frames).
 * Test aid: console `cinskip` skips a running cinematic (engine).
+
+## irq1a shadows and sun rays (owner, 2026-11-11: "shadows across half the map, come and go; the sun washes out")
+
+* The long streaks across the courtyard were lamp shadows (r_om_lshadow) from light 691: intensity 5000, reach 1200,
+  138 units above the ground - the mapper's fill standing in for the sun. A "lamp" reaching past 1500 units is no
+  longer a shadow lamp (the sun's shadows are the cascades'). Lamp shadow tails also fade with the distance from the
+  caster (full to 48 units, gone at 160): far from the caster the room's fill owns the floor.
+* r_om_capsule no longer removes the Ghoul ground shadow (only the nearest bodies have capsules - the others' shadows
+  came and went as one walked); the capsule's strength is 0.5 under it.
+* r_om_skyrays at half the former gain (the menu slider "Sky Ray Intensity" keeps its scale: 2 = the old strength).

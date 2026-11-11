@@ -415,7 +415,10 @@ GL3_LShadow_LoadMap(const gl3model_t *mod, const char *ents, int entlen, const b
 			/* linear falloff: dark where intensity - fade x distance reaches 0 */
 			lt.radius = fminf(lt.intensity / lt.fade, 1200.0f);
 
-			if (lt.radius < 48)
+			/* a reach past 1500 units is no lamp but the mapper's fill for a whole area (irq1a: intensity 5000 at 138
+			   above the courtyard, standing in for the sun): from such a low point every caster threw its shadow
+			   across half the map. The sun's shadows are the cascades' (r_om_csm) */
+			if ((lt.radius < 48) || (lt.intensity / lt.fade > 1500.0f))
 			{
 				continue;
 			}
@@ -665,7 +668,11 @@ static const char *ls_glsl =
 	"			sh = 1.0 - s / float(nt);\n"
 	"		}\n"
 	"		else sh = 1.0;\n"
-	"		float dk = omLsP.y * share * sh * omLsSoft[i].y;\n"
+	/* the tail fades with the distance from the caster: a low wall lamp stretched a pole's or a man's shadow across
+	   the whole irq1a courtyard ("half the map"), and with the lamps changing slots as one walked it came and went.
+	   Far from the caster the fill light of the room owns the floor; full strength to 48 units, gone by 160 */
+	"		float tail = 1.0 - smoothstep(48.0, 160.0, max(zr - zb, 0.0));\n"
+	"		float dk = omLsP.y * share * sh * omLsSoft[i].y * tail;\n"
 	"		dbg = max(dbg, vec3(dk, share, sh) * vec3(1.0, 0.5, 0.25));\n"
 	"		keep *= 1.0 - dk;\n"
 	"	}\n"

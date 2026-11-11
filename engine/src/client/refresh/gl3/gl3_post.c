@@ -13311,7 +13311,9 @@ GL3_Post_SkyRays(void)
 	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
 	glDrawBuffers(1, one);
 	glViewport(P.vx, P.vy, P.vw, P.vh);
-	inten = Q_clamp(r_om_skyrays_intensity->value, 0.0f, 4.0f) * fade * tune_str * (painted ? 0.5f : 0.6f);
+	/* half of the first tuning: the irq1a sun "washed everything out" even at the menu's 0.7 (the slider keeps its
+	   scale: 2 is the old strength) */
+	inten = Q_clamp(r_om_skyrays_intensity->value, 0.0f, 4.0f) * fade * tune_str * (painted ? 0.25f : 0.3f);
 	GL3_UseProgram(SKR.padd);
 	glUniform4f(glGetUniformLocation(SKR.padd, "rect"), 0, 0, 1, 1);
 	/* the disc: the painted moon is about 4 degrees across in radius (train); half a degree for a sun */

@@ -694,7 +694,7 @@ CapsuleAdd(const vec3_t mins, const vec3_t maxs)
 	}
 
 	a[3] = r;
-	b[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.7f;
+	b[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.5f;
 	capid[capcur][numcaps[capcur]] = capinst;
 	numcaps[capcur]++;
 	return true;
@@ -966,7 +966,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 				VectorSet(ca, e->origin[0] - hx, e->origin[1] - hy, feet + 9);
 				VectorSet(cb, e->origin[0] + hx, e->origin[1] + hy, feet + 9);
 				ca[3] = 9;
-				cb[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.7f;
+				cb[3] = Q_clamp(r_om_capsule->value, 0.0f, 1.0f) * 0.5f;
 				capid[capcur][numcaps[capcur]] = capinst;
 				numcaps[capcur]++;
 				capsuled = true;
@@ -1039,8 +1039,11 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		mode = 2;
 	}
 
-	/* no ground shadows in a mirror image; none where the capsule shades the ground (r_om_capsule) */
-	if ((ghl_shadow_darkness->value <= 0) || gl3_ghoul_mirror || capsuled)
+	/* no ground shadows in a mirror image. The capsule (r_om_capsule) no longer takes the ground shadow away: only
+	   the nearest bodies get one, and as they changed the long shadows of the others came and went (irq1a) - the
+	   capsule is the soft contact under the feet, the ground shadow the shape thrown by the light */
+	(void)capsuled;
+	if ((ghl_shadow_darkness->value <= 0) || gl3_ghoul_mirror)
 	{
 		mode = 0;
 	}
