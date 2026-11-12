@@ -80,6 +80,10 @@ if(OM_GAME_CPP)
   if(MSVC)
     target_link_options(gamex86 PRIVATE /OPT:NOICF)
     set(OM_SYMTAB_ARGS --msvc $<TARGET_FILE_DIR:gamex86>/gamex86.map)
+  elseif(APPLE)
+    # Apple's linker writes its own map format (-map)
+    target_link_options(gamex86 PRIVATE -Wl,-map,${CMAKE_CURRENT_BINARY_DIR}/gamex86.linkmap)
+    set(OM_SYMTAB_ARGS --ld64 ${CMAKE_CURRENT_BINARY_DIR}/gamex86.linkmap)
   else()
     target_link_options(gamex86 PRIVATE -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/gamex86.linkmap)
     set(OM_SYMTAB_ARGS --lld ${CMAKE_CURRENT_BINARY_DIR}/gamex86.linkmap)
@@ -88,6 +92,13 @@ if(OM_GAME_CPP)
     add_custom_command(TARGET gamex86 POST_BUILD
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/om_symtab.py ${OM_SYMTAB_ARGS} $<TARGET_FILE:gamex86>
       VERBATIM)
+    if(APPLE)
+      # the table is written into the linked file, which ends the linker's signature: macOS on Apple silicon does
+      # not load a module whose signature does not match, so it is signed again (ad hoc, no identity)
+      add_custom_command(TARGET gamex86 POST_BUILD
+        COMMAND codesign --force --sign - $<TARGET_FILE:gamex86>
+        VERBATIM)
+    endif()
   else()
     message(WARNING "Python 3 not found: gamex86 gets no symbol table, its savegames cannot keep callbacks")
   endif()

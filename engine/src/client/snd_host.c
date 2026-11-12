@@ -31,6 +31,8 @@
 
 #ifdef _WIN32
 #define SNDH_MODULE "OMsnd.dll"
+#elif defined(__APPLE__)
+#define SNDH_MODULE "OMsnd.dylib"
 #else
 #define SNDH_MODULE "OMsnd.so"
 #endif

@@ -14,6 +14,8 @@
 
 #ifdef _WIN32
 #define SV_PLAYER_LIBRARY "player.dll"
+#elif defined(__APPLE__)
+#define SV_PLAYER_LIBRARY "player.dylib"
 #else
 #define SV_PLAYER_LIBRARY "player.so"
 #endif
