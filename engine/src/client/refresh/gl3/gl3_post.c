@@ -12526,7 +12526,7 @@ GL3_Probes_Frame(void)
 		return;
 	}
 
-	/* a new map: every probe is free */
+	/* a new map: every probe is free (GL3_Post_MapLoad clears RP.world, the pointer is the same for every map) */
 	if (RP.world != (const void *)gl3_worldmodel)
 	{
 		RP.world = gl3_worldmodel;
@@ -13745,6 +13745,11 @@ GL3_WaterRefl_Skip(float dist)
 void
 GL3_Post_MapLoad(void)
 {
+	/* the reflection probes belong to the old map. gl3_worldmodel is always mod_known[0], so GL3_Probes_Frame never
+	   saw a new map by its pointer: a probe still being captured kept the old map's PVS cluster, and
+	   GL3_MarkLeaves read the new map's vis table with it (a crash in the first frames of the next map) */
+	RP.world = NULL;
+
 	VolFogCvars();
 
 	if (r_om_volfog->value)
