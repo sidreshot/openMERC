@@ -9,11 +9,13 @@ dedicated server, `ref_gl3`, the game and player modules, the OMsnd sound module
 | `tools/build/build-macos.sh` from a clean tree | ok |
 | `sofpm_test`, `pm_unit`, `omghoul_test` (no stock data), `g3tests` (fixtures skipped) | 360/0, all passed, 142/0, skipped |
 | symbol table of `gamex86.dylib` (savegame callbacks) against `nm` | 3978 symbols, every address agrees |
+| omlight with Homebrew's libomp 23.1: `-map maps/tsr1.bsp`, 17 threads | ok, 14 s (170 s of processor time), 1.3 MB of lighting written |
 | client `+map tsr1` with `ref_gl3` in a 2560x1440 window: level loads (2.5 s), 1100 frames, two screenshots, `quit` | ok, exit 0; the pictures show the level, the weapon and the HUD |
 
 That one session is all that was run: one level, no input, about 14 seconds. Not verified: play with keyboard and
 mouse, sound heard by a person, saving and loading, the other levels, full screen, the frame rate, the 0.2.3
-effects one by one, omlight with OpenMP, the dedicated server, Intel Macs, a package for players. Only mode B
+effects one by one, a re-bake started by the game itself (`r_om_relight`), omlight built without OpenMP on a
+map (it compiles; one thread), the dedicated server, Intel Macs, a package for players. Only mode B
 (OpenMerc's own modules) can run on a Mac: the original game and player modules are 32-bit Windows DLLs.
 
 macOS has no OpenGL newer than 4.1 and Apple marks OpenGL as deprecated. `ref_gl3` asks for a 3.2 core context
