@@ -409,6 +409,116 @@ CL_CurrentMap_f(void)
 
 void CL_WeapLast_f(void); /* cl_network.c */
 
+/*
+ * OpenMerc: om_freecam [0|1] - a camera for pictures and videos in one command. The whole interface goes (HUD,
+ * crosshair, weapon, subtitles, messages, the fps counter; centre prints and captions: cl_sofscreen.c) and the game module's omfreecam lets the
+ * player fly through walls, unseen by the enemies and unhurt (game/src/g_cmds.cpp); off again, the interface comes
+ * back as it was and the player is back where the flight began. Single player needs no cheats, multiplayer the
+ * server's (a refusal comes back as "om_freecam 0"). config.cfg gets the values of before while it is on
+ * (CL_FreecamSavedValue); a new level or a disconnect ends it on this side too (CL_FreecamCheck).
+ */
+static const char *const freecam_cvars[][2] = {
+	{"scr_interface", "0"}, {"crosshair", "0"}, {"cl_gun", "0"}, {"cl_subtitles", "0"},
+	{"con_notifytime", "0"}, {"cl_showfps", "0"},
+};
+
+#define FREECAM_CVARS (int)(sizeof(freecam_cvars) / sizeof(freecam_cvars[0]))
+
+static char freecam_saved[FREECAM_CVARS][MAX_QPATH];
+static qboolean freecam_on;
+static int freecam_servercount;
+
+static void
+CL_FreecamRestore(void)
+{
+	int i;
+
+	freecam_on = false;
+
+	for (i = 0; i < FREECAM_CVARS; i++)
+	{
+		Cvar_Set((char *)freecam_cvars[i][0], freecam_saved[i]);
+	}
+}
+
+static void
+CL_Freecam_f(void)
+{
+	qboolean want = (Cmd_Argc() > 1) ? (atoi(Cmd_Argv(1)) != 0) : !freecam_on;
+	int i;
+
+	if (want == freecam_on)
+	{
+		return;
+	}
+
+	if (want)
+	{
+		if (cls.state != ca_active)
+		{
+			Com_Printf("om_freecam: only in a level\n");
+			return;
+		}
+
+		for (i = 0; i < FREECAM_CVARS; i++)
+		{
+			Q_strlcpy(freecam_saved[i], Cvar_VariableString((char *)freecam_cvars[i][0]), sizeof(freecam_saved[i]));
+			Cvar_Set((char *)freecam_cvars[i][0], (char *)freecam_cvars[i][1]);
+		}
+
+		freecam_on = true;
+		freecam_servercount = cl.servercount;
+		Cbuf_AddText("cmd omfreecam 1\n");
+	}
+	else
+	{
+		CL_FreecamRestore();
+
+		if (cls.state == ca_active)
+		{
+			Cbuf_AddText("cmd omfreecam 0\n");
+		}
+	}
+}
+
+/* each frame: another level or no connection ends it here */
+static void
+CL_FreecamCheck(void)
+{
+	if (freecam_on && ((cls.state != ca_active) || (cl.servercount != freecam_servercount)))
+	{
+		CL_FreecamRestore();
+	}
+}
+
+qboolean
+CL_FreecamOn(void)
+{
+	return freecam_on;
+}
+
+/* Com_WriteConfig: the value of before for a cvar om_freecam has changed, else NULL */
+const char *
+CL_FreecamSavedValue(const char *name)
+{
+	int i;
+
+	if (!freecam_on)
+	{
+		return NULL;
+	}
+
+	for (i = 0; i < FREECAM_CVARS; i++)
+	{
+		if (!Q_stricmp(name, freecam_cvars[i][0]))
+		{
+			return freecam_saved[i];
+		}
+	}
+
+	return NULL;
+}
+
 static void
 CL_InitLocal(void)
 {
@@ -496,6 +606,7 @@ CL_InitLocal(void)
 
 	/* register our commands */
 	Cmd_AddCommand("cmd", CL_ForwardToServer_f);
+	Cmd_AddCommand("om_freecam", CL_Freecam_f);
 	Cmd_AddCommand("pause", CL_Pause_f);
 	Cmd_AddCommand("pingservers", CL_PingServers_f);
 	Cmd_AddCommand("skins", CL_Skins_f);
@@ -663,6 +774,8 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 	{
 		return;
 	}
+
+	CL_FreecamCheck();
 
 	/* openMERC: animation transitions of the Ghoul models (seconds; 0 = the original snap between sequences) */
 	{

@@ -124,7 +124,7 @@ void SaveClientData(void)
 			continue;
 		game.clients[i].pers.health = ent->health;
 		game.clients[i].pers.max_health = ent->max_health;
-		game.clients[i].pers.savedFlags = ent->flags & FL_GODMODE;
+		game.clients[i].pers.savedFlags = Freecam_RealFlags(ent) & FL_GODMODE; /* not the camera's god (omfreecam) */
 		if (game.clients[i].inv)
 			game.clients[i].pers.weapon = InvCurWeapon(game.clients[i].inv);
 		game.clients[i].pers.fov = game.clients[i].ps.fov;

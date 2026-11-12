@@ -750,6 +750,9 @@ void SV_AddGravity(edict_t *ent);
 // g_main.cpp
 void SaveClientData(void);
 void FetchClientEntData(edict_t *ent);
+/* g_cmds.cpp, omfreecam: the flags as before the flight; the player as before it while a save is written */
+int Freecam_RealFlags(edict_t *ent);
+void Freecam_SaveSwap(bool before);
 void EndDMLevel(void);
 
 // g_chase.cpp

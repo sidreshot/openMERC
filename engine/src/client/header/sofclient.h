@@ -66,6 +66,7 @@ float CL_SoF_EffectDetail(void);           /* min(1, fps / sc_framerate) */
 float CL_SoF_SmoothedFps(void);            /* refdef value 0 */
 /* deathmatch byte of svc_serverdata (SPEC-203) */
 int CL_SoF_ServerDeathmatch(void);
+qboolean CL_FreecamOn(void); /* cl_main.c: om_freecam, the camera without the interface */
 void CL_SoF_SetServerDeathmatch(int dm);
 
 /* ---- input (cl_input.c, cl_keyboard.c; SPEC-312) -------------------------- */

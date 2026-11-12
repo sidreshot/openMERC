@@ -36,6 +36,14 @@ of the surfaces are used from the next load of that map.
 Saves of the original game cannot be loaded by openMERC's game modules; the
 load menu shows them greyed out as "Not compatible".
 
+Free camera
+-----------
+Type om_freecam in the console (~): the whole interface goes (HUD, crosshair,
+weapon, subtitles, messages) and you fly through walls, unseen by enemies and
+unhurt. om_freecam again brings the interface back and puts you back where the
+flight began. No cheats are needed in single player; in multiplayer the server
+must allow cheats. Together with F12 it makes clean videos.
+
 Video recording
 ---------------
 F12 starts a recording and F12 again stops it (console: om_record). A blinking

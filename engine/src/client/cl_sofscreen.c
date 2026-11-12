@@ -148,7 +148,8 @@ SCR_DrawPrint(void)
 	int L, y0, i, W = HUD_TextW(), H = HUD_TextH();
 	const sofps_t *ps = CL_SoF_CurrentPS();
 
-	if (!cprint.n || (cls.realtime >= cprint.endtime))
+	/* OpenMerc: om_freecam shows no centre prints and captions (cl_main.c) */
+	if (!cprint.n || (cls.realtime >= cprint.endtime) || CL_FreecamOn())
 	{
 		return;
 	}

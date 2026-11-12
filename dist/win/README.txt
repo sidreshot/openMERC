@@ -17,6 +17,9 @@ The game data (base\*.pak) is read from the Soldier of Fortune folder and never 
 openMERC's own files are in openmerc\. Settings, saves, screenshots (F11) and logs go to
 openmerc\user\. Your original SoF saves and config (user\) stay untouched; the original SoF.exe keeps
 working as before.
+Free camera for pictures and videos: type om_freecam in the console (~). The whole interface goes
+and you fly through walls, unseen by enemies and unhurt; om_freecam again brings the interface back
+and puts you back where the flight began. No cheats needed in single player.
 To uninstall, delete the openmerc folder and openMerc.exe, openMerc-ded.exe, ref_gl3.dll, ref_gles3.dll,
 SDL3.dll, OMsnd.dll, OpenAL32.dll, fmt.dll, msvcp140.dll, msvcp140_atomic_wait.dll, vcruntime140.dll, vcomp140.dll,
 omlight.exe, openMERC-README.txt.
@@ -84,6 +87,9 @@ openMERC — бесплатный движок с открытым кодом (G
 Собственные файлы openMERC лежат в openmerc\. Настройки, сохранения, скриншоты (F11) и логи — в
 openmerc\user\. Ваши оригинальные сохранения и конфиг SoF (user\) не трогаются, оригинальный SoF.exe
 работает как раньше.
+Свободная камера для скриншотов и видео: команда om_freecam в консоли (~). Пропадает весь интерфейс,
+можно летать сквозь стены, враги вас не видят и не ранят; повторная om_freecam возвращает интерфейс
+и ставит вас туда, откуда вы взлетели. В одиночной игре читы не нужны.
 Чтобы удалить openMERC, удалите папку openmerc и файлы openMerc.exe, openMerc-ded.exe, ref_gl3.dll,
 ref_gles3.dll, SDL3.dll, OMsnd.dll, OpenAL32.dll, fmt.dll, msvcp140.dll, msvcp140_atomic_wait.dll,
 vcruntime140.dll, vcomp140.dll, omlight.exe, openMERC-README.txt.

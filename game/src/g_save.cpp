@@ -6,7 +6,13 @@
 #include "g_local.h"
 #include "save/save_local.h"
 
-void WriteGame(qboolean autosave) { G10_WriteGame(autosave); }
+/* a save written during om_freecam holds the player as before the flight (g_cmds.cpp) */
+void WriteGame(qboolean autosave)
+{
+	Freecam_SaveSwap(true);
+	G10_WriteGame(autosave);
+	Freecam_SaveSwap(false);
+}
 qboolean ReadGame(int unused)
 {
 	/* OpenMerc level select: a kit still pending from a start on a no-weapons map (om_levelkit, ClientBegin) never
@@ -14,7 +20,12 @@ qboolean ReadGame(int unused)
 	gi.cvar_set("om_levelkit", "0");
 	return G10_ReadGame(unused);
 }
-void WriteLevel(void) { G10_WriteLevel(); }
+void WriteLevel(void)
+{
+	Freecam_SaveSwap(true);
+	G10_WriteLevel();
+	Freecam_SaveSwap(false);
+}
 void ReadLevel(void) { G10_ReadLevel(); }
 qboolean SaveAllowed(void) { return G10_SaveAllowed(); }
 

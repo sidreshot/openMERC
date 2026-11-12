@@ -564,6 +564,8 @@ Com_ExecAutoexec(void)
  * --------------------------------------------------------------------- */
 
 #ifndef DEDICATED_ONLY
+const char *CL_FreecamSavedValue(const char *name); /* cl_main.c: om_freecam hides the interface for a while */
+
 void
 Com_WriteConfig(qboolean keysonly)
 {
@@ -616,7 +618,9 @@ Com_WriteConfig(qboolean keysonly)
 		{
 			if (var->flags & CVAR_ARCHIVE)
 			{
-				fprintf(f, "set %s \"%s\"\n", var->name, var->string);
+				const char *saved = CL_FreecamSavedValue(var->name);
+
+				fprintf(f, "set %s \"%s\"\n", var->name, saved ? saved : var->string);
 			}
 		}
 	}

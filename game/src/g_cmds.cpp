@@ -249,6 +249,132 @@ static void Cmd_OmSetPos_f(edict_t *ent)
 		gi.argc() >= 6 ? gi.argv(5) : "-");
 }
 
+/* ------------------------------------------------------------------------------------------------------------------
+ * omfreecam [0|1]: the game half of om_freecam (the client hides the interface, cl_main.c). While it is on, the player
+ * flies through walls (noclip), is not seen by the enemies (notarget) and is not hurt (god); off again, the player is
+ * back where the flight began, with the movement and flags of before. Single player needs no cheats (a camera for
+ * pictures and videos), multiplayer the server's. A refusal turns the client's half off again (stufftext).
+ * The record names its level: another level (a load, a level change) ends it. A save written during the flight holds
+ * the player as before it (Freecam_SaveSwap), and so does the god flag carried to the next level (Freecam_RealFlags).
+ * ---------------------------------------------------------------------------------------------------------------- */
+static struct
+{
+	bool on;
+	int flags, movetype;
+	vec3_t origin, angles;
+	char map[MAX_QPATH];
+	/* the camera's place while a save is written */
+	vec3_t camorigin, camangles;
+} freecam[MAX_CLIENTS];
+
+static int FreecamIndex(edict_t *ent)
+{
+	int i = ent ? (int)(ent - g_edicts) - 1 : -1;
+	return (ent && ent->client && i >= 0 && i < MAX_CLIENTS) ? i : -1;
+}
+
+static bool FreecamActive(int i)
+{
+	if (i < 0 || !freecam[i].on)
+		return false;
+	if (strcmp(freecam[i].map, level.mapname)) {
+		freecam[i].on = false; /* a record of another level */
+		return false;
+	}
+	return true;
+}
+
+/* the player at o, looking along a (view angles; roll 0), standing still */
+static void FreecamPlace(edict_t *ent, const vec3_t o, const vec3_t a)
+{
+	gclient_t *c = ent->client;
+	VectorCopy(o, ent->s.origin);
+	VectorClear(ent->velocity);
+	for (int k = 0; k < 3; k++)
+		c->ps.pmove.origin[k] = (short)(o[k] * 8.0f);
+	c->ps.pmove.velocity[0] = c->ps.pmove.velocity[1] = c->ps.pmove.velocity[2] = 0;
+	ent->s.angles[YAW] = a[YAW];
+	ent->s.angles[PITCH] = 0;
+	ent->s.angles[ROLL] = 0;
+	for (int k = 0; k < 3; k++) {
+		float v = k == ROLL ? 0.0f : a[k];
+		c->ps.pmove.delta_angles[k] = (short)ANGLE2SHORT(v - c->resp.cmd_angles[k]);
+		c->ps.viewangles[k] = v;
+		c->v_angle[k] = v;
+	}
+	VectorClear(c->kick_angles);
+}
+
+static void FreecamRefuse(edict_t *ent)
+{
+	gi.WriteByte(svc_stufftext);
+	gi.WriteString("om_freecam 0\n");
+	gi.unicast(ent, true);
+}
+
+static void Cmd_OmFreecam_f(edict_t *ent)
+{
+	int i = FreecamIndex(ent);
+	if (i < 0)
+		return;
+	bool on = FreecamActive(i);
+	bool want = gi.argc() > 1 ? atoi(gi.argv(1)) != 0 : !on;
+	if (want == on)
+		return;
+	if (want) {
+		if ((deathmatch->value || maxclients->value > 1) && !CheatsOK(ent)) {
+			FreecamRefuse(ent);
+			return;
+		}
+		if (ent->health <= 0 || ent->client->resp.spectator) {
+			FreecamRefuse(ent);
+			return;
+		}
+		freecam[i].on = true;
+		freecam[i].flags = ent->flags & (FL_GODMODE | FL_NOTARGET);
+		freecam[i].movetype = ent->movetype;
+		VectorCopy(ent->s.origin, freecam[i].origin);
+		VectorCopy(ent->client->v_angle, freecam[i].angles);
+		Com_sprintf(freecam[i].map, sizeof(freecam[i].map), "%s", level.mapname);
+		ent->flags |= FL_GODMODE | FL_NOTARGET;
+		ent->movetype = MOVETYPE_NOCLIP;
+	} else {
+		freecam[i].on = false;
+		ent->flags = (ent->flags & ~(FL_GODMODE | FL_NOTARGET)) | freecam[i].flags;
+		ent->movetype = freecam[i].movetype;
+		FreecamPlace(ent, freecam[i].origin, freecam[i].angles);
+		gi.linkentity(ent);
+	}
+}
+
+int Freecam_RealFlags(edict_t *ent)
+{
+	int i = FreecamIndex(ent);
+	if (!FreecamActive(i))
+		return ent->flags;
+	return (ent->flags & ~(FL_GODMODE | FL_NOTARGET)) | freecam[i].flags;
+}
+
+void Freecam_SaveSwap(bool before)
+{
+	for (int i = 0; i < game.maxclients && i < MAX_CLIENTS; i++) {
+		edict_t *ent = &g_edicts[1 + i];
+		if (!ent->inuse || !ent->client || !FreecamActive(i))
+			continue;
+		if (before) {
+			VectorCopy(ent->s.origin, freecam[i].camorigin);
+			VectorCopy(ent->client->v_angle, freecam[i].camangles);
+			ent->flags = Freecam_RealFlags(ent);
+			ent->movetype = freecam[i].movetype;
+			FreecamPlace(ent, freecam[i].origin, freecam[i].angles);
+		} else {
+			ent->flags |= FL_GODMODE | FL_NOTARGET;
+			ent->movetype = MOVETYPE_NOCLIP;
+			FreecamPlace(ent, freecam[i].camorigin, freecam[i].camangles);
+		}
+	}
+}
+
 /* test aid: uses every entity with the given targetname (as a trigger would, the player activating) */
 static void Cmd_OmFire_f(edict_t *ent)
 {
@@ -753,6 +879,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_Noclip_f(ent);
 	else if (Q_stricmp(cmd, "omsetpos") == 0)
 		Cmd_OmSetPos_f(ent);
+	else if (Q_stricmp(cmd, "omfreecam") == 0)
+		Cmd_OmFreecam_f(ent);
 	else if (Q_stricmp(cmd, "omhurt") == 0)
 		Cmd_OmHurt_f(ent);
 	else if (Q_stricmp(cmd, "ominv") == 0)
