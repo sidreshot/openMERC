@@ -32,6 +32,10 @@ int CharactersNear(const float p[3], float radius);
  * GG_WriteAttached / GG_ReadAttached; see ai_api.h */
 void WriteLevelAI(void);
 void ReadLevelAI(void);
+/* test aid, not in the original (ai_audit.cpp): the omaudit cheat command checks that every enemy of the level reacts
+ * to the player; while it runs the level must not end */
+void AuditStart(struct edict_s *player);
+bool AuditActive(void);
 }
 
 #endif

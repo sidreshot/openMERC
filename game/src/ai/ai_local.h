@@ -103,6 +103,10 @@ void MakeHelper(edict_t *ent, AI *ai);
 void SilentRemove(edict_t *ent, AI *ai);    /* SPEC-700 rule 9 */
 void CasualtyRules(edict_t *victim, AI *ai, edict_t *attacker);
 
+/* ---- enemy reaction check (ai_audit.cpp; a test aid, inert unless started with the omaudit command) ---- */
+void AuditLevelStart(void);
+void AuditFrame(void);
+
 /* ---- senses (ai_senses.cpp) ---- */
 Sense *NewSight(int code);
 Sense *NewHearing(void);

@@ -42,7 +42,7 @@ Rules for the clean team (C, see `CLEANROOM.md`) and conventions every test harn
   base + 9). Never use the defaults (27910, any port). Bases: I1b 29400, I4c 29410, I5 29420, I7 29430,
   F5 29440, G18 29450, G2 29460, G4 29470, G7 29480, G9 29490, I1a 29500, G3 29510, R-team probes 29520,
   I5s-2 29610 (uses 29611/29612), G10 29530, I1c 29540, I2d 29550, I1d 29560, R movement 29570, X1 29580,
-  I1b-2 29590, V1 29600. If a run sees a second server's serverdata or a connect it did not ask for, discard the run.
+  I1b-2 29590, V1 29600, AIAUDIT 29720. If a run sees a second server's serverdata or a connect it did not ask for, discard the run.
 - The original SoF.exe crashes with more than 50 command-line words; put long setups in an `+exec` file.
 - Comparison hygiene: cap both games to the same frame rate (`cl_maxfps` in the original, `vid_maxfps` in
   openMERC) - effects and animations step per frame above 60 fps; compare like with like (the same role: a
