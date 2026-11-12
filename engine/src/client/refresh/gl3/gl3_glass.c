@@ -164,6 +164,13 @@ const char *gl3_glass_fs =
 	"	float c = gHash(i + vec2(0.0, 1.0)), d = gHash(i + vec2(1.0, 1.0));\n"
 	"	return du * vec2(b - a + (a - b - c + d) * u.y, c - a + (a - b - c + d) * u.x);\n"
 	"}\n"
+	/* how much of a texel is a smudge or streak: lighter than the pane and not frame, wire or dirt */
+	"float gStreak(vec4 t)\n"
+	"{\n"
+	"	float cover = clamp((t.a - gPane.w - 0.04) / max(1.0 - gPane.w - 0.04, 0.05), 0.0, 1.0);\n"
+	"	vec3 lw = vec3(0.299, 0.587, 0.114);\n"
+	"	return clamp((dot(t.rgb, lw) - dot(gPane.rgb, lw)) * 4.0 - 0.1, 0.0, 1.0) * (1.0 - cover);\n"
+	"}\n"
 	"float gEyeDist(float z)\n"
 	"{\n"
 	"	float ndc = (z - omSoftP.z) / (omSoftP.w - omSoftP.z) * 2.0 - 1.0;\n"
@@ -185,8 +192,10 @@ const char *gl3_glass_fs =
 	"	vec2 pp = vec2(dot(passWorld, T1), dot(passWorld, B1));\n"
 	/* drawn window glass: long uneven waves, mostly across; the texture's streaks bend the light too */
 	"	vec2 g = (gNoiseG(pp * vec2(0.018, 0.05)) * vec2(0.35, 1.0) + gNoiseG(pp * 0.08 + 17.0) * 0.3) * gK.w;\n"
-	"	g += vec2(dot(texture(tex, passTexCoord + vec2(gTexel.x, 0.0)).rgb - texture(tex, passTexCoord - vec2(gTexel.x, 0.0)).rgb, lw),\n"
-	"		dot(texture(tex, passTexCoord + vec2(0.0, gTexel.y)).rgb - texture(tex, passTexCoord - vec2(0.0, gTexel.y)).rgb, lw)) * 0.8;\n"
+	/* only the streaks bend it, not the edges of the wire and the frame: the slope of every colour change of the
+	   texture tore the view behind wire glass along the mesh into jagged pieces (issue #13) */
+	"	g += vec2(gStreak(texture(tex, passTexCoord + vec2(gTexel.x, 0.0))) - gStreak(texture(tex, passTexCoord - vec2(gTexel.x, 0.0))),\n"
+	"		gStreak(texture(tex, passTexCoord + vec2(0.0, gTexel.y))) - gStreak(texture(tex, passTexCoord - vec2(0.0, gTexel.y)))) * 0.2;\n"
 	"	vec3 tw = T1 * g.x + B1 * g.y;\n"
 	"	vec3 Np = normalize(N + tw * 0.03);\n"
 	/* the scene behind: shifted as through an uneven slab - more the farther it lies behind the pane */
