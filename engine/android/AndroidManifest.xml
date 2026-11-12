@@ -3,8 +3,8 @@
      external files folder (Android/data/com.openmerc.game/files: base/, openmerc/), pushed by the user -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.openmerc.game"
-    android:versionCode="1"
-    android:versionName="0.2.2"
+    android:versionCode="2"
+    android:versionName="0.2.3"
     android:installLocation="auto">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
