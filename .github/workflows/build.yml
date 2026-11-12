@@ -29,11 +29,14 @@ jobs:
         with:
           fetch-depth: 0 # git describe in the build info
 
-      - name: vcpkg binary cache
-        uses: actions/cache@v4
+      # vcpkg's binary cache: restored here, saved right after the dependencies are built (not only when the whole
+      # job succeeds); vcpkg itself skips cached packages whose ABI changed with the runner's vcpkg
+      - name: vcpkg binary cache (restore)
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
           path: vcpkg-cache
-          key: vcpkg-x86-windows-sdl3-openal-${{ hashFiles('.github/workflows/build.yml') }}
+          key: vcpkg-x86-windows-sdl3-openal-v1
           restore-keys: vcpkg-x86-windows-sdl3-openal-
 
       - name: Dependencies (vcpkg, classic mode)
@@ -42,6 +45,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sdl3:x86-windows openal-soft:x86-windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: vcpkg binary cache (save)
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-x86-windows-sdl3-openal-v1
 
       - name: Build (engine, sound, game, player)
         shell: cmd
