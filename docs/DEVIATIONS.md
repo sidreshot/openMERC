@@ -177,3 +177,11 @@ thunderstorm on jpn2".
 
 - Weapon ownership (2026-11-08): `PlayerInventory::OwnsWeapon` returns the flag bit `1 << weapon` (SPEC-AMEND-006 I7.13); the game declared it `bool` and read only the low byte, so weapons 8 and up (shotgun and heavier) were never owned for the game: picking one up that the player already had gave no ammunition and the item was gone, the saved inventory cvars and the view-model precache missed them. Declared `int` now.
 - Damage direction marker (2026-11-08): the bullet path (`damage/g3_damage.cpp` HitDirection) also carries the attacker yaw (0x4000 + bits 7-13); before, only `T_Damage` set it and a real hit showed no marker. Test aids `omhurt [dmg]`, `ominv`.
+
+## Lights of models out of view (2026-11-13)
+
+- A Ghoul model's own lamps (a TV monitor's glow, a lantern) reached the frame only through its draw, and a model
+  outside the view is not drawn: turning away from the monitor in the tsr1 ticket booth put out its light on the
+  floor, the bench and the cabinet that were still in view. The renderer keeps the lights a model gave while drawn
+  and gives them again in the frames it is culled, while it stays in the scene (gl3_sofapi.c, MLC). Checked at
+  omsetpos 434 -155 -179 with yaw 287 / 332 / 7: the room keeps its cyan light. Not in the original.

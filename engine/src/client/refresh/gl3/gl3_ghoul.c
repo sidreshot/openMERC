@@ -1008,6 +1008,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 		if (CornersOutside((const float (*)[3])corners))
 		{
+			GL3_SoF_ModelLightsCulled(inst); /* its lamps still light what is in view */
 			return;
 		}
 
@@ -1018,6 +1019,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 		if ((maxs[0] >= mins[0]) && GL3_Fog_CullPoint(c, 0.5f * VectorLength(corners[0])))
 		{
+			GL3_SoF_ModelLightsCulled(inst);
 			return;
 		}
 	}
@@ -1384,7 +1386,12 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 	GL3_GhoulEmu_TakeRound();
 	GL3_CSM_SetCasterKey((short)(e->frame & 0xFFFF), e->origin);
-	Ghl_Draw(inst, &P);
+	{
+		int mark = GL3_SoF_ModelLightMark();
+
+		Ghl_Draw(inst, &P);
+		GL3_SoF_ModelLightsDrawn(inst, mark);
+	}
 	GL3_CSM_SetCasterKey(0, NULL);
 
 	if (ff_emulated)

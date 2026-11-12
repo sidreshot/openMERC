@@ -205,6 +205,121 @@ GL3_SoF_WorldLights(const byte *lights, int len)
 	GhlVoid0(35);
 }
 
+/*
+ * OpenMerc: the lights of models that were not drawn. A Ghoul model's own lamps (a TV monitor's glow, a lantern)
+ * reach the frame only through its draw (the instance gathers them, SPEC-AMEND-006 I1c.3), and a model outside the
+ * view is not drawn (ghl_pre_cull): turning away from the monitor in the tsr1 ticket booth put out its light on the
+ * floor, the bench and the cabinet that were still in view. The lights a model gave while drawn are kept by its
+ * instance and given again in the frames it is culled, while it is still in the scene (not after 30 frames unseen),
+ * unless the same frame draws it in another view (a mirror) anyway. Not in the original.
+ */
+#define MLC_MAX 64
+#define MLC_PER 4
+
+static struct
+{
+	void *inst;
+	int n, seen, drawn;
+	ghllight_t l[MLC_PER];
+} mlc[MLC_MAX];
+
+static ghllight_t mlpend[SOF_MAX_DLIGHTS];
+static int nmlpend, mlframe = 1;
+
+static int
+MLC_Find(void *inst, qboolean make)
+{
+	int i, freei = -1, oldest = 0;
+
+	for (i = 0; i < MLC_MAX; i++)
+	{
+		if (mlc[i].inst == inst)
+		{
+			return i;
+		}
+
+		if (!mlc[i].inst && (freei < 0))
+		{
+			freei = i;
+		}
+
+		if (mlc[i].seen < mlc[oldest].seen)
+		{
+			oldest = i;
+		}
+	}
+
+	if (!make)
+	{
+		return -1;
+	}
+
+	i = (freei >= 0) ? freei : oldest;
+	memset(&mlc[i], 0, sizeof(mlc[i]));
+	mlc[i].inst = inst;
+	return i;
+}
+
+/* before a model's draw: the count of model lights so far */
+int
+GL3_SoF_ModelLightMark(void)
+{
+	return gl3_ghoul ? GhlInt0(28) : 0;
+}
+
+/* after it: the lights the draw added belong to the instance */
+void
+GL3_SoF_ModelLightsDrawn(void *inst, int mark)
+{
+	int i, n, c;
+
+	if (!gl3_ghoul || !inst)
+	{
+		return;
+	}
+
+	n = GhlInt0(28) - mark;
+	c = MLC_Find(inst, n > 0);
+
+	if (c < 0)
+	{
+		return;
+	}
+
+	mlc[c].n = 0;
+
+	for (i = 0; (i < n) && (mlc[c].n < MLC_PER); i++)
+	{
+		GhlIntPtr(29, mark + i, &mlc[c].l[mlc[c].n++]);
+	}
+
+	mlc[c].seen = mlc[c].drawn = mlframe;
+}
+
+/* a model left out of this view: its kept lights go to the next frame's exchange */
+void
+GL3_SoF_ModelLightsCulled(void *inst)
+{
+	int c = MLC_Find(inst, false), i;
+
+	if (c < 0)
+	{
+		return;
+	}
+
+	if (mlc[c].drawn == mlframe || mlc[c].seen == -mlframe)
+	{
+		return; /* drawn in this frame after all, or already given */
+	}
+
+	mlc[c].seen = -mlframe;
+
+	for (i = 0; (i < mlc[c].n) && (nmlpend < SOF_MAX_DLIGHTS); i++)
+	{
+		mlpend[nmlpend++] = mlc[c].l[i];
+	}
+}
+
 /* SPEC-002 / SPEC-411 §3: light exchange with the Ghoul system before the frame.
    I4b: returns the frame's light count; the engine's record keeps its own count (the original works
    on a copy of the frame record, so a scene drawn again unchanged, e.g. while paused, does not
@@ -249,6 +364,30 @@ GhoulLightExchange(sofrefdef_t *fd)
 		VectorCopy(l.color, d->color);
 		d->intensity = l.radius * k;
 		num++;
+	}
+
+	/* the kept lights of the models the last frame did not draw (OpenMerc, see MLC above) */
+	for (i = 0; (i < nmlpend) && (num < SOF_MAX_DLIGHTS); i++)
+	{
+		sofdlight_t *d = &fd->dlights[num];
+
+		VectorCopy(mlpend[i].origin, d->origin);
+		VectorCopy(mlpend[i].color, d->color);
+		d->intensity = mlpend[i].radius * k;
+		num++;
+	}
+
+	nmlpend = 0;
+	mlframe++;
+
+	for (i = 0; i < MLC_MAX; i++)
+	{
+		int seen = (mlc[i].seen < 0) ? -mlc[i].seen : mlc[i].seen;
+
+		if (mlc[i].inst && (mlframe - seen > 30))
+		{
+			mlc[i].inst = NULL;
+		}
 	}
 
 	GhlVoid0(30);

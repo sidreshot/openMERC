@@ -98,6 +98,7 @@ list | r_om_water_3d | 0,0.5,1,2 | Flat,Subtle,Normal,Strong | Плоская,Ч
 list | r_om_mirror | 0,1 | Off,On | Выкл,Вкл | Mirrors | Зеркала | requires=r_om_mirror
 list | r_om_glass | 0,1 | Original,Clear | Оригинальное,Прозрачное | Glass | Стекло | requires=r_om_glass | tip=Original: the tinted panes of the original game; Clear: see-through glass that refracts and reflects/Оригинальное: тонированные стёкла, как в оригинале; Прозрачное: стекло с преломлением и отражениями
 list | r_om_glass_refract | 0,0.5,1 | Off,Weak,Normal | Выкл,Слабое,Обычное | Glass Refraction | Преломление в стекле | requires=r_om_glass | tip=How much clear glass bends what is behind it (the ripple)/Насколько прозрачное стекло искажает то, что за ним (рябь)
+list | r_om_glass_dirt | 0,0.3,0.7 | Off,A Little,Heavy | Выкл,Немного,Сильно | Glass Dirt | Грязь на стёклах | requires=r_om_glass | tip=Grime, smears and dust on clear glass: a faint haze in the light, a little blur/Налёт, разводы и пыль на прозрачном стекле: лёгкая дымка на свету, чуть размывает
 list | r_om_rain | 0,1 | Off,On | Выкл,Вкл | Rain | Дождь | requires=r_om_rain
 list | r_om_snow | 0,1 | Off,On | Выкл,Вкл | Snow | Снег | requires=r_om_snow
 # per-pixel dynamic lights: A/B check passed (GFX-modern.md 14)

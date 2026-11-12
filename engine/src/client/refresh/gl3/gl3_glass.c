@@ -30,6 +30,7 @@
  * r_om_glass 0: the old blended texture. r_om_glass_refract: strength of the
  * refraction (1). r_om_glass_tint: how much of the texture's hue tints the
  * view (0.35). r_om_glass_reflect: strength of the reflection (1).
+ * r_om_glass_dirt: grime, smears and dust on the panes (0.3, a little).
  */
 
 #include "header/local.h"
@@ -44,7 +45,7 @@
 
 #define GLASS_MAXVERTS 1024
 
-static cvar_t *r_om_glass, *r_om_glass_refract, *r_om_glass_tint, *r_om_glass_reflect;
+static cvar_t *r_om_glass, *r_om_glass_refract, *r_om_glass_tint, *r_om_glass_reflect, *r_om_glass_dirt;
 
 typedef struct
 {
@@ -139,6 +140,7 @@ const char *gl3_glass_fs =
 	"uniform sampler2D gPrev;\n"    /* GL_TEXTURE21: the last finished frame, half size, mipmapped (r_om_ssr) */
 	"uniform mat4 gPrevPV;\n"       /* its projection x view */
 	"uniform vec4 gSSR;\n"          /* the last frame there, the reach of the traced reflection */
+	"uniform vec4 gDirt;\n"         /* r_om_glass_dirt */
 	"uniform vec4 omSoftP;\n"       /* projection C, D; depth range min, max */
 	"uniform vec4 omSoftV;\n"       /* 1 / scene target size */
 	"uniform vec4 gN;\n"            /* the pane's normal toward the eye */
@@ -174,6 +176,12 @@ const char *gl3_glass_fs =
 	"	vec3 lw = vec3(0.299, 0.587, 0.114);\n"
 	"	return clamp((dot(t.rgb, lw) - dot(gPane.rgb, lw)) * 4.0 - 0.1, 0.0, 1.0) * (1.0 - cover);\n"
 	"}\n"
+	"float gNoise(vec2 p)\n"
+	"{\n"
+	"	vec2 i = floor(p), f = fract(p);\n"
+	"	vec2 u = f * f * (3.0 - 2.0 * f);\n"
+	"	return mix(mix(gHash(i), gHash(i + vec2(1.0, 0.0)), u.x), mix(gHash(i + vec2(0.0, 1.0)), gHash(i + vec2(1.0, 1.0)), u.x), u.y);\n"
+	"}\n"
 	"float gEyeDist(float z)\n"
 	"{\n"
 	"	float ndc = (z - omSoftP.z) / (omSoftP.w - omSoftP.z) * 2.0 - 1.0;\n"
@@ -197,6 +205,18 @@ const char *gl3_glass_fs =
 	"	vec3 T1 = normalize(cross(N, (abs(N.z) < 0.9) ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)));\n"
 	"	vec3 B1 = cross(N, T1);\n"
 	"	vec2 pp = vec2(dot(passWorld, T1), dot(passWorld, B1));\n"
+	/* dirt (r_om_glass_dirt): patches of grime, smears of a cloth or fingers and fine dust, laid in the pane's own
+	   plane so they stay put as the eye moves; they act as the texture's smudges do - a faint haze in the light of
+	   the room, a little blur of what is seen and mirrored through them */
+	"	float dirt = 0.0;\n"
+	"	if (gDirt.x > 0.0)\n"
+	"	{\n"
+	"		float grime = gNoise(pp * 0.035) * 0.6 + gNoise(pp * 0.09 + 7.1) * 0.3 + gNoise(pp * 0.3 + 3.7) * 0.1;\n"
+	"		float smear = smoothstep(0.6, 0.85, gNoise(pp * vec2(0.05, 0.016) + 11.0));\n"
+	"		float dust = gNoise(pp * 1.7) * gNoise(pp * 0.6 + 5.0);\n"
+	"		dirt = clamp((smoothstep(0.45, 0.85, grime) * 0.7 + smear * 0.45 + dust * 0.35) * gDirt.x, 0.0, 1.0) * (1.0 - cover);\n"
+	"		smudge = max(smudge, dirt);\n"
+	"	}\n"
 	/* drawn window glass: long uneven waves, mostly across; the texture's streaks bend the light too */
 	"	vec2 g = (gNoiseG(pp * vec2(0.018, 0.05)) * vec2(0.35, 1.0) + gNoiseG(pp * 0.08 + 17.0) * 0.3) * gK.w;\n"
 	/* only the streaks bend it, not the edges of the wire and the frame: the slope of every colour change of the
@@ -299,6 +319,10 @@ const char *gl3_glass_fs =
 	"	float hz = smudge * 0.2;\n"
 	"	vec3 haze = mix(t.rgb, gPane.rgb, 0.5) * lit * 1.3;\n"
 	"	vec3 own = t.rgb * lit * cover + (haze * hz + env * F * gK.z + spec) * (1.0 - cover);\n"
+	/* the dirt's own haze: the room's light on it and the bright view behind scattered through it, a little warm;
+	   what is seen through it a little dimmer */
+	"	own += dirt * (lit * 0.35 + refr * 0.3) * vec3(0.95, 0.92, 0.85);\n"
+	"	trans *= 1.0 - dirt * 0.3;\n"
 	"	float ownW = cover + hz * (1.0 - cover);\n"
 	"	if (gFogC.w > 0.5)\n"
 	"	{\n"
@@ -411,6 +435,7 @@ InitCvars(void)
 		r_om_glass_refract = ri.Cvar_Get("r_om_glass_refract", "1", CVAR_ARCHIVE);
 		r_om_glass_tint = ri.Cvar_Get("r_om_glass_tint", "0.35", CVAR_ARCHIVE);
 		r_om_glass_reflect = ri.Cvar_Get("r_om_glass_reflect", "1", CVAR_ARCHIVE);
+		r_om_glass_dirt = ri.Cvar_Get("r_om_glass_dirt", "0.3", CVAR_ARCHIVE);
 	}
 }
 
@@ -704,6 +729,7 @@ GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int f
 		}
 
 		glUniform4f(GL3_UniformLoc(prog, "gSSR"), prev ? 1.0f : 0.0f, 700.0f, 0, 0);
+		glUniform4f(GL3_UniformLoc(prog, "gDirt"), Q_clamp(r_om_glass_dirt->value, 0.0f, 2.0f), 0, 0, 0);
 	}
 
 	GL3_Post_SoftUniforms(GL3_UniformLoc(prog, "omSoftP"), GL3_UniformLoc(prog, "omSoftV"), 0);

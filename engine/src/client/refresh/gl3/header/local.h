@@ -779,6 +779,10 @@ void GL3_Glass_PaneStats(gl3image_t *image, const byte *rgba, int w, int h);
 void GL3_Glass_BeginFrame(void);
 void GL3_Glass_Register(void);
 GLuint GL3_Post_LastFrame(float *prevpv);
+/* gl3_sofapi.c: the lights of Ghoul models kept for the frames they are culled */
+int GL3_SoF_ModelLightMark(void);
+void GL3_SoF_ModelLightsDrawn(void *inst, int mark);
+void GL3_SoF_ModelLightsCulled(void *inst);
 void GL3_World_SmoothNormals(gl3model_t *mod); /* gl3_smooth.c */
 qboolean GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int fogregion);
 extern float GL3_Mat_SurfClass(const msurface_t *surf); /* gl3_material.c: material class, negative */
