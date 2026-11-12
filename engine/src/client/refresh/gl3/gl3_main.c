@@ -2640,10 +2640,11 @@ GL3_SetLightLevel(entity_t *currententity)
  * OpenMerc r_om_preset: one knob for the GFX-modern settings. 0 = custom (nothing is touched), 4 = minimal (weak
  * integrated GPUs such as Intel UHD 610/620: half render scale, no shadows, fog, beams, AO, reflections or mirrors),
  * 1 = low (mobile, stronger integrated GPUs: 2 sun cascades at 1024, no lamp shadows / SSAO / SSR, 0.67 render
- * scale with the upscale), 2 = medium, 3 = high (the defaults of this build). Applied once when it changes; the single
+ * scale with the upscale), 2 = medium, 3 = high (every quality setting at the top of its menu range: shadow maps,
+ * lamp shadows, AO, reflections, water reflections, mirrors, tessellation, MSAA 4x + SMAA). Applied once when it changes; the single
  * settings stay editable afterwards. Every preset sets every key, so going from one to another never leaves an effect
  * of the previous one behind. GLES builds start on low; on desktop the first start on an integrated GPU picks
- * minimal or low (r_om_preset_auto), a discrete one keeps the config as it is.
+ * minimal or low (r_om_preset_auto) unless a preset is already set, a discrete one keeps the config as it is.
  */
 typedef struct { const char *name, *value; } presetkey_t;
 
@@ -2661,6 +2662,8 @@ static const presetkey_t preset_minimal[] = {
 	{"r_om_beams", "0"}, {"r_om_beams_motes", "0"}, {"r_om_bloom", "0"},
 	{"r_om_mirror", "0"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
 	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_look", "0"}, {"r_om_worldlite", "1"},
+	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "0"}, {"r_om_tess_round", "0"}, {"r_om_tess_weapon", "0"},
+	{"r_om_glints", "0"}, {"r_om_skyrays", "0"}, {"r_om_softparticles", "0"},
 	{NULL, NULL}};
 
 static const presetkey_t preset_low[] = {
@@ -2680,6 +2683,8 @@ static const presetkey_t preset_low[] = {
 	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_look", "0"},
 	/* the light world shaders: 33 -> 23.5 ms per frame on the Adreno 610 phone (arm1) */
 	{"r_om_worldlite", "1"},
+	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "0"}, {"r_om_tess_round", "0"}, {"r_om_tess_weapon", "0"},
+	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"},
 	{NULL, NULL}};
 
 static const presetkey_t preset_medium[] = {
@@ -2696,13 +2701,15 @@ static const presetkey_t preset_medium[] = {
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
 	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
+	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "2"}, {"r_om_tess_round", "1"}, {"r_om_tess_weapon", "0"},
+	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"},
 	{NULL, NULL}};
 
-static const presetkey_t preset_high[] = { /* the build's defaults */
+static const presetkey_t preset_high[] = { /* every quality setting at the top of its menu range */
 	{"r_om_renderscale", "1"}, {"r_om_upscale", "2"},
-	{"r_om_csm", "1"}, {"r_om_csm_size", "2048"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
-	{"r_om_lshadow", "1"}, {"r_om_lshadow_size", "512"}, {"r_om_lshadow_lights", "4"}, {"r_om_lshadow_taps", "8"},
-	{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "2"},
+	{"r_om_csm", "1"}, {"r_om_csm_size", "4096"}, {"r_om_csm_cascades", "4"}, {"r_om_csm_soft", "2"},
+	{"r_om_lshadow", "1"}, {"r_om_lshadow_size", "1024"}, {"r_om_lshadow_lights", "8"}, {"r_om_lshadow_taps", "8"},
+	{"r_om_ssao", "1.5"}, {"r_om_ssao_quality", "3"}, {"r_om_ssao_full", "1"}, {"r_om_ssr", "1"}, {"r_om_ssr_quality", "3"},
 	{"r_om_volfog", "1"}, {"r_om_volfog_half", "1"}, {"r_om_volfog_quality", "2"},
 	{"r_om_motionblur", "0.5"},
 	{"r_om_lens_ca", "0.5"}, {"r_om_lens_flare", "0.35"}, {"r_om_lens_dirt", "0.3"},
@@ -2710,8 +2717,10 @@ static const presetkey_t preset_high[] = { /* the build's defaults */
 	{"r_om_capsule", "1"},
 	{"r_om_taa", "-1"},
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
-	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
-	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
+	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "1"}, {"r_om_water", "1"}, {"r_om_water_quality", "3"},
+	{"r_om_tess", "8"}, {"r_om_tess_models", "3"}, {"r_om_tess_round", "1"}, {"r_om_tess_weapon", "3"},
+	{"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
+	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"},
 	{NULL, NULL}};
 
 /* the tone of the picture: on phones minimal and low get the bright, saturated one in the spirit of the PlayStation
@@ -2731,9 +2740,11 @@ static const presetkey_t preset_tone_normal[] = {
    low leave the edges to FXAA (cheaper than the SMAA passes); phones have neither (the FSR upscale) */
 #ifndef YQ2_GL3_GLES3
 static const presetkey_t preset_aa_light[] = {
-	{"r_msaa_samples", "0"}, {"r_om_fxaa", "-1"}, {"r_om_postaa", "1"}, {NULL, NULL}};
+	{"r_msaa_samples", "0"}, {"r_om_fxaa", "-1"}, {"r_om_postaa", "1"}, {"r_anisotropic", "4"}, {NULL, NULL}};
 static const presetkey_t preset_aa_medium[] = {
-	{"r_msaa_samples", "2"}, {"r_om_fxaa", "-1"}, {"r_om_postaa", "2"}, {NULL, NULL}};
+	{"r_msaa_samples", "2"}, {"r_om_fxaa", "-1"}, {"r_om_postaa", "2"}, {"r_anisotropic", "16"}, {NULL, NULL}};
+static const presetkey_t preset_aa_high[] = {
+	{"r_msaa_samples", "4"}, {"r_om_fxaa", "-1"}, {"r_om_postaa", "2"}, {"r_anisotropic", "16"}, {NULL, NULL}};
 #else
 static const presetkey_t preset_aa_light[] = {{"r_om_fxaa", "0"}, {NULL, NULL}};
 #endif
@@ -2798,6 +2809,35 @@ PresetForGPU(void)
 		return 1;
 	}
 
+	/* Mesa (radeonsi) names the chip: "AMD Radeon Graphics (radeonsi, gfx1201, ...)" also for discrete cards it has no
+	   marketing name for (an RX 9070 got low), so there the gfx target decides - integrated ones are Raven/Picasso
+	   (gfx902/909), Renoir and later Vega APUs (gfx90c), Van Gogh (gfx1033), Rembrandt / Raphael (gfx1035/1036),
+	   Mendocino (gfx1037), Phoenix (gfx1103) and Strix (gfx115x) */
+	{
+		const char *g = strstr(r, "radeonsi, gfx");
+
+		if (g)
+		{
+			static const char *const apu[] = {"gfx902", "gfx909", "gfx90c", "gfx1033", "gfx1035", "gfx1036", "gfx1037",
+				"gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", NULL};
+			int k;
+
+			g += 11; /* "gfx..." */
+
+			for (k = 0; apu[k]; k++)
+			{
+				size_t n = strlen(apu[k]);
+
+				if (!strncmp(g, apu[k], n) && ((g[n] == ',') || (g[n] == ' ') || (g[n] == ')') || !g[n]))
+				{
+					return 1;
+				}
+			}
+
+			return 0;
+		}
+	}
+
 	/* AMD APUs ("AMD Radeon(TM) Graphics", "Radeon(TM) Vega 8 Graphics", "Radeon 780M") */
 	if (strstr(r, "radeon") && (strstr(r, "(tm) graphics") || strstr(r, "vega") || strstr(r, "radeon graphics") ||
 		strstr(r, "610m") || strstr(r, "660m") || strstr(r, "680m") || strstr(r, "740m") || strstr(r, "760m") ||
@@ -2828,7 +2868,7 @@ ApplyPreset(void)
 
 		if (autop->value == 0)
 		{
-			int want = PresetForGPU();
+			int want = (preset->value == 0) ? PresetForGPU() : 0;
 
 			ri.Cvar_Set("r_om_preset_auto", "1");
 
@@ -2894,11 +2934,10 @@ ApplyPreset(void)
 #else
 	ApplyPresetKeys(preset_tone_normal);
 
-	if (p != 3)
 	{
 		int before = (int)gl_msaa_samples->value;
 
-		ApplyPresetKeys((p == 2) ? preset_aa_medium : preset_aa_light);
+		ApplyPresetKeys((p == 3) ? preset_aa_high : (p == 2) ? preset_aa_medium : preset_aa_light);
 
 		/* the MSAA buffers are made with the window */
 		if ((int)gl_msaa_samples->value != before)
