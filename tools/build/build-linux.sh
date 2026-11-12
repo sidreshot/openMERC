@@ -53,6 +53,9 @@ echo "== staging"
 REL=$OUT/release
 mkdir -p "$REL/base"
 cp -f "$OUT/engine/release/openMerc" "$OUT/engine/release/openMerc-ded" "$REL/"
+# omlight: the lightmap re-bake the renderer starts in the background for a map without a cache (r_om_relight,
+# r_om_deluxe); it is looked for next to the engine
+cp -f "$OUT/engine/release/omlight" "$REL/"
 for r in ref_gl3.so ref_gles3.so; do
   [ -f "$OUT/engine/release/$r" ] && cp -f "$OUT/engine/release/$r" "$REL/"
 done

@@ -13,7 +13,7 @@ Install
        cd ~/Games/SoF                 # your game folder
        tar xzf openMERC-<version>-linux-x86_64.tar.gz
 
-   This adds openMerc, openMerc-ded, openMERC.sh, a few .so files and the
+   This adds openMerc, openMerc-ded, omlight, openMERC.sh, a few .so files and the
    folder openmerc/ next to base/. No file of the game is replaced. The same
    archive also works unpacked into a folder inside the game folder
    (e.g. ~/Games/SoF/openMERC/); then the game data is found in the parent.
@@ -28,6 +28,10 @@ openMERC never writes into the game folder. Its own files are in openmerc/;
 settings, saves, screenshots and the log go to openmerc/user/. To remove
 openMERC, delete openmerc/ and the files the archive added. Dedicated server:
 ./openMerc-ded +map <map>.
+
+The first time a map is loaded, omlight re-bakes its lighting in the background
+(about half a minute; openmerc/user/lightmaps/). The new light and the highlights
+of the surfaces are used from the next load of that map.
 
 Saves of the original game cannot be loaded by openMERC's game modules; the
 load menu shows them greyed out as "Not compatible".

@@ -18,8 +18,8 @@ openMERC's own files are in openmerc\. Settings, saves, screenshots (F11) and lo
 openmerc\user\. Your original SoF saves and config (user\) stay untouched; the original SoF.exe keeps
 working as before.
 To uninstall, delete the openmerc folder and openMerc.exe, openMerc-ded.exe, ref_gl3.dll, ref_gles3.dll,
-SDL3.dll, OMsnd.dll, OpenAL32.dll, fmt.dll, msvcp140.dll, msvcp140_atomic_wait.dll, vcruntime140.dll,
-openMERC-README.txt.
+SDL3.dll, OMsnd.dll, OpenAL32.dll, fmt.dll, msvcp140.dll, msvcp140_atomic_wait.dll, vcruntime140.dll, vcomp140.dll,
+omlight.exe, openMERC-README.txt.
 
 Upgrading from 0.2.1 or 0.2.2: unpack @VERSION@ into the same folder and let it replace the openMERC files.
 Settings and saves in openmerc\user\ are kept.
@@ -36,6 +36,8 @@ base\ next to openMerc.exe (nothing but .pak files is taken from the image).
 GRAPHICS
 The Video menu has a Quality Preset (Minimal, Low, Medium, High or Custom); on integrated graphics a lighter
 preset is chosen by itself at the first start. Every effect has its own switch in the Video menu.
+The first time a map is loaded, omlight.exe re-bakes its lighting in the background (about half a minute;
+openmerc\user\lightmaps\). The new light and the highlights of the surfaces are used from the next load of that map.
 HD texture packs: put the pack's .pak into openmerc\hd\ and switch Video -> Picture Quality -> HD Textures
 on (see openmerc\hd\README.txt).
 
@@ -84,7 +86,7 @@ openmerc\user\. Ваши оригинальные сохранения и кон
 работает как раньше.
 Чтобы удалить openMERC, удалите папку openmerc и файлы openMerc.exe, openMerc-ded.exe, ref_gl3.dll,
 ref_gles3.dll, SDL3.dll, OMsnd.dll, OpenAL32.dll, fmt.dll, msvcp140.dll, msvcp140_atomic_wait.dll,
-vcruntime140.dll, openMERC-README.txt.
+vcruntime140.dll, vcomp140.dll, omlight.exe, openMERC-README.txt.
 
 Обновление с 0.2.1 или 0.2.2: распакуйте @VERSION@ в ту же папку и разрешите заменить файлы openMERC.
 Настройки и сохранения в openmerc\user\ остаются.
@@ -100,6 +102,8 @@ vcruntime140.dll, openMERC-README.txt.
 ГРАФИКА
 В меню «Видео» есть «Пресет качества» (Минимальные, Низкие, Средние, Высокие или Свои); на встроенной
 графике при первом запуске подходящий пресет выбирается сам. У каждого эффекта свой переключатель в меню «Видео».
+При первой загрузке карты omlight.exe в фоне пересчитывает её освещение (около полуминуты;
+openmerc\user\lightmaps\). Новый свет и блики на поверхностях появляются со следующей загрузки этой карты.
 HD-текстуры: положите .pak HD-пака в openmerc\hd\ и включите Видео -> Качество изображения -> HD-текстуры
 (см. openmerc\hd\README.txt).
 

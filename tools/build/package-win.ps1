@@ -63,13 +63,22 @@ New-Item -ItemType Directory -Force -Path (Join-Path $om 'licenses'), (Join-Path
 function Put([string]$src, [string]$dst) { Copy-Item -LiteralPath $src -Destination $dst -Force }
 
 # programs and libraries next to openMerc.exe
-foreach ($f in 'openMerc.exe', 'openMerc-ded.exe', 'ref_gl3.dll', 'ref_gles3.dll') { Put (Find-Built $Engine $f) $stage }
+# omlight.exe: the lightmap re-bake the renderer starts in the background for a map without a cache (r_om_relight,
+# r_om_deluxe); the engine looks for it next to itself
+foreach ($f in 'openMerc.exe', 'openMerc-ded.exe', 'ref_gl3.dll', 'ref_gles3.dll', 'omlight.exe') { Put (Find-Built $Engine $f) $stage }
 Put (Find-Built $Sound 'OMsnd.dll') $stage
 foreach ($f in 'SDL3.dll', 'OpenAL32.dll') { Put (Join-Path $vi "bin\$f") $stage }
 # fmt.dll: a runtime dependency of some vcpkg builds of OpenAL Soft
 $haveFmt = Test-Path (Join-Path $vi 'bin\fmt.dll')
 if ($haveFmt) { Put (Join-Path $vi 'bin\fmt.dll') $stage }
 foreach ($f in $crtFiles) { Put (Join-Path $crt.FullName $f) $stage }
+# vcomp140.dll: the MSVC OpenMP runtime of omlight.exe (VC\Redist\MSVC\<version>\x86\Microsoft.VC*.OpenMP)
+$omp = Get-ChildItem -Path (Split-Path $crt.FullName) -Directory -Filter 'Microsoft.VC*.OpenMP' | Select-Object -First 1
+$haveOmp = $false
+if ($omp -and (Test-Path (Join-Path $omp.FullName 'vcomp140.dll'))) {
+	Put (Join-Path $omp.FullName 'vcomp140.dll') $stage
+	$haveOmp = $true
+}
 
 # openMERC's own modules and data
 Put (Find-Built $Game 'gamex86.dll') $om
@@ -119,7 +128,7 @@ $third = (Read-Text (Join-Path $repo 'THIRD_PARTY.md')).TrimEnd() + @"
 |---|---|---|---|
 | ``SDL3.dll`` | SDL 3 (unmodified vcpkg build) | $sdlV | ``licenses/SDL3.txt`` |
 | ``OpenAL32.dll`` | OpenAL Soft (unmodified vcpkg build, dynamically linked; source: https://github.com/kcat/openal-soft) | $oalV | ``licenses/OpenAL-Soft.txt`` |
-$fmtRow| ``msvcp140.dll``, ``msvcp140_atomic_wait.dll``, ``vcruntime140.dll`` | Microsoft Visual C++ runtime, redistributable files of Visual Studio | $crtVersion | Microsoft Visual Studio redistributable terms (``licenses/MSVC-runtime.txt``) |
+$fmtRow| ``msvcp140.dll``, ``msvcp140_atomic_wait.dll``, ``vcruntime140.dll``$(if ($haveOmp) { ', ``vcomp140.dll``' }) | Microsoft Visual C++ runtime, redistributable files of Visual Studio | $crtVersion | Microsoft Visual Studio redistributable terms (``licenses/MSVC-runtime.txt``) |
 | fonts inside ``openmerc/zz_openmerc.pak`` | Play, Russo One, JetBrains Mono | - | ``licenses/OFL-*.txt`` |
 | everything else | openMERC | $version | ``LICENSE.txt`` (GPL v2 or later), Yamagi Quake II notices in ``licenses/Yamagi-Quake-II.txt``; code after FidelityFX FSR 1 / CAS and SMAA: ``licenses/FidelityFX-FSR.txt``, ``licenses/SMAA.txt`` |
 "@
@@ -137,7 +146,7 @@ foreach ($f in Get-ChildItem -Path (Join-Path $repo 'licenses') -Filter '*.txt')
 	Write-Text (Join-Path $lic $f.Name) (Read-Text $f.FullName)
 }
 Write-Text (Join-Path $lic 'MSVC-runtime.txt') @"
-msvcp140.dll, msvcp140_atomic_wait.dll and vcruntime140.dll are the Microsoft Visual C++ 2015-2022
+msvcp140.dll, msvcp140_atomic_wait.dll, vcruntime140.dll (and vcomp140.dll, its OpenMP runtime) are the Microsoft Visual C++ 2015-2022
 runtime (version $crtVersion, x86), copyright Microsoft Corporation. They are redistributable files of
 Visual Studio ("Distributable Code", Microsoft Visual Studio license terms) and are shipped unmodified
 next to openMerc.exe so that no separate runtime installer is needed. They are not covered by the GPL.

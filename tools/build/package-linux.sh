@@ -35,7 +35,7 @@ trap 'rm -rf "$STAGE"' EXIT
 P=$STAGE
 D=$P/openmerc
 mkdir -p "$D"
-cp "$REL/openMerc" "$REL/openMerc-ded" "$REL/OMsnd.so" "$P/"
+cp "$REL/openMerc" "$REL/openMerc-ded" "$REL/OMsnd.so" "$REL/omlight" "$P/"
 for r in ref_gl3.so ref_gles3.so; do [ -f "$REL/$r" ] && cp "$REL/$r" "$P/"; done
 cp "$REL/base/gamex86.so" "$REL/base/player.so" "$REL/base/zz_openmerc.pak" "$D/"
 cp "$REPO/LICENSE" "$REPO/THIRD_PARTY.md" "$D/"
@@ -45,7 +45,7 @@ cp "$REPO/dist/README-linux.txt" "$D/README.txt"
 mkdir -p "$D/hd"
 cp "$REPO/dist/README-hd.txt" "$D/hd/README.txt"
 install -m 755 "$REPO/dist/openMERC.sh" "$P/openMERC.sh"
-strip --strip-unneeded "$P/openMerc" "$P/openMerc-ded" "$P"/*.so "$D"/*.so
+strip --strip-unneeded "$P/openMerc" "$P/openMerc-ded" "$P/omlight" "$P"/*.so "$D"/*.so
 
 if [ "${OM_NO_BUNDLE:-0}" != "1" ]; then
   mkdir -p "$D/lib"
@@ -54,6 +54,24 @@ if [ "${OM_NO_BUNDLE:-0}" != "1" ]; then
   [ -f "$sdl" ] && [ -f "$oal" ] || { echo "libSDL3.so.0 or libopenal.so.1 not found" >&2; exit 1; }
   cp -L "$sdl" "$D/lib/libSDL3.so.0"
   cp -L "$oal" "$D/lib/libopenal.so.1"
+  # omlight's OpenMP runtime (GCC): not every desktop has libgomp installed
+  if readelf -d "$P/omlight" | grep -q 'libgomp.so.1'; then
+    gomp=${OM_GOMP_LIB:-$(find_lib libgomp.so.1)}
+    [ -f "$gomp" ] || { echo "libgomp.so.1 not found (OM_GOMP_LIB)" >&2; exit 1; }
+    cp -L "$gomp" "$D/lib/libgomp.so.1"
+    gpl3=${OM_GPL3_TEXT:-/usr/share/common-licenses/GPL-3}
+    [ -f "$gpl3" ] || { echo "GPL-3 text not found (OM_GPL3_TEXT)" >&2; exit 1; }
+    cp "$gpl3" "$D/lib/GPL-3.0.txt"
+    cat > "$D/lib/LICENSE-libgomp.txt" <<'TXT'
+libgomp.so.1: the GNU Offloading and Multi Processing Runtime Library of GCC, https://gcc.gnu.org
+(OpenMP runtime of omlight, the lightmap re-bake). Unmodified build of the distribution the package was
+made on; its source code is in that distribution's gcc package and at https://gcc.gnu.org.
+
+Copyright (C) Free Software Foundation, Inc. GPL version 3 or later (GPL-3.0.txt next to this file) with the
+GCC Runtime Library Exception version 3.1 (https://www.gnu.org/licenses/gcc-exception-3.1.html). It is a
+separate shared library: replace lib/libgomp.so.1 with any compatible build, or delete it to use the system one.
+TXT
+  fi
   strip --strip-unneeded "$D"/lib/*.so.*
   cat > "$D/lib/LICENSE-SDL3.txt" <<'TXT'
 libSDL3.so.0: Simple DirectMedia Layer 3, https://github.com/libsdl-org/SDL
