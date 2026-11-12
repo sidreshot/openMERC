@@ -678,8 +678,14 @@ void GL3_EndFrame(void)
 	/* OpenMerc (I4c): AVI capture at the end of the frame, before the swap (SPEC-412 §13) */
 	GL3_Avi_Frame();
 
+	/* OpenMerc: video recording (om_record, gl3_rec.c) */
+	GL3_Rec_Frame();
+
 	/* a requested screenshot, also before the swap */
 	GL3_SoF_ScreenShotFrame();
+
+	/* the recording's blinking mark: after the frame was read, so in neither the video nor a screenshot */
+	GL3_Rec_Indicator();
 	GL3_Post_ProfMark("2d");
 	GL3_Post_GpuTimer(false);
 

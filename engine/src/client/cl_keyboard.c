@@ -777,6 +777,48 @@ Key_LocalisedName(int key)
 	return CL_StringByName(ref);
 }
 
+/*
+ * OpenMerc: keys bound by default after a player's config.cfg may have been written. That file starts with
+ * unbindall, so the binds of configs/default_keys.cfg never reach an existing setup; each entry is given once (cvar
+ * om_bindver, saved with the config) and only to a key that is free.
+ */
+void
+Key_OpenMercDefaults(void)
+{
+	static const struct
+	{
+		int ver, key;
+		char *cmd;
+	} defs[] = {
+		{1, K_F12, "om_record"}, /* video recording (gl3_rec.c) */
+	};
+	cvar_t *ver = Cvar_Get("om_bindver", "0", CVAR_ARCHIVE);
+	int i, have = (int)ver->value, top = have;
+
+	for (i = 0; i < (int)(sizeof(defs) / sizeof(defs[0])); i++)
+	{
+		if (defs[i].ver <= have)
+		{
+			continue;
+		}
+
+		if (!keybindings[defs[i].key] || !keybindings[defs[i].key][0])
+		{
+			Key_SetBinding(defs[i].key, defs[i].cmd);
+		}
+
+		if (defs[i].ver > top)
+		{
+			top = defs[i].ver;
+		}
+	}
+
+	if (top != have)
+	{
+		Cvar_SetValue("om_bindver", (float)top);
+	}
+}
+
 void
 Key_SetBinding(int keynum, char *binding)
 {

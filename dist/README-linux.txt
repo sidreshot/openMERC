@@ -36,6 +36,20 @@ of the surfaces are used from the next load of that map.
 Saves of the original game cannot be loaded by openMERC's game modules; the
 load menu shows them greyed out as "Not compatible".
 
+Video recording
+---------------
+F12 starts a recording and F12 again stops it (console: om_record). A blinking
+red square in the top right corner shows that it runs; it is not in the video.
+The video goes to openmerc/user/video/openmerc-<date>_<time>.mp4: 1080p, 60
+frames per second, H.264 with the sound you hear (AAC). It needs ffmpeg, which
+is not included: install it (Debian, Ubuntu: sudo apt install ffmpeg) or put
+the ffmpeg program next to openMerc. The sound is taken from the default output
+through PulseAudio or PipeWire, so other programs playing at the same time are
+recorded too. Settings: om_rec_height (1080; 0 = the window's size), om_rec_fps
+(60), om_rec_audio (1), om_rec_vcodec (the encoder and its options),
+om_rec_ffmpeg (the path of ffmpeg), om_rec_indicator (1). ffmpeg's messages:
+openmerc/user/video/ffmpeg.log.
+
 Required system libraries
 -------------------------
 Built on Debian 13; needs glibc 2.38 or newer and libstdc++ from GCC 13 or newer

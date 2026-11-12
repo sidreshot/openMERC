@@ -440,6 +440,8 @@ Con_Print(char *txt)
 	/* OpenMerc: OMsnd debug lines (s_om_debug, "[p=<time>]") go to the console and the logs, not to the overlay
 	   (the test build records with s_om_debug 24: one line per second would cover the top of the screen) */
 	quiet = !strncmp(txt, "OMsnd: [p=", 10);
+	/* and the start of a video recording (gl3_rec.c): a line on the screen would be in the video */
+	quiet |= !strncmp(txt, "om_record: recording", 20);
 
 	while ((c = *txt))
 	{

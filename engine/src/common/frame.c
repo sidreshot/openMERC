@@ -86,6 +86,7 @@ int curtime;
 #ifndef DEDICATED_ONLY
 void Key_Init(void);
 void Key_Shutdown(void);
+void Key_OpenMercDefaults(void);
 void SCR_EndLoadingPlaque(void);
 #endif
 
@@ -252,6 +253,11 @@ void Qcommon_ExecConfigs(qboolean gameStartUp)
 	}
 
 	Cbuf_Execute();
+
+#ifndef DEDICATED_ONLY
+	/* binds added after a saved config.cfg (F12 video recording) */
+	Key_OpenMercDefaults();
+#endif
 }
 
 static qboolean checkForHelp(int argc, char **argv)

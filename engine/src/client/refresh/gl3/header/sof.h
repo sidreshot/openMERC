@@ -285,6 +285,13 @@ void GL3_Avi_f(void);
 void GL3_Avi_Frame(void);
 void GL3_Avi_Shutdown(void);
 
+/* gl3_rec.c: video recording through ffmpeg (om_record) */
+void GL3_Rec_Init(void);
+void GL3_Rec_f(void);
+void GL3_Rec_Frame(void);
+void GL3_Rec_Indicator(void);
+void GL3_Rec_Shutdown(void);
+
 /* ---------------- gl3_dynlight.c (SPEC-410 dynamic lights on lightmaps; package I4c) ---------------- */
 void GL3_DynLight_Free(void);
 void GL3_DynLight_BindPage(int page);
