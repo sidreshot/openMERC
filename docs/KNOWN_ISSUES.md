@@ -153,10 +153,11 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
 - **#6 crash when knifing a corpse (mode B): not reproduced.** About 300 knife hits on corpses of `m_nyc_mskinhead1`,
   `m_nyc_mskinhead2a` and `m_nyc_mpunk` on tsr1, including a severed leg and hits on the piece: no crash. Needed:
   `g18crash.log` (start with `+set g18_crashlog 1`) and `user\sof.log`.
-- **#10 enemies cannot be shot and do not hurt the player (Linux x86_64): not reproduced** (no Linux machine). Checked
-  in code: no pointer truncation in a 64-bit build of the modules, no `long` in shared data, the engine/game layouts
-  (`edict_t`, entity state, Ghoul hit record, movement block) agree on 64 bits. Needed: `sof.log` from Linux and the
-  video of the report.
+- **#10 enemies cannot be shot and do not hurt the player (Linux x86_64): fixed.** In a 64-bit build the game
+  module read the player module's members (current weapon, attack, spread) at the 32-bit offsets, so no shot of the
+  player ever left the gun (`3f4f844`, offsets from the compiler, `static_assert`s in `player/src/pm_local.h`).
+  Checked 2026-11-12 on Linux x86_64 (Debian 13, AMD Radeon / Mesa, the 0.2.3 package): a skinhead spawned on tsr1
+  is hit (`om_shotdebug 1`: `OMBULLET m_nyc_mskinhead1 ... take 2`) and dies, and the enemies' shots hurt the player.
 
 ## Mode-B specific (own game and player modules)
 
