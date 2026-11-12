@@ -32,8 +32,7 @@ cd build-macos-arm64-Release/release
 ./openMerc +set basedir "/path/to/Soldier of Fortune" +set vid_renderer gl3
 ```
 
-Use `+set basedir`, not `-basedir`: the check for game data at the start (`CL_OM_EnsureGameData`) runs before the
-`-basedir` switch is read and asks for a disc image although the data is there.
+`-basedir "/path/to/Soldier of Fortune"` does the same.
 
 ## Dependencies
 
