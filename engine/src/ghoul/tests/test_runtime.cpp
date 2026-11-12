@@ -598,9 +598,12 @@ void TestBinaryInterface()
 	// system slots 40-48: statistics
 	typedef int(__fastcall * IntFn)(void *, void *);
 	CHECK(((IntFn)slot(sv, 45))(sv, nullptr) == 0 && ((IntFn)slot(sv, 46))(sv, nullptr) == 0, "system slots 45/46");
-	// player model slot 17 IsLoaded, slot 3 NumSkins, slot 18 destructor
+	// player model slot 17 IsLoaded, slot 3 NumSkins, slot 18 destructor (the stock model needs the game data)
 	void *pm = OMGhoul_NewPlayerModel("Dekker.gpm");
-	CHECK(((BoolFn)slot(pm, 17))(pm, nullptr) && ((IntFn)slot(pm, 3))(pm, nullptr) == 4, "player model slots 3/17");
+	if (g_haveData)
+		CHECK(((BoolFn)slot(pm, 17))(pm, nullptr) && ((IntFn)slot(pm, 3))(pm, nullptr) == 4, "player model slots 3/17");
+	else
+		std::printf("SKIP: player model slots 3/17 need the game data\n");
 	typedef void *(__fastcall * DtorFn)(void *, void *, int);
 	((DtorFn)slot(pm, 18))(pm, nullptr, 1);
 	// object slot 27: destroy
