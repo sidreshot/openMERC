@@ -185,8 +185,12 @@ const char *gl3_glass_fs =
 	"	vec3 lw = vec3(0.299, 0.587, 0.114);\n"
 	/* smudges and streaks: lighter than the pane */
 	"	float smudge = clamp((dot(t.rgb, lw) - dot(gPane.rgb, lw)) * 4.0 - 0.1, 0.0, 1.0) * (1.0 - cover);\n"
-	"	vec3 N = normalize(gN.xyz);\n"
 	"	vec3 V = normalize(gEye.xyz - passWorld);\n"
+	/* the pane's normal toward the eye, whatever side of the face is drawn: with it turned away, the lamps behind
+	   the pane passed as lamps in front and every one got a large halo on the glass, at the place it is seen
+	   through it (gone when the eye turned) */
+	"	vec3 N = normalize(gN.xyz);\n"
+	"	if (dot(N, V) < 0.0) N = -N;\n"
 	"	vec3 T1 = normalize(cross(N, (abs(N.z) < 0.9) ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)));\n"
 	"	vec3 B1 = cross(N, T1);\n"
 	"	vec2 pp = vec2(dot(passWorld, T1), dot(passWorld, B1));\n"
@@ -198,15 +202,16 @@ const char *gl3_glass_fs =
 	"		gStreak(texture(tex, passTexCoord + vec2(0.0, gTexel.y))) - gStreak(texture(tex, passTexCoord - vec2(0.0, gTexel.y)))) * 0.2;\n"
 	"	vec3 tw = T1 * g.x + B1 * g.y;\n"
 	"	vec3 Np = normalize(N + tw * 0.03);\n"
-	/* the scene behind: shifted as through an uneven slab - more the farther it lies behind the pane */
+	/* the scene behind: a thin pane turns the view by a small angle - the same shift on the screen near and far, as
+	   through window glass (a shift growing with the distance behind made a lens of every pane, and three shifted
+	   colour channels made rainbow edges window glass does not have) */
 	"	vec2 suv = gl_FragCoord.xy * omSoftV.xy;\n"
 	"	float surfD = gEyeDist(gl_FragCoord.z);\n"
-	"	float behind = max(gEyeDist(texture(gDepth, suv).r) - surfD, 0.0);\n"
 	"	vec4 c0 = transProjView * vec4(passWorld, 1.0);\n"
-	"	vec4 c1 = transProjView * vec4(passWorld + tw * (0.03 * gK.x * min(behind, 400.0)), 1.0);\n"
-	"	vec2 off = clamp((c1.xy / c1.w - c0.xy / c0.w) * 0.5, vec2(-0.012), vec2(0.012));\n"
+	"	vec4 c1 = transProjView * vec4(passWorld + tw * (0.6 * gK.x * surfD * 0.01), 1.0);\n"
+	"	vec2 off = clamp((c1.xy / c1.w - c0.xy / c0.w) * 0.5, vec2(-0.003), vec2(0.003));\n"
 	"	if (gEyeDist(texture(gDepth, suv + off * 1.1).r) < surfD + 1.0) off = vec2(0.0);\n"
-	"	vec3 refr = vec3(texture(gScene, suv + off * 1.08).r, texture(gScene, suv + off).g, texture(gScene, suv + off * 0.92).b);\n"
+	"	vec3 refr = texture(gScene, suv + off).rgb;\n"
 	/* frosted under the smudges */
 	"	if (smudge > 0.05)\n"
 	"	{\n"
@@ -224,9 +229,11 @@ const char *gl3_glass_fs =
 	"	vec3 lit = passColor.rgb;\n"
 	"	vec3 env = Probe(passWorld + N * 2.0, R, 0.4 + smudge * 3.0);\n"
 	"	if (env.r < 0.0) env = lit * (0.45 + 0.3 * R.z);\n" /* no probe: the light around the pane */
-	/* the lamps: sharp highlights (the traced glints' shape, gl3_post.c), fewer through the smudges */
+	/* the lamps: their mirror images, as glass shows them - only where the reflected ray meets the lamp, as large as
+	   the lamp looks from there (about 8 units across), as faint as glass reflects (Fresnel: 4 % head-on); smudges
+	   spread them a little. A Blinn-Phong highlight (a lobe tens of pixels wide, a floor of 30 %) put a large white
+	   disc on the pane for every lamp around */
 	"	vec3 spec = vec3(0.0);\n"
-	"	float n = mix(2048.0, 96.0, smudge);\n"
 	"	for (int i = 0; i < 8; i++)\n"
 	"	{\n"
 	"		if (i >= omBN) break;\n"
@@ -235,11 +242,12 @@ const char *gl3_glass_fs =
 	"		float att = 1.0 - dl / (omBL[i].w * 1.5);\n"
 	"		if (att <= 0.0) continue;\n"
 	"		vec3 L = Lp / dl;\n"
-	"		float ndl = dot(N, L);\n"
-	"		if (ndl <= 0.0) continue;\n"
-	"		spec += omBC[i].rgb * (att * att * ndl * pow(max(dot(Np, normalize(L + V)), 0.0), n) * (n + 8.0) / 64.0);\n"
+	"		if (dot(N, L) <= 0.0) continue;\n"
+	"		float a = clamp(4.0 / dl, 0.002, 0.2) * (1.0 + 2.0 * smudge);\n"
+	"		float disc = smoothstep(cos(a * 1.5), cos(a), dot(R, L));\n"
+	"		spec += omBC[i].rgb * (disc * min(att * 2.0, 1.0));\n"
 	"	}\n"
-	"	spec = min(spec, vec3(4.0)) * (0.3 + 0.7 * F);\n"
+	"	spec = min(spec * F * 2.0, vec3(1.5));\n"
 	"	vec3 trans = refr * tint * (1.0 - F);\n"
 	"	float hz = smudge * 0.2;\n"
 	"	vec3 haze = mix(t.rgb, gPane.rgb, 0.5) * lit * 1.3;\n"
