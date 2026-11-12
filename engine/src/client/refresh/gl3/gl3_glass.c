@@ -350,6 +350,13 @@ InitCvars(void)
 	}
 }
 
+/* at the renderer's start: the video page shows the glass rows (requires=r_om_glass) before any glass was drawn */
+void
+GL3_Glass_Register(void)
+{
+	InitCvars();
+}
+
 static void
 MakeVAO(void)
 {

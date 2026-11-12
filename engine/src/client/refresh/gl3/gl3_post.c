@@ -3765,6 +3765,12 @@ UpTarget(void)
 {
 	static const GLenum one[1] = {GL_COLOR_ATTACHMENT0};
 
+	/* r_om_upscale 0: no upscale pass, the scaled view is stretched to the window as it is (issue #13) */
+	if (r_om_upscale->value < 1.0f)
+	{
+		return false;
+	}
+
 	{
 		int mode = (r_om_upscale->value >= 2.0f) ? 2 : 1;
 

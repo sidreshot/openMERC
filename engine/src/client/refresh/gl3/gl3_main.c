@@ -392,6 +392,7 @@ GL3_Register(void)
 	ri.Cmd_AddCommand("avi", GL3_Avi_f); /* I4c: SPEC-412 §13 */
 	ri.Cmd_AddCommand("om_record", GL3_Rec_f); /* video recording (gl3_rec.c), F12 */
 	GL3_Rec_Init();
+	GL3_Glass_Register();
 	ri.Cmd_AddCommand("gl_strings", GL3_Strings_f);
 #ifndef OM_SOFREF
 	ri.Cmd_AddCommand("modellist", GL3_Mod_Modellist_f);

@@ -51,12 +51,12 @@ list | r_om_tess_weapon | 0,2,3 | Off,Medium,High | Выкл,Средняя,Вы
 # ---- RENDER SCALE / UPSCALING / POST ANTIALIASING (docs GFX-modern.md: r_om_renderscale, r_om_upscale, r_om_postaa)
 section | RENDER | РЕНДЕР | requires=r_om_renderscale
 list | r_om_renderscale | 0.5,0.59,0.67,0.77,1 | Performance (50%),Balanced (59%),Quality (67%),Ultra Quality (77%),Native (100%) | Производительность (50%),Баланс (59%),Качество (67%),Ультра-качество (77%),Родное (100%) | Render Resolution | Разрешение рендера | requires=r_om_renderscale | tip=The 3D view is drawn smaller and upscaled to the window; the HUD stays sharp/3D-вид рисуется в меньшем разрешении и растягивается до окна; HUD остаётся чётким
-list | r_om_upscale | 2,1 | FSR 1.0,Catmull-Rom | FSR 1.0,Catmull-Rom | Upscaler | Апскейлер | requires=r_om_upscale | tip=FSR 1.0 (EASU): edge-adaptive, sharper; Catmull-Rom: a little cheaper. Used below 100%/FSR 1.0 (EASU): учитывает направление краёв, чётче; Catmull-Rom: чуть дешевле. Работает ниже 100%
+list | r_om_upscale | 2,1,0 | FSR 1.0,Catmull-Rom,Off (plain stretch) | FSR 1.0,Catmull-Rom,Выкл (простое растяжение) | Upscaler | Апскейлер | requires=r_om_upscale | tip=Only used when Render Resolution is below Native (100%). FSR 1.0 (EASU): edge-adaptive, sharper; Catmull-Rom: a little cheaper; Off: the smaller picture is stretched as it is/Работает только при разрешении рендера ниже родного (100%). FSR 1.0 (EASU): учитывает направление краёв, чётче; Catmull-Rom: чуть дешевле; Выкл: уменьшенная картинка просто растягивается
 slider | r_om_upscale_sharp | 0 | 1 | 0.05 | Upscale Sharpening | Резкость апскейла | requires=r_om_upscale_sharp
 list | r_om_fxaa | -1,0,1 | Auto (without MSAA),Off,On | Авто (без MSAA),Выкл,Вкл | Post Antialiasing | Постобработочное сглаживание | requires=r_om_fxaa | tip=Auto: only when MSAA is off/Авто: только когда MSAA выключено | pc
+list | r_om_postaa | 2,1 | SMAA,FXAA | SMAA,FXAA | Post Antialiasing Method | Метод сглаживания | requires=r_om_postaa | tip=SMAA keeps textures sharper, FXAA also softens thin lines/SMAA сохраняет текстуры чётче, FXAA сильнее смягчает тонкие линии | pc
 list | r_om_taa | -1,0,1 | Auto (without MSAA),Off,On | Авто (без MSAA),Выкл,Вкл | Temporal Antialiasing | Временное сглаживание | requires=r_om_taa | tip=A calm frame without crawling texels and glints (the way modern engines do it); over MSAA it mostly softens/Спокойный кадр без мерцания текстур и бликов (как в современных движках); поверх MSAA в основном смягчает | pc
 list | r_om_worldlite | 0,1 | Off,On | Выкл,Вкл | Simplified World Shading | Упрощённое освещение мира | requires=r_om_worldlite | pc | tip=Faster world shaders for weak graphics/Быстрые шейдеры мира для слабой графики
-list | r_om_postaa | 2,1 | SMAA,FXAA | SMAA,FXAA | Post Antialiasing Method | Метод сглаживания | requires=r_om_postaa | tip=SMAA keeps textures sharper, FXAA also softens thin lines/SMAA сохраняет текстуры чётче, FXAA сильнее смягчает тонкие линии | pc
 
 # ---- EFFECTS: renderer effects of the gfx-modern renderer (docs GFX-modern.md 14)
 section | ATMOSPHERE | АТМОСФЕРА | requires=r_om_bloom
@@ -96,6 +96,8 @@ list | r_om_water_quality | 1,2,3 | Simple,Clear,Clear + Reflections | Прос�
 list | r_om_water_clear | 0,1 | Off,On | Выкл,Вкл | See-Through Water | Прозрачная вода | requires=r_om_water | pc | tip=Water the original draws solid is see-through too (Clear quality and up)/Вода, которая в оригинале непрозрачная, тоже становится прозрачной (качество Прозрачная и выше)
 list | r_om_water_3d | 0,0.5,1,2 | Flat,Subtle,Normal,Strong | Плоская,Чуть-чуть,Обычные,Сильные | Water Waves | Волны на воде | requires=r_om_water | tip=The surface near you really rises and falls with the ripples/Поверхность рядом с вами на самом деле поднимается и опускается с рябью
 list | r_om_mirror | 0,1 | Off,On | Выкл,Вкл | Mirrors | Зеркала | requires=r_om_mirror
+list | r_om_glass | 0,1 | Original,Clear | Оригинальное,Прозрачное | Glass | Стекло | requires=r_om_glass | tip=Original: the tinted panes of the original game; Clear: see-through glass that refracts and reflects/Оригинальное: тонированные стёкла, как в оригинале; Прозрачное: стекло с преломлением и отражениями
+list | r_om_glass_refract | 0,0.5,1 | Off,Weak,Normal | Выкл,Слабое,Обычное | Glass Refraction | Преломление в стекле | requires=r_om_glass | tip=How much clear glass bends what is behind it (the ripple)/Насколько прозрачное стекло искажает то, что за ним (рябь)
 list | r_om_rain | 0,1 | Off,On | Выкл,Вкл | Rain | Дождь | requires=r_om_rain
 list | r_om_snow | 0,1 | Off,On | Выкл,Вкл | Snow | Снег | requires=r_om_snow
 # per-pixel dynamic lights: A/B check passed (GFX-modern.md 14)
