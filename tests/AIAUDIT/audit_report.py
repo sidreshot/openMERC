@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # OpenMerc AIAUDIT - sums up the OMAUDIT lines of a console log (omaudit, game/src/ai/ai_audit.cpp; the log of
 # audit_run.py or of a session where the command was typed). docs/impl/AIAUDIT.md explains the results.
-#   audit_report.py <console.log> [--json out.json] [--maps tsr1,kos1,...] [--traces]
+#   audit_report.py <console.log> [--json out.json] [--maps tsr1,kos1,...] [--traces] [--banner <log>]
 # --maps: the maps the session was asked for, so that a map that never started is named.
 # --traces: also what each silent enemy's AI did in the last two seconds of its turn (the ai_trace 2 lines between
 #           "OMTRACE <map> ent=<n> on" and "OMTRACE <map> off"), grouped by combat range code.
 # The first lines say where the log comes from (engine version, platform, architecture, GL), read from the log.
+# --banner: a second log of the same run, read only for those lines (sof.log starts after the engine's banner; the
+#           standard output has it).
 # Exit status 1 when the log holds no OMAUDIT line.
 # Implements: black-box test harness (no game code)
 import argparse
@@ -50,7 +52,14 @@ def parse(lines):
         if len(p) < 3:
             continue
         if p[2] == "start":
-            started.append(p[1])
+            if p[1] in started:
+                # started again (audit_run.py went on in a new session): only the last check of a map counts
+                rows[:] = [r for r in rows if r["map"] != p[1]]
+                done.pop(p[1], None)
+                for k in [k for k in why if k[0] == p[1]]:
+                    del why[k]
+            else:
+                started.append(p[1])
         elif p[2] == "done":
             done[p[1]] = fields(p[3:])
         else:
@@ -122,10 +131,14 @@ def main():
     ap.add_argument("--json", help="write the rows and the per-level totals to this file")
     ap.add_argument("--maps", default="", help="the maps the session was asked for (comma-separated)")
     ap.add_argument("--traces", action="store_true", help="also the AI trace of each silent enemy")
+    ap.add_argument("--banner", help="a second log of the same run, read only for the version and platform lines")
     a = ap.parse_args()
 
     lines = open(a.log, encoding="latin-1").read().splitlines()
     head, rows, started, done, notes, why = parse(lines)
+    if a.banner:
+        more = parse(open(a.banner, encoding="latin-1").read().splitlines())[0]
+        head = [h for h in more if h not in head] + head
     print("log: %s" % a.log)
     print("run on: %s" % ("; ".join(head) if head else "unknown (no engine banner in this log)"))
     if not rows and not started:

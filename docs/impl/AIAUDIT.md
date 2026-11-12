@@ -47,22 +47,34 @@ Start the game with `+set cheats 1`, load a map, let its opening cut scene end, 
 console. `timescale 3` makes it three times as fast. The lines are in the console and, with `logfile 2`, in the log
 file of the user folder; `python tests/AIAUDIT/audit_report.py <log>` sums them up.
 
-## One map or all 32 with the harness
+## One map or all of them with the harness
 
 ```
 python tests/AIAUDIT/audit_run.py --exe <path>/openMerc --game <folder with base/pak0.pak> --home <new folder> --maps tsr1
 python tests/AIAUDIT/audit_run.py --exe <path>/openMerc --game <folder with base/pak0.pak> --home <new folder>
 ```
 
-Without `--maps` it takes the 32 single-player maps of `tests/X1/xsweep.ps1`. One session of the open stack loads
-each map with the cut scenes skipped, waits 6 s of real time, runs `omaudit` at `timescale 3` and goes on to the
-next map; the last one quits. `--home` is the session's own user folder and must be new or empty: the console
-scripts `au_NN.cfg`, `console.log` and `audit.json` are written there, next to what the engine keeps in a user
-folder (`config.cfg`, its log, the material cache, autosaves), and nowhere else; the game data is only read.
-The session runs `-portable`, in a window, without sound, gets no input from the desktop and is killed after
-`--timeout` seconds (480 for each map by default). `--dry-run` writes the scripts and prints the command line
-only; `--make <folder>` writes the scripts only. A session that stops at one map (crash, hang) is continued with
-`--maps` and the maps that are left.
+Without `--maps` it takes the single-player maps of `tests/X1/xsweep.ps1` except tsr2 (31 maps): tsr2 is a cut
+scene whose own script ends the level a few seconds after the load, before a check can start. One session of the
+open stack loads each map with the cut scenes skipped, waits 6 s of real time, runs `omaudit` at `timescale 3` and
+goes on to the next map; the last one quits. `--home` is the run's own user folder and must be new or empty: the
+console scripts `au_NN.cfg`, `console.log` (the standard output) and `audit.json` are written there, next to what
+the engine keeps in a user folder (`config.cfg`, `sof.log`, the material cache, autosaves), and nowhere else; the
+game data is only read. A session runs `-portable`, in a window, without sound and gets no input from the desktop;
+the whole run is ended after `--timeout` seconds (480 for each map by default). `--dry-run` writes the scripts and
+prints the command line only; `--make <folder>` writes the scripts only.
+
+The harness follows `sof.log` while a session runs, so one bad map does not end the run. The session is closed, the
+map is noted as not checked (an `OMNOTE <map> audit_run: ...` line in `sof.log`, shown by the report) and a new
+session goes on with the maps after it when
+
+- the map's check does not start within `--start-limit` seconds (60) or starts in another level: the level ended
+  itself first, as tsr2 does;
+- a running check prints nothing for `--quiet-limit` seconds (120): a hang;
+- the session ends in the middle of a map: a crash.
+
+`--max-sessions 1` stops at the first such map instead and prints the `--maps` list to go on with. The exit status
+is 0 when every map of the list was checked and 1 otherwise.
 
 ## Reading the report
 
@@ -101,5 +113,12 @@ given are checked.
 - `audit_report.py` was also checked against a console log of the same `OMAUDIT` / `OMWHY` / `OMTRACE` lines from a
   0.2.2 build with other changes (32 levels started, 31 finished, 1558 enemies). That log is not a result for this
   tree.
-- **Not run yet:** more than one map in a session (the chain through `om_audit_next` ran only its last step,
-  `quit`), the other 31 maps, anything on Windows or Linux.
+- Two more sessions there on 0.2.3 with #14 and #16: all 32 maps stopped for good at tsr2 (the third map), which is
+  what the restart described above is for; the 29 maps from trn1 to arm3 then went through in one session (29
+  started, 29 finished, exit code 0, 22 minutes, 1497 enemies).
+- The restart was checked with a stand-in for the engine (a script that follows the `au_NN.cfg` chain and writes
+  the log lines): a level that changes before its check, a check that never starts, one that hangs and a session
+  that exits in a map are each noted and the run goes on; the same map started twice is counted once.
+- The restart with the game (macOS, `--maps tut1,tsr2,trn1`): tut1 was checked, tsr2's check did not start within
+  60 s and was noted, a second session checked trn1 (17 enemies) and quit; 88 s in all, exit status 1.
+- **Not run yet:** a real hang or crash of the game during a check (only with the stand-in), anything on Windows.
