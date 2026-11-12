@@ -72,6 +72,7 @@ static void DofShutdown(void);
 static void TaaShutdown(void);
 static void ProbesUniforms(GLuint prog);
 void GL3_Probes_Uniforms(GLuint prog);
+void GL3_Probes_BindSamplers(GLuint prog);
 static void ProbesShutdown(void);
 static cvar_t *r_om_ssr, *r_om_ssr_wet, *r_om_ssr_debug, *r_om_ssr_dist, *r_om_ssr_quality;
 static cvar_t *r_om_ssr_glint, *r_om_ssr_damp, *r_om_ssr_smooth, *r_om_ssr_temporal, *r_om_ssr_ripple, *r_om_ssr_checker;
@@ -12668,6 +12669,26 @@ void
 GL3_Probes_Uniforms(GLuint prog)
 {
 	ProbesUniforms(prog);
+}
+
+/* the probe samplers pc0..pc3 of a program on PROBE_UNIT.. (cube maps). Set once after the link: a sampler left
+   unset stays on unit 0 beside a program's 2D "tex", and Mesa refuses every draw of such a program
+   (GL_INVALID_OPERATION, "active samplers with a different type refer to the same texture image unit") */
+void
+GL3_Probes_BindSamplers(GLuint prog)
+{
+	static const char *const names[4] = {"pc0", "pc1", "pc2", "pc3"};
+	int i;
+
+	for (i = 0; i < 4; i++)
+	{
+		GLint loc = glGetUniformLocation(prog, names[i]);
+
+		if (loc != -1)
+		{
+			glUniform1i(loc, PROBE_UNIT + i);
+		}
+	}
 }
 
 /* the probes for the SSR trace program: samplers pc0..pc3 on PROBE_UNIT.., their places and boxes */

@@ -1366,6 +1366,11 @@ CreateObjects(void)
 	GL3_UseProgram(E.prog);
 	GL3_CSM_BindProgram(E.prog);
 #ifndef YQ2_GL3_GLES3
+	/* the probe cube maps on their own units from the start, not only once a PBR-lit draw sets the probes:
+	   unset they share unit 0 with "tex" and Mesa drops every Ghoul draw (no models on Linux) */
+	GL3_Probes_BindSamplers(E.prog);
+#endif
+#ifndef YQ2_GL3_GLES3
 	if (E.u_tessL != -1)
 	{
 		glUniform1i(glGetUniformLocation(E.prog, "omTessBuf"), EMU_TBO_UNIT);

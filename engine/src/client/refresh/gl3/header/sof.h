@@ -407,6 +407,7 @@ void GL3_Mirror_Note(const msurface_t *surf);
 void GL3_Mirror_Render(void);
 void GL3_Probes_Frame(void);
 void GL3_Probes_Uniforms(GLuint prog);
+void GL3_Probes_BindSamplers(GLuint prog);
 void GL3_Mirror_MapLoad(void);
 void GL3_WaterRefl_Note(const float *plane, const float *mins, const float *maxs, const float *center, float area);
 void GL3_WaterRefl_Render(void);
