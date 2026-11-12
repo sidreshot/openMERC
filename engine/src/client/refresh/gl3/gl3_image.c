@@ -1041,6 +1041,32 @@ UploadM32(gl3image_t *image, byte *m, int size, int kind, int pictipskip)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
+/* SPEC-413 §9 on n RGBA texels: detail images become luminance from red, environment images stay as they are */
+static void
+CorrectTexels(byte *p, int n, int softype)
+{
+	int i;
+
+	if (softype == SOFIMG_DETAIL)
+	{
+		/* uploaded as luminance from the red channel (SPEC-413 §8 step 5) */
+		for (i = 0; i < n; i++, p += 4)
+		{
+			p[1] = p[2] = p[0];
+			p[3] = 255;
+		}
+	}
+	else if (softype != SOFIMG_ENV)
+	{
+		for (i = 0; i < n; i++, p += 4)
+		{
+			p[0] = gl3_colortable[p[0]];
+			p[1] = gl3_colortable[p[1]];
+			p[2] = gl3_colortable[p[2]];
+		}
+	}
+}
+
 /* SPEC-413 §9: colour correction of every level, except detail and environment images */
 static void
 CorrectColours(byte *m, int size, int softype)
@@ -1053,7 +1079,7 @@ CorrectColours(byte *m, int size, int softype)
 		int h = M32Int(m, M32_OFS_HEIGHTS + 4 * level);
 		int ofs = M32Int(m, M32_OFS_OFFSETS + 4 * level);
 		byte *p;
-		int i, n;
+		int n;
 
 		if ((w <= 0) || (h <= 0) || (ofs <= 0) || ((size_t)ofs + (size_t)w * h * 4 > (size_t)size))
 		{
@@ -1062,26 +1088,40 @@ CorrectColours(byte *m, int size, int softype)
 
 		p = m + ofs;
 		n = w * h;
-
-		if (softype == SOFIMG_DETAIL)
-		{
-			/* uploaded as luminance from the red channel (SPEC-413 §8 step 5) */
-			for (i = 0; i < n; i++, p += 4)
-			{
-				p[1] = p[2] = p[0];
-				p[3] = 255;
-			}
-		}
-		else if (softype != SOFIMG_ENV)
-		{
-			for (i = 0; i < n; i++, p += 4)
-			{
-				p[0] = gl3_colortable[p[0]];
-				p[1] = gl3_colortable[p[1]];
-				p[2] = gl3_colortable[p[2]];
-			}
-		}
+		CorrectTexels(p, n, softype);
 	}
+}
+
+/*
+ * r_retexturing: a .tga / .png / .jpg of the same name as the .m32 (loose in base/textures or in a pak) replaces its
+ * texels; the size the coordinates use and everything else of the .m32 (flags, detail texture, animation, damage,
+ * glass pane, material map) stay. These replacements used to come in only as the replacement of a .wal - SoF has
+ * none, GetTexImage asks for it first - at their own size and without the .m32's properties: a texture four times
+ * larger was drawn four times larger (issue #15).
+ */
+static qboolean
+UploadReplacement(gl3image_t *image, const char *name, int softype)
+{
+	byte *pic;
+	int w, h;
+
+	if (!r_retexturing || !r_retexturing->value || (softype == SOFIMG_FONT) ||
+		!R_LoadReplacementPic(name, &pic, &w, &h))
+	{
+		return false;
+	}
+
+	CorrectTexels(pic, w * h, softype);
+	glTexImage2D(GL_TEXTURE_2D, 0, InternalFormat(image->has_alpha), w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pic);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	free(pic);
+
+	R_Printf(PRINT_DEVELOPER, "%s: replacement %dx%d, coordinates on the original %dx%d\n", name, w, h,
+		image->width, image->height);
+	return true;
 }
 
 static gl3image_t *LoadSoFImage(const char *name, int softype, qboolean substitute);
@@ -1936,7 +1976,12 @@ LoadSoFImage(const char *name, int softype, qboolean substitute)
 	GL3_SelectTMU(GL_TEXTURE0);
 	GL3_Bind(image->texnum);
 	t1 = ImgClock();
-	UploadM32(image, m, size, kind, pictipskip);
+
+	if (!UploadReplacement(image, name, softype))
+	{
+		UploadM32(image, m, size, kind, pictipskip);
+	}
+
 	imgt[3] += ImgClock() - t1;
 	SetImageFilter(image);
 	/* r_om_glass: the clear pane of a see-through texture, from its level-0 texels */
@@ -2369,8 +2414,11 @@ GL3_FindImage(const char *originname, imagetype_t type)
 		//
 		// load the pic from disk
 		//
-		image = (gl3image_t *)R_LoadImage(name, namewe, ext, type,
-			r_retexturing->value, (loadimage_t)GL3_LoadPic);
+		/* a .png / .tga / .jpg replaces a .wal only where the .wal exists: SoF's world textures are .m32 and
+		   GetTexImage asks for a .wal first; the .m32 load takes the replacement (UploadReplacement, #15) */
+		qboolean retex = r_retexturing->value && (Q_stricmp(ext, "wal") || (ri.FS_LoadFile(name, NULL) > 0));
+
+		image = (gl3image_t *)R_LoadImage(name, namewe, ext, type, retex, (loadimage_t)GL3_LoadPic);
 
 		if (!image)
 		{

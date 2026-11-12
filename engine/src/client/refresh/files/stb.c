@@ -732,6 +732,18 @@ LoadHiColorImage(const char *name, const char* namewe, const char *ext,
 	return image;
 }
 
+/* OpenMerc: a .tga, .png or .jpg replacement of namewe (the priority of LoadHiColorImage); free() the pixels */
+qboolean
+R_LoadReplacementPic(const char *namewe, byte **pic, int *width, int *height)
+{
+	*pic = NULL;
+	*width = *height = 0;
+
+	return (LoadSTB(namewe, "tga", pic, width, height)
+		|| LoadSTB(namewe, "png", pic, width, height)
+		|| LoadSTB(namewe, "jpg", pic, width, height)) && *pic && (*width > 0) && (*height > 0);
+}
+
 struct image_s *
 R_LoadImage(const char *name, const char* namewe, const char *ext, imagetype_t type,
 	qboolean r_retexturing, loadimage_t load_image)
