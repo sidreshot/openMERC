@@ -970,6 +970,8 @@ static const char *post_comp_fs =
 	"uniform vec4 rect;\n"
 	/* r_om_lens: x chromatic aberration, y ghosts and halo, z lens dirt, w aspect of the view */
 	"uniform vec4 lens;\n"
+	/* r_om_lens_ghosts, r_om_lens_halo: x the chain of ghosts, y the halo ring, each a factor on lens.y */
+	"uniform vec2 lensgh;\n"
 	/* r_om_hitfx: the game's screen tint (rgb, alpha); x 1 = a hit */
 	"uniform vec4 tint;\n"
 	"uniform vec4 nvis;\n"
@@ -1024,15 +1026,22 @@ static const char *post_comp_fs =
 	"	vec2 g = vec2(1.0) - v;\n"
 	"	vec2 dir = g - 0.5;\n"
 	"	vec3 acc = vec3(0.0);\n"
-	"	acc += GhostSrc(0.5 + dir * 0.55) * vec3(0.9, 0.55, 0.3) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.55)));\n"
-	"	acc += GhostSrc(0.5 - dir * 0.3) * vec3(0.35, 0.65, 0.9) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.3)));\n"
-	"	acc += GhostSrc(0.5 + dir * 1.45) * vec3(0.5, 0.8, 0.45) * 0.6 * (1.0 - smoothstep(0.1, 0.55, length(dir * 1.45)));\n"
+	"	if (lensgh.x > 0.0)\n"
+	"	{\n"
+	"		vec3 gh = GhostSrc(0.5 + dir * 0.55) * vec3(0.9, 0.55, 0.3) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.55)));\n"
+	"		gh += GhostSrc(0.5 - dir * 0.3) * vec3(0.35, 0.65, 0.9) * (1.0 - smoothstep(0.0, 0.5, length(dir * 0.3)));\n"
+	"		gh += GhostSrc(0.5 + dir * 1.45) * vec3(0.5, 0.8, 0.45) * 0.6 * (1.0 - smoothstep(0.1, 0.55, length(dir * 1.45)));\n"
+	"		acc += gh * lensgh.x;\n"
+	"	}\n"
 	/* the halo: a thin ring a set distance from the centre, from the light on the far side */
-	"	float dl = length(dir * vec2(lens.w, 1.0));\n"
-	"	vec2 hd = dl > 1e-4 ? dir / dl : vec2(0.0);\n"
-	"	vec2 hp = g - hd * vec2(1.0 / lens.w, 1.0) * 0.42;\n"
-	"	float hw = pow(1.0 - min(abs(length((hp - 0.5) * vec2(lens.w, 1.0)) - 0.42) * 5.0, 1.0), 4.0);\n"
-	"	acc += GhostSrc(hp) * vec3(0.7, 0.75, 1.0) * hw * 0.5;\n"
+	"	if (lensgh.y > 0.0)\n"
+	"	{\n"
+	"		float dl = length(dir * vec2(lens.w, 1.0));\n"
+	"		vec2 hd = dl > 1e-4 ? dir / dl : vec2(0.0);\n"
+	"		vec2 hp = g - hd * vec2(1.0 / lens.w, 1.0) * 0.42;\n"
+	"		float hw = pow(1.0 - min(abs(length((hp - 0.5) * vec2(lens.w, 1.0)) - 0.42) * 5.0, 1.0), 4.0);\n"
+	"		acc += GhostSrc(hp) * vec3(0.7, 0.75, 1.0) * hw * 0.5 * lensgh.y;\n"
+	"	}\n"
 	"	return acc * 0.6;\n"
 	"}\n"
 	/* dust and smudges on the front element: seen only where bright light falls on it (a mask on the bloom) */
@@ -4307,7 +4316,7 @@ GL3_Post_EndView(void)
 	glUniform1i(P.comp_mode, mode);
 	/* r_om_lens: chromatic aberration, ghosts and halo of what glows, lens dirt (not over debug views or night vision) */
 	{
-		static cvar_t *ca, *fl, *dirt;
+		static cvar_t *ca, *fl, *dirt, *ghosts, *halo;
 		qboolean nv = (r_newrefdef.rdflags & SOF_RDF_IRGOGGLES) != 0;
 		float cabump = 0;
 
@@ -4316,6 +4325,9 @@ GL3_Post_EndView(void)
 			ca = ri.Cvar_Get("r_om_lens_ca", "0.5", CVAR_ARCHIVE);
 			fl = ri.Cvar_Get("r_om_lens_flare", "0.35", CVAR_ARCHIVE);
 			dirt = ri.Cvar_Get("r_om_lens_dirt", "0.3", CVAR_ARCHIVE);
+			/* the two parts of the flare on their own: the chain of ghosts across the frame and the halo ring */
+			ghosts = ri.Cvar_Get("r_om_lens_ghosts", "1", CVAR_ARCHIVE);
+			halo = ri.Cvar_Get("r_om_lens_halo", "1", CVAR_ARCHIVE);
 		}
 
 		/* r_om_hitfx: the game's screen tint in the composite (gl3_fx.c then draws no flat fill); a red one is a hit:
@@ -4377,6 +4389,7 @@ GL3_Post_EndView(void)
 		glUniform4f(GL3_UniformLoc(P.progcomp, "lens"), (dbg || nv) ? 0.0f : Q_clamp(ca->value + cabump, 0.0f, 6.0f),
 			(dbg || nv || !P.bloomthis) ? 0.0f : Q_clamp(fl->value, 0.0f, 2.0f),
 			(dbg || nv || !P.bloomthis) ? 0.0f : Q_clamp(dirt->value, 0.0f, 2.0f), (float)P.vw / (float)Q_max(P.vh, 1));
+		glUniform2f(GL3_UniformLoc(P.progcomp, "lensgh"), Q_clamp(ghosts->value, 0.0f, 3.0f), Q_clamp(halo->value, 0.0f, 3.0f));
 	}
 	{
 		static cvar_t *vivid;
