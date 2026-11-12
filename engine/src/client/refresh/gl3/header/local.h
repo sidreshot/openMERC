@@ -37,6 +37,8 @@
 #ifndef SRC_CLIENT_REFRESH_GL3_HEADER_LOCAL_H_
 #define SRC_CLIENT_REFRESH_GL3_HEADER_LOCAL_H_
 
+#include <stddef.h> // NULL in the inline state helpers below (gcc and clang do not get it through the GL headers)
+
 #ifdef IN_IDE_PARSER
   // this is just a hack to get proper auto-completion in IDEs:
   // using system headers for their parsers/indexers but glad for real build

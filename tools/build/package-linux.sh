@@ -19,7 +19,7 @@ REL=$OUT/release
 [ -x "$REL/openMerc" ] || { echo "no build in $REL (run tools/build/build-linux.sh)" >&2; exit 1; }
 
 VER=$(sed -n 's/^#define OM_VERSION "\(.*\)"/\1/p' "$REPO/engine/src/common/header/om_version.h")
-case "$(readelf -h "$REL/openMerc" | sed -n 's/^ *Machine: *//p')" in
+case "$(LC_ALL=C readelf -h "$REL/openMerc" | sed -n 's/^ *Machine: *//p')" in
   *X86-64*) ARCH=x86_64 ;;
   *80386*)  ARCH=i386 ;;
   *) echo "unknown architecture of $REL/openMerc" >&2; exit 1 ;;

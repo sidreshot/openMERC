@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -14,6 +15,13 @@
 int g_fail = 0, g_pass = 0;
 bool g_haveData = false;
 TestHost g_host;
+
+// The engine clock the library times its model loads with (ghb_file.cpp, OMLOADTIME)
+extern "C" long long Sys_Microseconds(void)
+{
+	return std::chrono::duration_cast<std::chrono::microseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 static std::string Up(const std::string &s)
 {
