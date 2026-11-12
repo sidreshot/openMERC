@@ -10,6 +10,13 @@ and an OpenAL sound module.
 > **Work in progress.** The engine, renderer, sound and menus are usable; openMERC's own game and player logic
 > (mode B) loads and runs all 32 campaign maps but is not finished. Expect bugs - see [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
+## Download
+
+Ready-made packages for Windows (`openMERC-<version>-win32.zip`) and Linux x86_64
+(`openMERC-<version>-linux-x86_64.tar.gz`) are on the [Releases](https://github.com/sidreshot/openMERC/releases) page.
+Each archive goes straight into your Soldier of Fortune folder; the release notes and `openMERC-README.txt` explain
+the rest. Both are built from the tagged commit by the [build workflow](.github/workflows/build.yml).
+
 ## You need your own copy of the game
 
 openMERC contains **no files of the original game**. You need a legally owned copy of Soldier of Fortune (the GOG
@@ -64,6 +71,16 @@ Unit tests built with the engine and modules: `sofpm_test` (player movement), `o
 library), `pm_unit` (player module rules). `python tools/legal_scan.py` checks the tree for copied tables and
 forbidden markers.
 
+Release archive: `tools\build\package-win.ps1 -Engine <dir> -Sound <dir> -Game <dir> -Player <dir> -Vcpkg <vcpkg root>`
+packs the four build directories into `openMERC-<version>-win32.zip` (+ `.sha256`) in the release layout. Linux:
+`tools/build/build-linux.sh && tools/build/package-linux.sh` ([docs/BUILD-linux.md](docs/BUILD-linux.md)).
+
+## Continuous integration
+
+[`.github/workflows/build.yml`](.github/workflows/build.yml) builds Windows x86 (MSVC 2022, vcpkg) and Linux
+x86_64 (Debian 13) on every push and pull request, runs the unit tests and keeps both packages as workflow
+artifacts. A pushed tag `v*` attaches them to the release of that tag.
+
 ## Repository layout
 
 | Directory | Content |
@@ -88,7 +105,7 @@ is included. The tree contains no data tables copied from the original executabl
 
 GPL v2 or later, see [LICENSE](LICENSE). Third-party components and their licenses are listed in
 [THIRD_PARTY.md](THIRD_PARTY.md) (Yamagi Quake II and id Software's Quake II sources, SDL3, OpenAL Soft, fmt,
-stb, the OFL fonts). Soldier of Fortune is a trademark of its owners; openMERC is not affiliated with Raven Software
+stb, FidelityFX FSR 1 / CAS, SMAA, the OFL fonts; licence texts without a folder of their own in [licenses/](licenses/)). Soldier of Fortune is a trademark of its owners; openMERC is not affiliated with Raven Software
 or Activision.
 
 ---
@@ -102,6 +119,13 @@ openMERC - открытый (GPL v2) движок для **Soldier of Fortune** 
 
 > **Проект в разработке.** Движок, графика, звук и меню работают; собственная игровая логика openMERC (режим B)
 > загружает и запускает все 32 карты кампании, но ещё не доделана. Ошибки будут - см. [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+
+### Скачать
+
+Готовые сборки для Windows (`openMERC-<версия>-win32.zip`) и Linux x86_64 (`openMERC-<версия>-linux-x86_64.tar.gz`)
+лежат на странице [Releases](https://github.com/sidreshot/openMERC/releases). Архив распаковывается прямо в папку
+Soldier of Fortune; остальное - в описании релиза и в `openMERC-README.txt`. Обе сборки собираются из коммита с
+тегом [сборочным workflow](.github/workflows/build.yml).
 
 ### Нужна своя копия игры
 
@@ -146,6 +170,16 @@ player\build.cmd Release
 `base\`, сверху `dist\openMERC.cmd`. Запустите `openMERC.cmd`; при первом запуске он спросит папку Soldier of
 Fortune (ту, где лежит `base\pak0.pak`). Настройки, сохранения, скриншоты и логи - в `user\` рядом с запускалкой.
 Для режима A удалите `gamex86.dll` и `player.dll` из `base\` openMERC.
+
+Архив релиза: `tools\build\package-win.ps1 -Engine <папка> -Sound <папка> -Game <папка> -Player <папка> -Vcpkg <корень vcpkg>`
+собирает четыре папки сборки в `openMERC-<версия>-win32.zip` (+ `.sha256`) в раскладке релиза. Linux:
+`tools/build/build-linux.sh && tools/build/package-linux.sh` ([docs/BUILD-linux.md](docs/BUILD-linux.md)).
+
+### Непрерывная сборка
+
+[`.github/workflows/build.yml`](.github/workflows/build.yml) собирает Windows x86 (MSVC 2022, vcpkg) и Linux x86_64
+(Debian 13) на каждый push и pull request, гоняет юнит-тесты и сохраняет оба архива как артефакты. Тег `v*`
+прикладывает их к релизу этого тега.
 
 ### Чистая комната
 

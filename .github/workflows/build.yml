@@ -1,0 +1,142 @@
+# Build, test and package openMERC for Windows (x86, MSVC + vcpkg) and Linux (x86_64, Debian 13).
+# Every push and pull request builds both and runs the unit tests; the packages are kept as workflow artifacts.
+# A pushed tag v* also attaches openMERC-<version>-win32.zip and openMERC-<version>-linux-x86_64.tar.gz (+ .sha256)
+# to the GitHub release of that tag, when the release exists (create it, as a draft, before pushing the tag).
+name: build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x86 (MSVC)
+    runs-on: windows-2022
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe in the build info
+
+      - name: vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-x86-windows-sdl3-openal-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: vcpkg-x86-windows-sdl3-openal-
+
+      - name: Dependencies (vcpkg, classic mode)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sdl3:x86-windows openal-soft:x86-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build (engine, sound, game, player)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS=%%i"
+          set "VCVARSALL=%VS%\VC\Auxiliary\Build\vcvarsall.bat"
+          set "OM_VCPKG=%VCPKG_INSTALLATION_ROOT%"
+          set "OM_BUILD_DIR=%GITHUB_WORKSPACE%\out\engine"
+          call tools\build\build-msvc.cmd x86 Release || exit /b 1
+          set "OM_BUILD_DIR=%GITHUB_WORKSPACE%\out\sound"
+          call modules\sound\build.cmd Release || exit /b 1
+          set "OM_BUILD_DIR=%GITHUB_WORKSPACE%\out\game"
+          call game\build.cmd Release || exit /b 1
+          set "OM_BUILD_DIR=%GITHUB_WORKSPACE%\out\player"
+          call player\build.cmd Release || exit /b 1
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Find-Test([string]$dir, [string]$name) {
+            Get-ChildItem -Path $dir -Recurse -File -Filter $name | Select-Object -First 1
+          }
+          $failed = 0
+          # required tests; the Ghoul and G3 tests skip their checks of stock data (none in CI)
+          foreach ($t in @(@('out\engine', 'sofpm_test.exe'), @('out\player', 'pm_unit.exe'))) {
+            $exe = Find-Test $t[0] $t[1]
+            if (-not $exe) { Write-Host "::error::$($t[1]) was not built"; $failed++; continue }
+            & $exe.FullName
+            if ($LASTEXITCODE -ne 0) { $failed++ }
+          }
+          $g3 = Find-Test 'out\game' 'g3tests.exe'
+          if ($g3) { & $g3.FullName; if ($LASTEXITCODE -ne 0) { $failed++ } }
+          $gh = Find-Test 'out\engine' 'omghoul_test.exe'
+          if (-not $gh) { Write-Host '::error::omghoul_test.exe was not built'; $failed++ }
+          else {
+            New-Item -ItemType Directory -Force -Path out\no-ghoul-data, out\ghoul-renders | Out-Null
+            & $gh.FullName out\no-ghoul-data out\ghoul-renders
+            if ($LASTEXITCODE -ne 0) { $failed++ }
+          }
+          if ($failed) { throw "$failed unit test program(s) failed" }
+
+      - name: Package
+        shell: pwsh
+        run: >
+          tools\build\package-win.ps1 -Engine out\engine -Sound out\sound -Game out\game -Player out\player
+          -Vcpkg $env:VCPKG_INSTALLATION_ROOT -Out dist-out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openMERC-win32
+          path: dist-out/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          gh release view $tag --repo '${{ github.repository }}' *> $null
+          if ($LASTEXITCODE -ne 0) { Write-Host "no release for $tag yet - the package stays a workflow artifact"; exit 0 }
+          gh release upload $tag (Get-ChildItem dist-out).FullName --clobber --repo '${{ github.repository }}'
+
+  linux:
+    name: Linux x86_64 (Debian 13)
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - name: Build tools and libraries
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates build-essential cmake ninja-build \
+            pkg-config python3 libsdl3-dev libopenal-dev libgl-dev zlib1g-dev binutils file
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build and unit tests
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          OM_BUILD_DIR="$GITHUB_WORKSPACE/out" tools/build/build-linux.sh x86_64 Release
+      - name: Package
+        run: tools/build/package-linux.sh "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/dist-out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openMERC-linux-x86_64
+          path: dist-out/*
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apt-get install -y --no-install-recommends gh || { echo "gh not available"; exit 1; }
+          tag='${{ github.ref_name }}'
+          if ! gh release view "$tag" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            echo "no release for $tag yet - the package stays a workflow artifact"; exit 0
+          fi
+          gh release upload "$tag" dist-out/* --clobber --repo '${{ github.repository }}'
