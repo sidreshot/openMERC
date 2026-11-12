@@ -727,10 +727,12 @@ else()
 			${Platform-Specific-Source} ${Backends-Generic-Source})
 	target_link_libraries(openMerc ${yquake2LinkerFlags} ${yquake2ClientLinkerFlags}
 		${yquake2SDLLinkerFlags} ${yquake2ZLibLinkerFlags})
+	# OpenMerc: the SoF engine functions OMsnd looks up by name (src/common/sof_exports.dynlist). The definition
+	# gives them default visibility (shared.h); ELF also needs the dynamic list, a Mach-O executable (macOS)
+	# exports its default-visibility functions without one.
+	target_compile_definitions(openMerc PRIVATE OM_SOF_ELF_EXPORTS)
 	if(NOT APPLE)
-		# OpenMerc: the SoF engine functions OMsnd looks up by name (src/common/sof_exports.dynlist)
 		target_link_options(openMerc PRIVATE "-Wl,--dynamic-list=${CMAKE_CURRENT_SOURCE_DIR}/src/common/sof_exports.dynlist")
-		target_compile_definitions(openMerc PRIVATE OM_SOF_ELF_EXPORTS)
 		set_target_properties(openMerc PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/common/sof_exports.dynlist)
 	endif()
 endif()

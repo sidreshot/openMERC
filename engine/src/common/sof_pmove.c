@@ -23,6 +23,13 @@
 
 #include "header/sof_pmove.h"
 
+/* SPEC-314 section 1 rounds to single precision after every operation. On arm64 clang otherwise joins a
+   multiplication and the addition or subtraction after it into one instruction with one rounding:
+   W15b's 5 - 800 * t becomes -2.99999976 instead of -3 and snaps to -23/8 (sofpm_test). */
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#endif
+
 #define STEPSIZE 18.0f
 #define MIN_STEP_NORMAL 0.7f
 #define STOP_EPSILON 0.1f

@@ -27,7 +27,9 @@
  */
 
 #include <math.h>
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +42,15 @@
 #include <unistd.h>
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
+#endif
+
+#ifndef _OPENMP
+/* a compiler without OpenMP (Apple's clang without libomp): the pragmas are ignored and the bake runs on one thread */
+#include <time.h>
+static int omp_get_num_procs(void) { return 1; }
+static int omp_get_max_threads(void) { return 1; }
+static void omp_set_num_threads(int n) { (void)n; }
+static double omp_get_wtime(void) { return (double)clock() / CLOCKS_PER_SEC; }
 #endif
 
 #define CONTENTS_SOLID 1

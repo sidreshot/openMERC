@@ -854,6 +854,19 @@ WaterLadders(void)
 	To(&t, 1); CHK_TM(254); CHK_V(800, 0, 2736);
 	Init(&t, "W15b"); S.pm_flags = 0x08; S.pm_time = 255; Vel(&t, 800, 0, 40);
 	To(&t, 1); CHK_FL(0); CHK_TM(0); CHK_V(800, 0, -24);
+	/* SPEC-314 section 1: round gravity * t before subtracting it. At 10 ms
+	   the rounded decrement is exactly 8 units/s; a fused subtraction puts
+	   these velocities just above the negative eighth-unit snap boundary. */
+	Init(&t, "W15c round below"); S.pm_flags = 0x08; S.pm_time = 255; Vel(&t, 800, 0, 39);
+	To(&t, 1); CHK_FL(0); CHK_TM(0); CHK_V(800, 0, -25);
+	Init(&t, "W15d round above"); S.pm_flags = 0x08; S.pm_time = 255; Vel(&t, 800, 0, 41);
+	To(&t, 1); CHK_FL(0); CHK_TM(0); CHK_V(800, 0, -23);
+	Init(&t, "W15e round 20ms"); S.pm_flags = 0x08; S.pm_time = 255; Vel(&t, 800, 0, 120); t.cmd.msec = 20;
+	To(&t, 1); CHK_FL(0); CHK_TM(0); CHK_V(800, 0, -8);
+	Init(&t, "W15f reverse gravity"); S.gravity = -800; S.pm_flags = 0x08; S.pm_time = 255; Vel(&t, 800, 0, -40);
+	To(&t, 1); CHK_FL(0x08); CHK_TM(254); CHK_V(800, 0, 24);
+	Init(&t, "W15g zero boundary"); S.pm_flags = 0x08; S.pm_time = 255; Vel(&t, 800, 0, 64);
+	To(&t, 1); CHK_FL(0x08); CHK_TM(254); CHK_V(800, 0, 0);
 
 #define LADDER(h) AddBox(&t.w, 17, -512, 0, 40, 512, h, 0x20000001)
 	Init(&t, "K1"); Standing(&t); LADDER(512); t.cmd.angles[0] = -3641; t.cmd.forwardmove = 200;

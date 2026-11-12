@@ -1,5 +1,6 @@
 # Build, test and package openMERC for Windows (x86, MSVC + vcpkg) and Linux (x86_64, Debian 13).
 # Every push and pull request builds both and runs the unit tests; the packages are kept as workflow artifacts.
+# macOS (arm64) is built and tested too, without a release package (docs/BUILD-macos.md).
 # A pushed tag v* also attaches openMERC-<version>-win32.zip and openMERC-<version>-linux-x86_64.tar.gz (+ .sha256)
 # to the GitHub release of that tag, when the release exists (create it, as a draft, before pushing the tag).
 name: build
@@ -150,3 +151,21 @@ jobs:
             echo "no release for $tag yet - the package stays a workflow artifact"; exit 0
           fi
           gh release upload "$tag" dist-out/* --clobber --repo '${{ github.repository }}'
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build tools and libraries
+        run: brew install ninja sdl3 openal-soft libomp
+      - name: Build and unit tests
+        run: OM_BUILD_DIR="$GITHUB_WORKSPACE/out" tools/build/build-macos.sh arm64 Release
+      - name: omlight uses OpenMP
+        run: otool -L out/release/omlight | grep -q libomp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openMERC-macos-arm64
+          path: out/release/*

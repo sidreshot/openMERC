@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-# om_symtab.py --msvc MAP | --lld MAP  MODULE
+# om_symtab.py --msvc MAP | --lld MAP | --ld64 MAP  MODULE
 #
 # Writes the game module's symbol table into the module itself, so a savegame can name the callbacks and static
 # tables its pointers point at and a later build can find them again (game/src/save/save_symtab.cpp).
@@ -60,6 +60,36 @@ def lld_symbols(path):
     return out
 
 
+def ld64_symbols(path):
+    """(name, offset, object) from a map of Apple's linker (-map): the "# Symbols:" table"""
+    # "# Object files:" lists "[  n] path" (or "path/lib.a(member.o)"); "# Symbols:" has "0xADDRESS 0xSIZE [  n] name".
+    # A dynamic library is linked at address 0, so the address is the offset from the image base. Names are the
+    # linker's (C names with the leading underscore taken off, C++ names mangled); the linker's own labels and
+    # literals ("literal string: ...", "non-lazy-pointer", "ltmp1", "GCC_except_table3") are not symbols of the code.
+    out = []
+    objs = {}
+    section = ""
+    rx_obj = re.compile(r"^\[\s*(\d+)\]\s+(.*?)\s*$")
+    rx_sym = re.compile(r"^0x([0-9a-fA-F]+)\s+0x[0-9a-fA-F]+\s+\[\s*(\d+)\]\s+(\S+)\s*$")
+    for line in open(path, encoding="latin-1"):
+        if line.startswith("#"):
+            if not line.startswith("# Address"):  # the column titles under "# Sections:" and "# Symbols:"
+                section = line[1:].strip()
+            continue
+        if section.startswith("Object files"):
+            m = rx_obj.match(line)
+            if m:
+                name = m.group(2).replace("\\", "/").split("/")[-1]
+                if name.endswith(")") and "(" in name:
+                    name = name[name.rindex("(") + 1:-1]
+                objs[m.group(1)] = name
+        elif section.startswith("Symbols"):
+            m = rx_sym.match(line)
+            if m and m.group(3).startswith("_"):
+                out.append((m.group(3)[1:], int(m.group(1), 16), objs.get(m.group(2), "?")))
+    return out
+
+
 def build(symbols):
     addrs = defaultdict(set)
     for name, off, obj in symbols:
@@ -79,9 +109,10 @@ def build(symbols):
 
 
 def main():
-    if len(sys.argv) != 4 or sys.argv[1] not in ("--msvc", "--lld"):
-        sys.exit(__doc__ or "usage: om_symtab.py --msvc|--lld MAP MODULE")
-    syms = msvc_symbols(sys.argv[2]) if sys.argv[1] == "--msvc" else lld_symbols(sys.argv[2])
+    readers = {"--msvc": msvc_symbols, "--lld": lld_symbols, "--ld64": ld64_symbols}
+    if len(sys.argv) != 4 or sys.argv[1] not in readers:
+        sys.exit(__doc__ or "usage: om_symtab.py --msvc|--lld|--ld64 MAP MODULE")
+    syms = readers[sys.argv[1]](sys.argv[2])
     blob, n = build(syms)
     if len(blob) > SIZE:
         sys.exit("om_symtab: table of %d bytes does not fit the %d reserved" % (len(blob), SIZE))

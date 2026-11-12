@@ -535,6 +535,8 @@ SG_OwnGameModule(void)
 	const char *path = NULL;
 #ifdef _WIN32
 	const char *lib = "gamex86.dll";
+#elif defined(__APPLE__)
+	const char *lib = "gamex86.dylib";
 #else
 	const char *lib = "gamex86.so";
 #endif
