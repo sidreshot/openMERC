@@ -568,8 +568,11 @@ void OmAI::Think(edict_t *ent)
 	}
 	if (!ent->inuse || ent->ai != this)
 		return;
-	/* 11. ground, water, world effects */
-	if (ent->groundentity && ent->groundentity->linkcount != ground_linkcount)
+	/* 11. ground, water, world effects. Also checked while there is no ground entity: a character that came to rest
+	 * on a prop got none from its landing (only the world and solid 4 count there) and nothing asked again, and
+	 * without ground the combat plan only stands (DEVIATIONS.md "Characters on props"). CheckGround leaves a rising
+	 * character alone */
+	if (!ent->groundentity || ent->groundentity->linkcount != ground_linkcount)
 		CheckGround(ent, this);
 	CategorizePosition(ent);
 	WorldEffects(ent);

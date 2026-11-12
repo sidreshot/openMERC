@@ -185,3 +185,13 @@ thunderstorm on jpn2".
   floor, the bench and the cabinet that were still in view. The renderer keeps the lights a model gave while drawn
   and gives them again in the frames it is culled, while it stays in the scene (gl3_sofapi.c, MLC). Checked at
   omsetpos 434 -155 -179 with yaw 287 / 332 / 7: the room keeps its cyan light. Not in the original.
+
+## Characters on props (2026-11-12)
+
+- **A character resting on a prop has ground** (ai_object.cpp Think, rule 11): the ground check of a think ran only
+  when the ground entity's link count had changed (SPEC-700 rule 11), so a character with no ground entity was never
+  asked again; a landing takes only the world or a solid 4 entity as ground (SPEC-760 B4), not a prop. Without a
+  ground entity the combat plan only stands (CombatPlan). A character with no ground entity is now ground-checked
+  every think; the check itself leaves a rising character alone. tsr1: the three skinheads on the second train
+  (rtskinhead1-3), carried by it without a ground entity, planned combat for the whole ride and only played idle
+  records; with ground they fight. Not in the original.
