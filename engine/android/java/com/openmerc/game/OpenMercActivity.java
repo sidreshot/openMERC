@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // openMERC Android: SDL3's activity around libmain.so (the engine). The command line comes from args.txt in the app's
 // external files folder (adb push), so a test run needs no new APK; without it the GLES 3 renderer starts the menu.
+// openMERC's data archive comes with the APK (assets/zz_openmerc.pak) and is put next to the game data on start.
 package com.openmerc.game;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.util.ArrayList;
 
 import org.libsdl.app.SDLActivity;
@@ -86,9 +90,53 @@ public class OpenMercActivity extends SDLActivity {
         });
     }
 
+    /* openMERC's own data (zz_openmerc.pak: its configs, menu pages, fonts) ships in the APK as an asset; the engine
+       reads it from <external files folder>/openmerc. It is copied there when the copy is missing or older than the
+       installed APK. Without it the game's stock configs ask for an exclusive fullscreen mode that Android does not
+       have, and no renderer starts. */
+    private void installData() {
+        try {
+            File dir = new File(getExternalFilesDir(null), "openmerc");
+            File out = new File(dir, "zz_openmerc.pak");
+            long apk = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+
+            if (out.isFile() && out.lastModified() >= apk) {
+                return;
+            }
+
+            dir.mkdirs();
+
+            File tmp = new File(dir, "zz_openmerc.pak.tmp");
+            InputStream in = getAssets().open("zz_openmerc.pak");
+            OutputStream o = new FileOutputStream(tmp);
+            byte[] buf = new byte[65536];
+            int n;
+
+            try {
+                while ((n = in.read(buf)) > 0) {
+                    o.write(buf, 0, n);
+                }
+            } finally {
+                o.close();
+                in.close();
+            }
+
+            out.delete();
+
+            if (!tmp.renameTo(out)) {
+                tmp.delete();
+            }
+        } catch (Exception e) {
+            // no asset (an APK built without it) or no storage: the engine reports what it misses
+        }
+    }
+
     @Override
     protected String[] getArguments() {
         ArrayList<String> args = new ArrayList<String>();
+
+        // runs on the SDL thread right before the engine's main
+        installData();
 
         args.add("+set");
         args.add("vid_renderer");

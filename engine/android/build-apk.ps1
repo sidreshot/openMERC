@@ -29,10 +29,15 @@ $env:JAVA_HOME = $jdk
 & "$bt\d8.bat" --release --min-api 26 --lib $jar --output "$w\dex" @classes
 if ($LASTEXITCODE) { throw "d8 failed" }
 
+# openMERC's data archive as an asset (OpenMercActivity puts it into <external files>/openmerc on start)
+New-Item -ItemType Directory -Force "$w\assets" | Out-Null
+& python "$here\..\..\tools\mkpak.py" "$here\..\..\data\base" "$w\assets\zz_openmerc.pak"
+if ($LASTEXITCODE) { throw "mkpak failed" }
+
 # manifest -> base apk
 & "$bt\aapt2.exe" compile --dir "$here\res" -o "$w\res.zip"
 if ($LASTEXITCODE) { throw "aapt2 compile failed" }
-& "$bt\aapt2.exe" link -o "$w\base.apk" -I $jar --manifest "$here\AndroidManifest.xml" -R "$w\res.zip" --auto-add-overlay --min-sdk-version 26 --target-sdk-version 34
+& "$bt\aapt2.exe" link -o "$w\base.apk" -I $jar --manifest "$here\AndroidManifest.xml" -R "$w\res.zip" -A "$w\assets" --auto-add-overlay --min-sdk-version 26 --target-sdk-version 34
 if ($LASTEXITCODE) { throw "aapt2 failed" }
 
 # native libraries: the engine, its modules (lib<name>.so, Sys_LoadLibrary finds them by that name), SDL3,
