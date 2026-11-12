@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "g_local.h"
 #include "modes/g_modes.h" /* G9 */
 #include "ghoulglue/gg_ghoul.h" /* G9 */
+#include "ai/ai_hooks.h" /* omaudit */
 
 int SP_Id(const char *package, const char *entry);
 
@@ -54,6 +55,8 @@ void MoveClientToIntermission(edict_t *ent)
 
 void BeginIntermission(edict_t *targ)
 {
+	if (om_ai::AuditActive()) /* test aid (omaudit): a level does not end while its enemies are being checked */
+		return;
 	if (level.intermissiontime)
 		return;
 

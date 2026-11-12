@@ -143,7 +143,8 @@ thunderstorm on jpn2".
   bolt only over open sky, never over a tower of the map or of its painted sky box (GFX-modern.md "jpn2
   thunderstorm").
 - **Test aids:** om_testmode 1 (single player): god mode, no target, noclip every frame; omkill kills the nearest
-  living monster. Not in the original.
+  living monster; omaudit (cheats) puts the player in front of every enemy of the level in turn and reports who
+  does not react (docs/impl/AIAUDIT.md). Not in the original.
 
 ## Scripted scenes (2026-11-08)
 

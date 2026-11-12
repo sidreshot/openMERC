@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "modes/g_modes.h" /* G9 */
 #include "damage/damage_api.h"
 #include "damage/g3_local.h" /* G3: bolt positions for omaim head */
+#include "ai/ai_hooks.h" /* omaudit */
 
 int SP_Id(const char *package, const char *entry);
 void SP_PrintTo(edict_t *ent, const char *package, const char *entry);
@@ -407,6 +408,15 @@ static void Cmd_OmKill_f(edict_t *ent)
 	T_Damage(best, ent, ent, dir, best->s.origin, ent->s.origin, best->health + 20, 0, dflags, MOD_SUICIDE);
 }
 
+/* omaudit (test aid): does every enemy of the level react to the player? Puts the player in front of each one in
+   turn and prints one OMAUDIT line per enemy (ai/ai_audit.cpp, docs/impl/AIAUDIT.md). The level is used up afterwards */
+static void Cmd_OmAudit_f(edict_t *ent)
+{
+	if (!CheatsOK(ent))
+		return;
+	om_ai::AuditStart(ent);
+}
+
 static void Cmd_KillAllMonsters_f(edict_t *ent)
 {
 	if (!CheatsOK(ent))
@@ -773,6 +783,8 @@ void ClientCommand(edict_t *ent)
 		if (CheatsOK(ent))
 			GM_DefaultWeapons(ent); /* G9: SPEC-790 the level's default weapons */
 	}
+	else if (Q_stricmp(cmd, "omaudit") == 0)
+		Cmd_OmAudit_f(ent);
 	else if (Q_stricmp(cmd, "omkill") == 0)
 		Cmd_OmKill_f(ent);
 	else if (Q_stricmp(cmd, "killallmonsters") == 0)

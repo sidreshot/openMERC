@@ -79,6 +79,7 @@ void LevelStart(void)
 	fx::g_ai_noise = PropNoise;
 	ambient::g_angry_count = AngryCount;
 	g3hooks.explosionNoise = BodyExplosionNoise;
+	AuditLevelStart(); /* test aid (ai_audit.cpp) */
 }
 
 edict_t *SightClient(void) { return mgr.sight_client; }
@@ -226,6 +227,7 @@ void FrameBegin(void)
 {
 	if (!cv.ai_freeze)
 		RegisterCvars();
+	AuditFrame(); /* test aid, inert unless started with omaudit (ai_audit.cpp) */
 	ReapOrphans();
 	if (CvarValue(cv.ai_savetest) && level.framenum == 200)
 		SaveSelfTest();

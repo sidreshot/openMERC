@@ -12,4 +12,6 @@ void PathCornerSpawn(edict_t *) {}
 void LevelStart(void) {}
 void FrameBegin(void) {}
 void EntityGroundLost(edict_t *) {}
+void AuditStart(edict_t *) {}
+bool AuditActive(void) { return false; }
 }

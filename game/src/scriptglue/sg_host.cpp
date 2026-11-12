@@ -8,6 +8,7 @@
 
 #include "sg_local.h"
 #include "../roster/roster_api.h"
+#include "../ai/ai_hooks.h" /* omaudit */
 
 #include <stdio.h>
 #include <string.h>
@@ -37,7 +38,14 @@ bool GameHost::load_file(const char *path, std::vector<uint8_t> &out)
 float GameHost::cvar_value(const char *name) { return gix.cvar_value(name); }
 void GameHost::cvar_set(const char *name, const char *value) { gix.cvar_set(name, value); }
 void GameHost::cvar_set_value(const char *name, float value) { gix.cvar_setvalue(name, value); }
-void GameHost::add_command_text(const char *text) { gix.AddCommandString(text); }
+void GameHost::add_command_text(const char *text)
+{
+	/* test aid (omaudit): a script does not end the level while its enemies are being checked */
+	if (om_ai::AuditActive() &&
+	    (!strncmp(text, "map ", 4) || !strncmp(text, "gamemap", 7) || !strncmp(text, "intermission", 12)))
+		return;
+	gix.AddCommandString(text);
+}
 int GameHost::irand(int min, int max) { return gix.irand(min, max); }
 
 // ------------------------------------------------------------------------------------------------------------
