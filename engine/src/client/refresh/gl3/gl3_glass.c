@@ -136,6 +136,9 @@ const char *gl3_glass_fs =
 	"uniform sampler2D tex;\n"
 	"uniform sampler2D gScene;\n"   /* GL_TEXTURE11: the scene under the pane (GL3_Post_GlassCopy) */
 	"uniform sampler2D gDepth;\n"   /* GL_TEXTURE7: its depth */
+	"uniform sampler2D gPrev;\n"    /* GL_TEXTURE21: the last finished frame, half size, mipmapped (r_om_ssr) */
+	"uniform mat4 gPrevPV;\n"       /* its projection x view */
+	"uniform vec4 gSSR;\n"          /* the last frame there, the reach of the traced reflection */
 	"uniform vec4 omSoftP;\n"       /* projection C, D; depth range min, max */
 	"uniform vec4 omSoftV;\n"       /* 1 / scene target size */
 	"uniform vec4 gN;\n"            /* the pane's normal toward the eye */
@@ -228,7 +231,51 @@ const char *gl3_glass_fs =
 	"	vec3 R = reflect(-V, Np);\n"
 	"	vec3 lit = passColor.rgb;\n"
 	"	vec3 env = Probe(passWorld + N * 2.0, R, 0.4 + smudge * 3.0);\n"
-	"	if (env.r < 0.0) env = lit * (0.45 + 0.3 * R.z);\n" /* no probe: the light around the pane */
+	"	if (env.r < 0.0) env = lit * (0.45 + 0.3 * R.z);\n"
+	/* the pane's own sharp reflection, as glass in modern engines: the reflected ray marched over the depth of what
+	   is drawn so far, the colour of the hit from the last frame; where it leaves the screen, turns toward the eye or
+	   finds nothing it fades into the probe's cube map (its level 0: 256 on desktop) */
+	"	if (gSSR.x > 0.5 && F > 0.02)\n"
+	"	{\n"
+	"		float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
+	"		vec3 P0 = passWorld + N * 0.5;\n"
+	"		float tp = 0.0, th = -1.0;\n"
+	"		for (int i = 1; i <= 24; i++)\n"
+	"		{\n"
+	"			float f = (float(i) - jit) / 24.0;\n"
+	"			float tt = gSSR.y * f * f;\n"
+	"			vec4 cq = transProjView * vec4(P0 + R * tt, 1.0);\n"
+	"			if (cq.w <= 1.0) break;\n"
+	"			vec2 uq = cq.xy / cq.w * 0.5 + 0.5;\n"
+	"			if (uq.x < 0.0 || uq.y < 0.0 || uq.x > 1.0 || uq.y > 1.0) break;\n"
+	"			float sz = gEyeDist(texture(gDepth, uq).r);\n"
+	"			if (cq.w > sz + 1.0)\n"
+	"			{\n"
+	"				if (cq.w - sz < max(8.0, sz * 0.03) + (tt - tp)) th = tt;\n"
+	"				break;\n"
+	"			}\n"
+	"			tp = tt;\n"
+	"		}\n"
+	"		if (th > 0.0)\n"
+	"		{\n"
+	"			float a = tp, b = th;\n"
+	"			for (int k = 0; k < 5; k++)\n"
+	"			{\n"
+	"				float m = (a + b) * 0.5;\n"
+	"				vec4 cm = transProjView * vec4(P0 + R * m, 1.0);\n"
+	"				if (cm.w > gEyeDist(texture(gDepth, cm.xy / cm.w * 0.5 + 0.5).r)) b = m; else a = m;\n"
+	"			}\n"
+	"			vec3 H = P0 + R * b;\n"
+	"			vec4 ch = transProjView * vec4(H, 1.0);\n"
+	"			vec4 pc = gPrevPV * vec4(H, 1.0);\n"
+	"			vec2 sh = ch.xy / ch.w * 0.5 + 0.5;\n"
+	"			vec2 su = pc.w > 0.0 ? pc.xy / pc.w * 0.5 + 0.5 : vec2(-1.0);\n"
+	"			vec2 e = min(min(sh, 1.0 - sh), min(su, 1.0 - su));\n"
+	"			float conf = smoothstep(0.0, 0.08, min(e.x, e.y)) * (1.0 - smoothstep(gSSR.y * 0.6, gSSR.y, b));\n"
+	"			conf *= smoothstep(-0.25, 0.1, dot(R, normalize(passWorld - gEye.xyz)));\n"
+	"			if (conf > 0.0) env = mix(env, textureLod(gPrev, su, smudge * 3.0).rgb, conf);\n"
+	"		}\n"
+	"	}\n" /* no probe: the light around the pane */
 	/* the lamps: their mirror images, as glass shows them - only where the reflected ray meets the lamp, as large as
 	   the lamp looks from there (about 8 units across), as faint as glass reflects (Fresnel: 4 % head-on); smudges
 	   spread them a little. A Blinn-Phong highlight (a lobe tens of pixels wide, a floor of 30 %) put a large white
@@ -640,6 +687,25 @@ GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int f
 	glUniform1i(GL3_UniformLoc(prog, "tex"), 0);
 	glUniform1i(GL3_UniformLoc(prog, "gScene"), 11);
 	glUniform1i(GL3_UniformLoc(prog, "gDepth"), 7);
+
+	/* the last frame for the pane's traced reflection (r_om_ssr keeps it) */
+	{
+		float pv[16];
+		GLuint prev = GL3_Post_LastFrame(pv);
+
+		GL3_SelectTMU(GL_TEXTURE21);
+		glBindTexture(GL_TEXTURE_2D, prev);
+		GL3_SelectTMU(GL_TEXTURE0);
+		glUniform1i(GL3_UniformLoc(prog, "gPrev"), 21);
+
+		if (prev)
+		{
+			glUniformMatrix4fv(GL3_UniformLoc(prog, "gPrevPV"), 1, GL_FALSE, pv);
+		}
+
+		glUniform4f(GL3_UniformLoc(prog, "gSSR"), prev ? 1.0f : 0.0f, 700.0f, 0, 0);
+	}
+
 	GL3_Post_SoftUniforms(GL3_UniformLoc(prog, "omSoftP"), GL3_UniformLoc(prog, "omSoftV"), 0);
 	glUniform4f(GL3_UniformLoc(prog, "gN"), nrm[0], nrm[1], nrm[2], 0);
 	glUniform4f(GL3_UniformLoc(prog, "gEye"), r_newrefdef.vieworg[0], r_newrefdef.vieworg[1],

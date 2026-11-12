@@ -164,6 +164,13 @@ static struct
 	int context; /* gl3_contextgen the GL objects were made in */
 } E;
 
+/* r_om_probes: the level the models read, one coarser where the probes are 256 (desktop, gl3_post.c PROBE_SIZE) so
+   they keep the blur of the 128 probes */
+#ifdef YQ2_GL3_GLES3
+#define EMU_PROBE_LOD "2.5"
+#else
+#define EMU_PROBE_LOD "3.5"
+#endif
 #define EMU_TBO_UNIT 20 /* GL_TEXTURE20: the texture buffer of the tessellated triangles */
 
 static ghlff_t emuff;
@@ -1032,7 +1039,7 @@ static const char *emu_fs =
 	"	if (pcount > 0.5)\n"
 	"	{\n"
 	"		vec4 wq = omInvPV * vPos;\n"
-	"		env = Probe(wq.xyz / wq.w, omE2W * R, 2.5 + rough * 4.0);\n"
+	"		env = Probe(wq.xyz / wq.w, omE2W * R, " EMU_PROBE_LOD " + rough * 4.0);\n"
 	"	}\n"
 #endif
 	"	sp += env * Fe * (0.6 - 0.4 * rough);\n"

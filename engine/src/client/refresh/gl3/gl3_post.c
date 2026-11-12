@@ -10368,6 +10368,16 @@ static struct
 	GLint m_depth, m_src, m_rect, m_proj, m_proj2, m_params, m_texel;
 } SR;
 
+/* r_om_probes: the size of a probe's cube face; the SSR pass reads one level coarser on desktop so its floors keep the
+   blur they had with 128 (gl3_glass.c reads level 0: the panes' reflections are as sharp as the probe allows) */
+#ifdef YQ2_GL3_GLES3
+#define PROBE_SIZE 128
+#define PROBE_LOD0 "1.0"
+#else
+#define PROBE_SIZE 256
+#define PROBE_LOD0 "2.0"
+#endif
+
 static const char *ssr_fs =
 	"uniform sampler2D depthtex;\n"
 	"uniform sampler2D mattex;\n"
@@ -10522,7 +10532,8 @@ static const char *ssr_fs =
 	"	float ndv = clamp(dot(N, V), 0.0, 1.0);\n"
 	/* Schlick towards grazing angles, at most three times the head-on value, less on rough faces */
 	"	float k = refl + (min(0.85, refl * 3.0) - refl) * pow(1.0 - ndv, 5.0) * (1.0 - rough);\n"
-	/* r_om_probes: what the ray cannot find on the screen comes from the cube maps (a 128 cube: mip 1 sharp, 6 matte) */
+	/* r_om_probes: what the ray cannot find on the screen comes from the cube maps (PROBE_LOD0 sharp, 5 levels more
+	   matte) */
 	"	bool pr = pcount > 0.5 && dbg == 0;\n"
 	/* walls, trims and ceilings: the cube maps only. A screen-space ray from an upright face mostly leaves the view or
 	   comes back at the eye: thin trims under a ceiling (jpn3) reflected in pieces that came and went while walking */
@@ -10530,7 +10541,7 @@ static const char *ssr_fs =
 	"	if (upright && !pr) discard;\n"
 	"	bool probeonly = pr && (rough > 0.6 || upright);\n"
 	"	vec3 WP = (invview * vec4(P, 1.0)).xyz, WR = mat3(invview) * R;\n"
-	"	float plod = 1.0 + rough * 5.0;\n"
+	"	float plod = " PROBE_LOD0 " + rough * 5.0;\n"
 	"	float pw = clamp(k * strength, 0.0, 0.85);\n"
 	"	vec4 pout = vec4(0.0);\n"
 	"	if (pr)\n"
@@ -11512,6 +11523,21 @@ SSRSceneColour(void)
 	return (SR.havecol && SR.coltex && (SR.vw == P.vw) && (SR.vh == P.vh)) ? SR.coltex : 0;
 }
 
+/* r_om_glass: the last finished frame and its projection x view (world -> clip), for the reflections the panes trace
+   themselves (gl3_glass.c); 0 without r_om_ssr */
+GLuint
+GL3_Post_LastFrame(float *prevpv)
+{
+	GLuint t = SSRSceneColour();
+
+	if (t && prevpv)
+	{
+		memcpy(prevpv, &SR.prevpv.Elements[0][0], 16 * sizeof(float));
+	}
+
+	return t;
+}
+
 static void
 SSRShutdown(void)
 
@@ -12174,7 +12200,6 @@ GL3_Mirror_Render(void)
  * ------------------------------------------------------------------ */
 
 #define PROBE_MAX 16
-#define PROBE_SIZE 128
 #define PROBE_CELL 256.0f
 #define PROBE_CELLZ 128.0f
 #define PROBE_UNIT 24 /* 24..27: the four probes of the SSR pass */
