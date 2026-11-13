@@ -50,7 +50,7 @@ Every effect of the game is being redrawn with current techniques. The game's ow
 where and how big; only the drawing changes, and each new effect can be switched back to the original look. Details,
 the effects of each group and the rules: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Progress: 18 of 40 done.**
+**Progress: 18 of 41 done.**
 
 Done:
 
@@ -97,6 +97,7 @@ To do:
 - [ ] E15. Smoke and steam of the levels
 - [ ] E16. Lava and molten metal
 - [ ] E17. Breath in the cold, respawn and teleport
+- [ ] C1. Characters really speak: the mouth opens and moves with the voice, no swapped face texture
 
 ## Build (Windows)
 
@@ -213,7 +214,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 решают данные самой игры; меняется только отрисовка, и каждый новый эффект можно вернуть к оригинальному виду.
 Подробности, эффекты каждой группы и правила: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Прогресс: сделано 18 из 40.**
+**Прогресс: сделано 18 из 41.**
 
 Сделано:
 
@@ -260,6 +261,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - [ ] E15. Дым и пар на уровнях
 - [ ] E16. Лава и расплавленный металл
 - [ ] E17. Дыхание на морозе, возрождение и телепорт
+- [ ] C1. Персонажи по-настоящему говорят: рот открывается и двигается с голосом, без подмены текстуры лица
 
 ### Сборка (Windows)
 

@@ -14,7 +14,7 @@ Rules for every item:
   the picture changes (timing, size, sound, gameplay);
 - the box here is ticked when the item is in `main`, on by default on High, and checked in the game.
 
-Progress: **18 of 40 done**. The README shows the same list.
+Progress: **18 of 41 done**. The README shows the same list.
 
 ## Done
 
@@ -114,6 +114,14 @@ These come first; the effects below are built on them.
   alone). Planned: glowing in HDR, heat haze, a crust that moves.
 - [ ] **E17. The rest.** Breath in the cold (`enemy/breathe`), the respawn and teleport effects of multiplayer
   (`irespawn`, `prespawn`, `teleport7`).
+
+## To do: characters
+
+- [ ] **C1. Characters really speak.** Every character who talks - in cut scenes, briefings and in play, men and
+  women, every face model - opens the mouth and moves the jaw and lips with the voice line, instead of the swapped
+  face texture of the original. Planned: a jaw and lip deformation of the head driven by the voice channel (its
+  loudness, later the sounds of the line), blinking and the original expressions kept; the original texture swap one
+  setting away. (Owner's request, 2026-11-13.)
 
 Not on the list: `lighthit`, `exphit`, `gotshot` and `land` are empty (72 bytes, no sprite). `edit/*`, `canthear`,
 `cantsee`, `confusion` and `scripted` look like markers of the AI and of the editing tools (a snowflake sprite); to be
