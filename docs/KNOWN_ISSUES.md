@@ -197,6 +197,15 @@ is straight above), saving while dead offered by the menus and the weapon left i
 (b2f2e13), turning machinery - irq2a fans, truck wheels, radar dishes (09b20fc: the client draws the rotate
 effect), the water (r_om_water v3, HL2-style).
 
+## To investigate (owner's reports, 2026-11-13)
+
+- **sib3, at the start: the door does not open after its button is pressed.** The large octagonal door at
+  `omsetpos 32 -2390 453 8 0` (facing it, a dead guard on the floor in front) stays shut after the button is used.
+  Mode B, Linux build of 13 November (main 7a194b1). Screenshot kept with the owner's bug files (sib3_door/sof20.jpg).
+  **Fixed:** the button runs `checkpt2`, which toggles the blast doors back open (`checkpt1` shut them when the front
+  door was opened); the door clearance check held them, because a character stands near the world origin on sib3
+  (docs/DEVIATIONS.md "Door clearance"). Checked with tests/X1/sib3_blastdoors.cfg.
+
 ## Reporting
 
 Please include: mode (A or B), map, `user\sof.log`, and the steps. Compare with the original game on the same

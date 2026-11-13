@@ -219,3 +219,17 @@ thunderstorm on jpn2".
   every think; the check itself leaves a rising character alone. tsr1: the three skinheads on the second train
   (rtskinhead1-3), carried by it without a ground entity, planned combat for the whole ride and only played idle
   records; with ground they fight. Not in the original.
+
+## Door clearance (2026-11-13)
+
+- **Sliding doors are not held by people near the world origin** (g_func.cpp door_close_check, SPEC-760 B5.7): the
+  clearance check before a door closes looks for players and characters within 96 units of each team member's origin
+  point. For a sliding brush door without an origin brush that point is the door's movement offset, near the world
+  origin, so the check "practically never blocks" (the spec's note) - except on a level with a living character
+  standing near the world origin, where it then held every sliding door of the level for good. sib3: the cleansuit
+  man at (-72 0 56) kept the front door (t360) open and held the blast doors shut when checkpt2 toggled them back
+  open after the button, so the level could not be continued; arm1 and arm2 also have a character there. The check
+  now applies to rotating doors only (their origin is the hinge); the portcullis keeps it. A door that starts open
+  (spawnflag 1) and is toggled back to its open place is never held. Test: tests/X1/sib3_blastdoors.cfg; test aids
+  `om_doordebug 1` (prints who holds a door), `omusetarget` (what the use key would act on, with every candidate),
+  `omuse <entity>` (its use-key reaction as a press would call it).

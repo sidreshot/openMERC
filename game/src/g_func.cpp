@@ -715,12 +715,17 @@ void door_go_down(edict_t *self);
 void door_go_up(edict_t *self, edict_t *activator);
 static void door_close_check(edict_t *self);
 
-// players and characters with health within 96 units of a team member's origin block the close
-static bool door_blocked_by_people(edict_t *master)
+// players and characters with health within 96 units of a team member's origin block the close (SPEC-760 B5.7).
+// openMERC (docs/DEVIATIONS.md "Door clearance"): only a rotating door's origin is a place (its hinge); a sliding
+// door's origin is its movement offset near the world origin, so the original's check "practically never blocks"
+// there - but it did whenever a character stood near the world origin, and then for every sliding door of the level:
+// sib3's cleansuit man at (-72 0 56) kept the front door open and the blast doors shut. Sliding doors are not checked
+// when they close; the portcullis keeps the check as it is ("stand under it", SPEC-761)
+static bool door_blocked_by_people(edict_t *master, bool sliding_too)
 {
 	for (edict_t *m = master; m; m = m->teamchain) {
-		vec3_t org;
-		VectorCopy(m->s.origin, org);
+		if (!sliding_too && !IsRotatingDoor(m))
+			continue;
 		for (int i = 1; i < globals.num_edicts; i++) {
 			edict_t *e = &g_edicts[i];
 			if (!e->inuse || e->health <= 0)
@@ -730,9 +735,14 @@ static bool door_blocked_by_people(edict_t *master)
 			vec3_t c, d;
 			for (int j = 0; j < 3; j++)
 				c[j] = e->s.origin[j] + (e->mins[j] + e->maxs[j]) * 0.5f;
-			VectorSubtract(c, org, d);
-			if (VectorLength(d) < 96)
+			VectorSubtract(c, m->s.origin, d);
+			if (VectorLength(d) < 96) {
+				if (gix.cvar_value("om_doordebug")) /* test aid: who holds a door */
+					gi.dprintf("OMDOOR %d %s held by %d %s at %s (%.0f units)\n", G_EdictNum(m),
+					           m->targetname ? m->targetname : "-", i, e->classname ? e->classname : "-", vtos(c),
+					           VectorLength(d));
 				return true;
+			}
 		}
 	}
 	return false;
@@ -740,7 +750,9 @@ static bool door_blocked_by_people(edict_t *master)
 
 static void door_close_check(edict_t *self)
 {
-	if (door_blocked_by_people(self)) {
+	/* openMERC: a door that starts open goes back to its open place here - toggled again (sib3 checkpt2 opens the
+	   blast doors that checkpt1 shut). Nobody is in the way of an opening door: no clearance check */
+	if (!(self->spawnflags & DOOR_START_OPEN) && door_blocked_by_people(self, false)) {
 		self->think = door_close_check;
 		self->nextthink = level.time + 1.0f;
 		return;
@@ -1222,7 +1234,7 @@ static void portcullis_think(edict_t *self)
 	if (!self->count) {
 		self->moveinfo.speed = self->moveinfo.accel = self->moveinfo.decel = self->volume;
 		if (self->moveinfo.state == STATE_TOP || self->moveinfo.state == STATE_UP) {
-			if (!door_blocked_by_people(self)) {
+			if (!door_blocked_by_people(self, true)) {
 				Mover_StartSound(self);
 				self->moveinfo.state = STATE_DOWN;
 				Move_Calc(self, self->moveinfo.start_origin, portcullis_hit_bottom);

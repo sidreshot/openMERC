@@ -410,6 +410,83 @@ static void Cmd_OmBoxEnts_f(edict_t *ent)
 		           (int)list[i]->solid, vtos(list[i]->absmin), vtos(list[i]->absmax), list[i]->moveinfo.state);
 }
 
+static void UseTargetDetails(edict_t *ent);
+
+/* test aid: omuse <entity number> - its use-key reaction (else its use) with the player as other and activator, as a
+   press of the use key on it would; separates "the key does not reach it" from "using it does nothing" */
+static void Cmd_OmUse_f(edict_t *ent)
+{
+	if (!CheatsOK(ent) || gi.argc() < 2)
+		return;
+	int n = atoi(gi.argv(1));
+	edict_t *e = (n > 0 && n < globals.num_edicts) ? &g_edicts[n] : NULL;
+	if (!e || !e->inuse || !(e->plUse || e->use)) {
+		gi.cprintf(ent, PRINT_HIGH, "omuse: %d has no use reaction\n", n);
+		return;
+	}
+	gi.cprintf(ent, PRINT_HIGH, "omuse %d %s (%s)\n", n, e->classname, e->plUse ? "use key" : "use");
+	if (e->plUse)
+		e->plUse(e, ent, ent);
+	else
+		e->use(e, ent, ent);
+}
+
+/* test aid: what the use key would act on now (G_UseTarget), for "the button does nothing" reports */
+static void Cmd_OmUseTarget_f(edict_t *ent)
+{
+	if (!CheatsOK(ent) || !ent->client)
+		return;
+	UseTargetDetails(ent);
+	edict_t *e = G_UseTarget(ent);
+	if (!e) {
+		gi.cprintf(ent, PRINT_HIGH, "omusetarget: nothing\n");
+		return;
+	}
+	gi.cprintf(ent, PRINT_HIGH, "omusetarget %d %s tn %s target %s solid %d state %d absmin %s absmax %s\n",
+	           G_EdictNum(e), e->classname, e->targetname ? e->targetname : "-", e->target ? e->target : "-",
+	           (int)e->solid, e->moveinfo.state, vtos(e->absmin), vtos(e->absmax));
+}
+
+/* the details: what the view trace hits and every entity with a use-key reaction within 80 units, with its facing,
+   distance and the trace to its centre */
+static void UseTargetDetails(edict_t *ent)
+{
+	vec3_t eye, fwd, end, mins, maxs;
+	VectorCopy(ent->s.origin, eye);
+	eye[2] += ent->viewheight;
+	AngleVectors(ent->client->v_angle, fwd, NULL, NULL);
+	VectorMA(eye, 75, fwd, end);
+	trace_t vt = gi.trace(eye, NULL, NULL, end, ent, MASK_PLAYERSOLID);
+	gi.cprintf(ent, PRINT_HIGH, "omusetarget eye %s angles %s view trace %.2f hits %d %s at %s\n", vtos(eye),
+	           vtos(ent->client->v_angle), vt.fraction, vt.ent ? G_EdictNum(vt.ent) : -1,
+	           vt.ent && vt.ent->classname ? vt.ent->classname : "-", vtos(vt.endpos));
+	for (int i = 0; i < 3; i++) {
+		mins[i] = eye[i] - 80;
+		maxs[i] = eye[i] + 80;
+	}
+	edict_t *list[256];
+	int n = gi.BoxEdicts(mins, maxs, list, 256, AREA_SOLID);
+	for (int i = 0; i < n; i++) {
+		edict_t *e = list[i];
+		if (!e->plUse || e == ent)
+			continue;
+		vec3_t c, d;
+		for (int j = 0; j < 3; j++)
+			c[j] = e->solid == SOLID_BSP ? (e->absmin[j] + e->absmax[j]) * 0.5f
+			                             : e->s.origin[j] + (e->mins[j] + e->maxs[j]) * 0.5f;
+		VectorSubtract(c, eye, d);
+		float dist = VectorLength(d);
+		d[2] = 0;
+		VectorNormalize(d);
+		vec3_t flat = {fwd[0], fwd[1], 0};
+		VectorNormalize(flat);
+		trace_t tr = gi.trace(eye, NULL, NULL, c, ent, MASK_PLAYERSOLID);
+		gi.cprintf(ent, PRINT_HIGH, "omusetarget   cand %d %s health %d dot %.3f dist %.0f trace %.2f hits %d %s\n",
+		           G_EdictNum(e), e->classname, e->health, DotProduct(d, flat), dist, tr.fraction,
+		           tr.ent ? G_EdictNum(tr.ent) : -1, tr.ent && tr.ent->classname ? tr.ent->classname : "-");
+	}
+}
+
 /* test aid: prints the nearest dead character (origin, solid, svflags, box) */
 static void Cmd_OmCorpse_f(edict_t *ent)
 {
@@ -911,6 +988,10 @@ void ClientCommand(edict_t *ent)
 		Cmd_OmFire_f(ent);
 	else if (Q_stricmp(cmd, "omboxents") == 0)
 		Cmd_OmBoxEnts_f(ent);
+	else if (Q_stricmp(cmd, "omusetarget") == 0)
+		Cmd_OmUseTarget_f(ent);
+	else if (Q_stricmp(cmd, "omuse") == 0)
+		Cmd_OmUse_f(ent);
 	else if (Q_stricmp(cmd, "defaultweapons") == 0) {
 		if (CheatsOK(ent))
 			GM_DefaultWeapons(ent); /* G9: SPEC-790 the level's default weapons */
