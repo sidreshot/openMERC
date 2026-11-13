@@ -200,3 +200,12 @@ thunderstorm on jpn2".
   weight limit is unchanged. Mode B only (the game module's work); the HUD reads free bits of stats[13] (bits 7-13
   above the grenade count), which the original game module leaves at 0. Test: tests/X1/weapswap.cfg; test aid
   `omswap` (cheats): the limit, the weight and why each weapon item near is offered or not.
+
+## Steering under a low ceiling (2026-11-13)
+
+- **The steering probe fits under a low ceiling** (ai_decisions.cpp Steer): SPEC-710 C8 probes each direction with
+  the owner's box, its top raised by 16. Where the owner fits and the raised top does not, the probe starts in the
+  world, every direction reads 0 and the owner never takes a step towards its target. Such a probe is now traced
+  again with the owner's own box; a probe that starts in another character is unchanged. irq3b: the flamethrower
+  brute at -3044 1359 -41 stood idle 205 units from the player, out of the 64..160 range of its weapon; it walks
+  towards him now. Not in the original.
