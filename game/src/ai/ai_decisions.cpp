@@ -572,6 +572,11 @@ bool CombatDecision::Steer(edict_t *ent, AI *ai, vec3_t goal)
 		vec3_t end;
 		VectorMA(ent->s.origin, 60, dir, end);
 		trace_t tr = Trace(ent->s.origin, ent->mins, maxs, end, ent, 0x2020003);
+		/* under a low ceiling the raised top starts in the world although the owner itself fits: every direction
+		 * read 0 and the owner never took a step. The probe is traced again with the owner's own box then
+		 * (DEVIATIONS.md "Steering under a low ceiling"); a probe that starts in another character is unchanged */
+		if (tr.startsolid && !(tr.ent && tr.ent->ai))
+			tr = Trace(ent->s.origin, ent->mins, ent->maxs, end, ent, 0x2020003);
 		if (tr.ent && DoorUsableNow(tr.ent))
 			return 1.0f;
 		if (tr.startsolid)
