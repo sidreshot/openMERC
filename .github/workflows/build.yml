@@ -152,6 +152,30 @@ jobs:
           fi
           gh release upload "$tag" dist-out/* --clobber --repo '${{ github.repository }}'
 
+  linux-arm64:
+    name: Linux arm64 (Debian 13)
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    steps:
+      - name: Build tools and libraries
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates build-essential cmake ninja-build \
+            pkg-config python3 libsdl3-dev libopenal-dev libgl-dev zlib1g-dev binutils file
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build and unit tests
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          OM_BUILD_DIR="$GITHUB_WORKSPACE/out" tools/build/build-linux.sh x86_64 Release
+      - name: Package
+        run: tools/build/package-linux.sh "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/dist-out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openMERC-linux-arm64
+          path: dist-out/*
+
   macos:
     name: macOS arm64
     runs-on: macos-26
