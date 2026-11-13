@@ -1949,3 +1949,43 @@ spots, groups); how to run it and the format: [tools/fxgal/README.md](../../tool
   more (explosions 0.01 to 0.03, a machine gun burst with tracers 0.05); the original look within 0.01 ms of the new.
 * Run: about 10 minutes a map (695 console steps), about 40 minutes for the four, 416 shots. The script is split
   into files of 20 KB: one 73 KB file overflowed the 32 KB command buffer and nothing ran.
+
+## B2: the effects in HDR today (2026-11-14, looked into; the item stays open for the owner's choice)
+
+What the renderer does with an effect now (gl3_shaders.c effect shader, gl3_ghoulemu.c, gl3_post.c Grade, HDRExposure):
+
+* The scene target is float (RGBA16F with r_om_hdr) but holds display-encoded values, as SoF's framebuffer did; it
+  becomes light only at the end, in the grade: l = scene^2.2 x exposure. An additive pass (blend ONE ONE: effect
+  quads, chains, additive Ghoul passes such as the explosion dome) adds texel x vertex colour, each layer at most 1.0,
+  in that display encoding. So light is added where light does not add: a faint halo of 0.2 over a wall of 0.2 gives
+  0.4 (0.13 in linear light) where the two lights together give 0.06 (0.28 shown) - a milky veil over what lies
+  behind; and a core is only as bright as one layer, white is its ceiling, and the filmic shoulder (from 0.6) and the
+  ACES camera seldom get anything above white to roll off.
+* Glow: the same pass writes its colour x r_om_bloom_fx (1) into the emissive target (GL3_Post_EmisForBlend), dimmed by
+  translucent faces drawn in front of it later. A fire glows as much as a lit panel of the same colour.
+* Exposure: metered from the scene colour, effects included (log luminance, the centre counting more), eased at
+  r_om_hdr_adapt 1.5 a second towards key 0.1, strength 0.35, within 0.7 to 1.6: an explosion in view darkens the rest
+  a little over about a second. While paused the exposure stands (its clock is the view's time).
+
+Ways to give the effects a brightness of their own:
+
+* A. Bright cores past white (tried as `r_om_fxhdr`, taken out again): an additive pass that is a light gets
+  1 + gain x smoothstep(knee, 1, max(r, g, b)) (r_om_fxhdr_gain 2, r_om_fxhdr_knee 0.55); the faint parts stay, the
+  cores pass 1.0 in the float scene, the curve turns them white-hot and the glow grows with them. Specular passes of
+  models are left out. Cheap (one multiply in two shaders), the draw order and everything that reads the scene stay.
+  It does not remove the milky veil. GLES (phones) has no float scene: the uniform stays 0 there.
+* B. Adding in linear light against the scene behind: the shader needs what is under the effect. A copy taken before
+  the sorted pass lacks the models drawn in that pass (a muzzle flash over a character would be added against the
+  wall behind the character); a texture barrier per batch works on desktop GL but not on the multisampled target or on GLES.
+* C. The effects into a light target of their own, added in the grade in linear light: the right sum and the right
+  exposure for every effect. The effects would drop out of what reads the scene colour (the traced reflections, the
+  scene copy of the water, the temporal filter) unless those read the target too; the emissive target, which already
+  has the occlusion by translucent faces, could become that target. Biggest change; best done with B4 (the motion
+  blur of fast particles), which also decides where effects are composited.
+
+A measured in the gallery (looks new and new + r_om_fxhdr 1, groups E1, E3, E5, E8, E10, E11, E12 at the four spots,
+232 shots, gl3_debugcontext 1 without a GL error): hardly a difference. The cores were white already (stacked layers
+past 1.0, the shoulder from 0.6), and past white the curve has nothing more to show; only the glow grows a little.
+Cost up to +0.004 ms. So A was taken out again and B2 stays open: what makes the effects look painted on is the faint
+part added in display values, which only B or C change. The choice between them (and whether it waits for B4) is the
+owner's.

@@ -49,7 +49,10 @@ These come first; the effects below are built on them.
 
 - [ ] **B2. Effects as light in HDR.** Find out how additive effects (fire, sparks, flashes, tracers) enter the HDR
   scene, bloom and exposure today; give them a brightness of their own, so that a fire is a light source and not
-  paint over the frame.
+  paint over the frame. Looked into 2026-11-14 ([impl/GFX-modern.md](impl/GFX-modern.md) "B2"): the effects are
+  added in display values to a scene that becomes light only at the end, so their faint parts lie over the frame
+  like a veil; brighter cores alone (tried) change almost nothing, the cores are white already. The choice is between
+  adding them in linear light against the scene behind and a light target of their own (owner's decision).
 - [ ] **B3. Living flame and smoke.** Flow-noise animation of the cards (the texture moves and boils along the
   card's own motion) instead of a sprite that only grows and fades; heat haze above hot effects (the refraction of the
   glass, last frame's colour).
