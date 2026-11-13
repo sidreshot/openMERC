@@ -78,6 +78,7 @@ if [ "${OM_NO_TESTS:-0}" != "1" ]; then
   echo "== unit tests"
   rc=0
   "$OUT/engine/sofpm_test" || rc=1
+  "$OUT/engine/cvar_test" || rc=1
   "$OUT/player/pm_unit" || rc=1
   # the next two need fixtures from the game data and skip (G3) or skip their data checks (Ghoul) without it
   if [ -x "$OUT/game/g3tests" ]; then "$OUT/game/g3tests" ${OM_G3_FIXTURES:-} || rc=1; fi

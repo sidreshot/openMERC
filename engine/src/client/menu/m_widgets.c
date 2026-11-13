@@ -718,7 +718,7 @@ Tag_CText(mparse_t *p)
 	MP_Args(p, a, 1);
 	w = ML_NewWidget(p, &mw_ctext, true);
 	w->data = Z_Malloc(sizeof(ctext_t));
-	w->cvar = Cvar_GetModule(a[0], "", 0, NULL);
+	w->cvar = Cvar_GetRef(a[0], "", 0, false);
 
 	if (!w->cvar && !p->dry)
 	{
@@ -2496,14 +2496,14 @@ Image_Option(mparse_t *p, mwidget_t *w, const char *kw)
 	else if (!Q_stricmp(kw, "cvartext"))
 	{
 		MP_Args(p, a, 3);
-		d->cvartext = Cvar_Get(a[0], "0", 0);
+		d->cvartext = Cvar_GetRef(a[0], "0", 0, true);
 		d->cx = atoi(a[1]);
 		d->cy = atoi(a[2]);
 	}
 	else if (!Q_stricmp(kw, "setimage"))
 	{
 		MP_Args(p, a, 1);
-		d->setimage = Cvar_Get(a[0], d->pic + strlen("pics/menus/"), 0);
+		d->setimage = Cvar_GetRef(a[0], d->pic + strlen("pics/menus/"), 0, true);
 	}
 	else if (!Q_stricmp(kw, "transient"))
 	{

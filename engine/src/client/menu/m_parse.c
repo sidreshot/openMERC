@@ -1228,7 +1228,7 @@ Tag_OnExit(mparse_t *p)
 
 	if (!p->dry && a[0][0])
 	{
-		Cvar_Get(a[0], "0", 0);
+		Cvar_GetRef(a[0], "0", 0, true);
 	}
 }
 
@@ -1584,7 +1584,7 @@ Tag_CKey(mparse_t *p)
 
 	if (!p->dry)
 	{
-		Cvar_Get(a[1], "0", 0);
+		Cvar_GetRef(a[1], "0", 0, true);
 	}
 
 	b = ML_NewBind(MP_KeyNum(a[0]), a[2], a[3], a[1], true);
@@ -1893,7 +1893,7 @@ Tag_Frame(mparse_t *p)
 
 			if (!p->dry)
 			{
-				Q_strlcpy(page, Cvar_Get(o[0], "", 0)->string, sizeof(page));
+				Q_strlcpy(page, Cvar_GetRef(o[0], "", 0, true)->string, sizeof(page));
 			}
 		}
 		else if (!Q_stricmp(kw, "cut"))

@@ -240,9 +240,11 @@ Cvar_Create(const char *var_name, const char *var_value, int flags,
 	return var;
 }
 
+/* owner: the caller declares the cvar, so its value becomes the default an existing cvar is reset to; a caller
+   that only refers to the cvar (Cvar_GetRef: a menu widget) leaves an existing cvar's default as it is */
 static cvar_t *
 Cvar_GetEx(const char *var_name, const char *var_value, int flags,
-		cvarcallback_t changed, qboolean privileged)
+		cvarcallback_t changed, qboolean privileged, qboolean owner)
 {
 	cvar_t *var;
 
@@ -273,7 +275,7 @@ Cvar_GetEx(const char *var_name, const char *var_value, int flags,
 
 		var->flags |= flags;
 
-		if (var_value)
+		if (var_value && owner)
 		{
 			var->default_string = Cvar_CopyString(var->default_string, var_value);
 		}
@@ -316,21 +318,31 @@ Cvar_GetEx(const char *var_name, const char *var_value, int flags,
 cvar_t *
 Cvar_Get(const char *var_name, const char *var_value, int flags)
 {
-	return Cvar_GetEx(var_name, var_value, flags, NULL, true);
+	return Cvar_GetEx(var_name, var_value, flags, NULL, true, true);
 }
 
 cvar_t *
 Cvar_GetCB(const char *var_name, const char *var_value, int flags,
 		cvarcallback_t changed)
 {
-	return Cvar_GetEx(var_name, var_value, flags, changed, true);
+	return Cvar_GetEx(var_name, var_value, flags, changed, true, true);
 }
 
 cvar_t *
 Cvar_GetModule(const char *var_name, const char *var_value, int flags,
 		cvarcallback_t changed)
 {
-	return Cvar_GetEx(var_name, var_value, flags, changed, false);
+	return Cvar_GetEx(var_name, var_value, flags, changed, false, true);
+}
+
+/* OpenMerc: a reference to a cvar - a menu widget that shows or sets it. As Cvar_Get (privileged) or
+   Cvar_GetModule (not privileged: no hidden cvars while they are locked), but an existing cvar keeps its default:
+   the menus named every cvar of a page with "" or "0", which became the default, so "Reset Section"
+   (om_resetcvars) set the settings to nothing - on a phone the touch buttons went to size 0 and alpha 0 */
+cvar_t *
+Cvar_GetRef(const char *var_name, const char *var_value, int flags, qboolean privileged)
+{
+	return Cvar_GetEx(var_name, var_value, flags, NULL, privileged, false);
 }
 
 /* applies a value change: game directory, callback */
@@ -448,7 +460,7 @@ Cvar_Set2(const char *var_name, const char *value, cvarset_t mode)
 	if (!var)
 	{
 		/* SPEC-302 B1: set on an unknown name creates the cvar (flags 0) */
-		return Cvar_GetEx(var_name, value ? value : "", 0, NULL, true);
+		return Cvar_GetEx(var_name, value ? value : "", 0, NULL, true, true);
 	}
 
 	return Cvar_SetVar(var, value, mode);
@@ -488,7 +500,7 @@ Cvar_FullSet(const char *var_name, const char *value, int flags)
 
 	if (!var)
 	{
-		return Cvar_GetEx(var_name, value, flags, NULL, true);
+		return Cvar_GetEx(var_name, value, flags, NULL, true, true);
 	}
 
 	if (flags & CVAR_INFOMASK)

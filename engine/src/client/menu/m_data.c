@@ -2857,7 +2857,7 @@ MD_DataTag(mparse_t *p, const char *tag)
 
 		if (!p->dry)
 		{
-			d->listcvar = Cvar_Get(a[0], "", 0);
+			d->listcvar = Cvar_GetRef(a[0], "", 0, true);
 		}
 	}
 	else if (!Q_stricmp(tag, "botlist"))
@@ -2878,7 +2878,7 @@ MD_DataTag(mparse_t *p, const char *tag)
 
 		if (!p->dry)
 		{
-			d->namecvar = Cvar_Get(a[0], "", 0);
+			d->namecvar = Cvar_GetRef(a[0], "", 0, true);
 		}
 	}
 	else

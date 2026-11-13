@@ -78,7 +78,7 @@ jobs:
           }
           $failed = 0
           # required tests; the Ghoul and G3 tests skip their checks of stock data (none in CI)
-          foreach ($t in @(@('out\engine', 'sofpm_test.exe'), @('out\player', 'pm_unit.exe'))) {
+          foreach ($t in @(@('out\engine', 'sofpm_test.exe'), @('out\engine', 'cvar_test.exe'), @('out\player', 'pm_unit.exe'))) {
             $exe = Find-Test $t[0] $t[1]
             if (-not $exe) { Write-Host "::error::$($t[1]) was not built"; $failed++; continue }
             & $exe.FullName

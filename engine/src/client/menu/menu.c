@@ -605,7 +605,7 @@ M_RefreshScreen(mscreen_t *scr)
 
 		if (f->cpage[0])
 		{
-			cvar_t *v = Cvar_Get(f->cpage, "", 0);
+			cvar_t *v = Cvar_GetRef(f->cpage, "", 0, true);
 
 			if (!pg || Q_stricmp(v->string, pg->name))
 			{

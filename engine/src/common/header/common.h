@@ -495,6 +495,12 @@ cvar_t *Cvar_Get(const char *var_name, const char *value, int flags);
 /* creates the variable if it doesn't exist, or returns the existing one */
 /* if it exists, the value will not be changed, but flags will be ORed in */
 /* that allows variables to be unarchived without needing bitflags */
+/* OpenMerc: value also becomes the default an existing cvar is reset to (om_resetcvars) */
+
+cvar_t *Cvar_GetRef(const char *var_name, const char *value, int flags, qboolean privileged);
+
+/* OpenMerc: as Cvar_Get for a caller that only refers to the cvar (a menu widget): an existing cvar keeps its
+   default; privileged false: a hidden cvar is not found while hidden cvars are locked (as Cvar_GetModule) */
 
 cvar_t *Cvar_Set(const char *var_name, const char *value);
 

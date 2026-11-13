@@ -840,9 +840,11 @@ else()
 	target_link_libraries(omlight m)
 endif()
 
-# OpenMerc ENG2: SPEC-314 player-movement test vectors (sofpm_test, exit code = failures)
-option(OM_SOFPM_TESTS "Build the SPEC-314 player-movement test program" ON)
+# OpenMerc ENG2: SPEC-314 player-movement test vectors (sofpm_test, exit code = failures); also the cvar test
+option(OM_SOFPM_TESTS "Build the engine unit test programs (SPEC-314 player movement, cvars)" ON)
 if(OM_SOFPM_TESTS)
+	# cvar defaults and the menus' Reset Section (om_resetcvars) on the real cvar.c (exit code = failures)
+	add_executable(cvar_test ${COMMON_SRC_DIR}/test_cvar.c ${COMMON_SRC_DIR}/cvar.c)
 	add_executable(sofpm_test ${COMMON_SRC_DIR}/test_sof_pmove.c ${COMMON_SRC_DIR}/sof_pmove.c)
 	if(NOT MSVC)
 		target_link_libraries(sofpm_test m)

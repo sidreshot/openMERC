@@ -250,7 +250,7 @@ ML_AddBind(mwidget_t *w, mbind_t *b)
 static cvar_t *
 ML_GetCvar(mparse_t *p, const char *name, const char *def, int flags)
 {
-	cvar_t *v = Cvar_GetModule(name, def, flags, NULL);
+	cvar_t *v = Cvar_GetRef(name, def, flags, false); /* the widget does not set the cvar's default */
 
 	if (!v && !p->dry)
 	{
@@ -279,7 +279,7 @@ ML_CommonOption(mparse_t *p, mwidget_t *w, const char *kw)
 
 		if (!p->dry)
 		{
-			Cvar_Get(a[1], "0", 0);
+			Cvar_GetRef(a[1], "0", 0, true);
 		}
 
 		ML_AddBind(w, ML_NewBind(ML_KeyNum(a[0]), a[2], a[3], a[1], true));

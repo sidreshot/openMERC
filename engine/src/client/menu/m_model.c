@@ -375,7 +375,7 @@ MM_ModelOption(mparse_t *p, mmodel_t *m, mwidget_t *w, const char *kw)
 
 		if (!p->dry)
 		{
-			Cvar_Get(a[0], "0", 0);
+			Cvar_GetRef(a[0], "0", 0, true);
 		}
 	}
 	else

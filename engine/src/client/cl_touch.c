@@ -133,8 +133,10 @@ Touch_Init(void)
 	   defaults so the menu shows them before a level has loaded the module (it showed "Off" until the first shot) */
 #ifdef __ANDROID__
 	Cvar_Get("om_aimassist", "1", CVAR_ARCHIVE);
+	Cvar_Get("om_throwprecise", "1", CVAR_ARCHIVE); /* g_weapon.cpp registers it at the first throw only */
 #else
 	Cvar_Get("om_aimassist", "0", CVAR_ARCHIVE);
+	Cvar_Get("om_throwprecise", "0", CVAR_ARCHIVE);
 #endif
 	Cvar_Get("om_aimassist_dist", "28", CVAR_ARCHIVE);
 	Cvar_Get("om_autoaim_angle", "12", CVAR_ARCHIVE);
