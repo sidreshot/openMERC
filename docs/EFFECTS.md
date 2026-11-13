@@ -14,7 +14,7 @@ Rules for every item:
   the picture changes (timing, size, sound, gameplay);
 - the box here is ticked when the item is in `main`, on by default on High, and checked in the game.
 
-Progress: **15 of 37 done**. The README shows the same list.
+Progress: **15 of 40 done**. The README shows the same list.
 
 ## Done
 
@@ -111,10 +111,16 @@ These come first; the effects below are built on them.
   alone). Planned: glowing in HDR, heat haze, a crust that moves.
 - [ ] **E17. The rest.** Breath in the cold (`enemy/breathe`), the respawn and teleport effects of multiplayer
   (`irespawn`, `prespawn`, `teleport7`).
+- [ ] **E18. Thunderstorm as in MGS V.** The lightning lights the clouds around its channel and the whole sky a
+  little, the flash glares in the eyes (bloom, lens ghosts, the eye adapting after it), the channel bright in HDR with
+  its re-strikes; thunder after every strike (today a second strike before the first thunder has arrived drops it).
+- [ ] **E19. Map fog.** The maps' fog (SoF's fog regions and the linear fog) without the old per-vertex fog: one
+  per-pixel or volumetric fog for the world, the models, the effects and the sky.
+- [ ] **E20. Rain on windows.** While it rains, panes open to the rain get drops and runnels on their street side.
 
 Not on the list: `lighthit`, `exphit`, `gotshot` and `land` are empty (72 bytes, no sprite). `edit/*`, `canthear`,
 `cantsee`, `confusion` and `scripted` look like markers of the AI and of the editing tools (a snowflake sprite); to be
 checked whether any of them shows in normal play.
 
-The order is B1, then B2 to B4 together with E1 to E3 (fire, flamethrower, explosions), then E5 and E8 (sparks,
+The order is E18, E19 and E20 first (asked for on 2026-11-13), then B1, then B2 to B4 together with E1 to E3 (fire, flamethrower, explosions), then E5 and E8 (sparks,
 tracers), then the rest. The plans of each item may change once the gallery shows the effect.
