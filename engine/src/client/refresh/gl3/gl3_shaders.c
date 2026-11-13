@@ -50,6 +50,20 @@ CompileShader(GLenum shaderType, const char* shaderSrc, const char* shaderSrc2)
 	const char* version = "#version 150\n";
 #endif
 	char* mp = NULL;
+	char* rf = NULL;
+
+	/* E19 r_om_fogpix: every 3D fragment shader gets the per-pixel fog of the regions (omRegionFog) ahead of its body */
+	if ((shaderType == GL_FRAGMENT_SHADER) && shaderSrc2)
+	{
+		size_t l = strlen(OM_REGIONFOG_GLSL) + strlen(shaderSrc2) + 1;
+
+		rf = malloc(l);
+		if (rf)
+		{
+			snprintf(rf, l, "%s%s", OM_REGIONFOG_GLSL, shaderSrc2);
+			shaderSrc2 = rf;
+		}
+	}
 #ifdef YQ2_GL3_GLES3
 	/* r_om_fs_mediump bit 1 (measurement): the fragment body after the shared uniform blocks in half precision */
 	if ((shaderType == GL_FRAGMENT_SHADER) && shaderSrc2 &&
@@ -80,6 +94,7 @@ CompileShader(GLenum shaderType, const char* shaderSrc, const char* shaderSrc2)
 	glCompileShader(shader);
 	free(wrapped);
 	free(mp);
+	free(rf);
 	GLint status;
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
 	if(status != GL_TRUE)
@@ -1755,7 +1770,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		uniform sampler2D tex;
 		uniform int texmode;   // 0 modulate, 1 replace, 2 untextured
 		uniform int alphatest; // > 0.05
-		uniform int fogmode;   // 0 off, 1 linear
+		uniform int fogmode;   // 0 off, 1 linear, 2 the regions per pixel (E19), 3 the same for an additive effect
 		uniform float fogstart;
 		uniform float fogend;
 		uniform vec4 fogcolor;
@@ -2147,10 +2162,16 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 					c.a = mix(c.a, 1.0, fres * 0.6); // less see-through at grazing angles
 			}
 
-			if(fogmode != 0)
+			if(fogmode == 1)
 			{
 				float f = clamp((fogend - passFogDist) / max(fogend - fogstart, 0.0001), 0.0, 1.0);
 				c.rgb = mix(fogcolor.rgb, c.rgb, f);
+			}
+			else if(fogmode >= 2)
+			{
+				// E19 r_om_fogpix: the regions' fog at this fragment; 3: an additive effect only fades
+				vec4 F = omRegionFog(passFxWorld);
+				c.rgb = (fogmode == 3) ? c.rgb * (1.0 - F.a) : c.rgb * (1.0 - F.a) + F.rgb;
 			}
 
 			if(omSoftV.w > 0.5 && omSoftV.w < 2.5)
@@ -2402,6 +2423,13 @@ initShader3D(gl3ShaderInfo_t* shaderInfo, const char* vertSrc, const char* fragS
 		{
 			glUniform1i(lmLoc, i+1); // lightmap0 belongs to GL_TEXTURE1, lightmap1 to GL_TEXTURE2 etc
 		}
+	}
+
+	/* E19: the fog regions' table (gl3_fog.c PixFrame) */
+	GLint rfLoc = glGetUniformLocation(prog, "omRFTab");
+	if(rfLoc != -1)
+	{
+		glUniform1i(rfLoc, 17);
 	}
 
 	/* OpenMerc: lightmap colour table on GL_TEXTURE5 (GL3_SoF_BindLightTable) */

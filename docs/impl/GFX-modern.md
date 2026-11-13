@@ -1878,3 +1878,39 @@ quick second strike the first thunder was lost.
   (90 samples each). GLES 3: the same drops (Mesa, debug context, no errors).
 * Also (E18): menu Video -> Effects -> Lightning Flash sets r_om_lightning_sky; Off takes the glare away too
   (bright flashes are not for everyone).
+
+## E19: map fog per pixel, one fog for everything (owner, 2026-11-13: "redo the old fog of the maps, get rid of the old vertex fog")
+
+Before: the fog of SoF's fog regions (33 of the 75 maps, mostly low dense layers over water, in sewers, on floors) was
+an overlay drawn over the world faces that carry region polygons (per pixel with r_om_ppfog, but still only on those
+faces), a far wall polygon 2000 units ahead, the linear fog of gl_fogmode 1, and for models and effects one fog value
+per model and per effect (the Ghoul emulator's fog per vertex, computed on the CPU from the model's origin). What has
+no region polygons stayed clear in the fog (sib1: a piece of a structure bright through it), the overlay left black,
+torn holes and lines along the edges of its polygons (ger1 water, both renderers).
+
+* One function, omRegionFog (OM_REGIONFOG_GLSL in local.h), for any point of the world: for each region of the frame
+  the stretch of the view ray inside it - its box (the bounds of its region polygons) clipped by its slanted sides,
+  turned inside by the box's centre; for the eye's own region the box only, as SoF used no planes there - gives
+  D = L x L and SoF's alpha min((D - start) / range / 255, opacity), with its height falloff (from the end of the
+  stretch), shimmer (the region's ten animated offsets) and the volumetric fog's dim of thin fog. Regions are laid far
+  ones first. A region seen through fogs what lies behind it, as fog does (the overlay did not).
+* Where: a full-view pass after the world (gl3_post.c GL3_Post_RegionFog, from the world's depth, sky included,
+  scene x (1 - a) + colour x a, the emissive target dimmed); the effect shader (fogmode 2, 3 for additive effects
+  that only fade; translucent world faces and water too), the Ghoul shader (the fragment's world position from
+  omInvPV), the pane's own light in the glass shader. CompileShader puts the function into every 3D fragment shader.
+* The table: GL_TEXTURE17, RGBA32F, 13 texels a row; row 0 the frame (count, dim, far wall region, the eye and its
+  region, the regions of the frame), a row per region. gl3_fog.c PixFrame fills it at GL3_Fog_BeginFrame (regions not
+  wholly behind the eye, the nearest eight); PixWall picks the far wall after the world walk from the faces seen, as
+  the overlay did. Without a 18th texture unit, with gl_fogmode 2 or 3, r_fullbright or r_om_fogpix 0: the old fog.
+* Mistakes on the way: a region without faces (box never set, kos1 region 8) taken as fog over the whole map turned
+  the sky orange - such a region fogs nothing in SoF; the slanted sides clipped the eye's own region (sib1, a region
+  over the whole map) and the distance came out clear; a far wall taken from any region in front instead of from the
+  faces seen.
+* Found on the way, not from this change: GL3_FX_LiqRipples set the water's rings while another program was bound
+  (GL3_FX_SetState binds the effect program only when the batch is drawn): every water face after a model gave
+  GL_INVALID_OPERATION (42136 in a 40 s ger1 run with gl3_debugcontext 1) and the rings went nowhere. It binds the
+  effect program now; the run has 0 GL errors (GL 4.6 and GLES 3.2 on Mesa).
+* Cost: ger1 water fog, 1600x900: GPU 1.498 ms per pixel against 1.491 ms with the old fog.
+* r_om_fogpix (1; 0 the old fog), menu Video -> Map Fog (Modern / Original).
+* Not checked: the effects in fog (the test smoke was gone by the shot), characters standing in fog, every one of the
+  33 maps; regions whose polygons do not fill their box fog the empty part of the box too.

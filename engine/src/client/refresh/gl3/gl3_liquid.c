@@ -1110,6 +1110,12 @@ GL3_Liquid_Draw(msurface_t *surf, entity_t *ent, qboolean translucent, int fogre
 
 	GL3_Fog_SetHardwareFxState(fogregion, &st);
 
+	/* E19 r_om_fogpix: an opaque liquid is in the world's depth, the screen pass fogs it with the world */
+	if (!translucent && (st.fogmode == 2))
+	{
+		st.fogmode = 0;
+	}
+
 	/* GFX-modern r_om_ssr: liquids are mirrors with a little roughness (the trace adds ripples); a translucent
 	   one writes its depth too, so the reflection is traced from its surface and not from the bottom below */
 	if (GL3_Post_SSRActive())

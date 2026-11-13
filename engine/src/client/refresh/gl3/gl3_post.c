@@ -8142,9 +8142,12 @@ static struct
 
 /* vid_restart: the weather's GL objects belong to the old context (WXCreate returned early on the old names and
    drew with them); the per-map flags stay, the map is loaded again after the restart */
+static void RFShutdown(void);
+
 static void
 WXShutdown(void)
 {
+	RFShutdown();
 	GLuint progs[8] = {WX.progaa, WX.progsnow, WX.progwar, WX.progsmoke, WX.prograin, WX.progsplash, WX.progbolt,
 		WX.progflash};
 	int i;
@@ -13944,4 +13947,127 @@ GL3_Post_MapLoad(void)
 	{
 		VolFogProgram();
 	}
+}
+
+/* ------------------------------------------------------------------
+ * E19 r_om_fogpix: the regions' fog over the world and the sky, per pixel from the depth of the world (the models,
+ * effects, glass and water drawn later fog themselves with the same omRegionFog). Replaces the overlay drawn on the
+ * faces of a region, the far wall and the linear fog of gl_fogmode 1.
+ * ------------------------------------------------------------------ */
+static const char *rf_fs =
+	OM_REGIONFOG_GLSL
+	"uniform sampler2D depthtex;\n"
+	"uniform vec4 proj;\n"      /* projection C, D; depth range min, max */
+	"uniform vec3 fwd;\n"
+	"uniform vec3 rgt;\n"
+	"uniform vec3 upv;\n"
+	"uniform vec2 tanxy;\n"
+	"uniform vec3 eyep;\n"
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmis;\n"
+	"void main()\n"
+	"{\n"
+	"	float z = texture(depthtex, uv).r;\n"
+	"	float ez = proj.y / ((z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0 + proj.x);\n"
+	"	vec2 n = vuv * 2.0 - 1.0;\n"
+	"	vec3 p = eyep + (fwd + n.x * tanxy.x * rgt + n.y * tanxy.y * upv) * ez;\n"
+	"	vec4 F = omRegionFog(p);\n"
+	"	if (F.a < 0.002)\n"
+	"		discard;\n"
+	"	outColor = F;\n"             /* premultiplied: scene x (1 - a) + colour x a */
+	"	outEmis = vec4(0.0, 0.0, 0.0, F.a);\n" /* what glows behind the fog glows less */
+	"}\n";
+
+static GLuint rfprog;
+static qboolean rffailed;
+
+void
+GL3_Post_RegionFog(void)
+{
+	static const GLenum two[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	float fw = (float)P.w, fh = (float)P.h;
+	vec3_t vf, vr, vu;
+
+	if (!P.bound || !GL3_Fog_PixOn() || rffailed)
+	{
+		return;
+	}
+
+	if (!rfprog)
+	{
+		rfprog = WXLink(NULL, rf_fs, true);
+
+		if (!rfprog)
+		{
+			rffailed = true;
+			R_Printf(PRINT_ALL, "r_om_fogpix: the fog pass did not link, the old fog stays\n");
+			return;
+		}
+
+		GL3_UseProgram(rfprog);
+		glUniform1i(GL3_UniformLoc(rfprog, "omRFTab"), 17);
+		glUniform1i(GL3_UniformLoc(rfprog, "depthtex"), 2);
+	}
+
+	GL3_Draw3DBatchesNow();
+	GL3_FX_Flush();
+
+	/* the world's depth (made for soft particles or the volumetric fog; else here) */
+	if (!P.depthcopied)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, P.fbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, P.depthfbo);
+		glBlitFramebuffer(P.vx, P.vy, P.vx + P.vw, P.vy + P.vh, P.vx, P.vy, P.vx + P.vw, P.vy + P.vh,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		P.depthcopied = true;
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, P.fbo);
+	glViewport(P.vx, P.vy, P.vw, P.vh);
+	glDrawBuffers(2, two);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+	GL3_UseProgram(rfprog);
+	BindTex(GL_TEXTURE2, P.texdepthcopy);
+	AngleVectors(r_newrefdef.viewangles, vf, vr, vu);
+	glUniform4f(GL3_UniformLoc(rfprog, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+	glUniform4f(GL3_UniformLoc(rfprog, "proj"), gl3state.projMat3D.Elements[2][2],
+		gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+	glUniform3fv(GL3_UniformLoc(rfprog, "fwd"), 1, vf);
+	glUniform3fv(GL3_UniformLoc(rfprog, "rgt"), 1, vr);
+	glUniform3fv(GL3_UniformLoc(rfprog, "upv"), 1, vu);
+	glUniform2f(GL3_UniformLoc(rfprog, "tanxy"), 1.0f / gl3state.projMat3D.Elements[0][0],
+		1.0f / gl3state.projMat3D.Elements[1][1]);
+	glUniform3fv(GL3_UniformLoc(rfprog, "eyep"), 1, r_newrefdef.vieworg);
+	GL3_BindVAO(P.vao);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	SceneBuffers();
+	GL3_SelectTMU(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D, P.texdepthcopy);
+	GL3_SelectTMU(GL_TEXTURE0);
+	gl3state.currenttexture = -1;
+}
+
+/* vid_restart: the program belongs to the old context */
+static void
+RFShutdown(void)
+{
+	if (rfprog)
+	{
+		glDeleteProgram(rfprog);
+	}
+
+	rfprog = 0;
+	rffailed = false;
 }

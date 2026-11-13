@@ -176,6 +176,7 @@ qboolean GL3_GhoulEmu_FF(ghlff_t *out);
 void *GL3_GhoulEmu_Table(void);
 void GL3_GhoulEmu_Begin(void);
 void GL3_GhoulEmu_SetEntityGlow(float glow);
+void GL3_GhoulEmu_SetRegionFog(qboolean on); /* E19 r_om_fogpix */
 void GL3_GhoulEmu_SetCsm(qboolean capture, qboolean replace);
 void GL3_GhoulEmu_SetCaster(qboolean casts);
 void GL3_GhoulEmu_SetTess(int level, float strength);

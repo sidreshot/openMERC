@@ -131,8 +131,11 @@ GL3_FX_Shutdown(void)
 void
 GL3_FX_LiqRipples(const float *r, int n)
 {
-	if (u_liqrip != -1)
+	/* GL3_FX_SetState binds the effect program only when the batch is drawn: the rings went into whatever program
+	   was bound (a Ghoul model's, the world's - GL_INVALID_OPERATION at every water face after a model) */
+	if ((u_liqrip != -1) && u_program)
 	{
+		GL3_UseProgram(u_program);
 		glUniform4fv(u_liqrip, n, r);
 	}
 }
@@ -248,7 +251,7 @@ uploaded:
 	glUniform1i(u_alphatest, st->alphatest ? 1 : 0);
 	glUniform1i(u_fogmode, st->fogmode);
 
-	if (st->fogmode)
+	if (st->fogmode == 1)
 	{
 		AngleVectors(r_newrefdef.viewangles, forward, right, up);
 		glUniform1f(u_fogstart, st->fogstart);
@@ -1218,6 +1221,13 @@ SetPointFog(gl3fxstate_t *st, int region, const vec3_t p, int blend)
 	float f;
 
 	st->fogmode = 0;
+
+	/* E19 r_om_fogpix: per pixel in the effect shader, any region the view crosses; additive effects only fade */
+	if (GL3_Fog_PixOn())
+	{
+		st->fogmode = ((blend == 2) || (blend == 3)) ? 3 : 2;
+		return;
+	}
 
 	if (region < 0)
 	{

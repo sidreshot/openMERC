@@ -151,7 +151,7 @@ const char *gl3_glass_fs =
 	"uniform vec4 gPane;\n"         /* the clear pane's colour (0..1) and alpha */
 	"uniform vec4 gK;\n"            /* refraction, tint, reflection, waviness */
 	"uniform vec4 gTexel;\n"        /* 1 / texture size */
-	"uniform vec4 gFogC;\n"         /* gl_fogmode 1: colour, on */
+	"uniform vec4 gFogC;\n"         /* gl_fogmode 1: colour, on (1); 2: the regions per pixel (E19 r_om_fogpix) */
 	"uniform vec4 gFogR;\n"         /* start, end */
 	"uniform vec4 omBL[8];\n"       /* the lamps of the view (gl3_lamps.c): origin, radius */
 	"uniform vec4 omBC[8];\n"       /* colour */
@@ -435,7 +435,13 @@ const char *gl3_glass_fs =
 	"	own += dirt * (lit * 0.35 + refr * 0.3) * vec3(0.95, 0.92, 0.85);\n"
 	"	trans *= 1.0 - dirt * 0.3;\n"
 	"	float ownW = cover + hz * (1.0 - cover);\n"
-	"	if (gFogC.w > 0.5)\n"
+	"	if (gFogC.w > 1.5)\n"
+	/* the pane's own light in the fog up to it; what is seen through it was fogged with the world behind */
+	"	{\n"
+	"		vec4 F = omRegionFog(passWorld);\n"
+	"		own = own * (1.0 - F.a) + F.rgb * ownW;\n"
+	"	}\n"
+	"	else if (gFogC.w > 0.5)\n"
 	"	{\n"
 	"		float f = clamp((gFogR.y - passFogDist) / max(gFogR.y - gFogR.x, 0.0001), 0.0, 1.0);\n"
 	"		own = mix(gFogC.rgb * ownW, own, f);\n"
@@ -887,7 +893,11 @@ GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int f
 	GL3_FX_DefaultState(&fog);
 	GL3_Fog_SetHardwareFxState(fogregion, &fog);
 
-	if (fog.fogmode)
+	if (fog.fogmode == 2)
+	{
+		glUniform4f(GL3_UniformLoc(prog, "gFogC"), 0, 0, 0, 2);
+	}
+	else if (fog.fogmode)
 	{
 		vec3_t vf, vr, vu;
 

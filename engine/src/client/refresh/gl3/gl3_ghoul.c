@@ -1224,7 +1224,11 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 	/* step 10: fog */
 	darkness = P.shadowDarkness;
 
-	if (!weapon)
+	/* E19 r_om_fogpix: the model's shader fogs it per pixel (the regions the view crosses), not the whole model by
+	   its origin; the view weapon stays clear as before */
+	GL3_GhoulEmu_SetRegionFog(!weapon && GL3_Fog_PixOn());
+
+	if (!weapon && !GL3_Fog_PixOn())
 	{
 		int region = GL3_Fog_RegionOfPoint(e->origin);
 
@@ -1399,6 +1403,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		/* a reused handle forgets the old model's answer at its first draw */
 		roundinst[(unsigned short)(e->frame & 0xFFFF)] = GL3_GhoulEmu_TakeRound() ? 1 : 0;
 		GL3_GhoulEmu_SetEntityGlow(0.0f);
+		GL3_GhoulEmu_SetRegionFog(false);
 		GL3_GhoulEmu_SetCsm(false, false);
 		GL3_GhoulEmu_SetCaster(false);
 		GL3_GhoulEmu_SetTess(0, 0.0f);

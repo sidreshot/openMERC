@@ -126,6 +126,8 @@ static struct
 	/* GL objects */
 	GLuint prog, vao, vbo;
 	GLint u_tex, u_texenv, u_texswz, u_alphafunc, u_alpharef, u_fog, u_fogcolor, u_a2c;
+	GLint u_rf;        /* E19: omRFOn */
+	int rfon;          /* E19: the regions' fog per pixel for this entity */
 
 	/* GFX-modern bloom (gl3_post.c): blending as set, the Ghoul system's source weight of the next
 	   primitive and the glow of the entity being drawn */
@@ -795,6 +797,7 @@ static const char *emu_fs =
 	"uniform int omA2C;\n"
 	"uniform int fogon;\n"
 	"uniform vec4 fogcolor;\n"
+	"uniform int omRFOn;\n"   /* E19 r_om_fogpix: 1 the regions' fog per pixel, 2 the same for an additive pass (fades) */
 	"uniform vec4 omEmis;\n"   /* GFX-modern: (x, y, z, mode) as in the effect shader */
 	"in vec4 vColor;\n"
 	"in vec2 vTex;\n"
@@ -1123,6 +1126,13 @@ static const char *emu_fs =
 	"	}\n"
 	"	vec3 omPre = (fogon != 0) ? c.rgb * vFog : c.rgb;\n"
 	"	if (fogon != 0) c.rgb = mix(fogcolor.rgb, c.rgb, vFog);\n"
+	"	if (omRFOn != 0)\n"
+	"	{\n"
+	"		vec4 wf = omInvPV * vPos;\n"
+	"		vec4 F = omRegionFog(wf.xyz / wf.w);\n"
+	"		omPre *= 1.0 - F.a;\n"
+	"		c.rgb = (omRFOn == 2) ? c.rgb * (1.0 - F.a) : c.rgb * (1.0 - F.a) + F.rgb;\n"
+	"	}\n"
 	"	if (omCsmRepl != 0 || omBeamN > 0)\n"
 	"	{\n"
 	"		vec4 w = omInvPV * vPos;\n"
@@ -1263,8 +1273,25 @@ Compile(GLenum type, const char *src)
 	const char *srcs[2] = {version, src};
 	GLuint s = glCreateShader(type);
 	GLint ok = 0;
+	char *rf = NULL;
+	char *wrapped;
+
+	/* E19 r_om_fogpix: the per-pixel fog of the regions (omRegionFog) */
+	if (type == GL_FRAGMENT_SHADER)
+	{
+		size_t l = strlen(OM_REGIONFOG_GLSL) + strlen(src) + 1;
+
+		rf = malloc(l);
+		if (rf)
+		{
+			snprintf(rf, l, "%s%s", OM_REGIONFOG_GLSL, src);
+			src = rf;
+			srcs[1] = src;
+		}
+	}
+
 	/* GFX-modern: the emissive output of the post path */
-	char *wrapped = (type == GL_FRAGMENT_SHADER) ? GL3_Post_WrapFragment(src, NULL) : NULL;
+	wrapped = (type == GL_FRAGMENT_SHADER) ? GL3_Post_WrapFragment(src, NULL) : NULL;
 
 	if (wrapped)
 	{
@@ -1274,6 +1301,7 @@ Compile(GLenum type, const char *src)
 	glShaderSource(s, 2, srcs, NULL);
 	glCompileShader(s);
 	free(wrapped);
+	free(rf);
 	glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
 
 	if (!ok)
@@ -1351,6 +1379,16 @@ CreateObjects(void)
 	E.u_fogcolor = glGetUniformLocation(E.prog, "fogcolor");
 	E.u_emis = glGetUniformLocation(E.prog, "omEmis");
 	E.u_invpv = glGetUniformLocation(E.prog, "omInvPV");
+	E.u_rf = glGetUniformLocation(E.prog, "omRFOn");
+	{
+		GLint rt = glGetUniformLocation(E.prog, "omRFTab");
+
+		if (rt != -1)
+		{
+			GL3_UseProgram(E.prog);
+			glUniform1i(rt, 17); /* gl3_fog.c PixFrame */
+		}
+	}
 	E.u_csmrepl = glGetUniformLocation(E.prog, "omCsmRepl");
 	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
 	E.u_pbrk = glGetUniformLocation(E.prog, "omPbrK");
@@ -2083,6 +2121,7 @@ Flush(void)
 	U1f(E.u_alpharef, Clamp01(E.alpharef));
 	U1i(E.u_fog, E.fog ? 1 : 0);
 	U4f(E.u_fogcolor, E.fogcolor[0], E.fogcolor[1], E.fogcolor[2], E.fogcolor[3]);
+	U1i(E.u_rf, E.rfon ? ((E.blendon && (E.bdst == GL_ONE)) ? 2 : 1) : 0);
 
 	/* GFX-modern bloom: Ghoul self-illumination / additive materials as drawn (SPEC-AMEND-016 R16.7),
 	   RF_FULLBRIGHT / RF_GLOW entities; multiplying blends keep what is behind */
@@ -2176,7 +2215,7 @@ Flush(void)
 		U1i(E.u_csmrepl, repl);
 		U1i(E.u_beamn, nbeam);
 
-		if (repl || nbeam)
+		if (repl || nbeam || E.rfon)
 		{
 			UM4(E.u_invpv, GL3_CSM_InvPV());
 		}
@@ -3854,6 +3893,13 @@ void
 GL3_GhoulEmu_SetCaster(qboolean casts)
 {
 	E.casts = casts;
+}
+
+/* E19 r_om_fogpix: the regions' fog per pixel for the entity being drawn (not the view weapon) */
+void
+GL3_GhoulEmu_SetRegionFog(qboolean on)
+{
+	E.rfon = on ? 1 : 0;
 }
 
 /* GFX-modern: bloom weight of the whole entity being drawn (RF_FULLBRIGHT / RF_GLOW), 0 after it */

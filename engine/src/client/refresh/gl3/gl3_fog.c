@@ -58,6 +58,14 @@ typedef struct
 
 static fogregion_t regions[MAX_FOG_REGIONS];
 static int numregions;
+
+/* E19 r_om_fogpix: one per-pixel fog for everything (the region table, GL3_Fog_PixFrame) */
+static cvar_t *r_om_fogpix;
+static qboolean pixon;           /* this frame */
+static void PixFrame(void);
+static void PixFree(void);
+static void PixWall(int n);
+static void Shimmer(void);
 static fogsurf_t *fogsurfs;      /* per world surface */
 static short *leafregion;        /* per world leaf */
 static int numfogsurfs, numleafregions;
@@ -146,6 +154,8 @@ GL3_Fog_FreeRegions(void)
 	}
 
 	FogTableFree(); /* r_om_ppfog region table */
+	PixFree();      /* E19 r_om_fogpix region table */
+	pixon = false;
 	free(leafregion);
 	fogsurfs = NULL;
 	leafregion = NULL;
@@ -192,6 +202,12 @@ GL3_Fog_LoadRegions(gl3model_t *mod, const byte *mod_base, const lump_t *lfaces,
 	const dleaf46_t *leafs = (const dleaf46_t *)(mod_base + lleafs->fileofs);
 	int numpolys = lpolys->filelen / 8;
 	int i, j, k;
+
+	/* E19: the menu row exists once a map is loaded */
+	if (!r_om_fogpix)
+	{
+		r_om_fogpix = ri.Cvar_Get("r_om_fogpix", "1", CVAR_ARCHIVE);
+	}
 
 	GL3_Fog_FreeRegions();
 
@@ -432,6 +448,7 @@ GL3_Fog_BeginFrame(void)
 	numqueued = 0;
 	viewregion = -1;
 	cutdist2 = -1;
+	pixon = false;
 	memset(regionseen, 0, sizeof(regionseen));
 
 	if (!fogworld || (fogworld != gl3_worldmodel) || !numregions)
@@ -459,6 +476,7 @@ GL3_Fog_BeginFrame(void)
 
 	viewregion = LeafRegion(leaf);
 	FogCullFrame();
+	PixFrame();
 }
 
 /*
@@ -1091,7 +1109,7 @@ GL3_Fog_RegionLinear(int region, float *start, float *end, float color[4])
 static qboolean
 HardwareMode(void)
 {
-	return gl_fogmode && ((int)gl_fogmode->value == 1);
+	return gl_fogmode && ((int)gl_fogmode->value == 1) && !pixon; /* E19: r_om_fogpix fogs per pixel */
 }
 
 /* the region whose linear fog a world face gets while drawn, or -1 (also -1 outside gl_fogmode 1) */
@@ -1189,6 +1207,13 @@ GL3_Fog_SetHardwareFxState(int region, gl3fxstate_t *st)
 {
 	float start, end, c[3];
 
+	/* E19: per pixel in the effect shader, whatever region the face is in (the view may cross another one) */
+	if (pixon)
+	{
+		st->fogmode = ((st->blend == 2) || (st->blend == 3)) ? 3 : 2; /* an additive face only fades */
+		return;
+	}
+
 	if ((region < 0) || (region >= numregions) || !HardwareMode())
 	{
 		return;
@@ -1202,6 +1227,34 @@ GL3_Fog_SetHardwareFxState(int region, gl3fxstate_t *st)
 	st->fogcolor[1] = c[1];
 	st->fogcolor[2] = c[2];
 	st->fogcolor[3] = 1;
+}
+
+/* shimmer animation, once per rendered frame */
+static void
+Shimmer(void)
+{
+	int i, j;
+
+	for (i = 0; i < numregions; i++)
+	{
+		fogregion_t *r = &regions[i];
+		float speed = (gl_fogtime->value >= 0) ? gl_fogtime->value : r->speed;
+		float amp = (gl_fogdensityrange->value >= 0) ? gl_fogdensityrange->value : r->amplitude;
+
+		if (!(r->flags & 1))
+		{
+			continue;
+		}
+
+		for (j = 0; j < 10; j++)
+		{
+			float c;
+
+			r->phase[j] += r->phasespeed[j] * speed;
+			c = cosf(r->phase[j]) * amp;
+			r->w[j] = c * fabsf(c);
+		}
+	}
 }
 
 static void
@@ -1257,7 +1310,7 @@ static void DrawQueued(int from, int to, int mode);
 void
 GL3_Fog_DrawPass(qboolean first)
 {
-	int i, j, n;
+	int n;
 	int mode = (int)gl_fogmode->value;
 
 	n = numqueued;
@@ -1268,34 +1321,19 @@ GL3_Fog_DrawPass(qboolean first)
 		gl3_c_fogpolys = 0; /* SPEC-AMEND-006 I4c.4: "fp" restarts with the first overlay pass of the frame */
 	}
 
-	if (!fogworld || (fogworld != gl3_worldmodel) || (mode == 2) || (n == 0))
+	if (pixon && first && fogworld && (fogworld == gl3_worldmodel))
 	{
-		return;
+		PixWall(n);
+	}
+
+	if (!fogworld || (fogworld != gl3_worldmodel) || (mode == 2) || (n == 0) || pixon)
+	{
+		return; /* E19: with r_om_fogpix the screen pass and the shaders fog everything (no overlay) */
 	}
 
 	if (first)
 	{
-		/* shimmer animation, once per rendered frame */
-		for (i = 0; i < numregions; i++)
-		{
-			fogregion_t *r = &regions[i];
-			float speed = (gl_fogtime->value >= 0) ? gl_fogtime->value : r->speed;
-			float amp = (gl_fogdensityrange->value >= 0) ? gl_fogdensityrange->value : r->amplitude;
-
-			if (!(r->flags & 1))
-			{
-				continue;
-			}
-
-			for (j = 0; j < 10; j++)
-			{
-				float c;
-
-				r->phase[j] += r->phasespeed[j] * speed;
-				c = cosf(r->phase[j]) * amp;
-				r->w[j] = c * fabsf(c);
-			}
-		}
+		Shimmer();
 	}
 
 	wallregion = -1;
@@ -1331,6 +1369,11 @@ GL3_Fog_DrawSurfaceNow(msurface_t *surf)
 {
 	int mode = (int)gl_fogmode->value;
 	int region;
+
+	if (pixon)
+	{
+		return; /* E19: the face fogs itself */
+	}
 
 	if (!fogworld || (fogworld != gl3_worldmodel) || (mode == 2) || !FogQueueRoom())
 	{
@@ -1690,6 +1733,312 @@ DrawQueued(int from, int to, int mode)
  * "r <region> [back] [pitch]" (blanks or '_') moves the rendered eye (single player only)
  * so that fog effects can be captured from fixed views.
  * ------------------------------------------------------------------ */
+
+/*
+ * E19 r_om_fogpix: one per-pixel fog for the world, the models, the effects, glass and water (omRegionFog, the GLSL
+ * of OM_REGIONFOG_GLSL in local.h). Instead of the overlay drawn on the faces of a region, the point fog of each
+ * model and effect and the linear fog: for any point the shaders take the stretch of the view ray inside every region
+ * seen (its box clipped by its slanted planes) and turn its length L into SoF's alpha with D = L x L (start, range,
+ * maximum alpha, height falloff, shimmer of the region). A region seen through, with the world behind it, fogs that
+ * world too, as fog does. The table (GL_TEXTURE17, RGBA32F, RF_W texels a row): row 0 the frame - count, dim of the
+ * volumetric fog, far wall region + 1, its distance; the eye; the regions of this frame (far ones first) - and one
+ * row per region.
+ */
+#define RF_W 13
+#define RF_MAXVIS 8
+#define RF_UNIT 17
+
+static GLuint rftab;
+static int rfrows;
+static float *rfdata, *rflast;
+
+static void
+PixFree(void)
+{
+	if (rftab)
+	{
+		glDeleteTextures(1, &rftab);
+	}
+
+	rftab = 0;
+	rfrows = 0;
+	free(rfdata);
+	free(rflast);
+	rfdata = rflast = NULL;
+}
+
+qboolean
+GL3_Fog_PixOn(void)
+{
+	return pixon;
+}
+
+static void
+PixFrame(void)
+{
+	static int maxunits = -1;
+	int i, k, n = numregions, rows = numregions + 1, vis[RF_MAXVIS], nvis = 0, wall = -1;
+	float dvis[RF_MAXVIS], *h;
+	size_t size = (size_t)rows * RF_W * 4 * sizeof(float);
+	vec3_t fwd, right, up;
+
+	if (!r_om_fogpix)
+	{
+		r_om_fogpix = ri.Cvar_Get("r_om_fogpix", "1", CVAR_ARCHIVE);
+	}
+
+	pixon = false;
+
+	if (maxunits < 0)
+	{
+		glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxunits);
+	}
+
+	/* the classic modes stay what they were: 2 no fog, 3 the overlay test colours */
+	if (!r_om_fogpix->value || (n <= 0) || (maxunits <= RF_UNIT) || (gl_fogmode->value >= 2) ||
+		(r_fullbright->value != 0))
+	{
+		return;
+	}
+
+	if (rfrows != rows)
+	{
+		PixFree();
+		rfdata = calloc(1, size);
+		rflast = calloc(1, size);
+
+		if (!rfdata || !rflast)
+		{
+			PixFree();
+			return;
+		}
+
+		glGenTextures(1, &rftab);
+		GL3_SelectTMU(GL_TEXTURE0 + RF_UNIT);
+		glBindTexture(GL_TEXTURE_2D, rftab);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, RF_W, rows, 0, GL_RGBA, GL_FLOAT, NULL);
+		GL3_SelectTMU(GL_TEXTURE0);
+		rfrows = rows;
+		memset(rflast, 0xff, size);
+	}
+
+	Shimmer();
+	AngleVectors(r_newrefdef.viewangles, fwd, right, up);
+
+	/* the regions of this frame: not wholly behind the eye, the nearest RF_MAXVIS (a region around the whole map
+	   counts as at the eye) */
+	for (i = 0; i < n; i++)
+	{
+		const fogregion_t *r = &regions[i];
+		float d = 0;
+
+		/* a region without faces (its box never set: kos1 8) fogs nothing in SoF (only a far wall of its own) */
+		if (r->mins[0] > r->maxs[0])
+		{
+			continue;
+		}
+
+		{
+			int c, front = 0;
+
+			for (c = 0; (c < 8) && !front; c++)
+			{
+				vec3_t p, e;
+
+				p[0] = (c & 1) ? r->maxs[0] : r->mins[0];
+				p[1] = (c & 2) ? r->maxs[1] : r->mins[1];
+				p[2] = (c & 4) ? r->maxs[2] : r->mins[2];
+				VectorSubtract(p, r_newrefdef.vieworg, e);
+				front = (DotProduct(e, fwd) > 0);
+			}
+
+			if (!front)
+			{
+				continue;
+			}
+
+			d = BoxDist2(r->mins, r->maxs, r_newrefdef.vieworg);
+		}
+
+		if (nvis < RF_MAXVIS)
+		{
+			vis[nvis] = i;
+			dvis[nvis++] = d;
+		}
+		else
+		{
+			int far = 0;
+
+			for (k = 1; k < nvis; k++)
+			{
+				if (dvis[k] > dvis[far])
+				{
+					far = k;
+				}
+			}
+
+			if (d < dvis[far])
+			{
+				vis[far] = i;
+				dvis[far] = d;
+			}
+		}
+	}
+
+	/* far ones first: each is laid over what is behind it */
+	for (i = 1; i < nvis; i++)
+	{
+		for (k = i; (k > 0) && (dvis[k] > dvis[k - 1]); k--)
+		{
+			float td = dvis[k];
+			int ti = vis[k];
+
+			dvis[k] = dvis[k - 1];
+			vis[k] = vis[k - 1];
+			dvis[k - 1] = td;
+			vis[k - 1] = ti;
+		}
+	}
+
+	/* the far wall (SPEC-410): the eye's region's; else PixWall after the world walk picks it from the faces seen */
+	if ((viewregion >= 0) && regions[viewregion].farwall != 0)
+	{
+		wall = viewregion;
+	}
+
+	memset(rfdata, 0, size);
+	h = rfdata;
+	h[0] = (float)nvis;
+	h[1] = OverlayDim();
+	h[2] = (float)(wall + 1);
+	h[3] = 2000.0f;
+	{ float *e = h + 4; VectorCopy(r_newrefdef.vieworg, e); }
+	h[7] = (float)(viewregion + 1); /* the eye's region: the whole stretch in its box, no slanted sides (SoF) */
+
+	for (i = 0; i < nvis; i++)
+	{
+		h[8 + i * 4] = (float)vis[i];
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		const fogregion_t *r = &regions[i];
+		float *t = rfdata + (i + 1) * RF_W * 4;
+		float start, range, maxalpha, color[4], c[3];
+		int np = 0;
+
+		Params(r, &start, &range, &maxalpha, color);
+		VectorCopy(r->mins, t);
+		t[3] = (r->mins[0] > r->maxs[0]) ? 1 : 0;
+		{ float *mx = t + 4; VectorCopy(r->maxs, mx); }
+		t[7] = ((r->flags & 2) && (r->size[2] > 0)) ? 1 : 0;
+		t[8] = start;
+		t[9] = range;
+		t[10] = maxalpha / 255.0f;
+		t[11] = (r->flags & 1) ? 1 : 0;
+		t[12] = color[0] / 255.0f;
+		t[13] = color[1] / 255.0f;
+		t[14] = color[2] / 255.0f;
+		t[15] = color[3] / 255.0f;
+
+		/* the slanted sides, turned so that the inside is dot(n, x) - d <= 0 */
+		c[0] = (r->mins[0] + r->maxs[0]) * 0.5f;
+		c[1] = (r->mins[1] + r->maxs[1]) * 0.5f;
+		c[2] = (r->mins[2] + r->maxs[2]) * 0.5f;
+
+		for (k = 0; (k < r->numplanes) && (np < 5) && !t[3]; k++)
+		{
+			const cplane_t *pl = r->planes[k];
+			float *o = t + 16 + np * 4, sg = (DotProduct(pl->normal, c) - pl->dist > 0) ? -1.0f : 1.0f;
+
+			o[0] = pl->normal[0] * sg;
+			o[1] = pl->normal[1] * sg;
+			o[2] = pl->normal[2] * sg;
+			o[3] = pl->dist * sg;
+			np++;
+		}
+
+		t[36] = (float)np;
+		t[37] = r->farwall;
+
+		for (k = 0; k < 10; k++)
+		{
+			t[40 + k] = r->w[k];
+		}
+	}
+
+	if (memcmp(rfdata, rflast, size))
+	{
+		GL3_SelectTMU(GL_TEXTURE0 + RF_UNIT);
+		glBindTexture(GL_TEXTURE_2D, rftab);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, RF_W, rows, GL_RGBA, GL_FLOAT, rfdata);
+		GL3_SelectTMU(GL_TEXTURE0);
+		memcpy(rflast, rfdata, size);
+	}
+
+	/* bound for the whole frame: nothing else uses the unit */
+	GL3_SelectTMU(GL_TEXTURE0 + RF_UNIT);
+	glBindTexture(GL_TEXTURE_2D, rftab);
+	GL3_SelectTMU(GL_TEXTURE0);
+	pixon = true;
+}
+
+/* E19: the far wall when the eye's region has none: as the overlay did, the region with a far wall nearest the eye
+   among the world faces queued by this frame's walk (their region polygons), written into the table's first texel */
+static void
+PixWall(int n)
+{
+	int i, j, k, wall = -1;
+	float best = 1e30f;
+
+	if (!pixon || !rfdata || ((viewregion >= 0) && (regions[viewregion].farwall != 0)))
+	{
+		return;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		const fogqueued_t *q = &queue[i];
+		const fogsurf_t *fs;
+
+		if (q->model || (q->region < 0) || (regions[q->region].farwall == 0))
+		{
+			continue;
+		}
+
+		fs = &fogsurfs[q->surf - fogworld->surfaces];
+
+		for (j = 0; j < fs->numpolys; j++)
+		{
+			const fogpoly_t *p = &fs->polys[j];
+
+			for (k = 0; p->verts && (k < p->numverts); k++)
+			{
+				float D = ThicknessEye(q->region, p->verts[k], r_newrefdef.vieworg);
+
+				if (D < best)
+				{
+					best = D;
+					wall = q->region;
+				}
+			}
+		}
+	}
+
+	if ((float)(wall + 1) != rfdata[2])
+	{
+		rfdata[2] = (float)(wall + 1);
+		rflast[2] = rfdata[2];
+		GL3_SelectTMU(GL_TEXTURE0 + RF_UNIT);
+		glBindTexture(GL_TEXTURE_2D, rftab);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_FLOAT, rfdata);
+		GL3_SelectTMU(GL_TEXTURE0);
+	}
+}
 
 void
 GL3_Fog_Regions_f(void)
