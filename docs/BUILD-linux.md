@@ -27,7 +27,10 @@ Linux: the original game and player modules are 32-bit Windows DLLs.
 
 The fully open build works on Linux with CMake and Ninja. That is the engine, the game and player modules,
 the OMsnd sound module on OpenAL Soft, and Ghoul. x86_64 is the main target. i386 builds too, and is the
-only Linux target that can check the 32-bit SoF layout asserts. The Windows MSVC x86 build is unchanged
+only Linux target that can check the 32-bit SoF layout asserts. arm64 builds natively on an arm64 machine
+(`tools/build/build-linux.sh arm64`; CI job "Linux arm64", package `openMERC-<version>-linux-arm64.tar.gz`). All
+code is built with `-ffp-contract=off`: GCC on aarch64 fuses multiply and add by default, which rounded player
+movement apart from x86 (sofpm_test W15). The Windows MSVC x86 build is unchanged
 (`tools/build/build-msvc.cmd`, `game/build.cmd`, `player/build.cmd`, `modules/sound/build.cmd`).
 
 ## Dependencies
@@ -50,6 +53,7 @@ SDL 3 and OpenAL Soft 1.2x are required. cURL is not needed, because the script 
 tools/build/build-linux.sh                 # x86_64 Release
 tools/build/build-linux.sh x86_64 Debug
 tools/build/build-linux.sh i386            # -m32 -msse2 -mfpmath=sse (SSE2 maths like MSVC x86)
+tools/build/build-linux.sh arm64           # on an arm64 machine (native)
 OM_BUILD_DIR=/tmp/om OM_NO_TESTS=1 tools/build/build-linux.sh
 ```
 
