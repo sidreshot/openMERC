@@ -29,6 +29,7 @@ public:
 	om_script::ScriptSystem *sys = nullptr;
 	int framenum = 0;
 	std::vector<MockEnt> ents;
+	std::string ent_label(int ent) const;
 	std::vector<std::string> roots;                     /* directories searched for files, first wins */
 	std::map<std::string, std::vector<uint8_t> > memfiles;
 	std::map<std::string, std::string> cvars;

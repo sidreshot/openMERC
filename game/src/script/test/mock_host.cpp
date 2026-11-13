@@ -39,6 +39,15 @@ int MockHost::add(const char *classname, const char *targetname, bool ai)
 	return (int)ents.size() - 1;
 }
 
+/* the name an entity is known by in the trace: its targetname, else its script target, else its class */
+std::string MockHost::ent_label(int ent) const
+{
+	if (ent < 0 || ent >= (int)ents.size())
+		return "-";
+	const MockEnt &e = ents[ent];
+	return !e.targetname.empty() ? e.targetname : !e.scripttarget.empty() ? e.scripttarget : e.classname;
+}
+
 void MockHost::log(const std::string &s)
 {
 	if (trace_on)
@@ -211,7 +220,7 @@ bool MockHost::entity_has_use(int ent)
 void MockHost::use_entity(int ent, int other, int activator)
 {
 	ents[ent].uses++;
-	log(fmtf("use %d other %d activator %d", ent, other, activator));
+	log(fmtf("use %d other %d activator %d name=%s", ent, other, activator, ent_label(ent).c_str()));
 }
 
 void MockHost::free_entity(int ent)
@@ -297,13 +306,14 @@ bool MockHost::has_ai(int ent)
 
 void MockHost::ai_command(int ent, const AiCommand &cmd)
 {
-	log(fmtf("ai %d cmd %d kind %d speed %d anim %s dur %g count %d expr %d done %d", ent, cmd.command, cmd.kind,
-	         cmd.speed, cmd.animation ? cmd.animation : "-", cmd.duration, cmd.count, cmd.expression, cmd.done_id));
+	log(fmtf("ai %d cmd %d kind %d speed %d anim %s dur %g count %d expr %d done %d name=%s", ent, cmd.command, cmd.kind,
+	         cmd.speed, cmd.animation ? cmd.animation : "-", cmd.duration, cmd.count, cmd.expression, cmd.done_id,
+	         ent_label(ent).c_str()));
 	if (cmd.done_id && cmd.count > 0)
 		ai_pending.push_back(std::make_pair(framenum + ai_complete_delay, cmd.done_id));
 }
 
-void MockHost::ai_reset(int ent) { log(fmtf("ai_reset %d", ent)); }
+void MockHost::ai_reset(int ent) { log(fmtf("ai_reset %d name=%s", ent, ent_label(ent).c_str())); }
 void MockHost::ai_clear_call_for_help(int ent) { (void)ent; }
 
 int MockHost::heli_command(int ent, int command, int target, const float vec[3], float scalar)

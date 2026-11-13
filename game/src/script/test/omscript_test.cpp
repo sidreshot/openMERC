@@ -27,6 +27,10 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <dirent.h>
+#include <strings.h>
+#include <sys/stat.h>
 #endif
 
 using namespace om_script;
@@ -49,9 +53,23 @@ static void find_os(const std::string &dir, const std::string &rel, std::vector<
 	} while (FindNextFileA(h, &fd));
 	FindClose(h);
 #else
-	(void)dir;
-	(void)rel;
-	(void)out;
+	DIR *d = opendir(dir.c_str());
+	if (!d)
+		return;
+	while (struct dirent *e = readdir(d)) {
+		std::string n = e->d_name;
+		if (n == "." || n == "..")
+			continue;
+		std::string p = dir + "/" + n;
+		struct stat st;
+		if (stat(p.c_str(), &st) != 0)
+			continue;
+		if (S_ISDIR(st.st_mode))
+			find_os(p, rel.empty() ? n : rel + "/" + n, out);
+		else if (n.size() > 3 && !strcasecmp(n.c_str() + n.size() - 3, ".os"))
+			out.push_back(rel.empty() ? n : rel + "/" + n);
+	}
+	closedir(d);
 #endif
 }
 
@@ -156,6 +174,10 @@ static int cmd_run(const std::vector<std::string> &roots)
 			frames_total++;
 		}
 		trace_total += (long)h.trace.size();
+		/* OMSCRIPT_TRACE=1: every trace line of the run, prefixed with the script (the AI commands of the levels) */
+		if (getenv("OMSCRIPT_TRACE"))
+			for (const auto &t : h.trace)
+				printf("TRACE %s %s\n", n.c_str(), t.c_str());
 		std::string res;
 		if (!sys.pending_error().empty()) {
 			res = "error";
