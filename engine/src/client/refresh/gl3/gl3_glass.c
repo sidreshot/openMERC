@@ -31,6 +31,7 @@
  * refraction (1). r_om_glass_tint: how much of the texture's hue tints the
  * view (0.35). r_om_glass_reflect: strength of the reflection (1).
  * r_om_glass_dirt: grime, smears and dust on the panes (0.3, a little).
+ * r_om_glass_rain: while it rains, drops on the panes with the open sky on one side (E20; 1, 0 = none).
  */
 
 #include "header/local.h"
@@ -46,6 +47,7 @@
 #define GLASS_MAXVERTS 1024
 
 static cvar_t *r_om_glass, *r_om_glass_refract, *r_om_glass_tint, *r_om_glass_reflect, *r_om_glass_dirt;
+static cvar_t *r_om_glass_rain;
 
 typedef struct
 {
@@ -141,6 +143,7 @@ const char *gl3_glass_fs =
 	"uniform mat4 gPrevPV;\n"       /* its projection x view */
 	"uniform vec4 gSSR;\n"          /* the last frame there, the reach of the traced reflection */
 	"uniform vec4 gDirt;\n"         /* r_om_glass_dirt */
+	"uniform vec4 gRain;\n"         /* E20: x rain on this pane (0 none), y 1: show the drops (r_om_glass_debug 2) */
 	"uniform vec4 omSoftP;\n"       /* projection C, D; depth range min, max */
 	"uniform vec4 omSoftV;\n"       /* 1 / scene target size */
 	"uniform vec4 gN;\n"            /* the pane's normal toward the eye */
@@ -187,6 +190,81 @@ const char *gl3_glass_fs =
 	"	float ndc = (z - omSoftP.z) / (omSoftP.w - omSoftP.z) * 2.0 - 1.0;\n"
 	"	return omSoftP.y / (ndc + omSoftP.x);\n"
 	"}\n"
+	/* E20: rain on the street side of a pane, in its own plane (q: across, down; world units): beads that land, sit
+	   and dry up, and drops that run down leaving a wet trail of small beads. Returns the slope of the water (a lens)
+	   and how much of the point it covers */
+	"vec3 gRainDrops(vec2 q, float t, float run)\n"
+	"{\n"
+	"	vec3 o = vec3(0.0);\n"
+	/* the running drops: one column of them every 2.4 units, each drop of a column the length of its gap apart */
+	"	float lane = 0.0;\n"
+	"	float cw = 2.4;\n"
+	"	float col = floor(q.x / cw);\n"
+	"	float h = gHash(vec2(col, 5.3));\n"
+	"	if (h < 0.55 * run)\n"
+	"	{\n"
+	"		float sp = 5.0 + 9.0 * gHash(vec2(col, 2.9));\n"
+	"		float gap = 30.0 + 50.0 * gHash(vec2(col, 2.2));\n"
+	"		float x0 = (col + 0.3 + 0.4 * gHash(vec2(col, 8.1))) * cw + 0.15 * sin(q.y * 0.5 + h * 20.0);\n"
+	/* stick and slip: the drop pauses and runs on */
+	"		float run2 = t * sp + 0.45 * sp * sin(t * 1.3 + h * 9.0) + h * gap;\n"
+	"		float lc = mod(q.y - run2, gap) - gap * 0.5;\n"
+	"		float dx = q.x - x0;\n"
+	"		vec2 e = vec2(dx / 0.34, lc / (lc > 0.0 ? 0.44 : 0.34));\n"
+	"		float k = length(e);\n"
+	"		if (k < 1.0)\n"
+	"		{\n"
+	"			o.xy = e * (1.0 + 0.6 * k * k);\n"
+	"			o.z = 1.0 - smoothstep(0.8, 1.0, k);\n"
+	"		}\n"
+	/* the trail above it: the drop has taken the beads with it (a clear lane), a thin wet streak and the little
+	   beads it leaves */
+	"		float tl = 14.0 + 10.0 * h;\n"
+	"		if (lc < 0.0 && lc > -tl)\n"
+	"		{\n"
+	"			float a = 1.0 + lc / tl;\n"
+	"			lane = (1.0 - smoothstep(0.2, 0.4, abs(dx))) * min(a * 3.0, 1.0);\n"
+	"			float w = 0.06 * a + 0.02;\n"
+	"			if (abs(dx) < w && o.z < 0.5)\n"
+	"			{\n"
+	"				o.x += dx / w * 0.9 * a;\n"
+	"				o.z = max(o.z, 0.75 * a);\n"
+	"			}\n"
+	"			float bi = floor(lc / 0.5);\n"
+	"			vec2 bd = vec2(dx - 0.05 * (gHash(vec2(col, bi)) - 0.5), mod(lc, 0.5) - 0.25);\n"
+	"			float br = (0.03 + 0.05 * gHash(vec2(bi, col))) * a;\n"
+	"			float bk = length(bd) / br;\n"
+	"			if (bk < 1.0 && gHash(vec2(bi + 3.0, col)) < 0.6)\n"
+	"			{\n"
+	"				o.xy += bd / br;\n"
+	"				o.z = max(o.z, 1.0 - smoothstep(0.7, 1.0, bk));\n"
+	"			}\n"
+	"		}\n"
+	"	}\n"
+	/* the beads: small ones close together, a few bigger ones; each lands, sits and dries up */
+	"	for (int l = 0; l < 2; l++)\n"
+	"	{\n"
+	"		if (o.z > 0.9 || lane > 0.99) break;\n"
+	"		float cs = (l == 0) ? 0.45 : 1.4;\n"
+	"		vec2 p = q / cs + float(l) * 17.31;\n"
+	"		vec2 id = floor(p), f = fract(p) - 0.5;\n"
+	"		float hb = gHash(id + 3.1);\n"
+	"		if (hb > ((l == 0) ? 0.7 : 0.35)) continue;\n"
+	"		vec2 c = (vec2(gHash(id + 7.7), gHash(id + 1.3)) - 0.5) * 0.5;\n"
+	"		float ph = fract(t / (4.0 + 5.0 * hb) + gHash(id + 4.4));\n"
+	"		float r = ((l == 0) ? 0.07 + 0.12 * gHash(id + 9.2) : 0.06 + 0.07 * gHash(id + 9.2)) * smoothstep(0.0, 0.04, ph) *\n"
+	"			(1.0 - smoothstep(0.75, 1.0, ph)) * (1.0 - lane);\n"
+	"		vec2 d = (f - c) * vec2(1.0, 0.9);\n"
+	"		float kb = length(d) / max(r, 1e-3);\n"
+	"		if (kb < 1.0)\n"
+	"		{\n"
+	"			o.xy += d / max(r, 1e-3) * (1.0 + 0.6 * kb * kb) * (1.0 - o.z);\n"
+	"			o.z = max(o.z, 1.0 - smoothstep(0.8, 1.0, kb));\n"
+	"		}\n"
+	"	}\n"
+	"	return o;\n"
+	"}\n"
+
 	"void main()\n"
 	"{\n"
 	"	vec4 t = texture(tex, passTexCoord);\n"
@@ -217,6 +295,28 @@ const char *gl3_glass_fs =
 	"		dirt = clamp((smoothstep(0.45, 0.85, grime) * 0.7 + smear * 0.45 + dust * 0.35) * gDirt.x, 0.0, 1.0) * (1.0 - cover);\n"
 	"		smudge = max(smudge, dirt);\n"
 	"	}\n"
+	/* E20: rain on the street side. Its own frame, the same from both sides of the pane: across (level) and down the
+	   pane; a level pane (a skylight) gets beads only */
+	"	vec3 rainN = vec3(0.0);\n"
+	"	float rainC = 0.0, rainS = 0.0;\n"
+	"	if (gRain.x > 0.0)\n"
+	"	{\n"
+	"		vec3 Tw = (abs(N.z) > 0.95) ? vec3(1.0, 0.0, 0.0) : normalize(vec3(-N.y, N.x, 0.0));\n"
+	"		if (Tw.x + Tw.y * 0.001 < 0.0) Tw = -Tw;\n"
+	"		vec3 Bw = normalize(cross(Tw, N));\n"
+	"		if (Bw.z > 0.0 || (Bw.z == 0.0 && Bw.y < 0.0)) Bw = -Bw;\n"
+	"		vec3 w = gRainDrops(vec2(dot(passWorld, Tw), dot(passWorld, Bw)), gEye.w, 1.0 - smoothstep(0.7, 0.95, abs(N.z)));\n"
+	"		rainC = w.z * min(gRain.x, 1.0) * (1.0 - cover);\n"
+	"		rainS = length(w.xy);\n"
+	"		rainN = (Tw * w.x + Bw * w.y) * rainC;\n"
+	"	}\n"
+	"	if (gRain.y > 0.5)\n"
+	"	{\n"
+	"		outColor = vec4(rainC, min(rainS, 1.0) * rainC, gRain.x > 0.0 ? 0.25 : 0.0, 1.0);\n"
+	"		outEmissive = vec4(0.0, 0.0, 0.0, 1.0);\n"
+	"		outMaterial = vec4(0.0, 0.0, 0.0, 1.0);\n"
+	"		return;\n"
+	"	}\n"
 	/* drawn window glass: long uneven waves, mostly across; the texture's streaks bend the light too */
 	"	vec2 g = (gNoiseG(pp * vec2(0.018, 0.05)) * vec2(0.35, 1.0) + gNoiseG(pp * 0.08 + 17.0) * 0.3) * gK.w;\n"
 	/* only the streaks bend it, not the edges of the wire and the frame: the slope of every colour change of the
@@ -224,7 +324,7 @@ const char *gl3_glass_fs =
 	"	g += vec2(gStreak(texture(tex, passTexCoord + vec2(gTexel.x, 0.0))) - gStreak(texture(tex, passTexCoord - vec2(gTexel.x, 0.0))),\n"
 	"		gStreak(texture(tex, passTexCoord + vec2(0.0, gTexel.y))) - gStreak(texture(tex, passTexCoord - vec2(0.0, gTexel.y)))) * 0.2;\n"
 	"	vec3 tw = T1 * g.x + B1 * g.y;\n"
-	"	vec3 Np = normalize(N + tw * 0.03);\n"
+	"	vec3 Np = normalize(N + tw * 0.03 + rainN * 0.6);\n"
 	/* the scene behind: a thin pane turns the view by a small angle - the same shift on the screen near and far, as
 	   through window glass (a shift growing with the distance behind made a lens of every pane, and three shifted
 	   colour channels made rainbow edges window glass does not have) */
@@ -234,7 +334,16 @@ const char *gl3_glass_fs =
 	"	vec4 c1 = transProjView * vec4(passWorld + tw * (0.6 * gK.x * surfD * 0.01), 1.0);\n"
 	"	vec2 off = clamp((c1.xy / c1.w - c0.xy / c0.w) * 0.5, vec2(-0.003), vec2(0.003));\n"
 	"	if (gEyeDist(texture(gDepth, suv + off * 1.1).r) < surfD + 1.0) off = vec2(0.0);\n"
+	/* a drop is a small lens: it shows the scene around it, turned over (as wide as a few drops on the screen) */
+	"	if (rainC > 0.0)\n"
+	"	{\n"
+	"		vec4 c2 = transProjView * vec4(passWorld - rainN * 0.8, 1.0);\n"
+	"		vec2 od = off + clamp((c2.xy / c2.w - c0.xy / c0.w) * 0.5, vec2(-0.03), vec2(0.03));\n"
+	"		if (gEyeDist(texture(gDepth, suv + od).r) >= surfD + 1.0) off = od;\n"
+	"	}\n"
 	"	vec3 refr = texture(gScene, suv + off).rgb;\n"
+	/* the view through a drop is a little soft */
+	"	smudge = max(smudge, rainC * 0.45);\n"
 	/* frosted under the smudges */
 	"	if (smudge > 0.05)\n"
 	"	{\n"
@@ -316,6 +425,8 @@ const char *gl3_glass_fs =
 	"	}\n"
 	"	spec = min(spec * F * 2.0, vec3(1.5));\n"
 	"	vec3 trans = refr * tint * (1.0 - F);\n"
+	/* the edge of a drop turns the view away (dark rim) */
+	"	trans *= 1.0 - 0.25 * rainC * smoothstep(0.5, 1.3, rainS);\n"
 	"	float hz = smudge * 0.2;\n"
 	"	vec3 haze = mix(t.rgb, gPane.rgb, 0.5) * lit * 1.3;\n"
 	"	vec3 own = t.rgb * lit * cover + (haze * hz + env * F * gK.z + spec) * (1.0 - cover);\n"
@@ -436,6 +547,7 @@ InitCvars(void)
 		r_om_glass_tint = ri.Cvar_Get("r_om_glass_tint", "0.35", CVAR_ARCHIVE);
 		r_om_glass_reflect = ri.Cvar_Get("r_om_glass_reflect", "1", CVAR_ARCHIVE);
 		r_om_glass_dirt = ri.Cvar_Get("r_om_glass_dirt", "0.3", CVAR_ARCHIVE);
+		r_om_glass_rain = ri.Cvar_Get("r_om_glass_rain", "1", CVAR_ARCHIVE);
 	}
 }
 
@@ -730,6 +842,36 @@ GL3_Glass_Draw(msurface_t *surf, gl3image_t *image, const entity_t *model, int f
 
 		glUniform4f(GL3_UniformLoc(prog, "gSSR"), prev ? 1.0f : 0.0f, 700.0f, 0, 0);
 		glUniform4f(GL3_UniformLoc(prog, "gDirt"), Q_clamp(r_om_glass_dirt->value, 0.0f, 2.0f), 0, 0, 0);
+
+		/* E20: rain on the pane if one side of it is under the open sky while it rains */
+		{
+			float rain = 0;
+
+			if (r_om_glass_rain->value > 0)
+			{
+				vec3_t c = {0, 0, 0};
+				int k;
+
+				for (k = 0; k < nv; k++)
+				{
+					VectorAdd(c, verts[k].pos, c);
+				}
+
+				VectorScale(c, 1.0f / nv, c);
+				rain = GL3_Post_GlassRain(c, nrm) * Q_min(r_om_glass_rain->value, 2.0f);
+			}
+
+			{
+				static cvar_t *rdbg;
+
+				if (!rdbg)
+				{
+					rdbg = ri.Cvar_Get("r_om_glass_debug", "0", 0);
+				}
+
+				glUniform4f(GL3_UniformLoc(prog, "gRain"), rain, (rdbg->value == 2) ? 1.0f : 0.0f, 0, 0);
+			}
+		}
 	}
 
 	GL3_Post_SoftUniforms(GL3_UniformLoc(prog, "omSoftP"), GL3_UniformLoc(prog, "omSoftV"), 0);

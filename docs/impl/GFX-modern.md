@@ -1852,3 +1852,29 @@ quick second strike the first thunder was lost.
 * Seen in shots and a recording (jpn2 elevator and outside it): the strike flickers three times in about 0.4 s, the
   frame's mean brightness rises 28 %. Window panes and wet facades reflect the lit sky (SSR), in a still frame as rings
   around the windows.
+
+## E20: rain on windows (owner, 2026-11-13: "if it rains, there must be drops on the street side")
+
+* gl3_glass.c, the clear glass shader: while it rains, a pane whose one side lies under the open sky gets water on it.
+  GL3_Post_GlassRain (gl3_post.c) tests the pane's centre 12 and 32 units off along its normal, both sides, against the
+  BSP column up to the sky (SKCPoint, the same test as the rain's own columns); the rain's density scales it. An
+  inside window (both sides under a roof) stays dry.
+* gRainDrops, in the pane's own frame (level across, down the pane; the same from both sides, so the drops do not move
+  when the eye goes round the pane):
+  - beads: small ones close together (cells of 0.45 units, radius 0.07..0.19) and a few bigger ones (1.4 units); each
+    lands, sits and dries up over 4..9 s;
+  - running drops: a column every 2.4 units, about half of them used, a drop every 30..80 units of a column, sliding
+    5..14 units a second with a pause and a push (stick and slip), swaying a little; the trail above it is a lane
+    the drop has cleared of beads, with a thin wet streak and small beads left in it. A level pane (a skylight) gets
+    beads only.
+  - Each drop is a small lens: the view through it is the scene around it turned over (the scene copy, offset by the
+    drop's slope, up to 3 % of the screen), a little soft, darker at its rim; its slope tilts the pane's normal, so
+    the Fresnel reflection and the lamp highlights sit on the drops' edges.
+* First version: drops of 0.12..0.36 units looked like bubbles (three times real drops) with sharp turned-over
+  pictures; the trails were lines of one or two pixels lost among the beads (the cleared lane makes them read).
+* r_om_glass_rain (1; 0 none, up to 2), menu Video -> Effects -> Rain on Glass. Test aid r_om_glass_debug 2: the drops
+  as colours (red cover, green slope, blue: rain on the pane).
+* Cost: jpn2 elevator, the window about a third of a 1600x900 view: GPU 1.046 ms with the drops, 1.018 without
+  (90 samples each). GLES 3: the same drops (Mesa, debug context, no errors).
+* Also (E18): menu Video -> Effects -> Lightning Flash sets r_om_lightning_sky; Off takes the glare away too
+  (bright flashes are not for everyone).

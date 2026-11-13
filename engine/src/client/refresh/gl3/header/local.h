@@ -779,6 +779,7 @@ void GL3_Glass_PaneStats(gl3image_t *image, const byte *rgba, int w, int h);
 void GL3_Glass_BeginFrame(void);
 void GL3_Glass_Register(void);
 GLuint GL3_Post_LastFrame(float *prevpv);
+float GL3_Post_GlassRain(const float *centre, const float *normal); /* E20: rain on a pane, 0 none */
 /* gl3_sofapi.c: the lights of Ghoul models kept for the frames they are culled */
 int GL3_SoF_ModelLightMark(void);
 void GL3_SoF_ModelLightsDrawn(void *inst, int mark);

@@ -9845,6 +9845,43 @@ SKCPoint(float x, float y, float *out)
 	out[1] = c.done ? c.hi : -1e9f;
 }
 
+/* E20: how much rain a pane of glass gets (0 none): while it rains, if the air on one side of it lies under the
+   open sky (a column of the world straight up to the sky, as the drops of the rain itself), 12 or 32 units off */
+float
+GL3_Post_GlassRain(const float *centre, const float *normal)
+{
+	static const float dist[2] = {12.0f, 32.0f};
+	int i, s;
+
+	if (!WX.active || !WX.rain || !gl3_worldmodel || !r_om_rain_density)
+	{
+		return 0;
+	}
+
+	for (s = -1; s <= 1; s += 2)
+	{
+		for (i = 0; i < 2; i++)
+		{
+			float lohi[2], p[3];
+			int j;
+
+			for (j = 0; j < 3; j++)
+			{
+				p[j] = centre[j] + normal[j] * dist[i] * s;
+			}
+
+			SKCPoint(p[0], p[1], lohi);
+
+			if ((p[2] >= lohi[0]) && (p[2] <= lohi[1]))
+			{
+				return Q_clamp(r_om_rain_density->value, 0.0f, 1.5f);
+			}
+		}
+	}
+
+	return 0;
+}
+
 /* one row of grid points: corners (w + 1 per row, h + 1 rows) then centres (w per row, h rows) */
 static void
 SKCRow(int j, void *ctx)
@@ -10442,7 +10479,8 @@ nodrops:
 			/* E18: the channel is far brighter than white: above 1 in the float scene, so the bloom and the lens
 			   ghosts carry it into the eyes (r_om_lightning_glare 0: the old clamped core) */
 			{
-				float g = Q_clamp(r_om_lightning_glare->value, 0.0f, 4.0f);
+				/* the menu's Lightning Flash Off (r_om_lightning_sky 0) takes the glare away too */
+				float g = Q_clamp(r_om_lightning_glare->value, 0.0f, 4.0f) * ((r_om_lightning_sky->value > 0) ? 1.0f : 0.0f);
 
 				glUniform4f(WX.b_color, 0.75f, 0.82f, 1.0f, pass ? Q_max(Q_min(1.0f, flash * 1.8f), flash * 4.0f * g) :
 					flash * (0.22f + 0.2f * g));
