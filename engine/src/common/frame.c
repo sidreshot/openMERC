@@ -362,7 +362,9 @@ Qcommon_Init(int argc, char **argv)
 		Q_strlcpy(userGivenGame, game, sizeof(userGivenGame));
 	}
 
-	/* 4. filesystem; openMERC: without game data the player may unpack it from a disc image first */
+	/* 4. filesystem; openMERC: without game data the player may unpack it from a disc image first. That check
+	   reads basedir and cddir, so the dash switches have to be in their cvars by now */
+	FS_ReadSwitches();
 #ifndef DEDICATED_ONLY
 	{
 		extern void CL_OM_EnsureGameData(void);

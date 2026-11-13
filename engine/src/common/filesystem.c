@@ -2591,6 +2591,23 @@ FS_FindGameData(void)
 	}
 }
 
+/* The dash switches set their cvars before the cvars are registered. Also called by the start-up before the
+   check for game data (CL_OM_EnsureGameData), which runs ahead of the filesystem and reads basedir and cddir. */
+void
+FS_ReadSwitches(void)
+{
+	FS_SwitchToCvar("-basedir", "basedir");
+	FS_SwitchToCvar("-cddir", "cddir");
+	FS_SwitchToCvar("-game", "game");
+	FS_SwitchToCvar("-user", "user");
+
+	/* Yamagi -datadir: same as -basedir (not normalised) */
+	if (datadir[0])
+	{
+		Cvar_FullSet("basedir", datadir, 0);
+	}
+}
+
 void
 FS_InitFilesystem(void)
 {
@@ -2611,16 +2628,7 @@ FS_InitFilesystem(void)
 	Cmd_AddCommand("dir", FS_Dir_f);
 
 	/* dash switches set the values before the cvars are registered */
-	FS_SwitchToCvar("-basedir", "basedir");
-	FS_SwitchToCvar("-cddir", "cddir");
-	FS_SwitchToCvar("-game", "game");
-	FS_SwitchToCvar("-user", "user");
-
-	/* Yamagi -datadir: same as -basedir (not normalised) */
-	if (datadir[0])
-	{
-		Cvar_FullSet("basedir", datadir, 0);
-	}
+	FS_ReadSwitches();
 
 	usergiven = (Cvar_VariableString("user")[0] != 0); /* -user / +set user */
 	fs_basedir = Cvar_Get("basedir", ".", CVAR_NOSET);

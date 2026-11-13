@@ -757,6 +757,7 @@ strlist_t FS_ListFiles2(const char *findname,
 		unsigned musthave, unsigned canthave);
 
 void FS_InitFilesystem(void);
+void FS_ReadSwitches(void); /* -basedir, -cddir, -game, -user, -datadir into their cvars */
 void FS_ShutdownFilesystem(void);
 void FS_BuildGameSpecificSearchPath(const char *dir);
 const char *FS_Gamedir(void);
