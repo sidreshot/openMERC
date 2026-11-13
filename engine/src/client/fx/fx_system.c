@@ -1110,29 +1110,14 @@ CLFX_ParseEffect(void)
 
 /* the instance last started by entity effect slot k of entity num still runs `def`
    and is still emitting or has primitives pending (OpenMerc) */
+/* an instance still emits while a primitive is still to fire or an emitter has bursts left; an emitter whose last
+   burst is out only waits for its particles to die, and holding a slot for that (0.6-0.8 s for environ/firelarge2,
+   one burst per 0.05 s instance) thinned fires to a puff a second */
 static qboolean
-FX_SlotBusy(int num, int k, const fx_def_t *def)
+FX_RunEmitting(const fx_run_t *r)
 {
-	int run = fx_slot_run[num][k] - 1, j;
-	const fx_run_t *r;
+	int j;
 
-	if ((run < 0) || (run >= FX_MAX_RUNNING))
-	{
-		return false;
-	}
-
-	r = &fx_running[run];
-
-	if (!r->inuse || (r->serial != fx_slot_serial[num][k]) || (r->def != def) || r->detached ||
-		(r->p.ent != num))
-	{
-		return false;
-	}
-
-	/* busy while a primitive is still to fire or an emitter has bursts left; an emitter
-	   whose last burst is out only waits for its particles to die, and holding the slot
-	   for that (0.6-0.8 s for environ/firelarge2, one burst per 0.05 s instance) thinned
-	   fires to a puff a second */
 	for (j = 0; j < r->def->eft.count; j++)
 	{
 		const fx_slot_t *s = &r->slot[j];
@@ -1149,6 +1134,81 @@ FX_SlotBusy(int num, int k, const fx_def_t *def)
 	}
 
 	return false;
+}
+
+static qboolean
+FX_SlotBusy(int num, int k, const fx_def_t *def)
+{
+	int run = fx_slot_run[num][k] - 1;
+	const fx_run_t *r;
+
+	if ((run < 0) || (run >= FX_MAX_RUNNING))
+	{
+		return false;
+	}
+
+	r = &fx_running[run];
+
+	if (!r->inuse || (r->serial != fx_slot_serial[num][k]) || (r->def != def) || r->detached ||
+		(r->p.ent != num))
+	{
+		return false;
+	}
+
+	return FX_RunEmitting(r);
+}
+
+/* om_fxplay ... loop (test aid, tools/fxgal): the effect started again at its point the way a level's effect slot
+   starts it (FX_EntitySlots): after the effect's repeat delay, once the instance before has fired everything. A fire,
+   smoke or steam of a level is a chain of short instances; one start alone is a single puff */
+#define FX_PLAYLOOPS 8
+
+static struct
+{
+	fx_def_t *def;
+	fx_params_t p;
+	int run;
+	unsigned serial;
+	float next;
+} fx_playloop[FX_PLAYLOOPS];
+
+static int fx_num_playloops;
+
+static void
+FX_PlayLoopStart(int i)
+{
+	int run = FX_StartEffect(fx_playloop[i].def, &fx_playloop[i].p, FXS_GAME);
+
+	fx_playloop[i].run = run;
+	fx_playloop[i].serial = (run >= 0) ? fx_running[run].serial : 0;
+	fx_playloop[i].next = fx_now + FX_Range(&fx_playloop[i].def->eft.repeat);
+}
+
+static void
+FX_PlayLoops(void)
+{
+	int i;
+
+	for (i = 0; i < fx_num_playloops; i++)
+	{
+		const fx_run_t *r;
+
+		if (fx_now < fx_playloop[i].next)
+		{
+			continue;
+		}
+
+		r = (fx_playloop[i].run >= 0) ? &fx_running[fx_playloop[i].run] : NULL;
+
+		if (r && r->inuse && (r->serial == fx_playloop[i].serial) && (r->def == fx_playloop[i].def) &&
+			FX_RunEmitting(r))
+		{
+			fx_playloop[i].next = fx_now + FX_Range(&fx_playloop[i].def->eft.repeat);
+			continue;
+		}
+
+		FX_PlayLoopStart(i);
+	}
 }
 
 static void
@@ -1504,31 +1564,133 @@ FX_Load_f(void)
 	}
 }
 
-/* OpenMerc test aid: om_fxplay <effect> [distance] [up]: starts an effect (effects/<effect>.eft) at distance units
-   (default 150) in front of the eye, raised by up, facing the eye - repeatable smoke, fire and explosions for the
-   renderer's tests without firing a weapon */
+/* OpenMerc test aid: om_fxplay <effect> [distance] [up] [air|floor|wall] [loop] starts effects/<effect>.eft:
+   - air (default): at distance units (default 150) in front of the eye, raised by up, facing the eye;
+   - floor: on the ground distance units ahead (along the floor, stopped short of a wall), raised by up, facing the eye
+     level - a fire or a smoke column standing where a level would put it;
+   - wall: where the view meets the world, up units off the surface, facing out of it - an impact, sparks, a scorch;
+   - loop: started again and again at that point as a level's effect slot does (FX_PlayLoops), until om_fxclear or a
+     new map - the fires, smoke and steam of the levels, which one start shows as a single puff.
+   Repeatable effects for the renderer's tests and the effect gallery (tools/fxgal) without firing a weapon */
 static void
 FX_Play_f(void)
 {
-	vec3_t f, r, u, o, back;
+	vec3_t f, r, u, o, back, end;
+	trace_t tr;
+	const char *place = (Cmd_Argc() > 4) ? Cmd_Argv(4) : "air";
 	float dist = (Cmd_Argc() > 2) ? (float)atof(Cmd_Argv(2)) : 150.0f;
 	float up = (Cmd_Argc() > 3) ? (float)atof(Cmd_Argv(3)) : 0.0f;
+	int hit;
 
 	if (Cmd_Argc() < 2)
 	{
-		Com_Printf("Usage: om_fxplay <effect> [distance] [up]\n");
+		Com_Printf("Usage: om_fxplay <effect> [distance] [up] [air|floor|wall] [loop]\n");
 		return;
 	}
 
-	AngleVectors(cl.refdef.viewangles, f, r, u);
-	VectorMA(cl.refdef.vieworg, dist, f, o);
-	o[2] += up;
-	VectorScale(f, -1, back);
+	/* an effect the level does not use was never registered by the precache: its sprites, models and sounds are
+	   loaded here (loaded on demand by name, it played with no picture) */
+	{
+		fx_def_t *d = FX_FindEffect(Cmd_Argv(1));
 
-	if (CLFX_StartNamedEffect(Cmd_Argv(1), o, back) < 0)
+		if (d && d->loaded)
+		{
+			FX_RegisterDef(d);
+		}
+	}
+
+	AngleVectors(cl.refdef.viewangles, f, r, u);
+
+	if (!Q_stricmp(place, "wall"))
+	{
+		VectorMA(cl.refdef.vieworg, 4096, f, end);
+		FX_Trace(cl.refdef.vieworg, NULL, NULL, end, FXTR_WORLD, &tr, &hit);
+
+		if (tr.fraction >= 1.0f)
+		{
+			Com_Printf("om_fxplay: no wall in view\n");
+			return;
+		}
+
+		VectorMA(tr.endpos, up, tr.plane.normal, o);
+		VectorCopy(tr.plane.normal, back);
+	}
+	else if (!Q_stricmp(place, "floor"))
+	{
+		/* along the ground: the view's heading without its pitch */
+		f[2] = 0;
+
+		if (VectorNormalize(f) < 0.001f)
+		{
+			Com_Printf("om_fxplay: looking straight up or down, no heading for floor\n");
+			return;
+		}
+
+		VectorMA(cl.refdef.vieworg, dist, f, end);
+		FX_Trace(cl.refdef.vieworg, NULL, NULL, end, FXTR_WORLD, &tr, &hit);
+		VectorMA(tr.endpos, (tr.fraction < 1.0f) ? -16.0f : 0.0f, f, o); /* short of a wall */
+		VectorCopy(o, end);
+		end[2] -= 2048;
+		FX_Trace(o, NULL, NULL, end, FXTR_WORLD, &tr, &hit);
+
+		if (tr.fraction >= 1.0f)
+		{
+			Com_Printf("om_fxplay: no floor below the point\n");
+			return;
+		}
+
+		VectorCopy(tr.endpos, o);
+		o[2] += up;
+		VectorScale(f, -1, back);
+	}
+	else
+	{
+		VectorMA(cl.refdef.vieworg, dist, f, o);
+		o[2] += up;
+		VectorScale(f, -1, back);
+	}
+
+	if ((Cmd_Argc() > 5) && !Q_stricmp(Cmd_Argv(5), "loop"))
+	{
+		fx_def_t *d = FX_FindEffect(Cmd_Argv(1));
+		int i = fx_num_playloops;
+
+		if (!d || !d->loaded || (d->eft.count <= 0))
+		{
+			Com_Printf("om_fxplay: %s did not start\n", Cmd_Argv(1));
+			return;
+		}
+
+		if (i == FX_PLAYLOOPS)
+		{
+			Com_Printf("om_fxplay: %d loops already (om_fxclear ends them)\n", FX_PLAYLOOPS);
+			return;
+		}
+
+		fx_num_playloops++;
+		fx_playloop[i].def = d;
+		FX_DefaultParams(&fx_playloop[i].p);
+		VectorCopy(o, fx_playloop[i].p.origin);
+		FX_AxesFromDir(back, fx_playloop[i].p.fwd, fx_playloop[i].p.right, fx_playloop[i].p.up);
+		FX_PlayLoopStart(i);
+	}
+	else if (CLFX_StartNamedEffect(Cmd_Argv(1), o, back) < 0)
 	{
 		Com_Printf("om_fxplay: %s did not start\n", Cmd_Argv(1));
 	}
+	else if (fx_trace && fx_trace->value)
+	{
+		Com_Printf("om_fxplay: %s at %.0f %.0f %.0f facing %.2f %.2f %.2f\n", Cmd_Argv(1), o[0], o[1], o[2], back[0],
+				back[1], back[2]);
+	}
+}
+
+/* om_fxclear: every running effect, particle, piece of debris and mark gone, as at a map change (the level's own
+   effects start again from their entities) - the effect gallery's clean slate between two effects */
+static void
+FX_Clear_f(void)
+{
+	CLFX_ClearState();
 }
 
 /* om_decal <sprite> [size] [alpha] [r g b]: a mark of textures/sprites/<sprite> where the view meets the world
@@ -1717,6 +1879,7 @@ CLFX_Init(void)
 	Cmd_AddCommand("om_fxmeatdemo", FX_MeatDemo_f);
 	Cmd_AddCommand("om_fxplay", FX_Play_f);
 	Cmd_AddCommand("om_decal", FX_Decal_f);
+	Cmd_AddCommand("om_fxclear", FX_Clear_f);
 }
 
 qboolean
@@ -1741,6 +1904,7 @@ CLFX_Shutdown(void)
 	Cmd_RemoveCommand("om_fxmeatdemo");
 	Cmd_RemoveCommand("om_fxplay");
 	Cmd_RemoveCommand("om_decal");
+	Cmd_RemoveCommand("om_fxclear");
 	fx_inited = false;
 }
 
@@ -1756,6 +1920,7 @@ CLFX_ClearState(void)
 	memset(fx_slot_next, 0, sizeof(fx_slot_next));
 	memset(fx_slot_run, 0, sizeof(fx_slot_run));
 	memset(fx_slot_serial, 0, sizeof(fx_slot_serial));
+	fx_num_playloops = 0;
 	fx_pool_drop_world = fx_pool_drop_own = fx_pool_evicted = fx_pool_slot_capped = 0;
 	fx_shake = 0;
 	fx_shake_decay = 0;
@@ -1893,6 +2058,7 @@ CLFX_Frame(void)
 	}
 
 	FX_EntitySlots();
+	FX_PlayLoops();
 	FX_EditorStep();
 
 	/* the original's order (SPEC-AMEND-005 I5.2): submission, the effects steps, then the

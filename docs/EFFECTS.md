@@ -8,13 +8,13 @@ Rules for every item:
 
 - its own switch (cvar), and a menu row where a player would want it; the original look stays one setting away;
 - a path for Low / Medium and the GLES renderer (phones), or the original look there;
-- before and after shots of the same moment (`om_fxplay <effect> [dist] [up]`, `om_decal <sprite>`), the frame cost
-  measured with the effect on and off;
+- before and after shots of the same moment and the frame cost with the effect on and off: the effect gallery
+  ([tools/fxgal](../tools/fxgal/README.md)), with the item's switch added to its looks;
 - a section in [impl/GFX-modern.md](impl/GFX-modern.md); an entry in [DEVIATIONS.md](DEVIATIONS.md) when anything but
   the picture changes (timing, size, sound, gameplay);
 - the box here is ticked when the item is in `main`, on by default on High, and checked in the game.
 
-Progress: **18 of 41 done**. The README shows the same list.
+Progress: **19 of 41 done**. The README shows the same list.
 
 ## Done
 
@@ -38,6 +38,7 @@ Progress: **18 of 41 done**. The README shows the same list.
 | [x] | Thunderstorm as in MGS V: the clouds light up around the channel, glare in the eyes, the flash through windows, thunder after every strike | `r_om_lightning_sky`, `r_om_lightning_glare` | 2026-11-13 |
 | [x] | Rain on windows: beads and running drops on the panes that face the rain, each drop a small lens | `r_om_glass_rain` | 2026-11-13 |
 | [x] | Map fog per pixel: one fog for the world, models, effects, glass and water, along the view through the fog volumes | `r_om_fogpix` | 2026-11-13 |
+| [x] | B1. Effect gallery: every group below played at fixed spots of four maps (lit and dark, indoors and outdoors), the new and the original look shot on the same frozen frame, the frame's GPU time in each | [tools/fxgal](../tools/fxgal/README.md) | 2026-11-14 |
 
 New effects without an original (not counted): snow on the sib maps (`r_om_snow`), anti-aircraft fire and the
 distant war around kos (`r_om_aa`, `r_om_war`), drifting clouds (`r_om_skyflow`), lens effects (`r_om_lens`).
@@ -46,9 +47,6 @@ distant war around kos (`r_om_aa`, `r_om_war`), drifting clouds (`r_om_skyflow`)
 
 These come first; the effects below are built on them.
 
-- [ ] **B1. Effect gallery.** A script that plays every group of the list below at fixed spots of a few maps (lit and
-  dark, indoors and outdoors), takes before and after shots and the GPU time. The gallery of the first pass
-  (`fxgal.cfg`) was not kept.
 - [ ] **B2. Effects as light in HDR.** Find out how additive effects (fire, sparks, flashes, tracers) enter the HDR
   scene, bloom and exposure today; give them a brightness of their own, so that a fire is a light source and not
   paint over the frame.
@@ -127,5 +125,10 @@ Not on the list: `lighthit`, `exphit`, `gotshot` and `land` are empty (72 bytes,
 `cantsee`, `confusion` and `scripted` look like markers of the AI and of the editing tools (a snowflake sprite); to be
 checked whether any of them shows in normal play.
 
-The order is B1, then B2 to B4 together with E1 to E3 (fire, flamethrower, explosions), then E5 and E8 (sparks,
-tracers), then the rest. The plans of each item may change once the gallery shows the effect.
+The order is B2 to B4 together with E1 to E3 (fire, flamethrower, explosions), then E5 and E8 (sparks, tracers),
+then the rest (B1, the gallery, is done). The plans of each item may change once the gallery shows the effect.
+
+Open question found by the gallery (owner's decision): above 60 frames a second the effects age as fast as the frame
+rate. Their clock runs a full 1/60 s step every frame (SPEC-400 Timebase, kept as in 1.07f), so at 165 fps the
+grenade's fire dome is mostly gone after 0.1 s instead of lasting about 0.2 s, and at 1000 fps it is over after a few
+hundredths. Effects that keep their designed duration at any frame rate would be a deviation from 1.07f (timing).

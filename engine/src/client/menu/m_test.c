@@ -420,7 +420,9 @@ MT_TourNext(void)
    (the console's "wait" is not tied to drawn frames in OpenMerc);
    om_after t<seconds> <text>: once the local game has run <seconds> since its map started (game time - the same
    moment of a level on a fast PC and a slow phone);
-   om_after r<seconds> <text>: <seconds> of game time from now */
+   om_after r<seconds> <text>: <seconds> of game time from now;
+   om_after c<seconds> <text>: <seconds> of the client's time from now (cl.time, the clock of the effects and of the
+   view: to the frame, where the game time steps by server frames; stands still while paused, as r does) */
 #define MT_AFTER 128
 
 static struct
@@ -428,6 +430,7 @@ static struct
 	int frames;
 	int gamems; /* > 0: wait for this game time instead of frames */
 	int relms;  /* > 0: r<seconds> given while no game ran - counted from the first frame of a running game */
+	int clms;   /* > 0: c<seconds>, wait for this client time (cl.time) */
 	char text[1024];
 } mt_after[MT_AFTER];
 
@@ -455,6 +458,17 @@ MT_After_f(void)
 			   chain; t<seconds> counts from the server's start, which a single-player level has passed before its
 			   first client frame) */
 			mt_after[i].relms = 0;
+			mt_after[i].clms = 0;
+
+			if (Cmd_Argv(1)[0] == 'c')
+			{
+				mt_after[i].clms = cl.time + (int)(atof(Cmd_Argv(1) + 1) * 1000.0f);
+
+				if (mt_after[i].clms <= 0)
+				{
+					mt_after[i].clms = 1;
+				}
+			}
 
 			if (Cmd_Argv(1)[0] == 'r')
 			{
@@ -503,7 +517,8 @@ MT_AfterFrame(void)
 			mt_after[i].relms = 0;
 		}
 
-		if (mt_after[i].gamems ? (SV_GameMsec() >= mt_after[i].gamems - 1) : (--mt_after[i].frames <= 0))
+		if (mt_after[i].clms ? (cl.time >= mt_after[i].clms) :
+				mt_after[i].gamems ? (SV_GameMsec() >= mt_after[i].gamems - 1) : (--mt_after[i].frames <= 0))
 		{
 			Cbuf_AddText(mt_after[i].text);
 			Cbuf_AddText("\n");

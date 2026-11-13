@@ -1914,3 +1914,38 @@ torn holes and lines along the edges of its polygons (ger1 water, both renderers
 * r_om_fogpix (1; 0 the old fog), menu Video -> Map Fog (Modern / Original).
 * Not checked: the effects in fog (the test smoke was gone by the shot), characters standing in fog, every one of the
   33 maps; regions whose polygons do not fill their box fog the empty part of the box too.
+
+## B1: the effect gallery (2026-11-14)
+
+The base of the effects list (docs/EFFECTS.md): every group played at fixed spots, the new and the original look shot
+on the same frozen frame, the frame's GPU time in each look. Tool: `tools/fxgal/fxgal.py` with `gallery.json` (looks,
+spots, groups); how to run it and the format: [tools/fxgal/README.md](../../tools/fxgal/README.md).
+
+* Spots: jpn1 (a street at night under neon), kos1 (a dark sewer with a water channel), sud1 (a wooden tunnel under
+  lamps), sib1 (a snow canyon by day); each with a view for effects on the floor or in the air and one at a wall.
+* Groups: E1 to E17 but E16 (lava needs spots on its maps), 51 items: effects started by `om_fxplay`, weapons
+  fired, marks. The looks: `new` (the High preset) and `orig` (r_om_fxlight, fxvolume, fxsoft, softparticles,
+  dlight_model, holes, wetblood 0); each item done from now on adds its switch.
+* How: the item is started, the game paused after its age; the pause stops the effects, the dynamic lights and the
+  renderer's clock, so each look is set on that frame, shot after a second, and timed (`r_om_gputime 1`, median of
+  the OMGPU lines). A look that changes what is simulated cannot be compared this way (the frame holds what the first
+  look made); such an item will need a start per look.
+* Engine aids (test commands, no effect on play):
+  * `om_fxplay <effect> [dist] [up] [air|floor|wall] [loop]`: `floor` puts it on the ground ahead (short of a wall),
+    `wall` where the view meets the world facing out of it; `loop` starts it again as a level's effect slot does
+    (FX_PlayLoops, after the effect's repeat delay once the instance before fired everything; FX_RunEmitting is the
+    test FX_SlotBusy used). The command now registers the effect's sprites, models and sounds: an effect the level
+    does not use played with no picture (only its light, sound and mark showed).
+  * `om_fxclear`: every running effect, particle, debris and mark gone (CLFX_ClearState), loops ended.
+  * `om_after c<seconds>`: the client's time (cl.time, the clock of the effects). The game time of `om_after r`
+    steps by 0.1 s server frames and the client lags it; an explosion age in game time missed the explosion.
+* Found by the gallery, not changed: the effects age as fast as the frame rate above 60 fps. FX_AdvanceClock runs a
+  full 1/60 s step and clamps the effects clock to the client's time, so every frame is one step (SPEC-400 Timebase,
+  kept on purpose as 1.07f does: I5 "flame1/flame2"). The grenade's fire dome and shock ring, seen at 0.03 to 0.2 s at
+  60 fps, are mostly gone at 0.1 s at 165 fps (the default limit follows the display) and gone at 0.02 s at 1000 fps.
+  The gallery plays at 60 fps and reads the GPU time on the paused frame with the frame rate free.
+* Also seen: the flame gun (E2) from the player's view is a yellow haze over the whole frame at 1 s, no stream.
+* Cost on the owner's PC (RDNA4, 1600x900, High), jpn1: the frame without an effect 1.39 ms; with one, 0.01 to 0.05 ms
+  more (explosions 0.01 to 0.03, a machine gun burst with tracers 0.05); the original look within 0.01 ms of the new.
+* Run: about 10 minutes a map (695 console steps), about 40 minutes for the four, 416 shots. The script is split
+  into files of 20 KB: one 73 KB file overflowed the 32 KB command buffer and nothing ran.

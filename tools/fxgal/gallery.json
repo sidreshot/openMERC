@@ -1,0 +1,111 @@
+{
+  "about": "Effect gallery (docs/EFFECTS.md B1). Run with tools/fxgal/fxgal.py; the format is described in tools/fxgal/README.md.",
+
+  "looks": {
+    "new": {
+      "r_om_fxlight": "1", "r_om_fxvolume": "1", "r_om_fxsoft": "1", "r_om_softparticles": "1",
+      "r_om_dlight_model": "1", "r_om_holes": "1", "r_om_wetblood": "1"
+    },
+    "orig": {
+      "r_om_fxlight": "0", "r_om_fxvolume": "0", "r_om_fxsoft": "0", "r_om_softparticles": "0",
+      "r_om_dlight_model": "0", "r_om_holes": "0", "r_om_wetblood": "0"
+    }
+  },
+
+  "spots": [
+    {"id": "jpn1", "map": "jpn1", "what": "outdoors at night, neon-lit street",
+     "view": "476 700 91 -9 8", "wall": "476 700 91 -9 0"},
+    {"id": "kos1", "map": "kos1", "what": "dark sewer with a water channel",
+     "view": "112 -3288 -64 90 8", "wall": "112 -3288 -64 180 0"},
+    {"id": "sud1", "map": "sud1", "what": "indoors, wooden tunnel under lamps",
+     "view": "1624 -1864 56 180 8", "wall": "1624 -1864 56 270 0"},
+    {"id": "sib1", "map": "sib1", "what": "outdoors by day, snow canyon",
+     "view": "-2944 -3000 40 90 8", "wall": "-2944 -3000 40 180 0"}
+  ],
+
+  "groups": [
+    {"id": "E1", "name": "Fire", "items": [
+      {"fx": "environ/firelarge2", "place": "floor", "dist": 160, "loop": true, "age": 2.0},
+      {"fx": "environ/firelarge3", "place": "floor", "dist": 200, "loop": true, "age": 2.0},
+      {"fx": "gbfire", "place": "floor", "dist": 120, "loop": true, "age": 2.0},
+      {"fx": "environ/onfireburst", "place": "floor", "dist": 160, "age": 0.5},
+      {"fx": "weapons/world/phosburn", "place": "floor", "dist": 160, "age": 1.0},
+      {"fx": "environ/roadflare", "place": "floor", "dist": 120, "loop": true, "age": 1.0}
+    ]},
+    {"id": "E2", "name": "Flamethrower", "items": [
+      {"shoot": 11, "age": 1.0},
+      {"fx": "weapons/world/flamehitwall", "place": "wall", "age": 0.3}
+    ]},
+    {"id": "E3", "name": "Explosions", "items": [
+      {"fx": "weapons/world/grenadeexplode", "place": "floor", "dist": 220, "age": 0.1},
+      {"fx": "weapons/world/grenadeexplode", "place": "floor", "dist": 220, "age": 0.6, "note": "smoke after the flash"},
+      {"fx": "weapons/world/rocketexplode", "place": "floor", "dist": 260, "age": 0.15},
+      {"fx": "weapons/world/c4explode", "place": "floor", "dist": 260, "age": 0.15},
+      {"fx": "weapons/world/airexplode", "place": "air", "dist": 260, "up": 60, "age": 0.15},
+      {"fx": "weapons/world/phosexplode", "place": "floor", "dist": 220, "age": 0.2}
+    ]},
+    {"id": "E4", "name": "Scorch marks", "items": [
+      {"decal": "scorch", "size": 48},
+      {"decal": "scorchwht", "size": 48}
+    ]},
+    {"id": "E5", "name": "Sparks", "items": [
+      {"fx": "environ/wallspark", "place": "wall", "age": 0.1},
+      {"fx": "spark", "place": "wall", "age": 0.1},
+      {"fx": "spark2", "place": "wall", "age": 0.1},
+      {"fx": "environ/metal_computer", "place": "wall", "age": 0.3}
+    ]},
+    {"id": "E6", "name": "Impacts by material", "items": [
+      {"shoot": 2, "age": 0.1, "note": "9 mm at the wall"},
+      {"shoot": 4, "age": 0.1, "note": "shotgun at the wall"},
+      {"fx": "armorhit", "place": "wall", "age": 0.1}
+    ]},
+    {"id": "E7", "name": "Debris and gibs", "items": [
+      {"fx": "gore/gibbody", "place": "floor", "dist": 140, "up": 40, "age": 0.3},
+      {"fx": "gore/gibhit", "place": "air", "dist": 140, "age": 0.2}
+    ]},
+    {"id": "E8", "name": "Tracers", "items": [
+      {"shoot": 8, "age": 0.4, "note": "machine gun burst"},
+      {"shoot": 7, "age": 0.4, "note": "assault rifle burst"}
+    ]},
+    {"id": "E9", "name": "Projectiles and trails", "items": [
+      {"shoot": 10, "age": 0.25, "note": "rocket in flight"},
+      {"fx": "weapons/world/rockettrail2", "place": "air", "dist": 160, "loop": true, "age": 1.0}
+    ]},
+    {"id": "E10", "name": "Muzzle flashes and shells", "items": [
+      {"shoot": 7, "age": 0.05},
+      {"shoot": 4, "age": 0.05},
+      {"fx": "weapons/othermz/machinegun", "place": "air", "dist": 100, "age": 0.03}
+    ]},
+    {"id": "E11", "name": "MPG, electricity, beams", "items": [
+      {"shoot": 12, "age": 0.6},
+      {"fx": "weapons/world/mpgzap", "place": "wall", "age": 0.1},
+      {"fx": "environ/pulsecook", "place": "floor", "dist": 140, "loop": true, "age": 1.0}
+    ]},
+    {"id": "E12", "name": "Blood and gore", "items": [
+      {"fx": "gore/bloodcloud", "place": "air", "dist": 140, "age": 0.15},
+      {"fx": "gore/hugeburst2", "place": "air", "dist": 140, "age": 0.2},
+      {"fx": "environ/splatred", "place": "wall", "age": 0.3},
+      {"fx": "environ/bloodrain", "place": "floor", "dist": 160, "loop": true, "age": 1.5}
+    ]},
+    {"id": "E13", "name": "Spraying liquids", "items": [
+      {"fx": "environ/waterspurt", "place": "wall", "loop": true, "age": 1.5},
+      {"fx": "environ/oilspurt", "place": "wall", "loop": true, "age": 1.5},
+      {"fx": "environ/chemspurt", "place": "wall", "loop": true, "age": 1.5}
+    ]},
+    {"id": "E14", "name": "The rest of the water", "items": [
+      {"fx": "environ/waterdrip", "place": "air", "dist": 140, "up": 80, "loop": true, "age": 1.5},
+      {"fx": "environ/gb_watersplash", "place": "floor", "dist": 160, "age": 0.2},
+      {"fx": "environ/puddle", "place": "floor", "dist": 140, "age": 0.3}
+    ]},
+    {"id": "E15", "name": "Smoke and steam of the levels", "items": [
+      {"fx": "environ/normalsmoke", "place": "floor", "dist": 180, "loop": true, "age": 3.0},
+      {"fx": "environ/normalsteam", "place": "floor", "dist": 160, "loop": true, "age": 2.0},
+      {"fx": "environ/sm_steam01", "place": "wall", "loop": true, "age": 2.0},
+      {"fx": "environ/gb_dustcloud01", "place": "floor", "dist": 180, "age": 0.5}
+    ]},
+    {"id": "E17", "name": "The rest", "items": [
+      {"fx": "environ/teleport7", "place": "floor", "dist": 140, "age": 0.3},
+      {"fx": "environ/irespawn", "place": "floor", "dist": 140, "age": 0.3}
+    ]}
+  ]
+}

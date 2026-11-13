@@ -50,7 +50,7 @@ Every effect of the game is being redrawn with current techniques. The game's ow
 where and how big; only the drawing changes, and each new effect can be switched back to the original look. Details,
 the effects of each group and the rules: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Progress: 18 of 41 done.**
+**Progress: 19 of 41 done.**
 
 Done:
 
@@ -72,10 +72,10 @@ Done:
 - [x] Thunderstorm: glowing clouds, glare, light through windows, thunder every time
 - [x] Rain drops on windows
 - [x] Map fog per pixel instead of the old per-vertex fog
+- [x] B1. Effect gallery: before and after shots, frame cost
 
 To do:
 
-- [ ] B1. Effect gallery: before and after shots, frame cost
 - [ ] B2. Effects as light sources in HDR and bloom
 - [ ] B3. Living flame and smoke, heat haze
 - [ ] B4. Fast particles stretched along their motion
@@ -214,7 +214,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 решают данные самой игры; меняется только отрисовка, и каждый новый эффект можно вернуть к оригинальному виду.
 Подробности, эффекты каждой группы и правила: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Прогресс: сделано 18 из 41.**
+**Прогресс: сделано 19 из 41.**
 
 Сделано:
 
@@ -236,10 +236,10 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - [x] Гроза: светящиеся облака, засветка, свет через окна, гром каждый раз
 - [x] Капли дождя на окнах
 - [x] Туман на картах попиксельный вместо старого повершинного
+- [x] B1. Галерея эффектов: снимки до и после, цена кадра
 
 Будет сделано:
 
-- [ ] B1. Галерея эффектов: снимки до и после, цена кадра
 - [ ] B2. Эффекты как источники света в HDR и bloom
 - [ ] B3. Живое пламя и дым, дрожание горячего воздуха
 - [ ] B4. Быстрые частицы, вытянутые по движению
