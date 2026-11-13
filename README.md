@@ -44,6 +44,56 @@ writes into it.
   (64-bit, OpenMerc's own game modules only): unpack `openMERC-<version>-linux-x86_64.tar.gz` into the game
   folder and run `./openMerc`; building: [docs/BUILD-linux.md](docs/BUILD-linux.md).
 
+## Effects rewrite
+
+Every effect of the game is being redrawn with current techniques. The game's own effect data still decides when,
+where and how big; only the drawing changes, and each new effect can be switched back to the original look. Details,
+the effects of each group and the rules: [docs/EFFECTS.md](docs/EFFECTS.md).
+
+**Progress: 14 of 36 done.**
+
+Done:
+
+- [x] Dynamic lights of shots, fire and explosions
+- [x] Smoke and dust lit by the level and by dynamic lights
+- [x] Smoke puffs lit as a volume
+- [x] Explosion fire ball without its polygon outline
+- [x] Soft particles at walls and floors
+- [x] Bullet holes with depth
+- [x] Wet blood, blood pools under bodies
+- [x] Lamp halos as bloom instead of painted sprites
+- [x] Rain and thunderstorm with lightning light
+- [x] Water: swell, ripples, refraction, foam
+- [x] Hit tint as a dark red vignette
+- [x] Night vision as an image intensifier tube
+- [x] Contact shadows of bodies instead of the round blob
+- [x] Glass with refraction, reflections and dirt
+
+To do:
+
+- [ ] B1. Effect gallery: before and after shots, frame cost
+- [ ] B2. Effects as light sources in HDR and bloom
+- [ ] B3. Living flame and smoke, heat haze
+- [ ] B4. Fast particles stretched along their motion
+- [ ] B5. Cheap path for Low and phones
+- [ ] E1. Fire, burning bodies, phosphorus, road flares
+- [ ] E2. Flamethrower
+- [ ] E3. Explosions
+- [ ] E4. Scorch marks
+- [ ] E5. Sparks
+- [ ] E6. Impacts by material: dust, chunks, glass shards
+- [ ] E7. Debris and gibs
+- [ ] E8. Tracers
+- [ ] E9. Projectiles and trails
+- [ ] E10. Muzzle flashes and shell casings
+- [ ] E11. MPG, electric arcs, beams
+- [ ] E12. Blood and gore
+- [ ] E13. Spraying liquids
+- [ ] E14. Water splashes, drips, ripples
+- [ ] E15. Smoke and steam of the levels
+- [ ] E16. Lava and molten metal
+- [ ] E17. Breath in the cold, respawn and teleport
+
 ## Build (Windows)
 
 Requirements:
@@ -152,6 +202,56 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - **Платформы**: Windows (32-битный движок на 64-битной Windows 10/11). Linux x86_64
   (64 бита, только собственные игровые модули OpenMerc): распакуйте `openMERC-<версия>-linux-x86_64.tar.gz`
   в папку игры и запустите `./openMerc`; сборка: [docs/BUILD-linux.md](docs/BUILD-linux.md).
+
+### Переписывание эффектов
+
+Все эффекты игры перерисовываются на современных технологиях. Когда, где и какого размера появляется эффект, по-прежнему
+решают данные самой игры; меняется только отрисовка, и каждый новый эффект можно вернуть к оригинальному виду.
+Подробности, эффекты каждой группы и правила: [docs/EFFECTS.md](docs/EFFECTS.md).
+
+**Прогресс: сделано 14 из 36.**
+
+Сделано:
+
+- [x] Динамический свет выстрелов, огня и взрывов
+- [x] Дым и пыль освещаются уровнем и динамическим светом
+- [x] Клубы дыма освещаются как объём
+- [x] Огненный шар взрыва без граней
+- [x] Мягкие частицы у стен и пола
+- [x] Пулевые отверстия с глубиной
+- [x] Мокрая кровь, лужи крови под телами
+- [x] Ореолы ламп через bloom вместо нарисованных спрайтов
+- [x] Дождь и гроза со светом молний
+- [x] Вода: волны, рябь, преломление, пена
+- [x] Попадание как тёмно-красная виньетка
+- [x] Ночное видение как электронно-оптический преобразователь
+- [x] Контактные тени тел вместо круглого пятна
+- [x] Стекло с преломлением, отражениями и грязью
+
+Будет сделано:
+
+- [ ] B1. Галерея эффектов: снимки до и после, цена кадра
+- [ ] B2. Эффекты как источники света в HDR и bloom
+- [ ] B3. Живое пламя и дым, дрожание горячего воздуха
+- [ ] B4. Быстрые частицы, вытянутые по движению
+- [ ] B5. Дешёвый путь для Low и телефонов
+- [ ] E1. Огонь, горящие тела, фосфор, фальшфейеры
+- [ ] E2. Огнемёт
+- [ ] E3. Взрывы
+- [ ] E4. Следы копоти
+- [ ] E5. Искры
+- [ ] E6. Попадания по материалам: пыль, осколки, стекло
+- [ ] E7. Обломки и куски тел
+- [ ] E8. Трассеры
+- [ ] E9. Снаряды и шлейфы
+- [ ] E10. Вспышки выстрелов и гильзы
+- [ ] E11. MPG, электрические дуги, лучи
+- [ ] E12. Кровь
+- [ ] E13. Струи жидкостей
+- [ ] E14. Всплески, капли и круги на воде
+- [ ] E15. Дым и пар на уровнях
+- [ ] E16. Лава и расплавленный металл
+- [ ] E17. Дыхание на морозе, возрождение и телепорт
 
 ### Сборка (Windows)
 
