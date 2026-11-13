@@ -522,7 +522,8 @@ V_Render3dCrosshair(void)
  * openMERC GFX-modern: thunder for the renderer's lightning (r_om_rain). The game has no thunder sound, so three
  * are synthesised once into <gamedir>/sound/om/: brown-noise rumble with a few random rolls under a slow decay,
  * the third with a sharp crack in front (close strikes). The renderer reports each strike in the cvar
- * r_om_lightning_strike ("number distance"); the thunder follows after distance / 1200 s, quieter when far.
+ * r_om_lightning_strike ("number distance"); the thunder follows after distance / 3000 s (1.5..4 s), a little
+ * quieter when far, every one of them (a queue of eight).
  */
 #define THUNDER_RATE 22050
 #define THUNDER_SECONDS 5
@@ -661,11 +662,13 @@ static void
 CL_Thunder_Frame(void)
 {
 	static cvar_t *strike;
-	static int lastseq = -1, pending;
-	static float due, dist;
+	static int lastseq = -1, nq;
+	/* thunders on their way: a strike every few seconds, each thunder 7..9 s behind it, so several are under way
+	   at once (one slot dropped the earlier thunder of every quick second strike) */
+	static float qdue[8], qdist[8];
 	static qboolean made;
-	int seq = 0;
-	float d = 0;
+	int seq = 0, i, k;
+	float d = 0, dist, now = cls.realtime * 0.001f;
 
 	if (!strike)
 	{
@@ -676,20 +679,39 @@ CL_Thunder_Frame(void)
 	{
 		if (lastseq >= 0 && seq > 0)
 		{
-			pending = 1;
-			dist = d;
-			due = cls.realtime * 0.001f + d / 1200.0f;
+			if (nq == 8) /* full: the oldest goes now rather than the new one never */
+			{
+				qdue[0] = now;
+			}
+			else
+			{
+				/* E18: 1.5..4 s behind the flash (d / 1200 put it 7..9 s behind, long after the eye had
+				   forgotten the flash: "no thunder") */
+				qdue[nq] = now + Q_clamp(d / 3000.0f, 1.5f, 4.0f);
+				qdist[nq] = d;
+				nq++;
+			}
 		}
 
 		lastseq = seq;
 	}
 
-	if (!pending || cls.realtime * 0.001f < due)
+	for (k = 0; k < nq && qdue[k] > now; k++)
+	{
+	}
+
+	if (k == nq)
 	{
 		return;
 	}
 
-	pending = 0;
+	dist = qdist[k];
+	for (i = k; i + 1 < nq; i++)
+	{
+		qdue[i] = qdue[i + 1];
+		qdist[i] = qdist[i + 1];
+	}
+	nq--;
 
 	if (!made)
 	{
@@ -720,7 +742,9 @@ CL_Thunder_Frame(void)
 		char name[64];
 		struct sfx_s *sfx;
 		int v = (dist < 1900) ? 2 : (rand() & 1);
-		float vol = Q_clamp(1.4f - dist / 3500.0f, 0.4f, 1.0f);
+		/* E18: the strikes are drawn 6500..11000 units out; the old 1.4 - d / 3500 gave every one of them the
+		   floor of 0.4, under the downpour hardly heard. Loud and only a little quieter the farther */
+		float vol = Q_clamp(1.3f - dist / 20000.0f, 0.7f, 1.0f);
 
 		Com_sprintf(name, sizeof(name), "om/thunder%d.wav", v);
 		sfx = S_RegisterSound(name);
@@ -729,6 +753,8 @@ CL_Thunder_Frame(void)
 		{
 			S_StartSound(NULL, cl.playernum + 1, 0, sfx, vol, 0, 0);
 		}
+
+		Com_DPrintf("thunder: %s, distance %.0f, volume %.2f\n", name, dist, vol);
 	}
 }
 

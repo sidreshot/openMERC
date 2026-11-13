@@ -1391,6 +1391,10 @@ static const char* fragmentSrc3Dsky = MULTILINE_STRING(
 		// darkening what is painted. xy the wind (world, unit), z strength, w speed. Only above the horizon: a painted
 		// city skyline stays as it is. (A flow-map drift of the painted clouds themselves doubled them when made visible)
 		uniform vec4 omSkyFlow;
+		// OpenMerc E18: the clouds lit by a lightning strike. xyz towards the channel, w the flash (0 none); omSkyRef the
+		// colour of the open sky (w 1: known) - a texel far from it is painted (a tower of jpn2's skyline) and stays dark
+		uniform vec4 omSkyBolt;
+		uniform vec4 omSkyRef;
 		in vec3 passSkyDir;
 
 		float SkyHash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
@@ -1413,6 +1417,37 @@ static const char* fragmentSrc3Dsky = MULTILINE_STRING(
 				// the layers move at their own speeds (higher clouds slower): the sky does not slide as one sheet
 				float f = SkyNoise(P + w) * 0.5 + SkyNoise(P * 2.1 + w * 1.35 + 7.3) * 0.3 + SkyNoise(P * 4.7 + w * 1.8 + 3.1) * 0.2;
 				texel.rgb *= mix(1.0, 0.6 + 0.8 * smoothstep(0.25, 0.75, f), min(k, 1.0));
+			}
+
+			if (omSkyBolt.w > 0.0)
+			{
+				float c = dot(D, omSkyBolt.xyz);
+				float lobe = exp((c - 1.0) * 5.0); // half at about 34 degrees from the channel
+				float core = exp((c - 1.0) * 60.0); // the cloud right around it
+				float open = smoothstep(-0.05, 0.12, D.z);
+				if (omSkyRef.w > 0.0)
+				{
+					// the colour test on the mean of 3x3 texels 1.5 apart: the painted sky is grainy, a test per texel
+					// lit it in speckles
+					vec2 px = 1.5 / vec2(textureSize(tex, 0));
+					vec3 m = vec3(0.0);
+					for (int j = -1; j <= 1; j++)
+						for (int i = -1; i <= 1; i++)
+							m += texture(tex, passTexCoord + vec2(float(i), float(j)) * px).rgb;
+					m /= 9.0;
+					vec3 tol = vec3(4.0 / 255.0) + 0.6 * omSkyRef.rgb;
+					vec3 q = abs(m - omSkyRef.rgb) / tol;
+					// and the texel itself: around a lit window of a painted tower the mean of black and yellow is
+					// the sky's colour (the windows were ringed with light)
+					vec3 q1 = abs(texel.rgb - omSkyRef.rgb) / tol;
+					open *= (1.0 - smoothstep(0.7, 1.5, max(q.r, max(q.g, q.b)))) *
+						(1.0 - smoothstep(0.9, 1.45, max(q1.r, max(q1.g, q1.b))));
+				}
+				float f = omSkyBolt.w * open;
+				// the painted clouds light up in their own pattern (more in blue: lightning is white, the city glow red),
+				// and a cool glow of the lit cloud deck over them
+				texel.rgb = texel.rgb * (1.0 + f * (0.6 * lobe + 1.2 * core + 0.12) * vec3(0.9, 1.3, 1.9))
+					+ f * (0.11 * lobe + 0.5 * core + 0.015) * vec3(0.72, 0.8, 1.0);
 			}
 
 			// TODO: something about GL_BLEND vs GL_ALPHATEST etc

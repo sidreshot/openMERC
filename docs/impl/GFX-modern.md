@@ -1817,3 +1817,38 @@ client fx module) to start an effect in front of the eye.
 * r_om_capsule no longer removes the Ghoul ground shadow (only the nearest bodies have capsules - the others' shadows
   came and went as one walked); the capsule's strength is 0.5 under it.
 * r_om_skyrays at half the former gain (the menu slider "Sky Ray Intensity" keeps its scale: 2 = the old strength).
+
+## E18: thunderstorm as in MGS V (owner, 2026-11-13: "glow in the eyes, the lightning flashes, there must always be thunder")
+
+Before: from the jpn2 elevator a strike changed the mean brightness of the frame by 0.5 % (74.4 -> 74.8 of 255): the
+sky stayed as it was (the old whole-sky flash had been removed), the world light stopped at the window, and of every
+quick second strike the first thunder was lost.
+
+* Thunder (cl_view.c CL_Thunder_Frame): a queue of eight instead of one pending slot (a strike every few seconds, each
+  thunder seconds behind it: the next strike overwrote the slot). 1.5..4 s behind the flash (distance / 3000 instead of
+  / 1200, which put it 7..9 s behind, long after the eye had let go of the flash), volume 1.3 - d / 20000 clamped to
+  0.7..1 (the old 1.4 - d / 3500 gave every strike at 6500..11000 units the floor of 0.4, under the downpour hardly
+  heard). Checked at r_om_lightning_rate 8: 23 strikes, 20 thunders, the last three still on their way at the quit.
+  `developer 1` prints each one ("thunder: ...").
+* The clouds (gl3_shaders.c sky shader, omSkyBolt / omSkyRef): during a flash the sky's own pixels light up around the
+  channel (a lobe of about 34 degrees, a bright core of a few degrees, a little everywhere): the painted clouds
+  multiplied (more in blue: white light over the city's red glow) plus a cool glow. The open sky is told from what is
+  painted on it (jpn2's towers) by the colour test of WXSkyMask (the mean colour of the up face), per pixel on the mean
+  of 3x3 texels and on the texel itself: the painted towers stay dark against the flash, with their own edges. A
+  fullscreen pass over the sky's depth (the first try) also lit the alpha-blended neon signs (no depth) white; the coarse
+  mask of the bolt (1.4 degrees a texel) lit the sky in blocks; a test per texel alone lit the grain of the painted sky in
+  speckles and the mean alone ringed the windows of the painted towers. GLES reads no sky back: jpn2's sky keeps its
+  old look there (other skies light up as a whole).
+* The glare: the channel's core is far above white in the float scene (flash x 4 x r_om_lightning_glare, was clamped
+  to 1) and a soft lobe around the channel goes into the emissive target (gl3_post.c wx_flash_fs, sky pixels only), so
+  the bloom and the lens ghosts carry the flash into the eyes; the exposure adapts to it as to any bright view.
+* Through windows: glass (material 37 or the glass class) is no longer an occluder of the strike's shadow map
+  (WXExtraGeometry); the flash lies on the floor of the jpn2 elevator in the shape of its window. The edge shows the
+  2 units per texel of that map (3x3 PCF).
+* Cvars: r_om_lightning_sky (1; 0 = the sky stays as it is, up to 4), r_om_lightning_glare (1; 0 = the old core).
+  Test aid r_om_lightning_test 1 now holds the whole last strike (sky, channel, light) and stops new strikes.
+* Cost: jpn2, 1600x900, a strike held: GPU 0.81 ms a frame with the new flash, without it and without lightning (100
+  samples each, within 0.01 ms). The sky shader does nine more texture reads per sky pixel only while a flash lasts.
+* Seen in shots and a recording (jpn2 elevator and outside it): the strike flickers three times in about 0.4 s, the
+  frame's mean brightness rises 28 %. Window panes and wet facades reflect the lit sky (SSR), in a still frame as rings
+  around the windows.

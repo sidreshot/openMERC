@@ -50,7 +50,7 @@ Every effect of the game is being redrawn with current techniques. The game's ow
 where and how big; only the drawing changes, and each new effect can be switched back to the original look. Details,
 the effects of each group and the rules: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Progress: 15 of 40 done.**
+**Progress: 16 of 40 done.**
 
 Done:
 
@@ -69,6 +69,7 @@ Done:
 - [x] Night vision as an image intensifier tube
 - [x] Contact shadows of bodies instead of the round blob
 - [x] Glass with refraction, reflections and dirt
+- [x] Thunderstorm: glowing clouds, glare, light through windows, thunder every time
 
 To do:
 
@@ -94,7 +95,6 @@ To do:
 - [ ] E15. Smoke and steam of the levels
 - [ ] E16. Lava and molten metal
 - [ ] E17. Breath in the cold, respawn and teleport
-- [ ] E18. Thunderstorm as in MGS V: glare, flashing sky, thunder every time
 - [ ] E19. Map fog: per-pixel instead of the old per-vertex fog
 - [ ] E20. Rain drops on windows from the street side
 
@@ -213,7 +213,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 решают данные самой игры; меняется только отрисовка, и каждый новый эффект можно вернуть к оригинальному виду.
 Подробности, эффекты каждой группы и правила: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Прогресс: сделано 15 из 40.**
+**Прогресс: сделано 16 из 40.**
 
 Сделано:
 
@@ -232,6 +232,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - [x] Ночное видение как электронно-оптический преобразователь
 - [x] Контактные тени тел вместо круглого пятна
 - [x] Стекло с преломлением, отражениями и грязью
+- [x] Гроза: светящиеся облака, засветка, свет через окна, гром каждый раз
 
 Будет сделано:
 
@@ -257,7 +258,6 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - [ ] E15. Дым и пар на уровнях
 - [ ] E16. Лава и расплавленный металл
 - [ ] E17. Дыхание на морозе, возрождение и телепорт
-- [ ] E18. Гроза как в MGS V: засветка в глаза, вспышки неба, гром каждый раз
 - [ ] E19. Туман на картах: попиксельный вместо старого повершинного
 - [ ] E20. Капли дождя на окнах со стороны улицы
 

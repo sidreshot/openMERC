@@ -14,7 +14,7 @@ Rules for every item:
   the picture changes (timing, size, sound, gameplay);
 - the box here is ticked when the item is in `main`, on by default on High, and checked in the game.
 
-Progress: **15 of 40 done**. The README shows the same list.
+Progress: **16 of 40 done**. The README shows the same list.
 
 ## Done
 
@@ -35,6 +35,7 @@ Progress: **15 of 40 done**. The README shows the same list.
 | [x] | Night vision as an image intensifier tube instead of a green noise multiply | `r_om_nightvision` | 2026-11-11 |
 | [x] | Contact shadows of bodies instead of the round blob | `r_om_capsule` | 2026-11-11 |
 | [x] | Glass: see-through with refraction, traced reflections, dirt | `r_om_glass` | 2026-11-13 |
+| [x] | Thunderstorm as in MGS V: the clouds light up around the channel, glare in the eyes, the flash through windows, thunder after every strike | `r_om_lightning_sky`, `r_om_lightning_glare` | 2026-11-13 |
 
 New effects without an original (not counted): snow on the sib maps (`r_om_snow`), anti-aircraft fire and the
 distant war around kos (`r_om_aa`, `r_om_war`), drifting clouds (`r_om_skyflow`), lens effects (`r_om_lens`).
@@ -111,9 +112,6 @@ These come first; the effects below are built on them.
   alone). Planned: glowing in HDR, heat haze, a crust that moves.
 - [ ] **E17. The rest.** Breath in the cold (`enemy/breathe`), the respawn and teleport effects of multiplayer
   (`irespawn`, `prespawn`, `teleport7`).
-- [ ] **E18. Thunderstorm as in MGS V.** The lightning lights the clouds around its channel and the whole sky a
-  little, the flash glares in the eyes (bloom, lens ghosts, the eye adapting after it), the channel bright in HDR with
-  its re-strikes; thunder after every strike (today a second strike before the first thunder has arrived drops it).
 - [ ] **E19. Map fog.** The maps' fog (SoF's fog regions and the linear fog) without the old per-vertex fog: one
   per-pixel or volumetric fog for the world, the models, the effects and the sky.
 - [ ] **E20. Rain on windows.** While it rains, panes open to the rain get drops and runnels on their street side.
@@ -122,5 +120,5 @@ Not on the list: `lighthit`, `exphit`, `gotshot` and `land` are empty (72 bytes,
 `cantsee`, `confusion` and `scripted` look like markers of the AI and of the editing tools (a snowflake sprite); to be
 checked whether any of them shows in normal play.
 
-The order is E18, E19 and E20 first (asked for on 2026-11-13), then B1, then B2 to B4 together with E1 to E3 (fire, flamethrower, explosions), then E5 and E8 (sparks,
+The order is E19 and E20 first (asked for on 2026-11-13), then B1, then B2 to B4 together with E1 to E3 (fire, flamethrower, explosions), then E5 and E8 (sparks,
 tracers), then the rest. The plans of each item may change once the gallery shows the effect.

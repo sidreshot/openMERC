@@ -7959,6 +7959,9 @@ SSAOShutdown(void)
 static cvar_t *r_om_rain, *r_om_rain_density, *r_om_rain_sky, *r_om_lightning, *r_om_lightning_rate;
 static cvar_t *r_om_storm_maps, *r_om_aa, *r_om_aa_maps, *r_om_snow, *r_om_snow_maps, *r_om_war, *r_om_rain_maps;
 static cvar_t *r_om_lightning_zones;
+/* E18: the flash of the clouds around the channel (scale, 0 = the sky stays as it is) and the glare of the channel in
+   the eyes (its brightness above white in the scene and the bloom) */
+static cvar_t *r_om_lightning_sky, *r_om_lightning_glare;
 
 static float *wxextra;
 static int wxnextra, wxcapextra;
@@ -8113,7 +8116,7 @@ static struct
 	GLuint occtex, occfbo;
 	float occvp[16], occc[3];
 	const void *occmodel;
-	GLuint prograin, progsplash, progbolt, vao, bolt_vbo;
+	GLuint prograin, progsplash, progbolt, progflash, vao, bolt_vbo;
 	GLint r_vp, r_eye, r_time, r_params, r_occ, r_occvp, r_color;
 	GLint s_vp, s_eye, s_time, s_params, s_occ, s_occvp, s_color;
 	GLint b_vp, b_color;
@@ -8132,6 +8135,7 @@ static struct
 	unsigned char skym[SKYM_H][SKYM_W];
 	GLuint skytex;
 	const void *skymodel;
+	float skyref[4];      /* E18: the colour of the open sky (mean of the up face, 0..1), w: known */
 	qboolean occvalid;
 	const void *warm;     /* the map the lightning warm-up was done for */
 } WX;
@@ -8141,10 +8145,11 @@ static struct
 static void
 WXShutdown(void)
 {
-	GLuint progs[7] = {WX.progaa, WX.progsnow, WX.progwar, WX.progsmoke, WX.prograin, WX.progsplash, WX.progbolt};
+	GLuint progs[8] = {WX.progaa, WX.progsnow, WX.progwar, WX.progsmoke, WX.prograin, WX.progsplash, WX.progbolt,
+		WX.progflash};
 	int i;
 
-	for (i = 0; i < 7; i++)
+	for (i = 0; i < 8; i++)
 	{
 		if (progs[i]) glDeleteProgram(progs[i]);
 	}
@@ -8159,7 +8164,7 @@ WXShutdown(void)
 	if (SKC.tex) glDeleteTextures(1, &SKC.tex);
 	SKC.tex = 0;
 	SKC.built = false;
-	WX.progaa = WX.progsnow = WX.progwar = WX.progsmoke = WX.prograin = WX.progsplash = WX.progbolt = 0;
+	WX.progaa = WX.progsnow = WX.progwar = WX.progsmoke = WX.prograin = WX.progsplash = WX.progbolt = WX.progflash = 0;
 	WX.vao = WX.bolt_vbo = WX.occtex = WX.occfbo = WX.shtex = WX.shfbo = WX.skytex = 0;
 	WX.failed = false;
 	WX.occmodel = WX.skymodel = WX.gunmodel = WX.warm = NULL;
@@ -8223,6 +8228,8 @@ WeatherWanted(void)
 		/* rain and thunderstorm on maps whose data has none (the night of the Tokyo towers) */
 		r_om_rain_maps = ri.Cvar_Get("r_om_rain_maps", "jpn2", CVAR_ARCHIVE);
 		r_om_lightning_zones = ri.Cvar_Get("r_om_lightning_zones", "", CVAR_ARCHIVE);
+		r_om_lightning_sky = ri.Cvar_Get("r_om_lightning_sky", "1", CVAR_ARCHIVE);
+		r_om_lightning_glare = ri.Cvar_Get("r_om_lightning_glare", "1", CVAR_ARCHIVE);
 		r_om_aa = ri.Cvar_Get("r_om_aa", "1", CVAR_ARCHIVE);
 		r_om_aa_maps = ri.Cvar_Get("r_om_aa_maps", "kos1 kos2 kos3", CVAR_ARCHIVE);
 		r_om_snow = ri.Cvar_Get("r_om_snow", "1", CVAR_ARCHIVE);
@@ -8259,12 +8266,31 @@ WeatherWanted(void)
 	return WX.rain || WX.storm || WX.aa || WX.snow;
 }
 
+static qboolean
+LightningHeld(void)
+{
+	static cvar_t *test;
+
+	if (!test)
+	{
+		test = ri.Cvar_Get("r_om_lightning_test", "0", 0);
+	}
+
+	return test->value != 0;
+}
+
 /* 0..1 brightness of the lightning now */
 static float
 LightningFlash(void)
 {
 	float t = r_newrefdef.time - WX.start, f = 0;
 	int i;
+
+	/* r_om_lightning_test (a test aid): the last strike stays at full strength, its sky and channel too */
+	if (WX.start > 0 && LightningHeld())
+	{
+		return 1.0f;
+	}
 
 	if (WX.start <= 0 || t < 0 || t > 1.5f)
 	{
@@ -8451,6 +8477,12 @@ WXSkyMask(void)
 		memset(col, 255, sizeof(col));
 	}
 
+	/* E18: the sky shader tells the open sky from what is painted on it by the same colour test, per texel */
+	WX.skyref[0] = ref[0] / 255.0f;
+	WX.skyref[1] = ref[1] / 255.0f;
+	WX.skyref[2] = ref[2] / 255.0f;
+	WX.skyref[3] = haveref ? 1.0f : 0.0f;
+
 	/* open only below open sky: from the zenith down to the first painted thing */
 	for (x = 0; x < SKYM_W; x++)
 	{
@@ -8531,7 +8563,7 @@ LightningThink(void)
 		WX.next = now + (4.0f + frand() * 8.0f) / rate;
 	}
 
-	if (now >= WX.next)
+	if ((now >= WX.next) && !(WX.start > 0 && LightningHeld()))
 	{
 		/* far out in the sky, high above the horizon, roughly where the player looks (seen through the gaps
 		   between the buildings; the world in front hides it by depth) */
@@ -8881,6 +8913,34 @@ GL3_Post_WeatherFrame(void)
 			GL3_UseProgram(p);
 			glUniform4f(loc, tint * (0.95f + add) + warr, tint * (0.97f + add) + warg, tint + add, 0);
 		}
+
+		/* E18: the clouds lit by the strike, in the sky shader itself (only the sky's own pixels, the open sky told
+		   from the towers painted on it by its colour) */
+		if (p && (loc = GL3_UniformLoc(p, "omSkyBolt")) != -1)
+		{
+			float f = 0;
+
+			if (WX.active && (WX.rain || WX.storm) && r_om_lightning_sky && (r_om_lightning_sky->value > 0))
+			{
+				f = LightningFlash() * Q_min(r_om_lightning_sky->value, 4.0f);
+
+				if (f > 0)
+				{
+					WXSkyMask();
+
+					/* GLES reads no sky back: without the sky's colour the towers painted on jpn2's sky would light up
+					   with it, so such a sky keeps its old look there */
+					if (WX.forced && !WX.skyref[3])
+					{
+						f = 0;
+					}
+				}
+			}
+
+			GL3_UseProgram(p);
+			glUniform4f(loc, WX.ldir[0], WX.ldir[1], WX.ldir[2], f);
+			glUniform4fv(GL3_UniformLoc(p, "omSkyRef"), 1, WX.skyref);
+		}
 	}
 
 	/* r_om_ssr: the world shaders write the material target; wet ground needs the top-down map */
@@ -9091,6 +9151,47 @@ static const char *wx_bolt_fs =
 	"	float a = pow(core, 2.0) * color.a;\n"
 	"	outColor = vec4(color.rgb * a, 1.0);\n"
 	"	outEmis = vec4(color.rgb * a, 1.0);\n"
+	"}\n";
+
+/* E18: the glare of the lit clouds. A full-view pass over the pixels of the sky box (as the bolt), into the emissive
+   target only: a soft lobe around the channel whose bloom (and lens ghosts) is the glow in the eyes. The direction of
+   the pixel from the view's axes; the towers painted on the sky (WXSkyMask) take less of it. The clouds themselves
+   light up in the sky shader (omSkyBolt): a pass over the sky's depth also lit the alpha-blended signs, which write
+   no depth */
+static const char *wx_flash_fs =
+	"uniform sampler2D depthtex;\n"
+	"uniform sampler2D skymask;\n"
+	"uniform vec4 proj;\n"      /* projection C, D; depth range min, max */
+	"uniform vec3 fwd;\n"
+	"uniform vec3 rgt;\n"
+	"uniform vec3 upv;\n"
+	"uniform vec2 tanxy;\n"     /* tangents of the half angles of the view */
+	"uniform vec3 bdir;\n"      /* towards the channel */
+	"uniform vec4 params;\n"    /* x flash 0..1 x strength, z glare */
+	"in vec2 uv;\n"
+	"in vec2 vuv;\n"
+	"out vec4 outColor;\n"
+	"out vec4 outEmis;\n"
+	"void main()\n"
+	"{\n"
+	"	float z = texture(depthtex, uv).r;\n"
+	"	float d = proj.y / ((z - proj.z) / (proj.w - proj.z) * 2.0 - 1.0 + proj.x);\n"
+	"	if (d < 30000.0)\n"
+	"		discard;\n"
+	"	vec2 n = vuv * 2.0 - 1.0;\n"
+	"	vec3 dir = normalize(fwd + n.x * tanxy.x * rgt + n.y * tanxy.y * upv);\n"
+	"	float clear = (dir.z > 0.0) ? texture(skymask, vec2(atan(dir.y, dir.x) * 0.15915494 + 0.5,\n"
+	"		asin(dir.z) * 0.63661977)).r : 0.0;\n"
+	"	float c = dot(dir, bdir);\n"
+	"	float lobe = exp((c - 1.0) * 5.0);\n"           /* half at about 34 degrees */
+	"	float core = exp((c - 1.0) * 60.0);\n"          /* the cloud right around the channel */
+	"	float f = params.x;\n"
+	/* the mask of the open sky is coarse (1.4 degrees a texel, eroded): only a soft weight, the multiply follows the
+	   sky's own picture, so the dark towers painted on it stay dark and their edges sharp */
+	"	float open = mix(0.3, 1.0, clear);\n"
+	"	vec3 cool = vec3(0.72, 0.8, 1.0);\n"
+	"	outColor = vec4(0.0);\n"
+	"	outEmis = vec4(cool * f * (0.12 * lobe + 0.8 * core + 0.015) * open * params.z, 1.0);\n"
 	"}\n";
 
 /* anti-aircraft fire in the sky: up to eight guns far beyond the map fire bursts of tracers that climb, slow and
@@ -9418,13 +9519,14 @@ WXCreate(void)
 	WX.prograin = WXLink(wx_rain_vs, wx_rain_fs, false);
 	WX.progsplash = WXLink(wx_splash_vs, wx_splash_fs, false);
 	WX.progbolt = WXLink(wx_bolt_vs, wx_bolt_fs, true);
+	WX.progflash = WXLink(NULL, wx_flash_fs, true);
 	WX.progaa = WXLink(wx_aa_vs, wx_aa_fs, true);
 	WX.progsnow = WXLink(wx_snow_vs, wx_snow_fs, false);
 	WX.progwar = WXLink(wx_war_vs, wx_war_fs, true);
 	WX.progsmoke = WXLink(wx_smoke_vs, wx_smoke_fs, false);
 
 	if (!WX.prograin || !WX.progsplash || !WX.progbolt || !WX.progaa || !WX.progsnow ||
-		!WX.progwar || !WX.progsmoke)
+		!WX.progwar || !WX.progsmoke || !WX.progflash)
 	{
 		return false;
 	}
@@ -9527,6 +9629,12 @@ WXExtraGeometry(void)
 		qboolean inworld = (i >= first) && (i < first + count);
 
 		if ((tf & (SURF_SKY | SURF_WARP | SURF_NODRAW)) || (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB)))
+		{
+			continue;
+		}
+
+		/* E18: glass lets the flash through (the window of the jpn2 elevator: the light on its floor) */
+		if ((((tf >> 24) & 0xff) == 37) || ((int)(-GL3_Mat_SurfClass(s) + 0.5f) == 4))
 		{
 			continue;
 		}
@@ -10224,6 +10332,41 @@ GL3_Post_Weather(void)
 
 nodrops:
 
+	/* E18: the glare of the clouds lit by the strike (also one that stays in the clouds) */
+	if (flash > 0.01f && r_om_lightning_sky->value > 0)
+	{
+		float sk = Q_min(r_om_lightning_sky->value, 4.0f);
+		vec3_t vf, vr, vu;
+
+		AngleVectors(r_newrefdef.viewangles, vf, vr, vu);
+
+		WXSkyMask();
+		glDisable(GL_DEPTH_TEST);
+		GL3_UseProgram(WX.progflash);
+		glUniform1i(GL3_UniformLoc(WX.progflash, "depthtex"), 2);
+		glUniform1i(GL3_UniformLoc(WX.progflash, "skymask"), 3);
+		BindTex(GL_TEXTURE2, P.texdepthcopy);
+		BindTex(GL_TEXTURE3, WX.skytex);
+		glUniform4f(GL3_UniformLoc(WX.progflash, "rect"), P.vx / fw, P.vy / fh, P.vw / fw, P.vh / fh);
+		glUniform4f(GL3_UniformLoc(WX.progflash, "proj"), gl3state.projMat3D.Elements[2][2],
+			gl3state.projMat3D.Elements[3][2], gl3depthmin, gl3depthmax);
+		glUniform3fv(GL3_UniformLoc(WX.progflash, "fwd"), 1, vf);
+		glUniform3fv(GL3_UniformLoc(WX.progflash, "rgt"), 1, vr);
+		glUniform3fv(GL3_UniformLoc(WX.progflash, "upv"), 1, vu);
+		glUniform2f(GL3_UniformLoc(WX.progflash, "tanxy"), 1.0f / gl3state.projMat3D.Elements[0][0],
+			1.0f / gl3state.projMat3D.Elements[1][1]);
+		glUniform3fv(GL3_UniformLoc(WX.progflash, "bdir"), 1, WX.ldir);
+		GL3_BindVAO(WX.vao);
+
+		glDrawBuffers(2, bufs);
+		glBlendFunc(GL_ONE, GL_ONE);
+		glUniform4f(GL3_UniformLoc(WX.progflash, "params"), flash * sk, 0.0f,
+			Q_clamp(r_om_lightning_glare->value, 0.0f, 4.0f), 0);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
+
 	/* lightning: the bolt far in the sky (a soft glow and a bright core), into the scene and the emissive target;
 	   its light on the world comes from the world shaders (omLightningLight, GL3_SoF_LightningUniforms) */
 	if (flash > 0.01f && WX.nbolt >= 2)
@@ -10296,7 +10439,14 @@ nodrops:
 				n += 30;
 			}
 
-			glUniform4f(WX.b_color, 0.75f, 0.82f, 1.0f, pass ? Q_min(1.0f, flash * 1.8f) : flash * 0.22f);
+			/* E18: the channel is far brighter than white: above 1 in the float scene, so the bloom and the lens
+			   ghosts carry it into the eyes (r_om_lightning_glare 0: the old clamped core) */
+			{
+				float g = Q_clamp(r_om_lightning_glare->value, 0.0f, 4.0f);
+
+				glUniform4f(WX.b_color, 0.75f, 0.82f, 1.0f, pass ? Q_max(Q_min(1.0f, flash * 1.8f), flash * 4.0f * g) :
+					flash * (0.22f + 0.2f * g));
+			}
 			glBufferData(GL_ARRAY_BUFFER, n * sizeof(float), quads, GL_STREAM_DRAW);
 			qglVertexAttribPointer(GL3_ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), 0);
 			qglVertexAttribPointer(GL3_ATTRIB_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (GLintptr)(3 * sizeof(float)));
