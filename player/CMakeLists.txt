@@ -11,6 +11,13 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM64)" OR ANDROID)
 	add_compile_options(-fsigned-char)
 endif()
 
+# OpenMerc: no fused multiply-add contraction (GCC's default on aarch64 fuses even across statements, clang within
+# one): movement, physics and the Ghoul maths must round as on x86, or an arm64 client's prediction and a server's
+# player movement differ (sofpm_test W15b-f: gravity rounded one unit/s apart on Linux arm64). MSVC does not contract
+if(NOT MSVC)
+	add_compile_options(-ffp-contract=off)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

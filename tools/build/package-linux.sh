@@ -22,12 +22,13 @@ VER=$(sed -n 's/^#define OM_VERSION "\(.*\)"/\1/p' "$REPO/engine/src/common/head
 case "$(LC_ALL=C readelf -h "$REL/openMerc" | sed -n 's/^ *Machine: *//p')" in
   *X86-64*) ARCH=x86_64 ;;
   *80386*)  ARCH=i386 ;;
+  *AArch64*) ARCH=arm64 ;;
   *) echo "unknown architecture of $REL/openMerc" >&2; exit 1 ;;
 esac
 NAME=openMERC-$VER-linux-$ARCH
 
 find_lib() { # <soname>: path of the system library
-  "$(command -v ldconfig || echo /sbin/ldconfig)" -p | awk -v n="$1" -v a="$ARCH" '$1 == n && (a == "i386" ? $0 !~ /x86-64/ : $0 ~ /x86-64/) { print $NF; exit }'
+  "$(command -v ldconfig || echo /sbin/ldconfig)" -p | awk -v n="$1" -v a="$ARCH" '$1 == n && (a == "i386" ? $0 !~ /x86-64|AArch64/ : a == "arm64" ? $0 ~ /AArch64/ : $0 ~ /x86-64/) { print $NF; exit }'
 }
 
 STAGE=$(mktemp -d)

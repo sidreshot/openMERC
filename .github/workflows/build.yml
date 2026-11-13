@@ -1,4 +1,4 @@
-# Build, test and package openMERC for Windows (x86, MSVC + vcpkg) and Linux (x86_64, Debian 13).
+# Build, test and package openMERC for Windows (x86, MSVC + vcpkg) and Linux (x86_64 and arm64, Debian 13).
 # Every push and pull request builds both and runs the unit tests; the packages are kept as workflow artifacts.
 # macOS (arm64) is built and tested too, without a release package (docs/BUILD-macos.md).
 # A pushed tag v* also attaches openMERC-<version>-win32.zip and openMERC-<version>-linux-x86_64.tar.gz (+ .sha256)
@@ -168,7 +168,7 @@ jobs:
       - name: Build and unit tests
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          OM_BUILD_DIR="$GITHUB_WORKSPACE/out" tools/build/build-linux.sh x86_64 Release
+          OM_BUILD_DIR="$GITHUB_WORKSPACE/out" tools/build/build-linux.sh arm64 Release
       - name: Package
         run: tools/build/package-linux.sh "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/dist-out"
       - uses: actions/upload-artifact@v4

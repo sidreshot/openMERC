@@ -5,7 +5,7 @@
 #   game module (gamex86.so, g3tests), player module (player.so, pm_unit), sound module (OMsnd.so on
 #   OpenAL Soft), OpenMerc's data archive (zz_openmerc.pak), staged into one directory, then the unit tests.
 #
-# usage: tools/build/build-linux.sh [x86_64|i386] [Release|Debug]
+# usage: tools/build/build-linux.sh [x86_64|i386|arm64] [Release|Debug]   (arm64: on an arm64 machine, native)
 # env:   OM_BUILD_DIR  build root (default <repo>/build-linux-<arch>-<cfg>)
 #        OM_NO_TESTS=1 skip the unit tests
 #        OM_JOBS       parallel jobs (default: nproc)
@@ -25,7 +25,8 @@ case "$ARCH" in
     # SSE2 maths like MSVC's x86 default (/arch:SSE2); x87 excess precision changes Ghoul results
     ARCH=i386; FLAGS="-m32 -msse2 -mfpmath=sse"
     export PKG_CONFIG_LIBDIR=${PKG_CONFIG_LIBDIR:-/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig} ;;
-  *) echo "unknown arch '$ARCH' (x86_64 or i386)" >&2; exit 2 ;;
+  arm64|aarch64) ARCH=arm64; FLAGS="" ;;
+  *) echo "unknown arch '$ARCH' (x86_64, i386 or arm64)" >&2; exit 2 ;;
 esac
 
 for t in cmake ninja pkg-config python3; do
