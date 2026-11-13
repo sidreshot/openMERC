@@ -328,8 +328,10 @@ void G_SetStats(edict_t *ent)
 	st[STAT_FORCEHUD] = level.forcehud ? 1 : 0;
 	st[13] = 0;
 	st[14] = (short)OM_AimTarget(ent); /* OpenMerc: the touch auto aim target */
-	/* OpenMerc: the grenades carried, for the touch grenade button (stats 13 is unused by SoF) */
-	st[STAT_OM_GRENADES] = (short)(inv ? inv->ItemCount(IT_GRENADE) : 0);
+	/* OpenMerc: the grenades carried, for the touch grenade button (stats 13 is unused by SoF), and above them the
+	   weapon swap offer (g_weapswap.cpp) */
+	int grenades = inv ? inv->ItemCount(IT_GRENADE) : 0;
+	st[STAT_OM_GRENADES] = (short)((grenades < 0 ? 0 : grenades > 127 ? 127 : grenades) | WeaponSwap_Stat(ent));
 	st[STAT_DAMAGEDIR] = (short)c->damage_dir;
 }
 

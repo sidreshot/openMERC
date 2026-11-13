@@ -509,7 +509,7 @@ Touch_Finger(long long id, int type, float nx, float ny)
 				{
 					Cbuf_AddText("itemuse fpak\n");
 				}
-				else if (Stat(STAT_OM_GRENADES) > 0)
+				else if (Stat(STAT_OM_GRENADES) & 0x7F) /* bits 7-12: the weapon swap offer (cl_hud.c) */
 				{
 					Cbuf_AddText("itemuse grenade\n");
 				}

@@ -895,6 +895,10 @@ void ClientCommand(edict_t *ent)
 		Cmd_OmHurt_f(ent);
 	else if (Q_stricmp(cmd, "ominv") == 0)
 		Cmd_OmInv_f(ent);
+	else if (Q_stricmp(cmd, "omswap") == 0) {
+		if (CheatsOK(ent))
+			WeaponSwap_Debug(ent); /* openMERC weapon swap: why a weapon is offered or not */
+	}
 	else if (Q_stricmp(cmd, "omnear") == 0)
 		Cmd_OmNear_f(ent);
 	else if (Q_stricmp(cmd, "omaim") == 0)

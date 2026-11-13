@@ -187,7 +187,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define STAT_FRAGS 10
 #define STAT_METER 11
 #define STAT_FORCEHUD 12
-#define STAT_OM_GRENADES 13 /* OpenMerc: grenades carried (touch grenade button) */
+#define STAT_OM_GRENADES 13 /* OpenMerc: bits 0-6 grenades carried (touch grenade button), 7-12 the weapon swap */
+#define OM_SWAP_SHIFT 7         /* bits 7-10: the weapon offered for the one in hand (g_weapswap.cpp, cl_hud.c) */
+#define OM_SWAP_POSSIBLE 0x0800 /* dropping the weapon in hand makes room for it */
+#define OM_SWAP_HOLDING 0x1000  /* the use key is held for the swap */
+#define OM_SWAP_OTHER 0x2000    /* not possible with the weapon in hand, but with another of the player's */
 #define STAT_DAMAGEDIR 15
 
 typedef enum { DAMAGE_NO, DAMAGE_YES, DAMAGE_AIM } damage_t;
@@ -692,6 +696,15 @@ void ItemsFinalize(void);
 void ItemsFrame(void);
 void ItemRemoveFromList(edict_t *ent);
 edict_t *DropWeaponItem(edict_t *ent, int weapon, int rounds);
+int WeaponCarryLimit(void);                      /* openMERC: weight the weapons may add up to, 0 = no limit */
+bool WeaponItemAvailable(edict_t *item);         /* openMERC: a weapon item that can be taken now */
+bool WeaponItemTake(edict_t *item, edict_t *other); /* openMERC weapon swap: give it as a pickup */
+
+// g_weapswap.cpp (openMERC: weapon swap, Crysis 2 style)
+void WeaponSwap_ClientThink(edict_t *ent);
+void WeaponSwap_InventoryThink(edict_t *ent, bool after);
+int WeaponSwap_Stat(edict_t *ent);
+void WeaponSwap_Debug(edict_t *ent); /* omswap */
 edict_t *DropEquipItem(edict_t *ent, int itemtype, int count);
 edict_t *SpawnKnifePickup(const vec3_t origin, const vec3_t angles, float life);
 void RevealHiddenItems(const char *targetname);

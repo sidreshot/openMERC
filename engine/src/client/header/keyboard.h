@@ -219,6 +219,7 @@ int Key_Flags(int key);                         /* KEYF_* */
 int Key_Char(int key, qboolean shifted);        /* layout character, 0 = none */
 int Key_ShiftDown(void);
 const char *Key_LocalisedName(int key);         /* KEY_<name> string, "" if none */
+void Key_Utf8ToFont(char *s);                   /* in place: UTF-8 -> SoF font bytes (CP1251 / Latin-1) */
 extern qboolean key_bindings_changed;           /* menus re-read bindings */
 
 /* the pending weapon command of SPEC-310 section 14 / SPEC-312 section 4 */

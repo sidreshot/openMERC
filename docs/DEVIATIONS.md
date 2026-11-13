@@ -185,3 +185,18 @@ thunderstorm on jpn2".
   floor, the bench and the cabinet that were still in view. The renderer keeps the lights a model gave while drawn
   and gives them again in the frames it is culled, while it stays in the scene (gl3_sofapi.c, MLC). Checked at
   omsetpos 434 -155 -179 with yaw 287 / 332 / 7: the room keeps its cyan light. Not in the original.
+
+## Weapon swap (2026-11-13)
+
+- **Swap the weapon in hand for one on the ground, in the manner of Crysis 2** (game g_weapswap.cpp, HUD cl_hud.c;
+  owner request). In SoF a weapon that would pass the carry weight (single player `sk_maxencum`: 10/7/5/5 by
+  difficulty; Realistic 4) is refused with "ENCUMBERED" (its ammunition is taken once). Now such a weapon in view
+  within 96 units of the eye (or under the feet), not behind a wall, shows its name and "Hold <use key>: replace
+  <weapon in hand>"; holding the use key 0.5 s drops the weapon in hand (the player module's own drop: throw hand,
+  the weapon falls with its clip) and gives the one on the ground as a pickup (its message and sound; an empty clip
+  when its ammunition was already taken), then raises it. One swap per press. When the weapon in hand cannot make
+  room the line says "No room: hold a heavier weapon" (another of the player's weapons would) or "Too heavy to
+  carry" (none would), and the key does nothing. Weapons that fit are still picked up by touch; deathmatch without a
+  weight limit is unchanged. Mode B only (the game module's work); the HUD reads free bits of stats[13] (bits 7-13
+  above the grenade count), which the original game module leaves at 0. Test: tests/X1/weapswap.cfg; test aid
+  `omswap` (cheats): the limit, the weight and why each weapon item near is offered or not.

@@ -347,5 +347,7 @@ void PlayerThinkInventory(edict_t *ent, int attack)
 	oc->remoteview = c->ps.remote_type != 0;
 	c->inv->SetOwnerContext(oc);
 	c->inv->SetPredicting(c->pers.predicting ? 1 : 0);
+	WeaponSwap_InventoryThink(ent, false); /* openMERC weapon swap: the new weapon replaces the hand's "next" */
 	c->inv->Think();
+	WeaponSwap_InventoryThink(ent, true); /* openMERC weapon swap: the weapon in hand was dropped - take the new one */
 }

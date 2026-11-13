@@ -1352,6 +1352,7 @@ void ClientThink(edict_t *ent, usercmd_t *ucmd)
 		else
 			G_AutoUse(ent);
 	}
+	WeaponSwap_ClientThink(ent); /* openMERC: hold use to swap the weapon in hand for one on the ground */
 
 	if (client->resp.spectator) {
 		if ((client->latched_buttons & BUTTON_ATTACK)) {

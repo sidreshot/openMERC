@@ -1146,6 +1146,162 @@ HUD_DrawPickup(void)
 	HUD_CentredText(y, hud_pickup, c, &font_medium);
 }
 
+/* OpenMerc: the weapon swap offer (game g_weapswap.cpp, in the Crysis 2 manner): a weapon within reach that the
+   player cannot carry, and "hold USE: replace <the weapon in hand>" with a bar that fills while the key is held.
+   stats[13] above its grenade count: bits 7-10 the weapon on the ground, 0x800 the swap is possible, 0x1000 the key
+   is held, 0x2000 another weapon in hand would make room; the weapon in hand is stats[6]. The game sends the hold in 0.1 s frames; the bar runs on the client's
+   clock from the frame the hold was first seen. */
+#define SWAP_HOLD_MS 500
+
+static const char *
+HUD_WeaponName(int w, char *buf, size_t size)
+{
+	static const char *const ref[] = {NULL, NULL, "ITEMS_DROPPED_44PISTOL", "ITEMS_DROPPED_9MMPISTOL",
+		"ITEMS_DROPPED_9MMSUPSMG", "ITEMS_DROPPED_556SMG", "ITEMS_DROPPED_SNIPER", "ITEMS_DROPPED_SLUGTHROWER",
+		"ITEMS_DROPPED_SHOTGUN", "ITEMS_DROPPED_HVYMACH", "ITEMS_DROPPED_ROCKETLAUNCHER", "ITEMS_DROPPED_MPG",
+		"ITEMS_DROPPED_FLAMEGUN"};
+	static const char *const en[] = {"", "Knife", ".44 Pistol", "9mm Pistol", "9mm Suppressed SMG", "5.56 SMG",
+		"5.56 Sniper Rifle", "Repeating Slug Thrower", "12 Gauge Shotgun", "Heavy Machinegun",
+		"M-1943 Rocket Launcher", "Microwave Pulse", "L-32 Flame Gun"};
+	const char *s = "";
+
+	if (w < 0 || w > 12)
+	{
+		w = 0;
+	}
+
+	if (ref[w])
+	{
+		s = CL_StringByName(ref[w]); /* the game's own text, in the language of the installation */
+	}
+
+	Q_strlcpy(buf, (s && s[0]) ? s : en[w], (int)size);
+	return buf;
+}
+
+/* a key's name as the game shows it (KEY_<name> strings exist for the special keys only), else its own name;
+   a letter in capitals */
+static const char *
+HUD_KeyName(int k)
+{
+	static char buf[32];
+	const char *s = Key_LocalisedName(k);
+
+	if (s[0])
+	{
+		return s;
+	}
+
+	Q_strlcpy(buf, Key_KeynumToString(k), sizeof(buf));
+
+	if (buf[0] && !buf[1] && (buf[0] >= 'a') && (buf[0] <= 'z'))
+	{
+		buf[0] = (char)(buf[0] - 'a' + 'A');
+	}
+
+	return buf;
+}
+
+/* the key bound to +use; the touch controls' button is "USE" */
+static const char *
+HUD_UseKeyName(void)
+{
+	int k, pad = -1;
+
+	if (Touch_Active())
+	{
+		return "USE";
+	}
+
+	for (k = 0; k < K_LAST; k++)
+	{
+		if (keybindings[k] && !Q_stricmp(keybindings[k], "+use"))
+		{
+			if (k >= K_JOY1)
+			{
+				if (pad < 0)
+				{
+					pad = k; /* a gamepad button: only when no keyboard key or mouse button is bound */
+				}
+
+				continue;
+			}
+
+			return HUD_KeyName(k);
+		}
+	}
+
+	return (pad >= 0) ? HUD_KeyName(pad) : "USE";
+}
+
+static void
+HUD_DrawSwap(const sofps_t *ps)
+{
+	static int holdseen = -1;
+	int v = ps->stats[13], w = (v >> 7) & 15, held = ps->stats[6], y = HUD_H() * 62 / 100, x, tw, h;
+	char name[64], heldname[64], tpl[160], line[256];
+	rgba_t c = {255, 255, 255, 255}, dim = {200, 200, 200, 255}, sh = {0, 0, 0, 200};
+	rgba_t bar = {255, 196, 64, 255}, barback = {0, 0, 0, 120};
+	qboolean ru = SP_RussianActive();
+
+	if (!w)
+	{
+		holdseen = -1;
+		return;
+	}
+
+	/* the weapon on the ground */
+	HUD_WeaponName(w, name, sizeof(name));
+	tw = D_TextWidth(name, &font_medium);
+	D_Text((HUD_W() - tw) / 2 + 2, y + 2, name, sh, &font_medium);
+	HUD_CentredText(y, name, c, &font_medium);
+	y += D_FontHeight(&font_medium) + 4;
+
+	/* what the key does, or why it does nothing */
+	if (v & 0x800)
+	{
+		Q_strlcpy(tpl, ru ? "Удерживайте %s: заменить %s" : "Hold %s to swap your %s", sizeof(tpl));
+		Key_Utf8ToFont(tpl); /* the names are font bytes already: only the template is converted */
+		Com_sprintf(line, sizeof(line), tpl, HUD_UseKeyName(), HUD_WeaponName(held, heldname, sizeof(heldname)));
+	}
+	else if (v & 0x2000)
+	{
+		/* another weapon of the player in hand would make room */
+		Q_strlcpy(line, ru ? "Нет места: возьмите в руки оружие тяжелее" :
+			"No room: hold a heavier weapon to swap it", sizeof(line));
+		Key_Utf8ToFont(line);
+	}
+	else
+	{
+		/* no single weapon of the player makes room for it */
+		Q_strlcpy(line, ru ? "Слишком тяжело: не унести" : "Too heavy to carry", sizeof(line));
+		Key_Utf8ToFont(line);
+	}
+
+	tw = D_TextWidth(line, &font_small);
+	x = (HUD_W() - tw) / 2;
+	D_Text(x + 1, y + 1, line, sh, &font_small);
+	D_Text(x, y, line, (v & 0x800) ? c : dim, &font_small);
+	y += D_FontHeight(&font_small) + 3;
+
+	/* the hold bar */
+	if (!(v & 0x800) || !(v & 0x1000))
+	{
+		holdseen = -1;
+		return;
+	}
+
+	if (holdseen < 0 || holdseen > cls.realtime)
+	{
+		holdseen = cls.realtime;
+	}
+
+	h = 3;
+	D_Fill(x, y, tw, h, barback);
+	D_Fill(x, y, tw * ((cls.realtime - holdseen) < SWAP_HOLD_MS ? (cls.realtime - holdseen) : SWAP_HOLD_MS) /
+		SWAP_HOLD_MS, h, bar);
+}
+
 static void
 HUD_DrawMission(void)
 {
@@ -1446,6 +1602,11 @@ HUD_DrawInterface(void)
 	HUD_DrawMission();
 	HUD_DrawPickup();
 	HUD_DrawDamageDir();
+
+	if (!scope && (ps->remote_type == 0))
+	{
+		HUD_DrawSwap(ps);
+	}
 
 	/* 8 rank / spectator: remote mask only */
 	if ((ps->remote_type == 0) || (ps->remote_type & elems[E_RANK].mask))

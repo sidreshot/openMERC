@@ -419,13 +419,15 @@ MT_TourNext(void)
 /* om_after <frames> <text>: console text run after <frames> client frames
    (the console's "wait" is not tied to drawn frames in OpenMerc);
    om_after t<seconds> <text>: once the local game has run <seconds> since its map started (game time - the same
-   moment of a level on a fast PC and a slow phone) */
+   moment of a level on a fast PC and a slow phone);
+   om_after r<seconds> <text>: <seconds> of game time from now */
 #define MT_AFTER 128
 
 static struct
 {
 	int frames;
 	int gamems; /* > 0: wait for this game time instead of frames */
+	int relms;  /* > 0: r<seconds> given while no game ran - counted from the first frame of a running game */
 	char text[1024];
 } mt_after[MT_AFTER];
 
@@ -448,6 +450,26 @@ MT_After_f(void)
 		{
 			mt_after[i].frames = atoi(Cmd_Argv(1));
 			mt_after[i].gamems = (Cmd_Argv(1)[0] == 't') ? (int)(atof(Cmd_Argv(1) + 1) * 1000.0f) + 1 : 0;
+
+			/* r<seconds>: game time from now, or from the first frame of a running game when none runs yet (a step
+			   chain; t<seconds> counts from the server's start, which a single-player level has passed before its
+			   first client frame) */
+			mt_after[i].relms = 0;
+
+			if (Cmd_Argv(1)[0] == 'r')
+			{
+				int ms = (int)(atof(Cmd_Argv(1) + 1) * 1000.0f) + 1;
+
+				if (SV_GameMsec() >= 0)
+				{
+					mt_after[i].gamems = SV_GameMsec() + ms;
+				}
+				else
+				{
+					mt_after[i].relms = ms;
+					mt_after[i].gamems = 0x7fffffff;
+				}
+			}
 			Q_strlcpy(mt_after[i].text, Cmd_Args() + strlen(Cmd_Argv(1)) + 1, sizeof(mt_after[i].text));
 
 			/* drop the quotes of a single quoted argument */
@@ -473,6 +495,12 @@ MT_AfterFrame(void)
 		if (!mt_after[i].text[0])
 		{
 			continue;
+		}
+
+		if (mt_after[i].relms && (SV_GameMsec() >= 0))
+		{
+			mt_after[i].gamems = SV_GameMsec() + mt_after[i].relms;
+			mt_after[i].relms = 0;
 		}
 
 		if (mt_after[i].gamems ? (SV_GameMsec() >= mt_after[i].gamems - 1) : (--mt_after[i].frames <= 0))

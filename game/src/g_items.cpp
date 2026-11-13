@@ -464,6 +464,42 @@ static int CarryLimit(int itemtype)
 	return -1;
 }
 
+/* the weight the weapons of a player may add up to (0: no limit): single player by sk_maxencum, Realistic 4 */
+int WeaponCarryLimit(void)
+{
+	if (!DMFamily())
+		return weight_limit[clamp4(gix.cvar_value("sk_maxencum"))];
+	return Mode() == 5 ? 4 : 0;
+}
+
+/* openMERC weapon swap (g_weapswap.cpp): a weapon item that a player can take now */
+bool WeaponItemAvailable(edict_t *item)
+{
+	return item && item->inuse && item->item && item->item->kind == IK_WEAPON && item->touch == Touch_Item &&
+	       item->solid == SOLID_TRIGGER && !(item->svflags & SVF_NOCLIENT);
+}
+
+/* openMERC weapon swap, its second half: the player has dropped the weapon in hand and takes this one, as a pickup
+   that fits. A weapon whose ammunition was already taken while the player was full (ITEM_AMMO_TAKEN) comes with an
+   empty clip: its rounds were given then. */
+bool WeaponItemTake(edict_t *item, edict_t *other)
+{
+	if (!WeaponItemAvailable(item) || !other || !other->client || !other->client->inv)
+		return false;
+	gitem_t *it = item->item;
+	PlayerInventory *inv = other->client->inv;
+	int w = it->value;
+	if (inv->OwnsWeapon(w))
+		return false;
+	bool dropped = (item->spawnflags & DROPPED_ITEM) != 0;
+	int rounds = (item->spawnflags & ITEM_AMMO_TAKEN) ? 0 : (dropped && item->itemcount > 0) ? item->itemcount : -1;
+	inv->GiveWeapon(w, rounds);
+	PickupSound(other);
+	ItemMessage(other, it->msg_pickup);
+	ItemConsumed(item, DMFamily() && !dropped && Mode() != 5);
+	return true;
+}
+
 static void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf)
 {
 	gitem_t *it = ent->item;
@@ -505,7 +541,7 @@ static void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t
 		/* openMERC (owner 5, docs/DEVIATIONS.md): a weapon a character dropped carries no rounds (itemcount 0) and was
 		   given empty - picked up, it had no ammunition at all; it comes with a full clip now, as a weapon of the map */
 		int rounds = (dropped && ent->itemcount > 0) ? ent->itemcount : -1;
-		int L = sp ? weight_limit[clamp4(gix.cvar_value("sk_maxencum"))] : realistic ? 4 : 0;
+		int L = WeaponCarryLimit();
 		if (!inv->OwnsWeapon(w)) {
 			bool encumbered = L > 0 && inv->WeaponWeight(w) + inv->TotalWeight() > L;
 			if (!encumbered) {

@@ -74,7 +74,7 @@ static int text_pending;    /* 0 none, 1 console line, 2 chat line,
                                3 insert (a VK_PACKET press: IME, on-screen
                                keyboard, SendInput Unicode) */
 static int text_pending_pos;
-static void Key_Utf8ToFont(char *s);
+void Key_Utf8ToFont(char *s); /* keyboard.h */
 
 /* TAB completion state (SPEC-312 5.2, SPEC-313 section 10) */
 static qboolean completion_active;
@@ -1373,8 +1373,8 @@ Key_Utf8Len(unsigned char c)
 
 /* in place: UTF-8 text (the clipboard) -> font bytes; characters without a
    glyph are dropped. Text that is not valid UTF-8 is kept byte for byte, so
-   a CP1251 clipboard (old programs) still pastes. */
-static void
+   a CP1251 clipboard (old programs) still pastes. Also the HUD's own UTF-8 texts (cl_hud.c). */
+void
 Key_Utf8ToFont(char *s)
 {
 	unsigned char *r = (unsigned char *)s, *w = (unsigned char *)s;
