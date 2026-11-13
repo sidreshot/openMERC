@@ -16,7 +16,7 @@
     {"id": "jpn1", "map": "jpn1", "what": "outdoors at night, neon-lit street",
      "view": "476 700 91 -9 8", "wall": "476 700 91 -9 0"},
     {"id": "kos1", "map": "kos1", "what": "dark sewer with a water channel",
-     "view": "112 -3288 -64 90 8", "wall": "112 -3288 -64 180 0"},
+     "view": "112 -3288 -64 90 8", "wall": "112 -3288 -64 270 0"},
     {"id": "sud1", "map": "sud1", "what": "indoors, wooden tunnel under lamps",
      "view": "1624 -1864 56 180 8", "wall": "1624 -1864 56 270 0"},
     {"id": "sib1", "map": "sib1", "what": "outdoors by day, snow canyon",
