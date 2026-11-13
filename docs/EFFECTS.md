@@ -14,7 +14,7 @@ Rules for every item:
   the picture changes (timing, size, sound, gameplay);
 - the box here is ticked when the item is in `main`, on by default on High, and checked in the game.
 
-Progress: **14 of 36 done**. The README shows the same list.
+Progress: **15 of 37 done**. The README shows the same list.
 
 ## Done
 
@@ -29,7 +29,8 @@ Progress: **14 of 36 done**. The README shows the same list.
 | [x] | Wet blood marks, blood pools under bodies | `r_om_wetblood` | 2026-11-10 |
 | [x] | Lamp halos (coronas) as bloom instead of painted sprites | `r_om_coronas 0` | 2026-11-02 |
 | [x] | Rain and thunderstorm with lightning light instead of the whole-sky flash | `r_om_rain` | 2026-11-01 |
-| [x] | Water: swell, ripples, refraction, foam, splash rings | `r_om_water` | 2026-11-09 |
+| [x] | Water surfaces: waves, ripples, reflections, refraction, caustics, foam, fog above and under the water | `r_om_water`, `r_om_water_fog` | 2026-11-09 |
+| [x] | Splashes in water: a spray of its own (column, drops, foam crown) and rings on the surface, in multiplayer too. Always on, no switch of its own yet | - | 2026-11-09 |
 | [x] | Hit tint as a dark red vignette instead of a flat red screen | `r_om_hitfx` | 2026-11-11 |
 | [x] | Night vision as an image intensifier tube instead of a green noise multiply | `r_om_nightvision` | 2026-11-11 |
 | [x] | Contact shadows of bodies instead of the round blob | `r_om_capsule` | 2026-11-11 |
@@ -98,9 +99,11 @@ These come first; the effects below are built on them.
 - [ ] **E13. Spraying liquids.** `chemspurt`, `oilspurt`, `waterspurt`, `takeleak`, `stream`, `stream_red`,
   `toiletspout`, `poolspout`, `k_waterspout3`, `gb_sewerspray01`, `gb_sewerspray02`. Planned: lit streams, water that
   refracts, oil and chemicals that do not.
-- [ ] **E14. Water effects.** `gb_watersplash`, `bulletsplash`, `gb_waterripple`, `waterdrip`, `gb_waterdrip`,
-  `gb_waterdrip2`, `gb_debrisintowater`, `gb_exitw`, `puddle`, `puddle2`, `puddle3`. Planned: splash sheets and drops
-  that refract like the rain drops, rings on the water surface itself.
+- [ ] **E14. The rest of the water.** Drips (`waterdrip`, `gb_waterdrip`, `gb_waterdrip2`), the ripple effect
+  `gb_waterripple`, `gb_debrisintowater`, leaving the water (`gb_exitw`), `puddle`, `puddle2`, `puddle3`; and the
+  original particles of `gb_watersplash` and `bulletsplash`, which still play under the new spray. Planned: drops that
+  refract like the rain drops, each of these ringing the surface like a splash, the old splash particles off where the
+  new spray runs, a switch for the spray.
 - [ ] **E15. Smoke and steam of the levels.** `normalsmoke`, `normalsteam`, `metal_steam`, `sm_steam01`, `sm_steam02`,
   `sm_steam10`, `sm_jet01`, `tv_smoke`, `helismoke`, `machgun_smoke2`, `gb_exhaust01`, `gb_exhaust02`, `kf_exhaust01`,
   `extinguisher1`, `gb_dustcloud01`, `snowspray`. Planned: lit volumes with soft edges that drift with the air.

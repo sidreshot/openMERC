@@ -50,7 +50,7 @@ Every effect of the game is being redrawn with current techniques. The game's ow
 where and how big; only the drawing changes, and each new effect can be switched back to the original look. Details,
 the effects of each group and the rules: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Progress: 14 of 36 done.**
+**Progress: 15 of 37 done.**
 
 Done:
 
@@ -63,7 +63,8 @@ Done:
 - [x] Wet blood, blood pools under bodies
 - [x] Lamp halos as bloom instead of painted sprites
 - [x] Rain and thunderstorm with lightning light
-- [x] Water: swell, ripples, refraction, foam
+- [x] Water: waves, reflections, refraction, foam, fog above and under it
+- [x] Splashes in water: spray and rings on the surface
 - [x] Hit tint as a dark red vignette
 - [x] Night vision as an image intensifier tube
 - [x] Contact shadows of bodies instead of the round blob
@@ -89,7 +90,7 @@ To do:
 - [ ] E11. MPG, electric arcs, beams
 - [ ] E12. Blood and gore
 - [ ] E13. Spraying liquids
-- [ ] E14. Water splashes, drips, ripples
+- [ ] E14. The rest of the water: drips, puddles, debris falling in
 - [ ] E15. Smoke and steam of the levels
 - [ ] E16. Lava and molten metal
 - [ ] E17. Breath in the cold, respawn and teleport
@@ -209,7 +210,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 решают данные самой игры; меняется только отрисовка, и каждый новый эффект можно вернуть к оригинальному виду.
 Подробности, эффекты каждой группы и правила: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Прогресс: сделано 14 из 36.**
+**Прогресс: сделано 15 из 37.**
 
 Сделано:
 
@@ -222,7 +223,8 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - [x] Мокрая кровь, лужи крови под телами
 - [x] Ореолы ламп через bloom вместо нарисованных спрайтов
 - [x] Дождь и гроза со светом молний
-- [x] Вода: волны, рябь, преломление, пена
+- [x] Вода: волны, отражения, преломление, пена, туман над водой и под ней
+- [x] Всплески в воде: брызги и круги на поверхности
 - [x] Попадание как тёмно-красная виньетка
 - [x] Ночное видение как электронно-оптический преобразователь
 - [x] Контактные тени тел вместо круглого пятна
@@ -248,7 +250,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - [ ] E11. MPG, электрические дуги, лучи
 - [ ] E12. Кровь
 - [ ] E13. Струи жидкостей
-- [ ] E14. Всплески, капли и круги на воде
+- [ ] E14. Остальное на воде: капли, лужи, падающие в воду обломки
 - [ ] E15. Дым и пар на уровнях
 - [ ] E16. Лава и расплавленный металл
 - [ ] E17. Дыхание на морозе, возрождение и телепорт
