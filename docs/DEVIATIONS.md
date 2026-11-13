@@ -233,3 +233,15 @@ thunderstorm on jpn2".
   (spawnflag 1) and is toggled back to its open place is never held. Test: tests/X1/sib3_blastdoors.cfg; test aids
   `om_doordebug 1` (prints who holds a door), `omusetarget` (what the use key would act on, with every candidate),
   `omuse <entity>` (its use-key reaction as a press would call it).
+
+## A crouched character stands up to move (2026-11-13)
+
+- **A crouched owner with no crouched move record stands up to move** (ai_decisions.cpp `CombatDecision::PlanMove`,
+  irq3b): the move choice gives a crouched body the first it has of the crouched run and the crouched aim stances
+  (SPEC-722 crouched list). A body with no crouched run for its weapon gets the aim stance, so a move planned while
+  it kneels, closing in or backing off, never takes a step: it kneels and aims for good. When the answer to a move
+  is not a move record and the body is crouched, the move is asked again standing; the owner stands up and moves
+  on its next think. Not for a character that never moves (spawnflag 128), nor for one standing on a train or on
+  a prop that moves: every step off it is refused, and the tsr1 train riders, kneeling to shoot, stood up and ran
+  against the train's edge. irq3b: the bodyguard with the sniper rifle on the upper floor (entity 455, about
+  -2500 1041 256), too close to the player after a crouched shot, only queued `cch_a_fwd_r_2`.
