@@ -255,3 +255,12 @@ thunderstorm on jpn2".
   that failed, it plans for 3 s as with no retreat point or no path: it attacks in place with a clear shot, else
   it stands; then it tries the move again. Fleeing (code 4) is unchanged. sud2: the worker `cutter2` at
   717 -2128 -93, too close to the player, ran on the spot against its own retreat for good.
+
+## A scripted jump also takes off from the air (2026-11-14)
+
+- **A scripted jump begun above the floor gets its push, and stops over its target** (ai_actions.cpp
+  `GroundAction::HandleEvents`, `JumpAction`; kos2): the jump push was given only on the ground. A cut-scene actor
+  placed above a ledge (spawnflag 16: not dropped to the floor) got none and fell straight down. kos2's outro: John,
+  placed above the ledge in front of the gun, fell into the pit and never ran across the last shot. A scripted jump
+  now takes off from the air too; since such a jump falls further than its push allows for, its sideways speed is
+  cut once the actor has covered the distance to its target, so it lands clear of the wall beyond.

@@ -177,7 +177,11 @@ void GroundAction::HandleEvents(edict_t *ent, AI *ai, uint32_t ev)
 		AddEntityEvent(ent, 3);
 	if (ev & BODYEV_FIRE)
 		Fire(ent, ai);
-	if ((ev & BODYEV_JUMP) && (move_flags & MF_JUMP_IMPULSE) && ent->groundentity && !(ent->flags & FL_FLY)) {
+	/* a scripted jump also takes off from the air: an actor placed above a ledge (spawnflag 16 is not dropped to the
+	 * floor) got no push and fell straight down, as kos2's outro John did into the pit (DEVIATIONS.md "A scripted jump
+	 * also takes off from the air") */
+	if ((ev & BODYEV_JUMP) && (move_flags & MF_JUMP_IMPULSE) && (ent->groundentity || (script_flags & 0x80000000)) &&
+	    !(ent->flags & FL_FLY)) {
 		float g = CvarValue(cv.sv_gravity);
 		if (g <= 0)
 			g = 800;
@@ -758,6 +762,10 @@ public:
 class JumpAction : public GroundAction { /* class 9 */
 public:
 	vec3_t start_velocity = {0, 0, 0};
+	/* a scripted jump by an actor placed above the floor: where it began. Not saved, a load only ends the stop over
+	 * the target */
+	bool began_in_air = false;
+	vec3_t air_from = {0, 0, 0};
 	void SaveTail(SaveRec &r) override { r.V(112, start_velocity); } /* SPEC-711 class 9 tail */
 	JumpAction() : GroundAction(9, AK_JUMP) {}
 	void Start(edict_t *ent, AI *ai) override
@@ -773,6 +781,8 @@ public:
 			VectorMA(ent->s.origin, 64, f, D);
 			VectorCopy(D, destination);
 		}
+		began_in_air = (script_flags & 0x80000000) && !ent->groundentity;
+		VectorCopy(ent->s.origin, air_from);
 		float g = CvarValue(cv.sv_gravity);
 		if (g <= 0)
 			g = 800;
@@ -820,6 +830,13 @@ public:
 			return true;
 		float now = Now();
 		if (!ent->groundentity) {
+			/* a jump begun in the air falls further than its impulse allows for and keeps its sideways speed: kos2's
+			 * outro John flew past his mark and ended inside a wall, every step of his run refused. The sideways speed
+			 * is cut once he has covered the distance to the target */
+			if (began_in_air && HDist2(ent->s.origin, air_from) >= HDist2(destination, air_from)) {
+				ent->velocity[0] = ent->velocity[1] = 0;
+				began_in_air = false;
+			}
 			if (ent->velocity[2] > 0 && now < landing_check) {
 				float left = landing_check - now;
 				if (left > 0.05f) {
