@@ -233,3 +233,12 @@ thunderstorm on jpn2".
   (spawnflag 1) and is toggled back to its open place is never held. Test: tests/X1/sib3_blastdoors.cfg; test aids
   `om_doordebug 1` (prints who holds a door), `omusetarget` (what the use key would act on, with every candidate),
   `omuse <entity>` (its use-key reaction as a press would call it).
+
+## A scripted jump also takes off from the air (2026-11-14)
+
+- **A scripted jump begun above the floor gets its push, and stops over its target** (ai_actions.cpp
+  `GroundAction::HandleEvents`, `JumpAction`; kos2): the jump push was given only on the ground. A cut-scene actor
+  placed above a ledge (spawnflag 16: not dropped to the floor) got none and fell straight down. kos2's outro: John,
+  placed above the ledge in front of the gun, fell into the pit and never ran across the last shot. A scripted jump
+  now takes off from the air too; since such a jump falls further than its push allows for, its sideways speed is
+  cut once the actor has covered the distance to its target, so it lands clear of the wall beyond.
