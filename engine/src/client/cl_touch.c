@@ -643,14 +643,33 @@ Look(void)
 		f->lx = f->x;
 		f->ly = f->y;
 	}
+}
 
-	if (cl.viewangles[PITCH] > 89)
+/* the limit is the drawn pitch: cl.viewangles plus the server delta (a spawn,
+   a scripted view). Clamping cl.viewangles to +/-89 on its own stops the view
+   at the horizon once that delta is positive. A finger looks up during a
+   cinematic, the script then levels the drawn pitch, and the same +/-89 can
+   no longer reach above level. Same numbers as CL_ClampPitch. */
+static void
+ClampTouchPitch(void)
+{
+	float pitch;
+
+	pitch = SHORT2ANGLE(cl.frame.playerstate.pmove.delta_angles[PITCH]);
+
+	if (pitch > 180)
 	{
-		cl.viewangles[PITCH] = 89;
+		pitch -= 360;
 	}
-	else if (cl.viewangles[PITCH] < -89)
+
+	if (cl.viewangles[PITCH] + pitch > 89)
 	{
-		cl.viewangles[PITCH] = -89;
+		cl.viewangles[PITCH] = 89 - pitch;
+	}
+
+	if (cl.viewangles[PITCH] + pitch < -89)
+	{
+		cl.viewangles[PITCH] = -89 - pitch;
 	}
 }
 
@@ -676,6 +695,7 @@ Touch_Move(struct usercmd_s *cmd)
 	Layout();
 	Look();
 	AutoAim();
+	ClampTouchPitch();
 
 	for (i = 0; i < TOUCH_FINGERS; i++)
 	{
