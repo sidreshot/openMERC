@@ -275,3 +275,13 @@ thunderstorm on jpn2".
   commander with the pistol at -2600 2491 -68 (entity 134). Owners that back off without firing (PFlags 8) take the
   other path and are unchanged, and so is an owner standing on a train or on a prop that moves: after the shot the
   tsr1 train riders got back-off records and ran against the train's edge.
+
+## Riders move with the train's actual move (2026-11-14)
+
+- **Riders follow where the train went, not its velocity** (props/prop_train.cpp `TrainRiders`, props/prop_core.cpp
+  `RidersMove`, tsr1): the train thinks before it moves, so the riders rule (SPEC-770 5.9) moved whoever stands on
+  it by velocity * FRAMETIME. A train held by an obstacle keeps its velocity (elasticity -1, SPEC-760 B4.7) without
+  moving, and the riders were carried on: the tsr1 ride ends at a metal plate across the rails, and the player on the
+  roof slid off the front and dropped to the track. Each think the riders now get last think's error (the train's
+  actual move minus what they were moved) and the predicted move scaled by the part of it the train made last think.
+  The train, its stop and its end handling are unchanged; other props that carry riders use `Riders` as before.
