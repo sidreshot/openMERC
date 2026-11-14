@@ -927,7 +927,9 @@ void RidersMove(edict_t *self, const vec3_t move)
 		VectorCopy(p->mins, lo);
 		lo[2] += 2;
 		trace_t tr = gi.trace(np, lo, p->maxs, np, p, p->client ? 0x02010003 : MASK_MONSTERSOLID);
-		if (tr.startsolid || tr.allsolid)
+		/* a rider whose box touches the tunnel ceiling reads startsolid and was left behind when the train moved.
+		 * Someone already standing on this prop still has to ride */
+		if ((tr.startsolid || tr.allsolid) && p->groundentity != self)
 			continue;
 		VectorCopy(np, p->s.origin);
 		gi.linkentity(p);

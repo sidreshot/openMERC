@@ -264,6 +264,17 @@ void CheckGround(edict_t *ent, AI *ai)
 	VectorCopy(ent->s.origin, point);
 	point[2] -= (ent->groundentity && ent->groundentity->solid == SOLID_GROUND) ? 2.5f : 0.25f;
 	trace_t tr = Trace(ent->s.origin, ent->mins, ent->maxs, point, ent, 0x2020003);
+	/* the probe is 0.25 under the origin, far above a train roof the feet rest on, so it misses and the rider
+	 * loses the car. Keep the train while he is still standing on its roof */
+	if (ent->groundentity && ent->groundentity->classname &&
+	    !Q_stricmp(ent->groundentity->classname, "misc_generic_train")) {
+		edict_t *g = ent->groundentity;
+		float feet = ent->s.origin[2] + ent->mins[2], top = g->absmax[2];
+		bool inside = ent->s.origin[0] >= g->absmin[0] && ent->s.origin[0] <= g->absmax[0] &&
+		              ent->s.origin[1] >= g->absmin[1] && ent->s.origin[1] <= g->absmax[1];
+		if (inside && feet > top - 8.0f && feet < top + 16.0f && (tr.fraction >= 1.0f || tr.startsolid))
+			return;
+	}
 	if (tr.plane.normal[2] < 0.7f && !tr.startsolid) {
 		ent->groundentity = nullptr;
 		return;
@@ -372,6 +383,39 @@ static bool StandsOnSomeone(edict_t *ent, const trace_t &tr)
 	return newbottom > top - 1;
 }
 
+/* the corner test traces points, and a point does not hit a bbox, so a train roof never counts as a floor and the
+ * rider cannot take a step (tsr1 rtskinhead1-3). Slide the anim step along the roof and keep him on the car */
+static bool SlideOnTrain(edict_t *ent, edict_t *train, const vec3_t move)
+{
+	float top = train->absmax[2];
+	float margin = 24.0f;
+	vec3_t np;
+	VectorAdd(ent->s.origin, move, np);
+	if (np[0] < train->absmin[0] + margin)
+		np[0] = train->absmin[0] + margin;
+	if (np[0] > train->absmax[0] - margin)
+		np[0] = train->absmax[0] - margin;
+	if (np[1] < train->absmin[1] + margin)
+		np[1] = train->absmin[1] + margin;
+	if (np[1] > train->absmax[1] - margin)
+		np[1] = train->absmax[1] - margin;
+	np[2] = top + 2.0f - ent->mins[2];
+	vec3_t lo;
+	VectorCopy(ent->mins, lo);
+	lo[2] += 4.0f;
+	trace_t tr = Trace(np, lo, ent->maxs, np, ent, 0x2020003);
+	if (tr.startsolid || tr.allsolid)
+		return false;
+	VectorCopy(np, ent->s.origin);
+	ent->groundentity = train;
+	ent->groundentity_linkcount = train->linkcount;
+	if (ent->ai)
+		ent->ai->ground_linkcount = train->linkcount;
+	gi.linkentity(ent);
+	G_TouchTriggers(ent);
+	return true;
+}
+
 /* SPEC-711 A6.3 */
 bool StepMove(edict_t *ent, AI *ai, const vec3_t move, int flags)
 {
@@ -422,6 +466,13 @@ bool StepMove(edict_t *ent, AI *ai, const vec3_t move, int flags)
 	if (DotProduct(ent->velocity, ent->velocity) > 121.0f)
 		return false;
 	float h = (flags & MF_FULL_STEP) ? (ai ? ai->step_height : 24.0f) : 2.0f;
+	vec3_t mins;
+	VectorCopy(ent->mins, mins);
+	edict_t *ground = ent->groundentity;
+	bool train = ground && ground->classname && !Q_stricmp(ground->classname, "misc_generic_train");
+	/* a step that the world accepts walks off the roof onto the track. Stay on the car */
+	if (train)
+		return SlideOnTrain(ent, ground, move);
 	trace_t tr;
 	bool found = false;
 	for (int i = 0; i < 3; i++) {
@@ -430,14 +481,14 @@ bool StepMove(edict_t *ent, AI *ai, const vec3_t move, int flags)
 		VectorCopy(neworg, end);
 		neworg[2] += hh;
 		end[2] -= 2 * h;
-		tr = Trace(neworg, ent->mins, ent->maxs, end, ent, mask);
+		tr = Trace(neworg, mins, ent->maxs, end, ent, mask);
 		if (!tr.allsolid && !tr.startsolid) {
 			found = true;
 			break;
 		}
 	}
 	if (!found)
-		return false;
+		return train && SlideOnTrain(ent, ground, move) ? true : false;
 	if (!(flags & MF_STEP_OFF) && StandsOnSomeone(ent, tr))
 		return false;
 	if (ent->waterlevel == 0) {
@@ -449,7 +500,7 @@ bool StepMove(edict_t *ent, AI *ai, const vec3_t move, int flags)
 	}
 	if (tr.fraction == 1.0f || !CheckBottomAt(ent, ai, tr.endpos, flags)) {
 		if (!(flags & MF_STEP_OFF))
-			return false;
+			return train && SlideOnTrain(ent, ground, move) ? true : false;
 		/* stepping off a ledge: partial ground when the floor 20 units below is missing or steep */
 		vec3_t below;
 		VectorCopy(tr.endpos, below);

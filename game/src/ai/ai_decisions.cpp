@@ -518,6 +518,47 @@ static bool OnCarryingProp(edict_t *ent)
 	return DotProduct(g->velocity, g->velocity) > 1.0f;
 }
 
+/* the point on a train roof closest to `target`, inset from the ends. World navigation nodes are on the track, not
+ * on the car, so an approach from the roof steps off it and then, the step refused, the rider stands where he woke
+ * (tsr1 rtskinhead1-3). Local +X is AngleVectors forward; local +Y is -right. */
+static bool TrainRoofPoint(edict_t *ent, const vec3_t target, vec3_t out)
+{
+	edict_t *g = ent->groundentity;
+	if (!g || !g->classname || Q_stricmp(g->classname, "misc_generic_train"))
+		return false;
+	vec3_t fwd, right, lx, ly;
+	AngleVectors(g->s.angles, fwd, right, nullptr);
+	fwd[2] = right[2] = 0;
+	if (VectorNormalize(fwd) < 0.1f || VectorNormalize(right) < 0.1f)
+		return false;
+	VectorCopy(fwd, lx);
+	VectorNegate(right, ly);
+	float spanx = g->maxs[0] - g->mins[0];
+	float spany = g->maxs[1] - g->mins[1];
+	vec3_t axis;
+	float half;
+	if (spany >= spanx) {
+		VectorCopy(ly, axis);
+		half = spany * 0.5f;
+	} else {
+		VectorCopy(lx, axis);
+		half = spanx * 0.5f;
+	}
+	vec3_t rel;
+	VectorSubtract(target, g->s.origin, rel);
+	float along = DotProduct(rel, axis);
+	float lim = half - 48.0f;
+	if (lim < 16.0f)
+		lim = 16.0f;
+	if (along > lim)
+		along = lim;
+	if (along < -lim)
+		along = -lim;
+	VectorMA(g->s.origin, along, axis, out);
+	out[2] = ent->s.origin[2];
+	return true;
+}
+
 void CombatDecision::PlanMove(edict_t *ent, AI *ai, const vec3_t dest, const vec3_t face, bool running, bool aiming,
                               bool strafing)
 {
@@ -789,6 +830,31 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 	}
 	/* too far, out of time, no clear shot, flee (4), search (7) */
 	vec3_t pathpt;
+	bool on_train = TrainRoofPoint(ent, target_pos, pathpt);
+	if (on_train) {
+		/* already at the point on this car closest to the enemy: shoot if the line is clear, otherwise aim there.
+		 * Walking further only steps off the roof */
+		vec3_t dir;
+		VectorSubtract(pathpt, ent->s.origin, dir);
+		dir[2] = 0;
+		float dist = VectorNormalize(dir);
+		if (dist <= 36.0f) {
+			if (may_attack && ClearShotTo(ent, ai, nullptr, target, target_pos))
+				PlanAttack(ent, ai, target, target_pos, false, nullptr);
+			else
+				PlanStand(ent, ai, target ? target->s.origin : nullptr, target, false, nullptr);
+			return;
+		}
+		/* a run step is about 20 units and the arrival test ends the action once that covers the goal, so the goal
+		 * stays a short way along the roof and the body keeps the looping run */
+		float stepd = dist < 48.0f ? dist : 48.0f;
+		vec3_t goal, look;
+		VectorMA(ent->s.origin, stepd, dir, goal);
+		VectorMA(ent->s.origin, 400, dir, look);
+		last_plan_move = true;
+		PlanMove(ent, ai, goal, look, true, false, false);
+		return;
+	}
 	if (stuck || !NavPoint(ent, ai, target_pos, NAV_APPROACH, pathpt)) {
 		if (may_attack && ClearShotTo(ent, ai, nullptr, target, target_pos))
 			PlanAttack(ent, ai, target, target_pos, false, nullptr);

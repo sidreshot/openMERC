@@ -285,3 +285,14 @@ thunderstorm on jpn2".
   roof slid off the front and dropped to the track. Each think the riders now get last think's error (the train's
   actual move minus what they were moved) and the predicted move scaled by the part of it the train made last think.
   The train, its stop and its end handling are unchanged; other props that carry riders use `Riders` as before.
+
+## Enemies on a train walk the roof (2026-11-15)
+
+- **A rider approaches along the car, and a step can stand on the train** (ai_decisions.cpp `TrainRoofPoint`,
+  ai_util.cpp `SlideOnTrain` and `CheckGround`, props/prop_core.cpp `RidersMove`, tsr1): world navigation points at
+  nodes on the track. The corner test traces points, and a point does not hit a bbox, so every step on
+  `rtskinhead1-3` was refused and they stood where the script woke them. On a train the approach is the point on
+  that roof closest to the enemy, inset from the ends. The anim step slides along the roof instead of onto the
+  track, the ground check keeps the train while the feet are still on it, and a rider the ceiling makes "solid"
+  is still carried. Not in the original. One of the three (the one who starts furthest from that point) still
+  drops off the car after a few steps; the other two stay on it and the one already nearest the player holds there.
