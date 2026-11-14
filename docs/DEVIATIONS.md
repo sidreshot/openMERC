@@ -245,3 +245,13 @@ thunderstorm on jpn2".
   a prop that moves: every step off it is refused, and the tsr1 train riders, kneeling to shoot, stood up and ran
   against the train's edge. irq3b: the bodyguard with the sniper rifle on the upper floor (entity 455, about
   -2500 1041 256), too close to the player after a crouched shot, only queued `cch_a_fwd_r_2`.
+
+## A move that gets nowhere is given up (2026-11-14)
+
+- **Three failed moves in a row, and the combat plan stops moving for 3 s** (ai_decisions.cpp
+  `CombatDecision::NonIdealPlan`, `ActionDone`; sud2): SPEC-710 C5 backs off along the retreat path or closes in
+  along the navigation path on every plan, with no limit. Where the step is refused (a wall, a ledge, a prop in the
+  way) the owner planned the same move think after think and did nothing else. After three such moves in a row
+  that failed, it plans for 3 s as with no retreat point or no path: it attacks in place with a clear shot, else
+  it stands; then it tries the move again. Fleeing (code 4) is unchanged. sud2: the worker `cutter2` at
+  717 -2128 -93, too close to the player, ran on the spot against its own retreat for good.

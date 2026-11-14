@@ -271,6 +271,13 @@ void CombatDecision::ActionDone(edict_t *ent, AI *ai, Action *a, float m)
 {
 	if (a->Kind() != AK_ATTACK)
 		success = 0.75f * success + 0.25f * m;
+	if (last_plan_move) {
+		if (m <= 0.25f) {
+			move_fails++;
+			move_fail_time = Now();
+		} else
+			move_fails = 0;
+	}
 	if (m <= 0.25f)
 		Unstick(ent, ai);
 	else if (pending_set && !PendingExecutable(ent))
@@ -667,9 +674,15 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 	VectorSubtract(target_pos, ent->s.origin, to_t);
 	to_t[2] = 0;
 	float dist_t = VectorNormalize(to_t);
+	/* a move of this plan whose steps keep failing (a wall, a ledge, a prop in the way) is given up for 3 s after three
+	 * in a row; the owner then plans as with no retreat point or no path: it attacks in place with a clear shot, else
+	 * it stands. Fleeing (code 4) is unchanged (DEVIATIONS.md "A move that gets nowhere is given up") */
+	if (move_fails && Now() - move_fail_time >= 3.0f)
+		move_fails = 0;
+	bool stuck = move_fails >= 3 && code != 4;
 	if (code == 2 || code == 8) {
-		vec3_t P;
-		bool retreat = NavPoint(ent, ai, target_pos, NAV_FLEE, P);
+		vec3_t P = {0, 0, 0};
+		bool retreat = !stuck && NavPoint(ent, ai, target_pos, NAV_FLEE, P);
 		vec3_t r = {0, 0, 0};
 		if (retreat) {
 			VectorSubtract(P, ent->s.origin, r);
@@ -739,6 +752,7 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 			}
 			vec3_t goal;
 			VectorMA(ent->s.origin, stepd, r, goal);
+			last_plan_move = true;
 			if (may_attack && !(PFlags(ai) & 8) && ClearShotTo(ent, ai, nullptr, target, target_pos)) {
 				G3MoveInput in;
 				FillInput(in, ent, ai, goal, face, target, -1, true, true, strafe, nullptr);
@@ -764,7 +778,7 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 	}
 	/* too far, out of time, no clear shot, flee (4), search (7) */
 	vec3_t pathpt;
-	if (!NavPoint(ent, ai, target_pos, NAV_APPROACH, pathpt)) {
+	if (stuck || !NavPoint(ent, ai, target_pos, NAV_APPROACH, pathpt)) {
 		if (may_attack && ClearShotTo(ent, ai, nullptr, target, target_pos))
 			PlanAttack(ent, ai, target, target_pos, false, nullptr);
 		else
@@ -796,9 +810,10 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 		VectorMA(ent->s.origin, 500, dir, face);
 	bool far_enough = dist_t > 50 || code == 4;
 	if (stepd * stepd >= 2 && far_enough && !((PFlags(ai) & 2) && code != 4)) {
-		if (Steer(ent, ai, goal))
+		if (Steer(ent, ai, goal)) {
+			last_plan_move = code != 4;
 			PlanMove(ent, ai, goal, face, true, may_attack && !(PFlags(ai) & 128) && code != 4 && code != 7, strafe);
-		else
+		} else
 			PlanStand(ent, ai, face, nullptr, false, nullptr);
 		return;
 	}
@@ -1044,6 +1059,8 @@ bool CombatDecision::Evaluate(edict_t *ent, AI *ai, int *priority)
 
 void CombatDecision::Plan(edict_t *ent, AI *ai)
 {
+	/* the action that just finished already read this in ActionDone */
+	last_plan_move = false;
 	if (kind >= DK_DEKKER1 && kind <= DK_DEKKER_LAST)
 		DekkerShock(ent, ai);
 	if (kind == DK_SEARCH) {
