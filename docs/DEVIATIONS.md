@@ -233,3 +233,14 @@ thunderstorm on jpn2".
   (spawnflag 1) and is toggled back to its open place is never held. Test: tests/X1/sib3_blastdoors.cfg; test aids
   `om_doordebug 1` (prints who holds a door), `omusetarget` (what the use key would act on, with every candidate),
   `omuse <entity>` (its use-key reaction as a press would call it).
+
+## Backing off while firing (2026-11-13)
+
+- **Too close, a clear shot, and no record to back off with: attack from the spot** (ai_decisions.cpp
+  `CombatDecision::NonIdealPlan`, irq3b): an owner closer than its weapon's range steps away and fires on the way,
+  with the record its body gives for that step. A body with no such record for its posture and weapon gives none, or
+  a stand, and nothing or an idle stand was queued think after think: the owner faced the player and did nothing.
+  When the answer is not a move, an attack or an aim record, the owner attacks from where it stands. irq3b: the
+  commander with the pistol at -2600 2491 -68 (entity 134). Owners that back off without firing (PFlags 8) take the
+  other path and are unchanged, and so is an owner standing on a train or on a prop that moves: after the shot the
+  tsr1 train riders got back-off records and ran against the train's edge.

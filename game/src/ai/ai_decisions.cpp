@@ -718,6 +718,20 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 				FillInput(in, ent, ai, goal, face, target, -1, true, true, strafe, nullptr);
 				S = now;
 				const G3Anim *rec = ai->body ? ai->body->ChooseAttack(in) : nullptr;
+				/* backing off while firing needs a record that moves or fires. A body with neither for its posture
+				 * and weapon answers with an aim stance (a stand for D3) or with nothing, and the owner aims for
+				 * good without a shot or a step. It attacks from where it is then (DEVIATIONS.md "Backing off
+				 * while firing"). Not on a train or a moving prop: after the shot the tsr1 riders got back-off
+				 * records and ran against the train's edge, every step off it being refused */
+				edict_t *g = ent->groundentity;
+				bool on_prop = g && g != g_edicts && !g->ai &&
+				               ((g->classname && !Q_stricmp(g->classname, "misc_generic_train")) ||
+				                DotProduct(g->velocity, g->velocity) > 1.0f);
+				bool acts = rec && (rec->cls == ANIMCLS_MOVE || rec->cls == ANIMCLS_ATTACK || (rec->flags & ANIMF_AIM));
+				if (!acts && !on_prop) {
+					PlanAttack(ent, ai, target, target_pos, false, nullptr);
+					return;
+				}
 				QueueRecord(ent, ai, this, rec, goal, face, target);
 			} else
 				PlanMove(ent, ai, goal, face, true, false, strafe);
