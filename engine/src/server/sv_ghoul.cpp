@@ -1260,6 +1260,23 @@ static int HostLoad(void *, const char *path, void **data)
 		RecordUsedFile(path);
 	return len;
 }
+/* a loose file only. FS_LoadLooseFile itself does nothing while r_retexturing is 0, so base/ghoul wins over the pak
+   only when retexturing is on */
+extern "C" int FS_LoadLooseFile(const char *path, void **buffer);
+static int HostLoadLoose(void *, const char *path, void **data)
+{
+	int len = FS_LoadLooseFile(path, data);
+	if ((len >= 0) && path && path[0])
+		RecordUsedFile(path);
+	return len;
+}
+#ifndef DEDICATED_ONLY
+extern "C" unsigned char *CL_DecodeImage(const void *data, int len, int *w, int *h);
+static unsigned char *HostDecode(void *, const void *data, int len, int *w, int *h)
+{
+	return CL_DecodeImage(data, len, w, h);
+}
+#endif
 static int HostLength(void *, const char *path)
 {
 	int len = SV_GhoulHost_FileLength(path);
@@ -1284,6 +1301,10 @@ void SV_Ghoul_Init(void)
 	done = true;
 	memset(&host, 0, sizeof(host));
 	host.load_file = HostLoad;
+	host.load_loose = HostLoadLoose;
+#ifndef DEDICATED_ONLY
+	host.decode_image = HostDecode;
+#endif
 	host.file_length = HostLength;
 	host.free_file = HostFree;
 	host.print = HostPrint;
