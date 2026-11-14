@@ -1913,7 +1913,10 @@ torn holes and lines along the edges of its polygons (ger1 water, both renderers
 * Cost: ger1 water fog, 1600x900: GPU 1.498 ms per pixel against 1.491 ms with the old fog.
 * r_om_fogpix (1; 0 the old fog), menu Video -> Map Fog (Modern / Original).
 * Not checked: the effects in fog (the test smoke was gone by the shot), characters standing in fog, every one of the
-  33 maps; regions whose polygons do not fill their box fog the empty part of the box too.
+  33 maps.
+* A volume's polygons are sometimes separate pockets (tsr1 volume 8: a yard at one end of the map and a patch at the
+  other). One box around both filled the clear corridor between them with that volume's colour. The per-pixel fog and
+  the volumetric fog test each pocket; pockets more than 64 units apart stay separate, at most four boxes.
 
 ## B1: the effect gallery (2026-11-14)
 
