@@ -264,3 +264,14 @@ thunderstorm on jpn2".
   placed above the ledge in front of the gun, fell into the pit and never ran across the last shot. A scripted jump
   now takes off from the air too; since such a jump falls further than its push allows for, its sideways speed is
   cut once the actor has covered the distance to its target, so it lands clear of the wall beyond.
+
+## Backing off while firing (2026-11-14)
+
+- **Too close, a clear shot, and no record to back off with: attack from the spot** (ai_decisions.cpp
+  `CombatDecision::NonIdealPlan`, irq3b): an owner closer than its weapon's range steps away and fires on the way,
+  with the record its body gives for that step. A body with no such record for its posture and weapon gives none, or
+  a stand, and nothing or an idle stand was queued think after think: the owner faced the player and did nothing.
+  When the answer is not a move, an attack or an aim record, the owner attacks from where it stands. irq3b: the
+  commander with the pistol at -2600 2491 -68 (entity 134). Owners that back off without firing (PFlags 8) take the
+  other path and are unchanged, and so is an owner standing on a train or on a prop that moves: after the shot the
+  tsr1 train riders got back-off records and ran against the train's edge.
