@@ -142,7 +142,8 @@ int ShootableParts(edict_t *self, edict_t *attacker, const vec3_t point);
 void ThrowOffLinked(edict_t *self);
 void LinkObject(edict_t *self, edict_t *other); // table chains (§6B.6)
 void FallOverStart(edict_t *self, edict_t *player);
-void Riders(edict_t *self);
+void Riders(edict_t *self);                        // riders moved by the prop's velocity for one frame
+void RidersMove(edict_t *self, const vec3_t move); // riders moved by a given displacement
 
 // pain behaviour with the hit point (SPEC-720 §5.3); NULL clears it
 void SetPain(edict_t *ent, prop_pain_t fn);

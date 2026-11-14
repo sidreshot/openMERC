@@ -233,3 +233,13 @@ thunderstorm on jpn2".
   (spawnflag 1) and is toggled back to its open place is never held. Test: tests/X1/sib3_blastdoors.cfg; test aids
   `om_doordebug 1` (prints who holds a door), `omusetarget` (what the use key would act on, with every candidate),
   `omuse <entity>` (its use-key reaction as a press would call it).
+
+## Riders move with the train's actual move (2026-11-14)
+
+- **Riders follow where the train went, not its velocity** (props/prop_train.cpp `TrainRiders`, props/prop_core.cpp
+  `RidersMove`, tsr1): the train thinks before it moves, so the riders rule (SPEC-770 5.9) moved whoever stands on
+  it by velocity * FRAMETIME. A train held by an obstacle keeps its velocity (elasticity -1, SPEC-760 B4.7) without
+  moving, and the riders were carried on: the tsr1 ride ends at a metal plate across the rails, and the player on the
+  roof slid off the front and dropped to the track. Each think the riders now get last think's error (the train's
+  actual move minus what they were moved) and the predicted move scaled by the part of it the train made last think.
+  The train, its stop and its end handling are unchanged; other props that carry riders use `Riders` as before.
