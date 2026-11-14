@@ -499,6 +499,18 @@ void CombatDecision::PlanAttack(edict_t *ent, AI *ai, edict_t *t, const vec3_t a
 	ai->fire_flags &= ~1;
 }
 
+/* standing on a train, moving or stopped, or on another prop while it moves. A step off it is refused by the ledge
+ * test, so a move from there only runs against the edge */
+static bool OnCarryingProp(edict_t *ent)
+{
+	edict_t *g = ent->groundentity;
+	if (!g || g == g_edicts || g->ai)
+		return false;
+	if (g->classname && !Q_stricmp(g->classname, "misc_generic_train"))
+		return true;
+	return DotProduct(g->velocity, g->velocity) > 1.0f;
+}
+
 void CombatDecision::PlanMove(edict_t *ent, AI *ai, const vec3_t dest, const vec3_t face, bool running, bool aiming,
                               bool strafing)
 {
@@ -506,6 +518,20 @@ void CombatDecision::PlanMove(edict_t *ent, AI *ai, const vec3_t dest, const vec
 	FillInput(in, ent, ai, dest, face, aiming ? target : nullptr, -1, running, aiming, strafing, nullptr);
 	S = Now();
 	const G3Anim *rec = ai->body ? ai->body->ChooseMove(in) : nullptr;
+	/* a crouched owner whose body has no crouched move record for its weapon gets a crouched aim stance from the
+	 * move choice (SPEC-722 crouched list), so the move never takes a step: closing in or backing off, it kneels
+	 * and aims for good. The move is asked again standing: the owner stands up, and moves on its next think
+	 * (DEVIATIONS.md "A crouched character stands up to move"). Not on a train: the tsr1 riders, kneeling to shoot
+	 * across the gap, stood up and ran against the train's edge */
+	if (rec && rec->cls != ANIMCLS_MOVE && ai->body->cur && ai->body->cur->posture == POSTURE_CROUCH &&
+	    !(ent->spawnflags & SF_STATIONARY) && !OnCarryingProp(ent) && dest && HDist2(dest, ent->s.origin) >= 1.0f) {
+		FillInput(in, ent, ai, dest, face, aiming ? target : nullptr, POSTURE_STAND, running, aiming, strafing, nullptr);
+		const G3Anim *up = ai->body->ChooseMove(in);
+		if (CvarValue(cv.ai_trace) >= 2)
+			Dbg("ai %d: crouched move %s, stands up: %s\n", G_EdictNum(ent), rec->name, up ? up->name : "none");
+		if (up)
+			rec = up;
+	}
 	QueueRecord(ent, ai, this, rec, dest, face, aiming ? target : nullptr);
 }
 
