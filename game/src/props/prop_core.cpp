@@ -876,6 +876,13 @@ void FallOverStart(edict_t *self, edict_t *player)
 
 void Riders(edict_t *self)
 {
+	vec3_t move;
+	VectorScale(self->velocity, FRAMETIME, move);
+	RidersMove(self, move);
+}
+
+void RidersMove(edict_t *self, const vec3_t move)
+{
 	/* openMERC: characters standing on the prop ride too (the spec names players only); otherwise the people on
 	   the tsr1 subway trains stayed in the air and fell when the train drove off in the cinematic */
 	static cvar_t *dbg;
@@ -915,7 +922,7 @@ void Riders(edict_t *self)
 		    p->movetype == MOVETYPE_STOP)
 			continue;
 		vec3_t np, lo;
-		VectorMA(p->s.origin, FRAMETIME, self->velocity, np);
+		VectorAdd(p->s.origin, move, np);
 		/* the bottom 2 units, which touch the roof, are not tested */
 		VectorCopy(p->mins, lo);
 		lo[2] += 2;
