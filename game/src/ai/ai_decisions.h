@@ -42,6 +42,11 @@ public:
 	int range_code = 0;
 	int blocker = -1;
 	float S = -1000.0f, C = -1000.0f;
+	/* (not saved) moves of the combat plan, backing off or closing in, that failed in a row: a move that gets nowhere
+	 * is given up for a while (DEVIATIONS.md "A move that gets nowhere is given up") */
+	bool last_plan_move = false;
+	int move_fails = 0;
+	float move_fail_time = -100;
 	/* search tail (kind 4) */
 	float heard_time = -100;
 	vec3_t heard_pos = {0, 0, 0};
