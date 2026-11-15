@@ -181,6 +181,8 @@ void ReadLevelProps(void)
 		d.push_saved_think = (void (*)(edict_t *))G10_DecodePtr(r.push_saved_think);
 		d.push_saved_next = r.push_saved_next;
 	}
+	/* Linux builds shipped an empty callback table, so a moving train came back with think = null */
+	RestoreTrains();
 }
 
 static G10Extension s_ext("G7PD", WriteLevelProps, ReadLevelProps);

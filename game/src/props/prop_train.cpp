@@ -332,4 +332,37 @@ static void SP_train(edict_t *ent)
 static const SpawnEntry s_spawns[] = {{"misc_generic_train", SP_train}, {NULL, NULL}};
 static SpawnTable s_reg(s_spawns);
 
+/* A save written by a module whose symbol table was empty stores every callback as none. The train's
+ * state (i0, axis, speed) is still in the prop record. Put the callbacks back, and if it was already
+ * rolling give it its speed again so the first think does not treat a zero velocity as "arrived". */
+void RestoreTrains(void)
+{
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || !e->classname || Q_stricmp(e->classname, "misc_generic_train"))
+			continue;
+		PropData &d = D(e);
+		bool rolling = d.i0 == TS_ACCEL || d.i0 == TS_CRUISE || d.i0 == TS_BRAKE;
+		if (rolling) {
+			if (!e->velocity[0] && !e->velocity[1]) {
+				float sp = d.i0 == TS_ACCEL ? d.f1 : d.f0;
+				if (sp < 1)
+					sp = d.f1 > 1 ? d.f1 : 100;
+				VectorScale(d.v1, sp, e->velocity);
+			}
+			e->think = train_think;
+			e->nextthink = level.time + FRAMETIME;
+			e->use = NULL;
+		} else if ((e->spawnflags & (1 | 4)) && d.i0 == TS_NONE && !e->use) {
+			e->use = train_use;
+			e->movetype = MOVETYPE_DAN;
+			e->elasticity = -1;
+			e->flags |= FL_NO_KNOCKBACK;
+		}
+		if ((e->spawnflags & (1 | 4)) && !e->touch)
+			e->touch = train_touch;
+		gi.linkentity(e);
+	}
+}
+
 } // namespace props

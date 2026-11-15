@@ -20,6 +20,7 @@ list | menu_maxfps_auto | 1,0 | By Display,Manual | По частоте мони
 list | menu_maxfps | 30,60,75,90,100,120,144,165,200,240,300,999 | 30,60,75,90,100,120,144,165,200,240,300,Unlimited | 30,60,75,90,100,120,144,165,200,240,300,Без ограничения | Manual Limit | Лимит вручную | stage | tip=Used when the limit is Manual/Действует, когда ограничение задано вручную | pc
 
 section | VIEW | ВИД
+list | om_skipintro | 0,1 | Off,On | Выкл,Вкл | Skip Startup Intro | Пропустить заставку | tip=Open the main menu instead of the disclaimer and the intro movie/Сразу главное меню, без предупреждения и ролика
 list | menu_uiscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | Menu and Text Size | Размер меню и текста | stage | pc
 list | scr_textscale | 1,1.25,1.5,2,2.5,3 | 100%,125%,150%,200%,250%,300% | 100%,125%,150%,200%,250%,300% | Text Size | Размер текста | tip=Console text and on-screen messages and subtitles/Текст консоли и сообщений на экране и субтитры
 list | menu_hudscale | 0,1,2,3,4 | Auto,1x,2x,3x,4x | Авто,1x,2x,3x,4x | HUD Size | Размер HUD | stage
