@@ -307,6 +307,7 @@ void ReadLevelSection(void)
 		game.clients[i].pers.connected = false;
 	}
 	GG_RemapEntityIds();
+	G_RepairLoadedEntities();
 	// G3 bodies look their hand bolts up again lazily after a load (g3_human.cpp SaveFields), but Fire uses the right
 	// hand bolt without the lookup, so a loaded character never fired (kos1: "fire ... -> 0" every think). The
 	// public query does the lookup (Needs from G3 in docs/impl/G10.md)

@@ -44,6 +44,7 @@ class ScriptSystem;
 
 // spawn functions
 void SP_script_runner(edict_t *ent);
+void ScriptGlue_RepairRunner(edict_t *ent);
 void SG_WorldScriptRunner(edict_t *ent);
 
 // frame and level hooks

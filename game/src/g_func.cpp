@@ -1090,6 +1090,47 @@ static void door_common(edict_t *ent)
 	Mover_DeferSounds(ent);
 }
 
+static void portcullis_use(edict_t *self, edict_t *other, edict_t *activator);
+void door_secret_use(edict_t *self, edict_t *other, edict_t *activator);
+void door_secret_blocked(edict_t *self, edict_t *other);
+void door_secret_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
+
+/* a 0.2.4 save stored the door callbacks as none. Position and state stay as saved.
+   A portcullis and a secret door do not share door_use. */
+void Door_Repair(edict_t *ent)
+{
+	if (!ent->classname)
+		return;
+	if (!strcmp(ent->classname, "func_door_secret")) {
+		if (!ent->use)
+			ent->use = door_secret_use;
+		if (!ent->plUse)
+			ent->plUse = door_secret_use;
+		if (!ent->blocked)
+			ent->blocked = door_secret_blocked;
+		if (ent->health && !ent->die)
+			ent->die = door_secret_die;
+		return;
+	}
+	if (!strcmp(ent->classname, "func_door_portcullis")) {
+		if (!ent->use)
+			ent->use = portcullis_use;
+		if (!ent->blocked)
+			ent->blocked = door_blocked;
+		return;
+	}
+	if (!ent->use)
+		ent->use = door_use;
+	if (!ent->blocked)
+		ent->blocked = door_blocked;
+	if (ent->health && !ent->die)
+		ent->die = door_killed;
+	if ((!ent->targetname || (ent->spawnflags & DOOR_PLAYER_USABLE)) && !ent->plUse)
+		ent->plUse = door_direct_use;
+	if (ent->targetname && (ent->message || ent->sp_message) && !ent->touch)
+		ent->touch = door_touch;
+}
+
 void SP_func_door(edict_t *ent)
 {
 	vec3_t abs_movedir;

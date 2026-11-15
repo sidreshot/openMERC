@@ -93,6 +93,13 @@ using namespace sg;
 
 void SP_script_runner(edict_t *ent) { runner_setup(ent); }
 
+/* a 0.2.4 save stored runner_use as none. The script handle on the entity is still there. */
+void ScriptGlue_RepairRunner(edict_t *ent)
+{
+	if (ent && ent->sg_script > 0 && !ent->use)
+		ent->use = runner_use;
+}
+
 // SPEC-760 B1.4: worldspawn key `script` creates a runner; the level's precache script, used when a client begins
 void SG_WorldScriptRunner(edict_t *ent)
 {
