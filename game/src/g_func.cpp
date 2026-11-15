@@ -768,6 +768,10 @@ void door_hit_top(edict_t *self)
 {
 	Mover_EndSound(self);
 	self->moveinfo.state = STATE_TOP;
+	/* START_OPEN: pos2 is the sealed place (the map brush). Arriving there closes the passage.
+	   A toggle door returns below, so this has to happen first (sib3 blastdr). */
+	if (self->spawnflags & DOOR_START_OPEN)
+		door_hold_portals(self, false);
 	if (self->spawnflags & DOOR_TOGGLE)
 		return;
 	if (self->flags & FL_TEAMSLAVE)
@@ -784,7 +788,10 @@ void door_hit_bottom(edict_t *self)
 {
 	Mover_EndSound(self);
 	self->moveinfo.state = STATE_BOTTOM;
-	door_hold_portals(self, false);
+	/* START_OPEN: the bottom is the open place. The portal was opened when the door left the seal
+	   (door_go_down). Closing it here left the open octagon looking out at the sky. */
+	if (!(self->spawnflags & DOOR_START_OPEN))
+		door_hold_portals(self, false);
 }
 
 void door_go_down(edict_t *self)
@@ -794,6 +801,9 @@ void door_go_down(edict_t *self)
 		self->health = self->max_health;
 	}
 	self->moveinfo.state = STATE_DOWN;
+	/* START_OPEN: this move leaves the sealed place and returns to the open one. Open the passage now. */
+	if (self->spawnflags & DOOR_START_OPEN)
+		door_hold_portals(self, true);
 	if (IsRotatingDoor(self)) {
 		if (!strcmp(self->classname, "func_door_rotating_smart")) {
 			// reset the direction for the next opening (SPEC-761 1.2)

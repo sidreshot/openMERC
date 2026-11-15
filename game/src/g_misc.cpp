@@ -31,6 +31,8 @@ void Use_Areaportal(edict_t *ent, edict_t *other, edict_t *activator)
 {
 	ent->count ^= 1;
 	gi.SetAreaPortalState(ent->style, ent->count);
+	if (gix.cvar_value("om_doordebug"))
+		gi.dprintf("OMPORTAL %d %s -> %d\n", ent->style, ent->targetname ? ent->targetname : "-", ent->count);
 }
 
 void SP_func_areaportal(edict_t *ent)
