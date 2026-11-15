@@ -604,6 +604,50 @@ static void valve_eos(edict_t *self)
 static gg::NoteCallback s_valve_eos(valve_eos);
 gg::NoteCallback *NoteValve(void) { return &s_valve_eos; }
 
+static void valve_use(edict_t *self, edict_t *other, edict_t *activator);
+
+/* distance from a point to an entity's absolute box, squared */
+static float dist_to_box(const vec3_t p, edict_t *e)
+{
+	float d2 = 0;
+	for (int i = 0; i < 3; i++) {
+		float v = p[i];
+		if (v < e->absmin[i])
+			v = e->absmin[i];
+		else if (v > e->absmax[i])
+			v = e->absmax[i];
+		float d = p[i] - v;
+		d2 += d * d;
+	}
+	return d2;
+}
+
+/* the use key. The valve's own use only plays the turn. On kos1 the hatch trigger
+ * (spawnflag 8, box z -88..-40) sits on the valve and the eye cube of a standing
+ * player never overlaps it, so the sewer pipe never starts. The key on the valve
+ * fires the nearest use-key trigger within 96 units. */
+static void valve_player_use(edict_t *self, edict_t *other, edict_t *activator)
+{
+	valve_use(self, other, activator);
+	edict_t *best = NULL;
+	float best_d = 96.0f * 96.0f;
+	const char *classes[2] = {"trigger_once", "trigger_multiple"};
+	for (int pass = 0; pass < 2; pass++) {
+		edict_t *t = NULL;
+		while ((t = G_Find(t, FOFS(classname), classes[pass]))) {
+			if (!t->inuse || !t->plUse)
+				continue;
+			float d = dist_to_box(self->s.origin, t);
+			if (d < best_d) {
+				best_d = d;
+				best = t;
+			}
+		}
+	}
+	if (best)
+		best->plUse(best, other, activator);
+}
+
 static void valve_use(edict_t *self, edict_t *other, edict_t *)
 {
 	if (self->spawnflags & 128) {
@@ -627,6 +671,7 @@ static void SP_valve(edict_t *e)
 	e->movetype = MOVETYPE_DAN;
 	e->gravity = 0;
 	e->use = valve_use;
+	e->plUse = valve_player_use;
 }
 
 static void SP_generic_sprinkler(edict_t *e)
