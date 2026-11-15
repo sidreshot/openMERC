@@ -414,6 +414,8 @@ unsigned char *Inventory::PS() const
 /* ---------------------------------------------------------------------------------------------- */
 static const int kInvnFourcc = 0x494E564E; /* bytes "NVNI" in file order */
 
+static void InvFromWire(InvState &s, const unsigned char *w);
+
 /* the game calls 75/76 whatever the context flag says (a console `save` runs in a client frame) */
 void Inventory::WriteSave()
 {
@@ -430,7 +432,17 @@ void Inventory::ReadSave()
 {
     if (!g_haveSv || !g_sv.ReadChunk)
         return;
-    g_sv.ReadChunk(kInvnFourcc, &st, sizeof(st), NULL);
+    /* A negative length asks for at most that many bytes. 0.2.4 wrote the 640-byte
+       32-bit image; a save from this build is the native struct. */
+    unsigned char buf[sizeof(InvState)];
+    memset(buf, 0, sizeof buf);
+    int n = g_sv.ReadChunk(kInvnFourcc, buf, -(int)sizeof buf, NULL);
+    if (n == (int)sizeof(st))
+        memcpy(&st, buf, sizeof(st));
+    else if (n == 640) /* the 32-bit image, INV_WIRE below */
+        InvFromWire(st, buf);
+    else
+        memset(&st, 0, sizeof st);
     st.inst = NULL;
     st.nextInst = NULL;
     st.ctx = NULL;

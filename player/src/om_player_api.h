@@ -118,7 +118,7 @@ struct PlayerServerImport {
     void (*SZ_Clear)(sizebuf_t *);                   /* 34 */
     void (*SZ_Write)(sizebuf_t *, const void *, int); /* 35 */
     void (*WriteChunk)(int fourcc, const void *data, int len); /* 36 */
-    void (*ReadChunk)(int fourcc, void *dst, int len, void **alloc); /* 37 */
+    int (*ReadChunk)(int fourcc, void *dst, int len, void **alloc); /* 37: returns the chunk length */
 };
 static_assert(sizeof(PlayerServerImport) == 152 || sizeof(void *) != 4, "SPEC-003: 152 bytes");
 

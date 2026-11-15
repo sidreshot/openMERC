@@ -887,9 +887,14 @@ M_OpenMenu(const char *rawname, const char *rawframe, qboolean forced)
 
 	/* the mission terminal (arm1..3 scripts: "intermission login") opened the
 	   retired, empty login page; the mission briefing (mail, which leads on to
-	   the outfit screen) is opened at once instead */
-	if (!strcmp(name, "login") || !strcmp(name, "f_login"))
+	   the outfit screen) is opened at once instead.
+	   The end-of-mission pages acc and acc2 are the same kind of leftover: the
+	   level scripts still say "intermission acc", and that black screen used to
+	   open the main menu. The briefing is the page that carries menu_nextmap. */
+	if (!strcmp(name, "login") || !strcmp(name, "f_login") ||
+		!strcmp(name, "acc") || !strcmp(name, "acc2"))
 	{
+		Com_DPrintf("menu: %s opens the briefing\n", name);
 		Q_strlcpy(name, "mail", sizeof(name));
 	}
 
