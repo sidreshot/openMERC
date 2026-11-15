@@ -76,6 +76,7 @@ void Inventory::Clear(bool alsoFlag)
         st.slots[i].clip = 0;
         st.slots[i].weapon = 0;
     }
+    st.owned = 0;
     for (int i = 0; i < NUM_AMMO; i++)
         st.ammo[i] = 0;
     for (int i = 0; i < NUM_ISLOTS; i++) {

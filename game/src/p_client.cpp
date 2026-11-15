@@ -887,7 +887,11 @@ void ClientBegin(edict_t *ent)
 		cvar_t *kit = gi.cvar("om_levelkit", "0", 0);
 		if (kit->value && !level.intermissiontime && level.weaponmode == 0)
 			gi.cvar_set("om_levelkit", "2"); /* waits for the next mission (dropped by a new game: InitGame) */
-		else if (kit->value && !level.intermissiontime && ent->client->inv) {
+		else if ((int)kit->value == 2 && !level.intermissiontime) {
+			/* armory deploy: gamemap does not reinit the game, so the kit was still 2 and the
+			   mission kit replaced the weapons just loaded from the outfit cvars */
+			gi.cvar_set("om_levelkit", "0");
+		} else if (kit->value && !level.intermissiontime && ent->client->inv) {
 			gi.cvar_set("om_levelkit", "0");
 			GM_DefaultWeapons(ent, 100, false);
 		}
