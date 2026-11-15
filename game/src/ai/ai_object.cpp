@@ -69,13 +69,17 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 		bool airborne = !ent->groundentity && ent->solid != SOLID_CORPSE;
 		if (airborne || fabsf(mins[2] - floor_height) <= 1.0f)
 			return 1;
-		float delta = floor_height - mins[2];
-		if (CvarValue(cv.ai_trace) >= 2)
-			Dbg("ai %d floor: bottom %.1f stored %.1f ground offset %.1f -> origin z %+.1f\n", G_EdictNum(ent),
-			    mins[2], floor_height, ground_offset, -delta);
-		mins[2] += delta;
-		maxs[2] += delta;
-		org[2] -= delta;
+		/* a corpse is seated from its posed bolts. Dragging the origin down to the
+		   ground bolt puts the legs through the floor. The flat-box clamp below still runs. */
+		if (ent->health > 0) {
+			float delta = floor_height - mins[2];
+			if (CvarValue(cv.ai_trace) >= 2)
+				Dbg("ai %d floor: bottom %.1f stored %.1f ground offset %.1f -> origin z %+.1f\n", G_EdictNum(ent),
+				    mins[2], floor_height, ground_offset, -delta);
+			mins[2] += delta;
+			maxs[2] += delta;
+			org[2] -= delta;
+		}
 	} else {
 		float bottom = ent->mins[2];
 		float height = scale * (bbox_maxs[i][2] - bbox_mins[i][2]);

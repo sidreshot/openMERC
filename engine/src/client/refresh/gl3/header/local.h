@@ -851,6 +851,14 @@ void GL3_Post_RegionFog(void);
 	"				float hh = clamp((mx.z - q.z) / max(mx.z - mn.z, 1.0), 0.0, 1.0);\n" \
 	"				al *= hh * hh;\n" \
 	"			}\n" \
+	/* the box face used to cut a wall in one pixel (kos1, the brick by the water at
+	   -1475 -2173). A surface inside the volume fades in over the first 64 units. */ \
+	"			if (dist - t1 < 2.0)\n" \
+	"			{\n" \
+	"				vec3 pin = min(p - mn.xyz, mx.xyz - p);\n" \
+	"				float inset = min(min(pin.x, pin.y), pin.z);\n" \
+	"				al *= smoothstep(0.0, 64.0, inset);\n" \
+	"			}\n" \
 	"			al *= mix(hd.y, 1.0, al);\n" \
 	"			C = C * (1.0 - al) + cl.rgb * al;\n" \
 	"			A = 1.0 - (1.0 - A) * (1.0 - al);\n" \
@@ -863,6 +871,9 @@ void GL3_Post_RegionFog(void);
 	"		C = C * (1.0 - wc4.a) + wc4.rgb * wc4.a;\n" \
 	"		A = 1.0 - (1.0 - A) * (1.0 - wc4.a);\n" \
 	"	}\n" \
+	/* a lamp you are standing against was fully fogged: the first couple of metres stay clear, then the
+	   region's own curve takes over */ \
+	"	A *= smoothstep(18.0, 110.0, dist);\n" \
 	"	return vec4(C, A);\n" \
 	"}\n"
 /* gl3_sofapi.c: the lights of Ghoul models kept for the frames they are culled */

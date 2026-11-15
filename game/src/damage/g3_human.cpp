@@ -2204,6 +2204,49 @@ public:
 		return true;
 	}
 
+	/* the death pose is authored around the pelvis. Snapping that bolt to the floor
+	   (ChangeBBox) leaves the legs through the ground (nyc1, the body by the fence).
+	   Once the fall has finished, sit the posed mesh on the floor under the origin. */
+	void SeatOnFloor(void)
+	{
+		IGhoulInst *inst = Inst();
+		if (!inst || !gore || gibbed)
+			return;
+		float lowest = 1e9f;
+		int n = 0;
+		for (int i = 0; i < gore->numZones; i++) {
+			vec3_t bp;
+			if (!gore->zones[i].goreBolt || !G3G_BoltWorld(ent, inst, gore->zones[i].goreBolt, bp))
+				continue;
+			n++;
+			if (bp[2] < lowest)
+				lowest = bp[2];
+		}
+		if (n < 3)
+			return;
+		/* from just above the lowest bolt, so a crate under the body counts and the
+		   street below that crate does not */
+		vec3_t start, end;
+		VectorCopy(ent->s.origin, start);
+		start[2] = lowest + 20.0f;
+		VectorCopy(start, end);
+		end[2] = lowest - 24.0f;
+		trace_t tr;
+		gix.trace(start, NULL, NULL, end, ent, MASK_SOLID, &tr);
+		if (tr.startsolid || tr.fraction >= 1.0f)
+			return;
+		/* the bolt is the middle of the part; the drawn limb reaches a little further down */
+		float lift = tr.endpos[2] - lowest + 8.0f;
+		if (lift < 4.0f || lift > 40.0f)
+			return;
+		ent->s.origin[2] += lift;
+		ent->mins[2] -= lift;
+		ent->maxs[2] = ent->mins[2] + 16.0f;
+		if (owner)
+			owner->OnGroundOffset(ent->mins[2]);
+		gix.linkentity(ent);
+	}
+
 	// OpenMerc (DEVIATIONS): the body pushed out of walls while it falls and once it rests. Every gore zone's bolt is a
 	// point of the drawn body (head, hands, feet, chest); a horizontal ray from the origin's column to it that ends in a
 	// wall gives the depth the body reaches into it. The deepest one moves the entity away from that wall, at most
@@ -2598,6 +2641,7 @@ public:
 		                      (!pauseKind && now - deathTime > 7.0f))) {
 			for (int k = 0; k < 3; k++)
 				SettleCorpse(40.0f);
+			SeatOnFloor();
 			IGhoulInst *inst = Inst();
 			if (inst) {
 				inst->Pause(now);
