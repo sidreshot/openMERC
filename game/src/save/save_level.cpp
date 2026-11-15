@@ -20,6 +20,7 @@
 //             SPEC-001 exports 0x10-0x1C, 0x40, 0x44
 
 #include "save_local.h"
+#include "save_i386_layout.h"
 
 #include "../ai/ai_hooks.h"
 #include "../damage/damage_api.h"
@@ -287,8 +288,17 @@ void ReadLevelSection(void)
 	int32_t ft[9], mine[9];
 	G10_ReadChunk("FTSZ", ft, 36);
 	Fingerprint(mine);
-	if (memcmp(ft, mine, sizeof(ft)))
-		gi.error("Function index tables have changed size"); // SPEC-752 1.2 (a save of another module or layout)
+	SaveSetI386(false);
+	if (memcmp(ft, mine, sizeof(ft))) {
+		/* Windows x86 writes the same OMG2 save with 4-byte pointers: edict 1176, client 2384,
+		   level 780, entity image 1124. The fields are the same; the host record is wider. */
+		if (ft[0] == 0x4F4D4732 && ft[4] == kI386Edict && ft[5] == kI386Client && ft[6] == kI386Level &&
+		    ft[7] == kI386Edct && (int)sizeof(edict_t) != kI386Edict) {
+			SaveSetI386(true);
+			gi.dprintf("savegame: 32-bit level, widening records\n");
+		} else
+			gi.error("Function index tables have changed size"); // SPEC-752 1.2 (a save of another module or layout)
+	}
 	SymReadTable();
 	KeepBefore();
 	ClearLevelObjects();

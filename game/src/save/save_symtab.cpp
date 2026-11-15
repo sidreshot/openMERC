@@ -18,9 +18,21 @@
 
 #include "save_local.h"
 
+#include "../damage/damage_api.h"
+#include "../props/props.h"
+
+#include <cstring>
+#include <cstdlib>
+#include <cxxabi.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+/* element sizes of the tables a 32-bit save names with "symbol+hex". The 32-bit sizes are that ABI's sizeof. */
+static_assert(sizeof(props::ModelEntry) == 48, "32-bit save element scale");
+static_assert(sizeof(props::PartRow) == 24, "32-bit save element scale");
+static_assert(sizeof(G3Anim) == 40, "32-bit save element scale");
+static_assert(sizeof(gitem_t) == 104, "32-bit save element scale");
 
 #define OM_SYMTAB_BYTES (1024 * 1024)
 
@@ -93,6 +105,148 @@ static bool SymName(const void *p, std::string &out)
 	return true;
 }
 
+// Itanium name to the qualified name a Windows map uses ("ns::func", no arguments).
+static std::string QualOf(const char *mangled)
+{
+	std::string s = mangled ? mangled : "";
+	size_t bang = s.rfind('!');
+	if (bang != std::string::npos)
+		s = s.substr(bang + 1);
+	if (s.size() < 2 || s[0] != '_' || s[1] != 'Z')
+		return s;
+	int status = -1;
+	char *d = abi::__cxa_demangle(s.c_str(), nullptr, nullptr, &status);
+	if (!d || status != 0) {
+		std::free(d);
+		return s;
+	}
+	std::string out(d);
+	std::free(d);
+	size_t paren = out.find('(');
+	if (paren != std::string::npos)
+		out.resize(paren);
+	const char *anon = "(anonymous namespace)::";
+	for (;;) {
+		size_t a = out.find(anon);
+		if (a == std::string::npos)
+			break;
+		size_t n = strlen(anon);
+		if (a > 0 && out[a - 1] == ' ') {
+			a--;
+			n++;
+		}
+		out.erase(a, n);
+	}
+	while (!out.empty() && out.back() == ' ')
+		out.pop_back();
+	return out;
+}
+
+static std::unordered_map<std::string, uint32_t> s_byqual;
+static bool s_qual_ready;
+
+static void BuildQual(void)
+{
+	if (s_qual_ready)
+		return;
+	s_qual_ready = true;
+	if (!Table())
+		return;
+	for (uint32_t i = 0; i < s_count; i++)
+		s_byqual.emplace(QualOf(s_str + s_ent[i].str), s_ent[i].off);
+}
+
+static int Elem32(const std::string &type)
+{
+	if (type.find("ModelEntry") != std::string::npos)
+		return 36;
+	if (type.find("PartRow") != std::string::npos)
+		return 12;
+	if (type.find("G3Anim") != std::string::npos)
+		return 36;
+	if (type.find("gitem_s") != std::string::npos)
+		return 64;
+	return 0;
+}
+
+static int Elem64(const std::string &type)
+{
+	if (type.find("ModelEntry") != std::string::npos)
+		return (int)sizeof(props::ModelEntry);
+	if (type.find("PartRow") != std::string::npos)
+		return (int)sizeof(props::PartRow);
+	if (type.find("G3Anim") != std::string::npos)
+		return (int)sizeof(G3Anim);
+	if (type.find("gitem_s") != std::string::npos)
+		return (int)sizeof(gitem_t);
+	return 0;
+}
+
+// "?name@ns@@..." from a Windows link map, plus an optional "+hex" byte offset into a table.
+static void *MsvcPtr(const std::string &name)
+{
+	std::string s = name;
+	uint32_t delta = 0;
+	size_t plus = s.rfind('+');
+	if (plus != std::string::npos && plus + 1 < s.size()) {
+		char *end = nullptr;
+		unsigned long v = strtoul(s.c_str() + plus + 1, &end, 16);
+		if (end && *end == 0 && end != s.c_str() + plus + 1) {
+			delta = (uint32_t)v;
+			s.resize(plus);
+		}
+	}
+	size_t bang = s.rfind('!');
+	if (bang != std::string::npos)
+		s = s.substr(bang + 1);
+	if (s.empty() || s[0] != '?')
+		return nullptr;
+	size_t cut = s.find("@@");
+	if (cut == std::string::npos || cut < 2)
+		return nullptr;
+	std::string type = s.substr(cut + 2);
+	std::string body = s.substr(1, cut - 1);
+	std::vector<std::string> parts;
+	size_t at = 0;
+	while (at <= body.size()) {
+		size_t n = body.find('@', at);
+		if (n == std::string::npos) {
+			if (at < body.size())
+				parts.push_back(body.substr(at));
+			break;
+		}
+		parts.push_back(body.substr(at, n - at));
+		at = n + 1;
+	}
+	if (parts.empty() || parts[0].empty())
+		return nullptr;
+	std::string qual;
+	for (int k = (int)parts.size() - 1; k >= 1; k--) {
+		if (!qual.empty())
+			qual += "::";
+		qual += parts[k];
+	}
+	if (!qual.empty())
+		qual += "::";
+	qual += parts[0];
+	BuildQual();
+	auto it = s_byqual.find(qual);
+	if (it == s_byqual.end())
+		return nullptr;
+	uint32_t off = it->second;
+	if (delta) {
+		int e32 = Elem32(type);
+		int e64 = Elem64(type);
+		if (e32 <= 0 || e64 <= 0 || (delta % (uint32_t)e32) != 0)
+			return nullptr;
+		off += (delta / (uint32_t)e32) * (uint32_t)e64;
+	}
+	const ImageInfo &im = Image();
+	if (!im.base)
+		return nullptr;
+	return (void *)(im.base + off);
+}
+
 static void *SymPtr(const std::string &name)
 {
 	if (!Table())
@@ -108,9 +262,9 @@ static void *SymPtr(const std::string &name)
 		delta = (uint32_t)strtoul(name.c_str() + plus + 1, nullptr, 16);
 	}
 	auto it = s_byname.find(base);
-	if (it == s_byname.end())
-		return nullptr;
-	return (void *)(Image().base + it->second + delta);
+	if (it != s_byname.end())
+		return (void *)(Image().base + it->second + delta);
+	return MsvcPtr(name);
 }
 
 // ---------------------------------------------------------------------------------------------------------------

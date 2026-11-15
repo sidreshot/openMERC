@@ -26,10 +26,42 @@
 // Implements: SPEC-752 1.1, 2.1, 2.2, 3.1-3.4; SPEC-760 1, B9.2; SPEC-780 1
 
 #include "save_local.h"
+#include "save_i386_layout.h"
 
 #include <stddef.h>
 
+static_assert(sizeof(edict_t) == 1472, "regenerate save_i386_layout.h for this edict");
+static_assert(sizeof(gclient_t) == 2440, "regenerate save_i386_layout.h for this client");
+static_assert(sizeof(level_locals_t) == 888, "regenerate save_i386_layout.h for this level");
+static_assert(offsetof(edict_t, classname) == 480, "regenerate save_i386_layout.h");
+static_assert(offsetof(edict_t, health) == 824, "regenerate save_i386_layout.h");
+static_assert(kI386Edict == 1176 && kI386Client == 2384 && kI386Level == 780, "32-bit save sizes");
+static_assert(kI386Link == 128 && kI386Svflags == 280, "32-bit link hole");
+
 namespace g10 {
+
+static bool s_i386_save;
+
+void SaveSetI386(bool on) { s_i386_save = on; }
+bool SaveIsI386(void) { return s_i386_save; }
+
+static void WidenRec(const SaveWidenOp *ops, int nops, const unsigned char *src, int src_n, unsigned char *dst,
+                     int dst_n)
+{
+	for (int i = 0; i < nops; i++) {
+		const SaveWidenOp &op = ops[i];
+		if (op.ptr) {
+			if ((int)op.src + (int)op.n * 4 > src_n || (int)op.dst + (int)op.n * 8 > dst_n)
+				gi.error("save widen: pointer field past the record");
+			for (int k = 0; k < op.n; k++)
+				memcpy(dst + op.dst + (size_t)k * 8, src + op.src + (size_t)k * 4, 4);
+		} else {
+			if ((int)op.src + (int)op.n > src_n || (int)op.dst + (int)op.n > dst_n)
+				gi.error("save widen: field past the record");
+			memcpy(dst + op.dst, src + op.src, op.n);
+		}
+	}
+}
 
 #define EF(f, k) {(int)offsetof(edict_t, f), k, #f}
 #define CF(f, k) {(int)offsetof(gclient_t, f), k, #f}
@@ -283,6 +315,22 @@ void WriteEntity(edict_t *e)
 void ReadEntity(edict_t *e)
 {
 	static unsigned char rec[sizeof(edict_t)], img[sizeof(edict_t) + ORIG_EDCT];
+	if (SaveIsI386()) {
+		/* image is 1124 with the 52-byte tail (1176 - 1124) in the link hole, then widened */
+		unsigned char rec32[kI386Edict];
+		memset(img, 0, 1124);
+		G10_ReadChunk("EDCT", img, kI386Edct);
+		memset(rec32, 0, sizeof(rec32));
+		memcpy(rec32, img, kI386Edct);
+		memcpy(rec32 + kI386Edct, img + kI386Link + 8, kI386Edict - kI386Edct);
+		memset(rec32 + kI386Link, 0, kI386Svflags - kI386Link);
+		memset(rec, 0, sizeof(rec));
+		WidenRec(kWidenEdict, (int)(sizeof(kWidenEdict) / sizeof(kWidenEdict[0])), rec32, kI386Edict, rec,
+		         (int)sizeof(rec));
+		DecodeFields(rec, ent_fields, COUNT(ent_fields));
+		memcpy(e, rec, sizeof(edict_t));
+		return;
+	}
 	int size = EntityImageSize();
 	memset(img, 0, sizeof(img));
 	G10_ReadChunk("EDCT", img, size);
@@ -389,10 +437,23 @@ void WriteClientLevel(gclient_t *c)
 void ReadClientLevel(gclient_t *c)
 {
 	static unsigned char rec[sizeof(gclient_t)];
-	G10_ReadChunk("OMCL", rec, (int)sizeof(gclient_t));
+	static unsigned char wide[sizeof(gclient_t)];
+	memset(rec, 0, sizeof(rec));
+	unsigned char *use = rec;
+	if (SaveIsI386()) {
+		/* the engine accepts a shorter chunk when the requested length is negative */
+		int n = G10_ReadUpTo("OMCL", rec, (int)sizeof(rec));
+		if (n != kI386Client)
+			gi.error("OMCL size %d", n);
+		memset(wide, 0, sizeof(wide));
+		WidenRec(kWidenClient, (int)(sizeof(kWidenClient) / sizeof(kWidenClient[0])), rec, kI386Client, wide,
+		         (int)sizeof(wide));
+		use = wide;
+	} else if (!G10_ReadChunk("OMCL", rec, (int)sizeof(rec)))
+		gi.error("OMCL size");
 	PlayerInventory *inv = c->inv; // from the game section (INVN)
-	DecodeFields(rec, client_fields, COUNT(client_fields));
-	memcpy(c, rec, sizeof(gclient_t));
+	DecodeFields(use, client_fields, COUNT(client_fields));
+	memcpy(c, use, sizeof(gclient_t));
 	c->inv = inv;
 }
 
@@ -512,6 +573,15 @@ void ReadLevelRecord(void)
 	memset(img, 0, sizeof(img));
 	int size = sizeof(level_locals_t) <= ORIG_LVLC ? ORIG_LVLC : (int)sizeof(level_locals_t);
 	G10_ReadChunk("LVLC", img, size);
+	if (SaveIsI386()) {
+		static unsigned char wide[sizeof(level_locals_t)];
+		memset(wide, 0, sizeof(wide));
+		WidenRec(kWidenLevel, (int)(sizeof(kWidenLevel) / sizeof(kWidenLevel[0])), img, kI386Level, wide,
+		         (int)sizeof(wide));
+		DecodeFields(wide, level_fields, COUNT(level_fields));
+		memcpy(&level, wide, sizeof(level_locals_t));
+		return;
+	}
 	DecodeFields(img, level_fields, COUNT(level_fields));
 	memcpy(&level, img, sizeof(level_locals_t));
 }

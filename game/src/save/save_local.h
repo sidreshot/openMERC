@@ -53,6 +53,9 @@ struct Field {
 	const char *name;
 };
 
+// a 32-bit OMG2 level (save_i386_layout.h): records are widened while they are read
+void SaveSetI386(bool on);
+bool SaveIsI386(void);
 // entity records (EDCT): OpenMerc's edict_t image, pointer fields encoded
 int EntityImageSize(void);
 void WriteEntity(edict_t *e);              // EDCT + STRG
