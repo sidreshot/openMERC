@@ -30,11 +30,21 @@
 
 #include <stddef.h>
 
+/* the widen tables were measured on the 64-bit host. Windows CI is MSVC x86, where the
+   records already are the 32-bit sizes and a save is not widened. */
+#if UINTPTR_MAX > 0xffffffffu
 static_assert(sizeof(edict_t) == 1472, "regenerate save_i386_layout.h for this edict");
 static_assert(sizeof(gclient_t) == 2440, "regenerate save_i386_layout.h for this client");
 static_assert(sizeof(level_locals_t) == 888, "regenerate save_i386_layout.h for this level");
 static_assert(offsetof(edict_t, classname) == 480, "regenerate save_i386_layout.h");
 static_assert(offsetof(edict_t, health) == 824, "regenerate save_i386_layout.h");
+#else
+static_assert(sizeof(edict_t) == kI386Edict, "32-bit edict does not match the i386 save layout");
+static_assert(sizeof(gclient_t) == kI386Client, "32-bit client does not match the i386 save layout");
+static_assert(sizeof(level_locals_t) == kI386Level, "32-bit level does not match the i386 save layout");
+static_assert(offsetof(edict_t, classname) == 436, "32-bit classname offset");
+static_assert(offsetof(edict_t, health) == 668, "32-bit health offset");
+#endif
 static_assert(kI386Edict == 1176 && kI386Client == 2384 && kI386Level == 780, "32-bit save sizes");
 static_assert(kI386Link == 128 && kI386Svflags == 280, "32-bit link hole");
 

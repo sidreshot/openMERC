@@ -23,16 +23,31 @@
 
 #include <cstring>
 #include <cstdlib>
-#include <cxxabi.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-/* element sizes of the tables a 32-bit save names with "symbol+hex". The 32-bit sizes are that ABI's sizeof. */
-static_assert(sizeof(props::ModelEntry) == 48, "32-bit save element scale");
-static_assert(sizeof(props::PartRow) == 24, "32-bit save element scale");
-static_assert(sizeof(G3Anim) == 40, "32-bit save element scale");
-static_assert(sizeof(gitem_t) == 104, "32-bit save element scale");
+/* abi::__cxa_demangle is the Itanium demangler. MSVC x86 has no cxxabi.h; its own map
+   already stores MSVC names, and those match a Windows save without demangling. */
+#if !defined(_MSC_VER)
+#include <cxxabi.h>
+#define OM_HAVE_CXA_DEMANGLE 1
+#else
+#define OM_HAVE_CXA_DEMANGLE 0
+#endif
+
+/* element sizes of the tables a save names with "symbol+hex". 64-bit host sizes differ from the 32-bit ABI. */
+#if UINTPTR_MAX > 0xffffffffu
+static_assert(sizeof(props::ModelEntry) == 48, "64-bit save element scale");
+static_assert(sizeof(props::PartRow) == 24, "64-bit save element scale");
+static_assert(sizeof(G3Anim) == 40, "64-bit save element scale");
+static_assert(sizeof(gitem_t) == 104, "64-bit save element scale");
+#else
+static_assert(sizeof(props::ModelEntry) == 36, "32-bit save element scale");
+static_assert(sizeof(props::PartRow) == 12, "32-bit save element scale");
+static_assert(sizeof(G3Anim) == 36, "32-bit save element scale");
+static_assert(sizeof(gitem_t) == 64, "32-bit save element scale");
+#endif
 
 #define OM_SYMTAB_BYTES (1024 * 1024)
 
@@ -114,6 +129,9 @@ static std::string QualOf(const char *mangled)
 		s = s.substr(bang + 1);
 	if (s.size() < 2 || s[0] != '_' || s[1] != 'Z')
 		return s;
+#if !OM_HAVE_CXA_DEMANGLE
+	return s;
+#else
 	int status = -1;
 	char *d = abi::__cxa_demangle(s.c_str(), nullptr, nullptr, &status);
 	if (!d || status != 0) {
@@ -140,6 +158,7 @@ static std::string QualOf(const char *mangled)
 	while (!out.empty() && out.back() == ' ')
 		out.pop_back();
 	return out;
+#endif
 }
 
 static std::unordered_map<std::string, uint32_t> s_byqual;
