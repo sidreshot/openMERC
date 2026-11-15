@@ -834,7 +834,9 @@ public:
 			return;
 		UpdateFace();
 		WeaponCharge();
-		if (ent->health <= 0 && cur && cur->cls == ANIMCLS_DEATH)
+		/* any dead body, not only one whose current clip is classed as a death. A fall or a
+		   paused pose (nyc2 tunnel) never reached the seat and stayed in the air. */
+		if (ent->health <= 0)
 			CorpseState();
 	}
 
@@ -2210,37 +2212,52 @@ public:
 	void SeatOnFloor(void)
 	{
 		IGhoulInst *inst = Inst();
-		if (!inst || !gore || gibbed)
+		/* a gibbed body whose mesh was switched off is invisible; one that still draws
+		   (nyc2 piperunguy, lb_pholdlegdie, gibbed set but the corpse stays on screen)
+		   has to sit on the floor like any other */
+		if (!inst || !gore)
 			return;
 		float lowest = 1e9f;
 		int n = 0;
+		vec3_t at;
+		VectorCopy(ent->s.origin, at);
 		for (int i = 0; i < gore->numZones; i++) {
 			vec3_t bp;
 			if (!gore->zones[i].goreBolt || !G3G_BoltWorld(ent, inst, gore->zones[i].goreBolt, bp))
 				continue;
 			n++;
-			if (bp[2] < lowest)
+			if (bp[2] < lowest) {
 				lowest = bp[2];
+				VectorCopy(bp, at);
+			}
 		}
-		if (n < 3)
+		/* one bolt is enough: a blown or legless body (nyc2, m_nyc_mskinhead2b) has fewer
+		   than three and used to freeze wherever the animation stopped */
+		if (n < 1)
 			return;
-		/* from just above the lowest bolt, so a crate under the body counts and the
-		   street below that crate does not */
+		/* from just above the lowest bolt, so a crate under that part counts and the
+		   street below the crate does not. Trace at the bolt, not the origin: the posed
+		   mesh is not above the entity origin (nyc2 tunnel). A finished death can freeze
+		   a body-height above the floor. */
 		vec3_t start, end;
-		VectorCopy(ent->s.origin, start);
+		VectorCopy(at, start);
 		start[2] = lowest + 20.0f;
 		VectorCopy(start, end);
-		end[2] = lowest - 24.0f;
+		end[2] = lowest - 128.0f;
 		trace_t tr;
 		gix.trace(start, NULL, NULL, end, ent, MASK_SOLID, &tr);
 		if (tr.startsolid || tr.fraction >= 1.0f)
 			return;
-		/* the bolt is the middle of the part; the drawn limb reaches a little further down */
+		/* the bolt is the middle of the part; the drawn limb reaches a little further down.
+		   positive lift pulls sunken feet up, negative lift drops a pose that froze in the air. */
 		float lift = tr.endpos[2] - lowest + 8.0f;
-		if (lift < 4.0f || lift > 40.0f)
+		if (lift > -4.0f && lift < 4.0f)
+			return;
+		if (lift < -96.0f || lift > 48.0f)
 			return;
 		ent->s.origin[2] += lift;
-		ent->mins[2] -= lift;
+		/* the flat box sits on the floor the trace hit, not at the old standing bottom */
+		ent->mins[2] = tr.endpos[2] - ent->s.origin[2];
 		ent->maxs[2] = ent->mins[2] + 16.0f;
 		if (owner)
 			owner->OnGroundOffset(ent->mins[2]);
@@ -2637,8 +2654,10 @@ public:
 		   stayed upright (owner: "characters hang in one pose, every second time") */
 		/* A looping death (dance, twitching, writhing) counts as "done" for AnimDone() from its first frame; it is not
 		   the end of the death - its exit follows (DyingFollowUp) - so it never freezes the corpse */
+		/* pauseKind used to block the timeout, so a body that paused when it left the ground
+		   never sat down. Seven seconds is long enough for the death clip; after that it sits. */
 		if (frozenAt == 0 && ((AnimDone() && cur && cur->cls == ANIMCLS_DEATH && !(cur->flags & ANIMF_LOOP)) ||
-		                      (!pauseKind && now - deathTime > 7.0f))) {
+		                      (deathTime > 0 && now - deathTime > 7.0f))) {
 			for (int k = 0; k < 3; k++)
 				SettleCorpse(40.0f);
 			SeatOnFloor();

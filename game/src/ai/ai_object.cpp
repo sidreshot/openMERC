@@ -531,8 +531,13 @@ void OmAI::Think(edict_t *ent)
 	if (CvarValue(cv.ai_goretest) && !(ent->spawnflags & SF_DORMANT) && !awake)
 		Wake(ent);
 	if (!awake) {
-		if (!WakeChecks(ent, this))
+		if (!WakeChecks(ent, this)) {
+			/* a dormant body that dies never runs an action, so the corpse seat never ran
+			   and the death pose stayed in the air (nyc2 piperunguy1) */
+			if (ent->health <= 0 && body)
+				body->Think();
 			return;
+		}
 		Wake(ent);
 		/* openMERC, black box (kos1 grunt -824 -1632, original module): a character that wakes while the player is
 		   in its line of sight knows him at once, whatever way it faces - the player standing 106, 125, 170 units
