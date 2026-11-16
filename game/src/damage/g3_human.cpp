@@ -2248,10 +2248,33 @@ public:
 		gix.trace(start, NULL, NULL, end, ent, MASK_SOLID, &tr);
 		if (tr.startsolid || tr.fraction >= 1.0f)
 			return;
-		/* the bolt is the middle of the part; the drawn limb reaches a little further down.
-		   positive lift pulls sunken feet up, negative lift drops a pose that froze in the air. */
-		float lift = tr.endpos[2] - lowest + 8.0f;
-		if (lift > -4.0f && lift < 4.0f)
+		/* sunk: the bolt is the middle of the part, so the feet come up to 8 above the
+		   floor. floating (tsr1 istairsguy): that same 8 left the whole body in the air,
+		   so a pose above the floor sits the lowest bolt on the surface. */
+		/* posed part bounds are in the entity frame. origin + that min is the drawn
+		   bottom; it sits a little under the lowest bolt. A fixed +8 on the bolt left
+		   tsr1 istairsguy hovering, and 0 sunk a body whose mesh hangs below the bolt. */
+		float mesh = lowest;
+		{
+			float partz = 1e9f;
+			for (int i = 0; i < gore->numZones; i++) {
+				float zmn[3], zmx[3];
+				if (!gore->zones[i].owner)
+					continue;
+				inst->GetBounds(G3_Time(), NULL, zmn, zmx, gore->zones[i].owner, true);
+				if (zmn[2] == 0.0f && zmx[2] == 0.0f)
+					continue;
+				if (zmn[2] < partz)
+					partz = zmn[2];
+			}
+			if (partz < 1e8f) {
+				float world = ent->s.origin[2] + partz;
+				if (world < mesh)
+					mesh = world;
+			}
+		}
+		float lift = tr.endpos[2] - mesh;
+		if (lift > -1.5f && lift < 4.0f)
 			return;
 		if (lift < -96.0f || lift > 48.0f)
 			return;
