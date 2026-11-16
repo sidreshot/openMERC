@@ -2130,8 +2130,9 @@ LB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 			c = (c & 0xFF000000u) | 0x00808080u;
 		}
 
-		/* SPEC-803 open question 4: last argument 6 (passed through) */
-		MR_StretchPic(cx, cy, d->tw, d->th, s->blocked ? 0xFF505050u : 0xFFFFFFFFu, va("save/%s", s->name), 6);
+		/* ShotPic already turns the bottom-up shot upright. Argument 6 flipped it
+		   again, so the load tiles were upside down. */
+		MR_StretchPic(cx, cy, d->tw, d->th, s->blocked ? 0xFF505050u : 0xFFFFFFFFu, va("save/%s", s->name), 0);
 
 		/* the hovered tile framed (fingers and mouse) */
 		if (i == hover)
@@ -2384,7 +2385,7 @@ LVB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 
 		if (d->pics[i])
 		{
-			MR_StretchPic(cx, cy, d->tw, d->th, 0xFFFFFFFFu, va("om/lv_%s", lvb_levels[i].map), 6);
+			MR_StretchPic(cx, cy, d->tw, d->th, 0xFFFFFFFFu, va("om/lv_%s", lvb_levels[i].map), 0);
 		}
 		else
 		{
