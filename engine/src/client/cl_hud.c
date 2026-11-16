@@ -1056,7 +1056,8 @@ HUD_CentredText(int y, const char *s, const unsigned char *c, const om_fontref_t
 
 /* OpenMerc: the last pickup or notice (owner 16: what was just picked up could not be read - it only went to the
    small console lines in the corner, under the touch layout's trays). Shown 3 s centred under the top of the HUD in
-   the medium font with a shadow, fading over the last second; a new one replaces it. */
+   the medium font with a shadow, fading over the last second; a new one replaces it. The corner is not given a
+   second copy of this text. */
 static char hud_pickup[128];
 static int hud_pickuptime = -100000;
 

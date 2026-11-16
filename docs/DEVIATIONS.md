@@ -169,8 +169,9 @@ thunderstorm on jpn2".
   a shelf needed a jump onto it).
 - **A dropped weapon comes loaded** (g_items.cpp): a weapon a character dropped carries no rounds and was given with an
   empty clip; it is given with a full clip, as a weapon lying in the map.
-- **Pickup line** (cl_hud.c): plain prints during play (pickups, "can't carry more") are also shown for 3 s centred
-  under the top of the HUD in the medium font; they went only to the small console lines.
+- **Pickup line** (cl_hud.c): plain prints during play (pickups, "can't carry more") are shown for 3 s centred
+  under the top of the HUD in the medium font. They are still written to the console log. They are not also drawn
+  as the small lines in the corner: that second copy repeated the same text (a pickup, "you can't carry any more").
 - **Damage direction marker** (cl_hud.c, g_combat.cpp): a short red arc around the crosshair towards the attacker,
   turning with the view and fading over a second; the attacker's world yaw rides in the unused high bits of
   stats[15] (0x4000, bits 7-13) beside SoF's direction flags. Test aid: cl_om_dmgtest <yaw>.

@@ -286,6 +286,34 @@ Con_ClearNotify(void)
 	}
 }
 
+/*
+ * Lines printed after `before` (the value of con.current at the time) stay
+ * in the scrollback and are not drawn in the corner. A print that did not
+ * start a new line is left alone.
+ */
+void
+Con_QuietNotify(int before)
+{
+	int i, n;
+
+	n = con.current - before;
+
+	if (n < 1)
+	{
+		return;
+	}
+
+	if (n > NUM_CON_TIMES)
+	{
+		n = NUM_CON_TIMES;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		con.times[(con.current - i) % NUM_CON_TIMES] = 0;
+	}
+}
+
 void
 Con_MessageMode_f(void)
 {
