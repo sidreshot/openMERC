@@ -632,6 +632,7 @@ public:
 			b->Think();
 			if (record)
 				ai->ChangeBBox(ent, b->cur ? b->cur->posture : record->posture, true);
+			b->KeepOnFloor();
 			return false;
 		}
 		/* OpenMerc (DEVIATIONS): the in-air pause of a death also ends when the body has stopped falling without a
@@ -701,6 +702,9 @@ public:
 				b->SetAnim(d, false);
 			record = d;
 		}
+		/* root motion has already run this frame. Seat after it, or the lie-down stays at the
+		   standing height until the clip ends and one drop puts the body on the floor. */
+		b->KeepOnFloor();
 		return false;
 	}
 

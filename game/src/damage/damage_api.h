@@ -304,6 +304,9 @@ public:
 
 	// per think: events, voices, faces, weapon charge effects, corpse freeze (G2 calls it every think)
 	virtual void Think(void);
+	/* after this think's root motion: a death played at the standing origin lies in the air and
+	   only meets the floor when the clip freezes. Humans pull the drawn bottom down every frame. */
+	virtual void KeepOnFloor(void) {}
 
 	// choices; NULL = none
 	virtual const G3Anim *ChooseMove(const G3MoveInput &in) { return NULL; }

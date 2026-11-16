@@ -840,6 +840,8 @@ public:
 			CorpseState();
 	}
 
+	void KeepOnFloor(void) override { SeatOnFloor(); }
+
 	// ---------------------------------------------------------------------------------------------------
 	// heels (footsteps and limp voices)
 	// ---------------------------------------------------------------------------------------------------
@@ -2671,6 +2673,10 @@ public:
 		   too (jpn2 intro: the hostage Dekker shoots fell back with head and shoulders into the wall) */
 		if (frozenAt == 0)
 			SettleCorpse(6.0f);
+		/* every frame of the lie-down, not the freeze. The clip is authored at the standing
+		   origin, so the body lay in the air and dropped onto the floor on the last frame. */
+		if (cur && cur->cls == ANIMCLS_DEATH)
+			SeatOnFloor();
 		/* (not while the fall waits in the air: the body would stay on its standing frame). Only a finished DEATH
 		   animation freezes: ChooseDeath runs this before the death is set, and a pre-death idle or walk that had
 		   just finished froze the instance at the moment of death - the death then played on a paused body, which
