@@ -935,12 +935,126 @@ GLimp_ShutdownGraphics(void)
 /*
  * (Un)grab Input
  */
+static void
+WindowToPixels(float x, float y, int *px, int *py)
+{
+	int ww = 1, wh = 1, pw = 1, ph = 1;
+
+	if (window != NULL)
+	{
+		if (!SDL_GetWindowSize(window, &ww, &wh) || !SDL_GetWindowSizeInPixels(window, &pw, &ph))
+		{
+			ww = wh = pw = ph = 1;
+		}
+	}
+
+	if (ww < 1)
+	{
+		ww = 1;
+	}
+
+	if (wh < 1)
+	{
+		wh = 1;
+	}
+
+	if (pw < 1)
+	{
+		pw = ww;
+	}
+
+	if (ph < 1)
+	{
+		ph = wh;
+	}
+
+	*px = (int)(x * (float)pw / (float)ww + (x >= 0.0f ? 0.5f : -0.5f));
+	*py = (int)(y * (float)ph / (float)wh + (y >= 0.0f ? 0.5f : -0.5f));
+}
+
+void
+GLimp_WindowToPixels(float x, float y, int *px, int *py)
+{
+	if (!px || !py)
+	{
+		return;
+	}
+
+	WindowToPixels(x, y, px, py);
+}
+
+void
+GLimp_WarpMousePixels(int x, int y)
+{
+	int ww = 1, wh = 1, pw = 1, ph = 1;
+
+	if (window == NULL)
+	{
+		return;
+	}
+
+	if (!SDL_GetWindowSize(window, &ww, &wh) || !SDL_GetWindowSizeInPixels(window, &pw, &ph))
+	{
+		return;
+	}
+
+	if (pw < 1)
+	{
+		pw = 1;
+	}
+
+	if (ph < 1)
+	{
+		ph = 1;
+	}
+
+	/* While relative mode is still on, the warp does not emit a motion event. */
+	SDL_WarpMouseInWindow(window, (float)x * (float)ww / (float)pw,
+			(float)y * (float)wh / (float)ph);
+}
+
+/*
+ * Menus follow the desktop cursor (its speed and acceleration). The grab keeps
+ * it inside the window. The menu draws its own pointer, so the system cursor stays hidden.
+ */
+qboolean
+GLimp_MenuMouse(qboolean on)
+{
+	static qboolean seen_error;
+
+	if ((window == NULL) || !on)
+	{
+		return false;
+	}
+
+	if (!SDL_SetWindowRelativeMouseMode(window, false))
+	{
+		if (!seen_error)
+		{
+			seen_error = true;
+			Com_Printf("WARNING: Setting Relative Mousemode failed, reason: %s\n", SDL_GetError());
+		}
+
+		return false;
+	}
+
+	SDL_SetWindowMouseGrab(window, true);
+	SDL_HideCursor();
+	return true;
+}
+
 void
 GLimp_GrabInput(qboolean grab)
 {
 	if(window != NULL)
 	{
 		SDL_SetWindowMouseGrab(window, grab ? true : false);
+
+		if (!grab)
+		{
+			/* A menu hid the cursor. Relative mode is what hides it during play. */
+			SDL_ShowCursor();
+		}
 	}
 
 	if(!SDL_SetWindowRelativeMouseMode(window, grab ? true : false))

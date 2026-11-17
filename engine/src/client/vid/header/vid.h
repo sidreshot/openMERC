@@ -64,6 +64,11 @@ void GLimp_Shutdown(void);
 qboolean GLimp_InitGraphics(int fullscreen, int *pwidth, int *pheight);
 void GLimp_ShutdownGraphics(void);
 void GLimp_GrabInput(qboolean grab);
+/* OpenMerc: menus track the desktop cursor. Warp and read are in window pixels
+   (the same space as viddef), which is not always the space of an SDL mouse event. */
+qboolean GLimp_MenuMouse(qboolean on); /* false when there is no window yet */
+void GLimp_WarpMousePixels(int x, int y);
+void GLimp_WindowToPixels(float x, float y, int *px, int *py);
 float GLimp_GetRefreshRate(void);
 qboolean GLimp_GetDesktopMode(int *pwidth, int *pheight);
 /* OpenMerc MENU2: the distinct fullscreen sizes of the game's display, largest first */

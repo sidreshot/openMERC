@@ -1414,6 +1414,35 @@ M_MouseAbs(int x, int y)
 	ms.my = y / MR_Scale();
 }
 
+/* Where the drawn pointer is, in window pixels, so the desktop cursor can be put there. */
+void
+M_PointerPixels(int *x, int *y)
+{
+	float s;
+
+	if (!x || !y)
+	{
+		return;
+	}
+
+	if (!ms.active)
+	{
+		*x = viddef.width / 2;
+		*y = viddef.height / 2;
+		return;
+	}
+
+	s = MR_Scale();
+
+	if (s < 0.5f)
+	{
+		s = 0.5f;
+	}
+
+	*x = (int)(ms.mx * s + (ms.mx >= 0 ? 0.5f : -0.5f));
+	*y = (int)(ms.my * s + (ms.my >= 0 ? 0.5f : -0.5f));
+}
+
 static void
 M_ClampPointer(void)
 {
