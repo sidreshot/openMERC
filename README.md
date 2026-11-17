@@ -44,6 +44,23 @@ writes into it.
   (64-bit, OpenMerc's own game modules only): unpack `openMERC-<version>-linux-x86_64.tar.gz` into the game
   folder and run `./openMerc`; building: [docs/BUILD-linux.md](docs/BUILD-linux.md).
 
+## Screenshots
+
+The same places at 1920x1080. Left is the original drawing. Right is every graphics option at its high value:
+clear glass, rain on the pane, water caustics, bloom, soft shadows and the rest of the Video menu. The interface
+is hidden. There are no texture packs. Motion blur and depth of field are off, so a still stays sharp. Each
+option turns off on its own.
+
+| Original | Every option at maximum |
+|---|---|
+| ![Tokyo. A flat smoked window. The SUNI sign barely shows through.](docs/screenshots/tokyo-window-original.jpg) | ![Tokyo. The same window is clear glass, with rain on the pane. The alley and the SUNI sign show through.](docs/screenshots/tokyo-window-high.jpg) |
+| ![Tokyo, the bar. The aquarium floor is a flat texture.](docs/screenshots/tokyo-aquarium-original.jpg) | ![Tokyo, the bar. The same aquarium, with caustics across the floor.](docs/screenshots/tokyo-aquarium-high.jpg) |
+| ![The armory street at night. The skyline, a brick parapet, a lamp.](docs/screenshots/armory-street-original.jpg) | ![The same street. Rain, and the lamp blooms.](docs/screenshots/armory-street-high.jpg) |
+
+Tokyo is not a rain mission. The drops there are the renderer, and they sit on the glass. The armory street is
+the map's own night rain. Both columns are openMERC, from the same game data: the original drawing beside the
+high picture, not a pixel match of the 2000 executable.
+
 ## Effects rewrite
 
 Every effect of the game is being redrawn with current techniques. The game's own effect data still decides when,
@@ -207,6 +224,23 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - **Платформы**: Windows (32-битный движок на 64-битной Windows 10/11). Linux x86_64
   (64 бита, только собственные игровые модули OpenMerc): распакуйте `openMERC-<версия>-linux-x86_64.tar.gz`
   в папку игры и запустите `./openMerc`; сборка: [docs/BUILD-linux.md](docs/BUILD-linux.md).
+
+### Снимки
+
+Одни и те же места, 1920x1080. Слева оригинальная отрисовка. Справа все настройки графики на максимуме:
+прозрачное стекло, дождь на стекле, каустика воды, bloom, мягкие тени и остальное из меню «Видео». Интерфейс
+скрыт. Пакетов текстур нет. Размытие движения и глубина резкости выключены, чтобы кадр оставался резким.
+Каждая настройка выключается отдельно.
+
+| Оригинал | Все настройки на максимуме |
+|---|---|
+| ![Токио. Плоское тёмное стекло. Вывеска SUNI едва видна.](docs/screenshots/tokyo-window-original.jpg) | ![Токио. То же окно - прозрачное стекло, по нему идёт дождь. Видны переулок и вывеска SUNI.](docs/screenshots/tokyo-window-high.jpg) |
+| ![Токио, бар. Пол аквариума - плоская текстура.](docs/screenshots/tokyo-aquarium-original.jpg) | ![Токио, бар. Тот же аквариум, по дну идут каустики.](docs/screenshots/tokyo-aquarium-high.jpg) |
+| ![Улица арсенала ночью. Небоскрёбы, кирпичный парапет, лампа.](docs/screenshots/armory-street-original.jpg) | ![Та же улица. Дождь, и лампа светится ореолом.](docs/screenshots/armory-street-high.jpg) |
+
+Токио - не дождливая миссия. Капли там рисует рендерер, и они сидят на стекле. Улица арсенала - ночной дождь
+самой карты. Оба столбца рисует openMERC из одних и тех же данных игры: оригинальная отрисовка рядом с высокой
+картинкой, а не попиксельное совпадение с исполняемым файлом 2000 года.
 
 ### Переписывание эффектов
 
