@@ -46,20 +46,18 @@ writes into it.
 
 ## Screenshots
 
-The same places at 1920x1080. Left is the original drawing. Right is every graphics option at its high value:
-clear glass, rain on the pane, water caustics, bloom, soft shadows and the rest of the Video menu. The interface
-is hidden. There are no texture packs. Motion blur and depth of field are off, so a still stays sharp. Each
-option turns off on its own.
+The same places at 2560x1440. Left is the original drawing: the map's own textures and lightmaps, flat glass,
+the old warp water, no HDR, no bloom, no modern rain, shadows or post. Right is every graphics option at
+maximum. Each of those turns off on its own in the Video menu.
 
 | Original | Every option at maximum |
 |---|---|
-| ![Tokyo. A flat smoked window. The SUNI sign barely shows through.](docs/screenshots/tokyo-window-original.jpg) | ![Tokyo. The same window is clear glass, with rain on the pane. The alley and the SUNI sign show through.](docs/screenshots/tokyo-window-high.jpg) |
-| ![Tokyo, the bar. The aquarium floor is a flat texture.](docs/screenshots/tokyo-aquarium-original.jpg) | ![Tokyo, the bar. The same aquarium, with caustics across the floor.](docs/screenshots/tokyo-aquarium-high.jpg) |
-| ![The armory street at night. The skyline, a brick parapet, a lamp.](docs/screenshots/armory-street-original.jpg) | ![The same street. Rain, and the lamp blooms.](docs/screenshots/armory-street-high.jpg) |
+| ![Tokyo. A flat tinted window, the neon behind it.](docs/screenshots/tokyo-window-original.jpg) | ![Tokyo. The same window, clear glass with rain on the pane.](docs/screenshots/tokyo-window-high.jpg) |
+| ![Tokyo, the roof. The pool is the original warp surface.](docs/screenshots/tokyo-pool-original.jpg) | ![Tokyo, the roof. The same pool, with reflections.](docs/screenshots/tokyo-pool-high.jpg) |
+| ![The subway corridor, flat light, a shotgun.](docs/screenshots/subway-original.jpg) | ![The same corridor. The lamps bloom, the corners fill in.](docs/screenshots/subway-high.jpg) |
 
-Tokyo is not a rain mission. The drops there are the renderer, and they sit on the glass. The armory street is
-the map's own night rain. Both columns are openMERC, from the same game data: the original drawing beside the
-high picture, not a pixel match of the 2000 executable.
+Both columns are openMERC, from the same game data. The left one is the original path, as close as the port
+gets to the 2000 picture.
 
 ## Effects rewrite
 
@@ -227,20 +225,18 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 
 ### Снимки
 
-Одни и те же места, 1920x1080. Слева оригинальная отрисовка. Справа все настройки графики на максимуме:
-прозрачное стекло, дождь на стекле, каустика воды, bloom, мягкие тени и остальное из меню «Видео». Интерфейс
-скрыт. Пакетов текстур нет. Размытие движения и глубина резкости выключены, чтобы кадр оставался резким.
-Каждая настройка выключается отдельно.
+Одни и те же места, 2560x1440. Слева оригинальная отрисовка: свои текстуры и карты освещения, плоское стекло,
+старая вода с warp, без HDR, без bloom, без современного дождя, теней и постобработки. Справа все настройки
+графики на максимуме. Каждая выключается отдельно в меню «Видео».
 
 | Оригинал | Все настройки на максимуме |
 |---|---|
-| ![Токио. Плоское тёмное стекло. Вывеска SUNI едва видна.](docs/screenshots/tokyo-window-original.jpg) | ![Токио. То же окно - прозрачное стекло, по нему идёт дождь. Видны переулок и вывеска SUNI.](docs/screenshots/tokyo-window-high.jpg) |
-| ![Токио, бар. Пол аквариума - плоская текстура.](docs/screenshots/tokyo-aquarium-original.jpg) | ![Токио, бар. Тот же аквариум, по дну идут каустики.](docs/screenshots/tokyo-aquarium-high.jpg) |
-| ![Улица арсенала ночью. Небоскрёбы, кирпичный парапет, лампа.](docs/screenshots/armory-street-original.jpg) | ![Та же улица. Дождь, и лампа светится ореолом.](docs/screenshots/armory-street-high.jpg) |
+| ![Токио. Плоское тонированное окно, за ним неон.](docs/screenshots/tokyo-window-original.jpg) | ![Токио. То же окно: прозрачное стекло, по нему идёт дождь.](docs/screenshots/tokyo-window-high.jpg) |
+| ![Токио, крыша. Бассейн - старая поверхность с warp.](docs/screenshots/tokyo-pool-original.jpg) | ![Токио, крыша. Тот же бассейн, с отражениями.](docs/screenshots/tokyo-pool-high.jpg) |
+| ![Коридор метро, плоский свет, дробовик.](docs/screenshots/subway-original.jpg) | ![Тот же коридор. Лампы светятся, углы заполнены.](docs/screenshots/subway-high.jpg) |
 
-Токио - не дождливая миссия. Капли там рисует рендерер, и они сидят на стекле. Улица арсенала - ночной дождь
-самой карты. Оба столбца рисует openMERC из одних и тех же данных игры: оригинальная отрисовка рядом с высокой
-картинкой, а не попиксельное совпадение с исполняемым файлом 2000 года.
+Оба столбца рисует openMERC из одних и тех же данных игры. Левый - оригинальный путь, насколько порт
+вообще может совпасть с картинкой 2000 года.
 
 ### Переписывание эффектов
 
