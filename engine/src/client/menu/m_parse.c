@@ -2307,6 +2307,11 @@ MP_LoadPageZ(mscreen_t *scr, mframe_t *frame, const char *name, qboolean dry, fl
 		ML_FoldColumns(pg);
 	}
 
+	if (!dry)
+	{
+		ML_DockButtons(pg);
+	}
+
 	if (pg->zframe)
 	{
 		int W, H;

@@ -1618,6 +1618,13 @@ M_InView(mwidget_t *w)
 	y -= w->bpad + w->yoff;
 	top = f->fy + f->pad + pg->screen->originy;
 	bottom = f->fy + f->fh - f->pad + pg->screen->originy;
+
+	/* a row in the pinned-button band is clipped, so it is not a place to land */
+	if (pg->dock && !(w->flags & WF_NOSCROLL))
+	{
+		bottom -= pg->dock;
+	}
+
 	return y + ML_TotalH(w) > top && y < bottom;
 }
 
@@ -1741,14 +1748,14 @@ M_PadNext(qboolean back, qboolean bolted)
 
 		h = ML_TotalH(w);
 
-		for (tries = 0; pg->vbar && !(w->flags & (WF_BOLTED | WF_NOTPLACED)) && tries < 512; tries++)
+		for (tries = 0; pg->vbar && !(w->flags & (WF_BOLTED | WF_NOTPLACED | WF_NOSCROLL)) && tries < 512; tries++)
 		{
 			int old = pg->scroll;
 
 			ML_WidgetScreenPos(pg, w, &x, &y);
 			y -= w->bpad + w->yoff;
 			top = f->fy + f->pad + scr->originy;
-			bottom = f->fy + f->fh - f->pad + scr->originy;
+			bottom = f->fy + f->fh - f->pad + scr->originy - pg->dock;
 
 			if (y < top)
 			{
@@ -1979,6 +1986,12 @@ M_PageHover(mscreen_t *scr, mframe_t *f, mpage_t *pg)
 		{
 			x += w->xoff;
 			y += w->yoff;
+		}
+
+		/* a scrolled row under the pinned buttons is not there */
+		if (pg->dock && !(w->flags & (WF_NOSCROLL | WF_BOLTED)) && y >= y1 - pg->dock)
+		{
+			continue;
 		}
 
 		ML_PageMouse(pg, w, &mx, &my);
