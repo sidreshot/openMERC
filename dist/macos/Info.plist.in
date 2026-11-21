@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- openMERC.app; @VERSION@ and @MINOS@ are filled in by tools/build/package-macos.sh -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>openMERC</string>
+	<key>CFBundleDisplayName</key>
+	<string>openMERC</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.openmerc.openMERC</string>
+	<key>CFBundleExecutable</key>
+	<string>openMERC-launcher</string>
+	<key>CFBundleIconFile</key>
+	<string>openMERC</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>@MINOS@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.action-games</string>
+	<key>LSArchitecturePriority</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>openMERC looks for multiplayer games on your local network and lets other players there join yours.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>openMERC contributors, GPL-2.0-or-later. Soldier of Fortune game data not included.</string>
+</dict>
+</plist>

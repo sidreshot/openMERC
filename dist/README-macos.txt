@@ -21,8 +21,31 @@ They look for these exact paths:
     /opt/homebrew/opt/openal-soft/lib/libopenal.1.dylib
     /opt/homebrew/opt/libomp/lib/libomp.dylib
 
-Install
--------
+openMERC.app
+------------
+openMERC-<version>-macos-arm64-app.zip holds openMERC.app. Unzip it, move
+openMERC.app wherever you like (Applications, for example) and open it.
+
+On the first start it asks for your Soldier of Fortune folder: the one that
+contains base/pak0.pak (for the GOG installer unpacked with innoextract, the
+folder you unpacked it into). The folder is remembered; hold the Option key
+while openMERC starts to choose it again.
+
+Settings, saves, screenshots, the console history and a launcher.log are kept in
+
+    ~/Library/Application Support/openMERC
+
+openMERC writes nothing into the app or the game folder.
+
+The app is not signed by Apple. The first time, macOS may refuse to open it:
+Control-click openMERC.app, choose Open, then Open again (or allow it in
+System Settings > Privacy & Security). The Homebrew libraries below are still
+needed; the app says so when one is missing.
+
+Extra engine arguments: open -a openMERC --args +map kos1
+
+Install (plain folder)
+----------------------
 Unpack this archive anywhere that is not your game folder. The base/ directory
 inside it is openMERC's modules (gamex86.dylib, player.dylib, zz_openmerc.pak).
 Do not copy it over the game's base/ (that folder holds pak0.pak).
