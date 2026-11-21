@@ -39,3 +39,40 @@ else
   (cd "$DEST" && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 fi
 echo "Packed $DEST/$NAME.tar.gz"
+
+# openMERC.app: the programs, ref_gl3 and OMsnd in Contents/MacOS, openMERC's base/ (modules, zz_openmerc.pak) in
+# Contents/Resources (the launcher gives it as -basedir; nothing but code may sit in MacOS for codesign).
+# Started by dist/macos/openMERC-launcher.sh, which asks for the game folder once and keeps everything openMERC
+# writes in ~/Library/Application Support/openMERC.
+# Packed as openMERC-<version>-macos-arm64-app.zip (ditto keeps the bundle intact) + .sha256.
+APPNAME=$NAME-app
+APP=$STAGE/app/openMERC.app
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$REL/openMerc" "$REL/openMerc-ded" "$REL/omlight" "$REL/ref_gl3.dylib" "$REL/OMsnd.dylib" "$APP/Contents/MacOS/"
+cp -R "$REL/base" "$APP/Contents/Resources/"
+cp "$REPO/dist/macos/openMERC-launcher.sh" "$APP/Contents/MacOS/openMERC-launcher"
+chmod 755 "$APP/Contents/MacOS/openMERC-launcher"
+MINOS=$(otool -l "$REL/openMerc" | awk '/LC_BUILD_VERSION/ { f = 1 } f && $1 == "minos" { print $2; exit }')
+sed -e "s/@VERSION@/$VER/g" -e "s/@MINOS@/${MINOS:-13.0}/g" "$REPO/dist/macos/Info.plist.in" > "$APP/Contents/Info.plist"
+plutil -lint "$APP/Contents/Info.plist" >/dev/null
+
+# icon: the Windows icon's largest image (256 px) at every size iconutil takes
+ICONSET=$STAGE/openMERC.iconset
+mkdir -p "$ICONSET"
+sips -s format png "$REPO/engine/stuff/icon/openmerc.ico" --out "$STAGE/icon.png" >/dev/null
+for s in 16 32 128 256; do
+  sips -z $s $s "$STAGE/icon.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  sips -z $((s * 2)) $((s * 2)) "$STAGE/icon.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/openMERC.icns"
+
+# ad-hoc signature over the whole bundle (arm64 needs one; the binaries are re-signed in place)
+codesign --force --sign - "$APP/Contents/MacOS/"*.dylib "$APP/Contents/Resources/base/"*.dylib \
+  "$APP/Contents/MacOS/openMerc" "$APP/Contents/MacOS/openMerc-ded" "$APP/Contents/MacOS/omlight"
+codesign --force --sign - "$APP"
+
+cp "$REPO/dist/README-macos.txt" "$STAGE/app/README.txt"
+cp "$REPO/LICENSE" "$REPO/THIRD_PARTY.md" "$STAGE/app/"
+(cd "$STAGE/app" && ditto -c -k --norsrc --noextattr . "$DEST/$APPNAME.zip")
+(cd "$DEST" && shasum -a 256 "$APPNAME.zip" > "$APPNAME.zip.sha256")
+echo "Packed $DEST/$APPNAME.zip"
