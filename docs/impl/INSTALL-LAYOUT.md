@@ -51,9 +51,7 @@ The same archive can be unpacked into a subfolder, e.g.
   `-basedir`, `-datadir` or `-user` is given); `openMERC.sh` passes the game
   folder with `-cddir` when it is not the binary's folder.
 
-Mode A (the original game modules) is chosen by removing or renaming
-`openmerc/gamex86.dll` and `openmerc/player.dll`; the modules in `base/` are
-then used.
+Only mode B is built and maintained. The retail Windows game DLL (mode A) is not a development target. Do not rename the openMERC modules to load it.
 
 ## Game data from a disc image (2026-11-08)
 

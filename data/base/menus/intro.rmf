@@ -1,0 +1,8 @@
+<stm nopush waitanim fragile>
+<include tints>
+<set scr_menuoverlay 1>
+<backdrop bgcolor black>
+<cursor 0>
+<cinclude om_showintro om_intro_play>
+<cninclude om_showintro om_intro_skip>
+</stm>

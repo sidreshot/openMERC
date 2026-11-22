@@ -22,8 +22,8 @@ quit); x86_64 could not load any save ("Illegible server message 0", inventory s
 size); SIGTERM queued `quit` without a newline every frame; the install-layout check of `base/pak0.pak` was
 case-sensitive.
 Not yet verified: a real display and sound device, a full campaign map, network play between machines, the
-OMsnd focus mute (always off on Linux), and ARM or macOS. Only mode B (OpenMerc's own modules) can run on
-Linux: the original game and player modules are 32-bit Windows DLLs.
+OMsnd focus mute (always off on Linux), and ARM or macOS. Only mode B is built and maintained.
+Only mode B (OpenMerc's own modules) can run on Linux: the original game and player modules are 32-bit Windows DLLs. Mode A is not a development target.
 
 The fully open build works on Linux with CMake and Ninja. That is the engine, the game and player modules,
 the OMsnd sound module on OpenAL Soft, and Ghoul. x86_64 is the main target. i386 builds too, and is the

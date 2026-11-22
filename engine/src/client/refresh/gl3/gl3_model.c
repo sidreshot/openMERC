@@ -1091,6 +1091,7 @@ GL3_BeginRegistration(const char *model)
 
 	registration_sequence++;
 	gl3_oldviewcluster = -1; /* force markleafs */
+	GL3_FxCfg_Load(); /* reread om_gfx.cfg when the map changes */
 
 	gl3state.currentlightmap = -1;
 

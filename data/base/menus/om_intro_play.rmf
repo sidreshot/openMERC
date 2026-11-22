@@ -1,0 +1,3 @@
+<key any "stopsound;menu amain">
+<set menu_mail_available 0>
+<ghoul "intro" width 640 height 480 xoff 320 yoff 240 oneshot end "menu amain" control>

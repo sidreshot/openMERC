@@ -106,6 +106,7 @@ struct Instance {
 	std::vector<Event> events;
 	std::vector<int> watches;       /* file offsets of armed WATCH instructions */
 
+	float wait_pad = 0;             /* seconds given back to the next wait after an early spawn */
 	bool in_handler = false;
 	int saved_ip = 0, saved_state = 0;
 	int running = 0;                /* activation depth */

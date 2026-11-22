@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // g_phys.c
 
 #include "g_local.h"
+#include "../../engine/src/common/header/om_corpse.h"
 
 void G_AddEvent(edict_t *ent, int ev, int parm);
 
@@ -130,12 +131,108 @@ int ClipVelocity(vec3_t in, vec3_t normal, vec3_t out, float overbounce)
 static void CorpseBox(edict_t *ent, vec3_t mins, vec3_t maxs)
 {
 	if (ent->solid == SOLID_CORPSE) {
-		VectorSet(mins, -8, -8, ent->mins[2]);
-		VectorSet(maxs, 8, 8, 8);
+		/* The shot hull grows to the posed limbs. Movement stays a narrow column.
+		   The bottom is the posture feet, clamped so a low head bolt cannot sink the body. */
+		float z0 = ent->mins[2];
+		if (z0 < -40.0f)
+			z0 = -40.0f;
+		if (z0 > 0.0f)
+			z0 = 0.0f;
+		VectorSet(mins, -8, -8, z0);
+		VectorSet(maxs, 8, 8, 12);
 	} else {
 		VectorCopy(ent->mins, mins);
 		VectorCopy(ent->maxs, maxs);
 	}
+}
+
+static int OM_SupportBrush(edict_t *hit)
+{
+	if (!hit || hit == world)
+		return 1;
+	return hit->solid == SOLID_BSP || hit->solid == SOLID_GROUND;
+}
+
+static float OM_CorpseFeet(edict_t *ent)
+{
+	float z = ent->mins[2];
+	if (z < -40.0f)
+		z = -40.0f;
+	if (z > 0.0f)
+		z = 0.0f;
+	return z;
+}
+
+/* Drop a corpse that has no floor under its feet onto the first supporting brush.
+   A kill in the air (the sabre chase on the next train, and every other map) ends
+   on that surface instead of staying at the kill height. */
+void OM_SettleDeadBody(edict_t *ent)
+{
+	float feet, origin[3], vel[3], floor_z;
+	int contact, have_floor;
+	edict_t *floorent;
+	vec3_t p, q;
+
+	if (!ent || !ent->inuse || ent->solid != SOLID_CORPSE)
+		return;
+	feet = OM_CorpseFeet(ent);
+	contact = 0;
+	have_floor = 0;
+	floorent = NULL;
+	floor_z = 0;
+	VectorCopy(ent->s.origin, p);
+	p[2] = ent->s.origin[2] + feet + 2.0f;
+	for (int n = 0; n < 3 && !contact; n++) {
+		trace_t tr;
+		VectorCopy(p, q);
+		q[2] -= 24.0f;
+		tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_SOLID);
+		if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f && tr.plane.normal[2] >= 0.7f &&
+		    OM_SupportBrush(tr.ent)) {
+			float gap = (ent->s.origin[2] + feet) - tr.endpos[2];
+			if (gap <= 12.0f && gap >= -16.0f) {
+				contact = 1;
+				floorent = tr.ent;
+				floor_z = tr.endpos[2];
+			}
+			break;
+		}
+		if (!(tr.startsolid || tr.allsolid))
+			break;
+		p[2] += 16.0f;
+	}
+	if (!contact) {
+		VectorCopy(ent->s.origin, p);
+		p[2] += 8.0f;
+		for (int n = 0; n < 4 && !have_floor; n++) {
+			trace_t tr;
+			VectorCopy(p, q);
+			q[2] = p[2] - 4096.0f;
+			tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_SOLID);
+			if (tr.startsolid || tr.allsolid) {
+				p[2] += 64.0f;
+				continue;
+			}
+			if (tr.fraction < 1.0f && tr.plane.normal[2] >= 0.7f && OM_SupportBrush(tr.ent)) {
+				have_floor = 1;
+				floorent = tr.ent;
+				floor_z = tr.endpos[2];
+			}
+			break;
+		}
+	}
+	VectorCopy(ent->s.origin, origin);
+	VectorCopy(ent->velocity, vel);
+	if (OM_DeathSettle(origin, vel, feet, contact, have_floor, floor_z)) {
+		VectorCopy(origin, ent->s.origin);
+		VectorCopy(vel, ent->velocity);
+		if (floorent) {
+			ent->groundentity = floorent;
+			ent->groundentity_linkcount = floorent->linkcount;
+		}
+	}
+	Dmg_CorpseHull(ent);
+	gi.linkentity(ent);
 }
 
 static void LandingEvent(edict_t *ent, float vz)
@@ -624,6 +721,9 @@ static void SV_Physics_Step(edict_t *ent)
 {
 	if (ent->stopspeed == 0)
 		ent->stopspeed = 100;
+
+	if (ent->solid == SOLID_CORPSE)
+		OM_SettleDeadBody(ent);
 
 	if (ent->solid == SOLID_CORPSE || !ent->groundentity)
 		SV_CheckGround(ent);

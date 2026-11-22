@@ -20,6 +20,7 @@
  */
 
 #include "fx_local.h"
+#include "../../common/header/om_fxcfg.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h> /* _BitScanForward */
@@ -293,9 +294,12 @@ FX_FreeDeadParticles(void)
 
 	FX_FOR_LIVE(i)
 	{
-		p = &fx_parts[i];
+		int rising;
 
-		if ((p->die <= fx_now) || (p->alpha < 2) ||
+		p = &fx_parts[i];
+		rising = OM_FxKeepRising((float)p->alpha, p->astyle, fx_now - p->spawn, 1);
+
+		if ((p->die <= fx_now) || ((p->alpha < 2) && !rising) ||
 			(p->noimage && (p->kind != FXK_TIMER) && (p->kind != FXK_GHOUL)))
 		{
 			/* om_fxtrace 2 statistics: why emitter particles end */

@@ -12,6 +12,7 @@
 
 #include "ghoul_gl.h"
 #include "ghoul_internal.h"
+#include "header/om_tess.h"
 
 namespace ghoul {
 
@@ -66,8 +67,18 @@ static bool IsRound(const std::string &upper)
 			}
 		}
 	}
-	for (const std::string &p : parts)
-		if (upper.find(p) != std::string::npos)
+	const char *ptrs[128];
+	int n = (int)parts.size();
+	int i;
+	if (n > 128)
+		n = 128;
+	for (i = 0; i < n; i++)
+		ptrs[i] = parts[(size_t)i].c_str();
+	if (OM_TessNameRound(upper.c_str(), ptrs, n))
+		return true;
+	/* a list longer than the stack block: the tail is still a name match */
+	for (size_t k = 128; k < parts.size(); k++)
+		if (upper.find(parts[k]) != std::string::npos)
 			return true;
 	return false;
 }

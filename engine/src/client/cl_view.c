@@ -36,6 +36,7 @@
 #include "input/header/input.h"
 #include "fx/cl_fx.h" /* OpenMerc (I5) */
 #include "../common/header/sof/refapi.h"
+#include "../common/header/om_tess.h"
 
 /* development tools for weapons */
 int gun_frame;
@@ -93,6 +94,26 @@ V_AddEntity(entity_t *ent)
 	}
 
 	r_entities[r_numentities++] = *ent;
+}
+
+/* The view weapon is added after the packet entities. A turn that fills the 128 slots
+   used to drop it. The slot ignores yaw: the gun stays in the draw set. */
+void
+V_AddViewWeapon(entity_t *ent, float yaw)
+{
+	int slot = OM_ViewWeaponSlot(r_numentities, MAX_ENTITIES, yaw);
+
+	if (slot < 0)
+	{
+		return;
+	}
+
+	r_entities[slot] = *ent;
+
+	if (slot == r_numentities)
+	{
+		r_numentities++;
+	}
 }
 
 void

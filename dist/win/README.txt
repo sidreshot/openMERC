@@ -56,11 +56,10 @@ SUPPORTED GAME VERSIONS
   Install the game elsewhere (for example C:\Games) or run from a copy.
 
 MODES
-- Default: everything open source (openMERC engine + openMERC game and player modules in
-  openmerc\). All 32 campaign maps load and run; enemy behaviour and some scripted scenes are unfinished.
-- Original game logic ("mode A"): rename openmerc\gamex86.dll and openmerc\player.dll
-  (for example to gamex86.dll.off and player.dll.off). openMERC then uses the gamex86.dll and player.dll
-  of your SoF 1.07f installation (base\). Rename them back to return to the default.
+Only mode B is built and maintained. That is the open source engine with openMERC's own
+game and player modules in openmerc\. All 32 campaign maps load and run; enemy behaviour
+and some scripted scenes are unfinished. The retail Windows game DLL (mode A) is not a
+development target.
 
 MULTIPLAYER: openMERC plays with openMERC only. Original 1.07f servers and clients are not compatible.
 
@@ -125,11 +124,10 @@ HD-текстуры: положите .pak HD-пака в openmerc\hd\ и вкл
   Установите игру в другое место (например, C:\Games).
 
 РЕЖИМЫ
-- По умолчанию: всё открытое (движок openMERC + модули игры и игрока openMERC в openmerc\).
-  Все 32 карты кампании загружаются и работают; поведение противников и часть скриптовых сцен ещё не доделаны.
-- Оригинальная игровая логика («режим A»): переименуйте openmerc\gamex86.dll и openmerc\player.dll
-  (например, в gamex86.dll.off и player.dll.off). Тогда openMERC возьмёт gamex86.dll и player.dll
-  из вашей SoF 1.07f (base\). Чтобы вернуть режим по умолчанию, переименуйте обратно.
+Only mode B is built and maintained. По умолчанию всё открытое: движок openMERC и модули
+игры и игрока openMERC в openmerc\. Все 32 карты кампании загружаются и работают;
+поведение противников и часть скриптовых сцен ещё не доделаны. Розничная Windows-библиотека
+игры (режим A) не является целью разработки.
 
 СЕТЕВАЯ ИГРА: openMERC играет только с openMERC. Оригинальные серверы и клиенты 1.07f несовместимы.
 

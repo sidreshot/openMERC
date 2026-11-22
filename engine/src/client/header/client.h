@@ -514,6 +514,7 @@ extern	struct model_s	*gun_model;
 void V_Init (void);
 void V_RenderView( float stereo_separation );
 void V_AddEntity (entity_t *ent);
+void V_AddViewWeapon(entity_t *ent, float yaw); /* keeps a slot at every yaw */
 void V_AddParticle (vec3_t org, unsigned int color, float alpha);
 void V_AddLight (vec3_t org, float intensity, float r, float g, float b);
 void V_AddLightStyle (int style, float r, float g, float b);

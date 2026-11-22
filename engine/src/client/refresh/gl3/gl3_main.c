@@ -2708,7 +2708,7 @@ static const presetkey_t preset_medium[] = {
 	{"r_om_beams", "1"}, {"r_om_beams_motes", "1"}, {"r_om_bloom", "1"},
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
 	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
-	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "2"}, {"r_om_tess_round", "1"}, {"r_om_tess_weapon", "0"},
+	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "2"}, {"r_om_tess_round", "1"}, {"r_om_tess_weapon", "1"},
 	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"},
 	{NULL, NULL}};
 

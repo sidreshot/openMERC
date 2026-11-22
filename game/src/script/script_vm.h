@@ -44,6 +44,10 @@ public:
 	/* cinematic state byte (SPEC-751 1.1; game exports 0x54/0x58) */
 	int cinematic_state() const { return cinematic_; }
 	void set_cinematic_state(int v) { cinematic_ = v; }
+	/* Opening cinematic: a character spawn that follows this wait happens
+	   half a second earlier. The next wait grows by the same amount, so
+	   the camera beat after the spawn stays put. */
+	float adjust_opening_wait(Instance *s, float now, float secs);
 
 	/* game error raised by a script (SPEC-750 2.4); empty when none */
 	const std::string &pending_error() const { return error_; }
@@ -61,6 +65,9 @@ public:
 	int script_state(int handle) const;
 	int script_ip(int handle) const;
 	const char *script_path(int handle) const;
+	/* OpenMerc: the script whose instructions are being run (-1 between scripts) */
+	int current_script() const { return current_; }
+	void set_current_script(int handle) { current_ = handle; }
 	bool variable_by_name(int handle, const char *name, FieldValue &out, int &type) const;
 	int queued_events(int handle) const;
 
@@ -88,8 +95,12 @@ private:
 	std::vector<std::unique_ptr<Variable> > globals_;
 	std::vector<std::pair<std::string, std::vector<uint8_t> > > rof_cache_;
 	int cinematic_ = 0;
+	bool opening_active_ = false;
+	bool opening_done_ = false;
+	float opening_start_ = 0;
 	bool stopsound_latch_ = true;
 	int done_counter_ = 0;
+	int current_ = -1;
 	std::string error_;
 };
 

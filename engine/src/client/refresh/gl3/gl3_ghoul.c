@@ -34,6 +34,8 @@
 
 #include "header/local.h"
 #include "header/gl3_ghoul.h"
+#include "../../../common/header/om_tess.h"
+#include "../../../common/header/om_fxcfg.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -184,12 +186,22 @@ GetCvars(void)
 	/* GFX-modern: curved PN tessellation. r_om_tess 0..10 (fractions allowed) is how strongly the surface
 	   is curved: 0 off, 10 the full PN surface (rounder but "inflated"), 8 by default (chosen by eye in
 	   game: round characters, no visible inflation, no slowdown). r_om_tess_models is
-	   the subdivision of the characters (triangles split into level^2, 2..3), r_om_tess_weapon that of
-	   the view weapon (0 off: the stock weapons are faceted with split normals and gain nothing) */
-	r_om_tess = ri.Cvar_Get("r_om_tess", "8", CVAR_ARCHIVE);
-	r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", "0", CVAR_ARCHIVE);
-	r_om_tess_models = ri.Cvar_Get("r_om_tess_models", "3", CVAR_ARCHIVE);
-	r_om_tess_round = ri.Cvar_Get("r_om_tess_round", "1", CVAR_ARCHIVE);
+	   the subdivision of the characters (triangles split into level^2, 2..3). r_om_tess_weapon is a
+	   scale 1..10 for the view weapon. The PN step is capped so 10 does not swell the shotgun. */
+	{
+		/* Fresh cvars take om_gfx.cfg. An archived value in config.cfg is left as the player set it. */
+		char ts[16], tw[16], tm[16], tr[16];
+
+		GL3_FxCfg_Ensure();
+		snprintf(ts, sizeof(ts), "%g", OM_FxCfg_Live("tess_scale"));
+		snprintf(tw, sizeof(tw), "%g", OM_FxCfg_Live("tess_weapon"));
+		snprintf(tm, sizeof(tm), "%g", OM_FxCfg_Live("tess_models"));
+		snprintf(tr, sizeof(tr), "%g", OM_FxCfg_Live("tess_round"));
+		r_om_tess = ri.Cvar_Get("r_om_tess", ts[0] ? ts : "8", CVAR_ARCHIVE);
+		r_om_tess_weapon = ri.Cvar_Get("r_om_tess_weapon", tw[0] ? tw : "1", CVAR_ARCHIVE);
+		r_om_tess_models = ri.Cvar_Get("r_om_tess_models", tm[0] ? tm : "3", CVAR_ARCHIVE);
+		r_om_tess_round = ri.Cvar_Get("r_om_tess_round", tr[0] ? tr : "1", CVAR_ARCHIVE);
+	}
 	/* GFX-modern: the GL lighting of Ghoul models (ghl_light_method 3) per pixel instead of per vertex */
 	r_om_ppl_models = ri.Cvar_Get("r_om_ppl_models", "1", CVAR_ARCHIVE);
 }
@@ -1346,25 +1358,50 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 		   flat decals that part from a curved body, or are boxes their smoothed normals would inflate */
 		{
 			float k = Q_clamp(r_om_tess->value, 0.0f, 10.0f) / 10.0f;
+			int models = (int)Q_clamp(r_om_tess_models->value, 0.0f, 3.0f);
 			qboolean round = roundinst[(unsigned short)(e->frame & 0xFFFF)] && (r_om_tess_round->value != 0);
-			int level = (k <= 0) ? 0 : weapon ? (int)r_om_tess_weapon->value :
-				(((flags & SOF_RF_CASTSHADOW) || round) ? (int)Q_clamp(r_om_tess_models->value, 0.0f, 3.0f) : 0);
+			int level, weap = 0, proplevel = 0;
+			float propk = 0.0f, pncap = 0.0f;
 
-			/* by size on the screen: the small triangles cost the GPU (MSAA shades the pixels along every edge
-			   twice; three characters close by at level 3 took 4.8 ms on a GTX 1050 Ti, at level 2 2.4). A man-high
-			   model taller than 600 pixels (an arm's length) keeps the level, from 100 pixels at most 2, smaller
-			   ones none - their facets are a pixel or two */
-			/* (a round prop is a few dozen triangles - a jpn1 trash can 34: the full level costs nothing and level 2
-			   left it a prism) */
-			if ((level > 1) && !weapon && !(round && !(flags & SOF_RF_CASTSHADOW)))
+			if (k <= 0.0f)
 			{
-				vec3_t d;
-				float dist, px;
+				level = 0;
+			}
+			else if (weapon)
+			{
+				weap = OM_WeaponTessLevel(r_om_tess_weapon->value);
+				level = OM_WeaponSubdiv(weap);
+				k = OM_WeaponPnK(weap);
+				pncap = OM_WEAPON_PN_EDGE;
+			}
+			else
+			{
+				level = ((flags & SOF_RF_CASTSHADOW) || round) ? models : 0;
 
-				VectorSubtract(e->origin, r_newrefdef.vieworg, d);
-				dist = Q_max(VectorLength(d), 1.0f);
-				px = 64.0f / dist * (r_newrefdef.height * 0.5f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f);
-				level = (px > 600.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
+				/* by size on the screen: the small triangles cost the GPU (MSAA shades the pixels along every edge
+				   twice; three characters close by at level 3 took 4.8 ms on a GTX 1050 Ti, at level 2 2.4). A man-high
+				   model taller than 600 pixels (an arm's length) keeps the level, from 100 pixels at most 2, smaller
+				   ones none - their facets are a pixel or two */
+				/* A round prop keeps the full level whether or not this copy casts a shadow. The old test skipped
+				   the cull only when the prop did not cast, so two barrels of one mesh could split. */
+				if ((level > 1) && !round)
+				{
+					vec3_t d;
+					float dist, px;
+
+					VectorSubtract(e->origin, r_newrefdef.vieworg, d);
+					dist = Q_max(VectorLength(d), 1.0f);
+					px = 64.0f / dist * (r_newrefdef.height * 0.5f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f);
+					level = (px > 600.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
+				}
+
+				/* The draw may still find a round shell (the name list missed it, or the shadow flag and the
+				   one-frame mark disagreed). Both copies then take this same level. */
+				if (r_om_tess_round->value != 0)
+				{
+					proplevel = models;
+					propk = Q_clamp(r_om_tess->value, 0.0f, 10.0f) / 10.0f;
+				}
 			}
 
 			if (ri.Cvar_Get("r_om_tessdebug", "0", 0)->value >= 2)
@@ -1375,6 +1412,7 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			}
 
 			GL3_GhoulEmu_SetTess(level, k);
+			GL3_GhoulEmu_SetTessExtra(weap, pncap, proplevel, propk);
 		}
 		GL3_GhoulEmu_SetPPL(r_om_ppl_models->value != 0);
 

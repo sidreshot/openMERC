@@ -470,6 +470,9 @@ set(Client-Source
 	${COMMON_SRC_DIR}/sof_locks.c
 	${COMMON_SRC_DIR}/sof_save.c
 	${COMMON_SRC_DIR}/sof_strings.c
+	${COMMON_SRC_DIR}/om_fpslog.c # low-fps incident ring (client frame)
+	${COMMON_SRC_DIR}/om_play.c # startup reel, title fade, cinematic spawn shift
+	${COMMON_SRC_DIR}/om_fxcfg.c # named gfx tunables and flare light radius
 	${COMMON_SRC_DIR}/shared/flash.c
 	${COMMON_SRC_DIR}/shared/rand.c
 	${COMMON_SRC_DIR}/shared/shared.c
@@ -662,6 +665,8 @@ set(GL3-Source
 	${REF_SRC_DIR}/files/wal.c
 	${REF_SRC_DIR}/files/pvs.c
 	${COMMON_SRC_DIR}/shared/shared.c
+	${COMMON_SRC_DIR}/om_tess.c
+	${COMMON_SRC_DIR}/om_fxcfg.c
 	${COMMON_SRC_DIR}/md4.c
 	${COMMON_SRC_DIR}/unzip/miniz/miniz.c
 	${COMMON_SRC_DIR}/unzip/miniz/miniz_tdef.c
@@ -852,6 +857,21 @@ option(OM_SOFPM_TESTS "Build the engine unit test programs (SPEC-314 player move
 if(OM_SOFPM_TESTS)
 	# cvar defaults and the menus' Reset Section (om_resetcvars) on the real cvar.c (exit code = failures)
 	add_executable(cvar_test ${COMMON_SRC_DIR}/test_cvar.c ${COMMON_SRC_DIR}/cvar.c)
+	# low-fps incident ring (under 30, 10 slots, overwrite, skip the same place)
+	add_executable(fpslog_test ${COMMON_SRC_DIR}/test_fpslog.c ${COMMON_SRC_DIR}/om_fpslog.c)
+	add_executable(menu_fade_spawn_test ${COMMON_SRC_DIR}/test_menu_fade_spawn.c ${COMMON_SRC_DIR}/om_play.c)
+	add_executable(corpse_hit_settle_test ${COMMON_SRC_DIR}/test_corpse.c ${COMMON_SRC_DIR}/om_corpse.c)
+	if(NOT MSVC)
+		target_link_libraries(corpse_hit_settle_test m)
+	endif()
+	add_executable(tess_weapon_test ${COMMON_SRC_DIR}/test_tess.c ${COMMON_SRC_DIR}/om_tess.c)
+	if(NOT MSVC)
+		target_link_libraries(tess_weapon_test m)
+	endif()
+	add_executable(config_flare_test ${COMMON_SRC_DIR}/test_fxcfg.c ${COMMON_SRC_DIR}/om_fxcfg.c)
+	if(NOT MSVC)
+		target_link_libraries(config_flare_test m)
+	endif()
 	add_executable(sofpm_test ${COMMON_SRC_DIR}/test_sof_pmove.c ${COMMON_SRC_DIR}/sof_pmove.c)
 	if(NOT MSVC)
 		target_link_libraries(sofpm_test m)

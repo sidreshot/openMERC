@@ -25,6 +25,7 @@
  */
 
 #include "header/local.h"
+#include "../../../common/header/om_tess.h"
 #include "header/gl3_ghoul.h"
 
 /* ------------------------------------------------------------------
@@ -148,6 +149,10 @@ static struct
 	   the depth function as set, to recognise a second pass over the same triangles */
 	int tess;
 	float tessk;    /* how far toward the PN surface (r_om_tess / 10) */
+	int weapscale;  /* 1..10: cap the PN offset. 0: a character or a prop */
+	float pncap;    /* OM_WEAPON_PN_EDGE for a weapon, else 0 */
+	int proplevel;  /* model subdivision a round prop may rise to, 0 off */
+	float propk;
 	qboolean ppl;   /* per-pixel lighting of the entity being drawn (r_om_ppl_models) */
 	qboolean softadd; /* GFX-modern r_om_fxsoft: the additive passes of effect models get soft edges */
 	/* GFX-modern r_om_ambcube: the ambient factors of the entity along +x -x +y -y +z -z (world), on; the eye to
@@ -161,7 +166,7 @@ static struct
 	int maxtess;
 	/* the same on the GPU: the corners in a texture buffer, a vertex array without attributes */
 	GLuint tessvao, tbo, tbotex;
-	GLint u_tessL, u_tessK, u_tessProj, u_tessTab;
+	GLint u_tessL, u_tessK, u_tessCap, u_tessProj, u_tessTab;
 	int tesstabL;
 	int context; /* gl3_contextgen the GL objects were made in */
 } E;
@@ -740,6 +745,7 @@ static const char *emu_vs =
 	"#ifdef OM_TESS\n"
 	"uniform int omTessL;\n"
 	"uniform float omTessK;\n"
+	"uniform float omTessCap;\n"   /* 0: no cap. A weapon: fraction of the edge the surface may leave the triangle */
 	"uniform mat4 omTessProj;\n"
 	"uniform ivec2 omTessTab[48];\n"
 	"uniform samplerBuffer omTessBuf;\n"
@@ -766,6 +772,14 @@ static const char *emu_vs =
 	"		vec3 pn = P1 * u * u * u + P2 * v * v * v + P3 * w * w * w + 3.0 * (b210 * u * u * v + b120 * u * v * v +\n"
 	"			b201 * u * u * w + b021 * v * v * w + b102 * u * w * w + b012 * v * w * w) + 6.0 * b111 * u * v * w;\n"
 	"		vec3 p = lin + omTessK * (pn - lin);\n"
+	"		if (omTessCap > 0.0)\n"
+	"		{\n"
+	"			float el = min(length(P2 - P1), min(length(P3 - P2), length(P1 - P3)));\n"
+	"			vec3 d = p - lin;\n"
+	"			float dl = length(d);\n"
+	"			float lim = omTessCap * el;\n"
+	"			if (dl > lim) p = lin + d * (lim / dl);\n"
+	"		}\n"
 	"		vColor = vec4(omTF(a + 4), omTF(a + 5), omTF(a + 6), omTF(a + 7)) * u +\n"
 	"			vec4(omTF(b + 4), omTF(b + 5), omTF(b + 6), omTF(b + 7)) * v +\n"
 	"			vec4(omTF(c + 4), omTF(c + 5), omTF(c + 6), omTF(c + 7)) * w;\n"
@@ -1404,6 +1418,7 @@ CreateObjects(void)
 	E.u_beam = glGetUniformLocation(E.prog, "omBeam");
 	E.u_tessL = glGetUniformLocation(E.prog, "omTessL");
 	E.u_tessK = glGetUniformLocation(E.prog, "omTessK");
+	E.u_tessCap = glGetUniformLocation(E.prog, "omTessCap");
 	E.u_tessProj = glGetUniformLocation(E.prog, "omTessProj");
 	E.u_tessTab = glGetUniformLocation(E.prog, "omTessTab");
 	E.tesstabL = 0;
@@ -1571,7 +1586,28 @@ Tessellate(emuvtx_t *in, int *n)
 		const float *P1 = a->eye, *P2 = b->eye, *P3 = c->eye;
 		const float *N1 = a->en, *N2 = b->en, *N3 = c->en;
 		float cp[10][3], Ev[3], V[3];
+		float edge = 0.0f;
 		int i, j, k;
+
+		if (E.weapscale > 0)
+		{
+			float e01 = (P2[0] - P1[0]) * (P2[0] - P1[0]) + (P2[1] - P1[1]) * (P2[1] - P1[1]) + (P2[2] - P1[2]) * (P2[2] - P1[2]);
+			float e12 = (P3[0] - P2[0]) * (P3[0] - P2[0]) + (P3[1] - P2[1]) * (P3[1] - P2[1]) + (P3[2] - P2[2]) * (P3[2] - P2[2]);
+			float e20 = (P1[0] - P3[0]) * (P1[0] - P3[0]) + (P1[1] - P3[1]) * (P1[1] - P3[1]) + (P1[2] - P3[2]) * (P1[2] - P3[2]);
+			float es = e01;
+
+			if (e12 < es)
+			{
+				es = e12;
+			}
+
+			if (e20 < es)
+			{
+				es = e20;
+			}
+
+			edge = sqrtf(es);
+		}
 
 #define PN_W(Pi, Pj, Ni) (((Pj)[0] - (Pi)[0]) * (Ni)[0] + ((Pj)[1] - (Pi)[1]) * (Ni)[1] + ((Pj)[2] - (Pi)[2]) * (Ni)[2])
 		/* control points: 0 b210, 1 b120, 2 b021, 3 b012, 4 b102, 5 b201, 6 b111 */
@@ -1605,20 +1641,42 @@ Tessellate(emuvtx_t *in, int *n)
 					{
 						emuvtx_t *v = &E.tessbuf[o++];
 						float u = (float)tri[q][m][0] / L, w2 = (float)tri[q][m][1] / L, w = 1.0f - u - w2;
-						float p[4], *proj = E.proj[E.projdepth];
+						float p[4], lin[3], pn[3], *proj = E.proj[E.projdepth];
 						int r;
 
 						for (r = 0; r < 3; r++)
 						{
-							float lin = P1[r] * u + P2[r] * w2 + P3[r] * w;
-							float pn = P1[r] * u * u * u + P2[r] * w2 * w2 * w2 + P3[r] * w * w * w +
+							lin[r] = P1[r] * u + P2[r] * w2 + P3[r] * w;
+							pn[r] = P1[r] * u * u * u + P2[r] * w2 * w2 * w2 + P3[r] * w * w * w +
 								3 * (cp[0][r] * u * u * w2 + cp[1][r] * u * w2 * w2 + cp[5][r] * u * u * w +
 								cp[2][r] * w2 * w2 * w + cp[4][r] * u * w * w + cp[3][r] * w2 * w * w) +
 								6 * cp[6][r] * u * w2 * w;
+						}
 
-							/* part of the way from the flat triangle to the PN surface: rounder silhouettes
-							   with less of the PN "inflation" */
-							p[r] = lin + E.tessk * (pn - lin);
+						/* part of the way from the flat triangle to the PN surface. A weapon clamps that
+						   step to a fraction of the edge so the shotgun does not swell off its texture. */
+						if (E.weapscale > 0)
+						{
+							float delta[3], off[3];
+
+							for (r = 0; r < 3; r++)
+							{
+								delta[r] = pn[r] - lin[r];
+							}
+
+							OM_WeaponOffset(E.weapscale, edge, delta, off);
+
+							for (r = 0; r < 3; r++)
+							{
+								p[r] = lin[r] + off[r];
+							}
+						}
+						else
+						{
+							for (r = 0; r < 3; r++)
+							{
+								p[r] = lin[r] + E.tessk * (pn[r] - lin[r]);
+							}
 						}
 
 						p[3] = 1;
@@ -1895,11 +1953,36 @@ Flush(void)
 
 	sawround |= E.texture2d && IsRound(E.boundtex);
 
-	/* a round prop modelled with split normals (the jpn1 trash cans: every side its own normal) gives the PN
-	   surface nothing to curve - "the tessellation does not work" there. Each of its corners gets one normal, the
-	   mean of the faces meeting there: the sides curve into a barrel and the rims round off; every triangle at a
-	   corner takes the same normal, so neighbours still meet without cracks */
-	if ((mode == GL_TRIANGLES) && (E.tess > 1) && E.texture2d && IsRound(E.boundtex) && (n <= 3072))
+	/* Same mesh, same class, this frame. The name mark can miss one copy (the texture id table, or the
+	   mark is a frame late). The normal ring does not: two barrels share it, a crate does not. */
+	{
+		int named = E.texture2d && IsRound(E.boundtex);
+		int shaped = 0;
+
+		if ((mode == GL_TRIANGLES) && (E.proplevel > 1) && (n >= 12) && (n <= 768))
+		{
+			static float tmp[768 * 3];
+			int i;
+
+			for (i = 0; i < n; i++)
+			{
+				tmp[i * 3] = out[i].en[0];
+				tmp[i * 3 + 1] = out[i].en[1];
+				tmp[i * 3 + 2] = out[i].en[2];
+			}
+
+			shaped = OM_TessClass(NULL, NULL, 0, tmp, n);
+		}
+
+		if ((named || shaped) && (E.proplevel > 1))
+		{
+			E.tess = E.proplevel;
+			E.tessk = E.propk;
+		}
+
+		/* a round prop modelled with split normals (the jpn1 trash cans: every side its own normal) gives the PN
+		   surface nothing to curve. Each corner gets the mean of the faces meeting there. */
+		if ((mode == GL_TRIANGLES) && (E.tess > 1) && (named || shaped) && (n <= 3072))
 	{
 		static float sm[3072][3];
 		int a, b;
@@ -1931,6 +2014,7 @@ Flush(void)
 			R_Printf(PRINT_ALL, "OMROUND prim %d verts %d tris %d n0 %.2f %.2f %.2f\n", E.prim, count, n / 3, out[0].en[0],
 				out[0].en[1], out[0].en[2]);
 		}
+	}
 	}
 
 	/* the shadow passes take the triangles as modelled: curved silhouettes are lost in a shadow map's texels,
@@ -2045,6 +2129,10 @@ Flush(void)
 
 		U1i(E.u_tessL, gputess);
 		U1f(E.u_tessK, E.tessk);
+		if (E.u_tessCap >= 0)
+		{
+			U1f(E.u_tessCap, E.pncap);
+		}
 		UM4(E.u_tessProj, E.proj[E.projdepth]);
 		n = (n / 3) * gputess * gputess * 3;
 	}
@@ -3886,6 +3974,19 @@ GL3_GhoulEmu_SetTess(int level, float strength)
 
 	E.tess = (level > 4) ? 4 : level;
 	E.tessk = Q_clamp(strength, 0.0f, 1.0f);
+	E.weapscale = 0;
+	E.pncap = 0.0f;
+	E.proplevel = 0;
+	E.propk = 0.0f;
+}
+
+void
+GL3_GhoulEmu_SetTessExtra(int weapscale, float pncap, int proplevel, float propk)
+{
+	E.weapscale = (weapscale > 0) ? weapscale : 0;
+	E.pncap = (pncap > 0.0f) ? pncap : 0.0f;
+	E.proplevel = (proplevel > 1) ? proplevel : 0;
+	E.propk = (propk > 0.0f) ? propk : 0.0f;
 }
 
 /* GFX-modern: whether the entity being drawn casts a shadow into light beams (independent of the sun) */

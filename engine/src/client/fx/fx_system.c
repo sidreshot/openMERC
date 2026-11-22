@@ -15,6 +15,7 @@
  */
 
 #include "fx_local.h"
+#include "../../common/header/om_fxcfg.h"
 #include "../header/sofclient.h" /* CL_SoF_GameFov (ENG2) */
 #include "../header/cl_ghoul.h" /* CL_Ghoul_GameClock (D1) */
 #include "../../common/header/sof/refapi.h" /* OM_WaterImpact (GFX-modern) */
@@ -773,11 +774,11 @@ FX_FireLight(fx_run_t *r, const fx_eft_light_t *l)
 	int red = (int)FX_Range(&l->rgb[0]);
 	int green = (int)FX_Range(&l->rgb[1]);
 	int blue = (int)FX_Range(&l->rgb[2]);
-	float radius = FX_Range(&l->radius);
+	float radius = OM_FxLightRadius(FX_Range(&l->radius), 0, 0.0f);
 	float life = FX_Range(&l->life);
 
 	FX_TraceLog("  light (%d %d %d) radius %.0f life %.3f\n", red, green, blue, radius, life);
-	CL_SoF_AddLight(0, r->p.origin, red, green, blue, radius, life * 1000.0f, 0);
+	CL_SoF_AddLight(0, r->p.origin, red, green, blue, radius, OM_FxLightLifeMs(life), 0);
 }
 
 static void

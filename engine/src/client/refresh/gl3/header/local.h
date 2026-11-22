@@ -787,6 +787,9 @@ float GL3_Post_GlassRain(const float *centre, const float *normal); /* E20: rain
    min((D - start) / range / 255, max), with its height falloff and shimmer; the dim of the volumetric fog; the far
    wall of the eye's region beyond 2000 units */
 qboolean GL3_Fog_PixOn(void);
+/* om_gfx.cfg named tunables. A missing file keeps the built-in numbers. */
+void GL3_FxCfg_Load(void);
+void GL3_FxCfg_Ensure(void);
 void GL3_Post_RegionFog(void);
 #define OM_REGIONFOG_GLSL \
 	"uniform highp sampler2D omRFTab;\n" \

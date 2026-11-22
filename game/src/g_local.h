@@ -860,6 +860,8 @@ void G_MoverSoundsFrame(void);
 void G_MoverSoundsReset(void);
 void G_AddEvent(edict_t *ent, int ev, int parm);
 void SV_CheckGround(edict_t *ent);
+void OM_SettleDeadBody(edict_t *ent);
+void Dmg_CorpseHull(edict_t *ent);
 void G_TriggerSoundNoise(edict_t *source, const vec3_t where);
 
 // g_save.cpp

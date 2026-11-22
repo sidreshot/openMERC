@@ -46,7 +46,7 @@ slider | r_om_tess | 0 | 10 | 1 | Model Smoothing (Tessellation) | Сглажи�
 list | r_om_tess_models | 0,1,2,3 | Off,Low,Medium,High | Выкл,Низкая,Средняя,Высокая | Character Tessellation | Тесселяция персонажей | pc | requires=r_om_tess_models | tip=Subdivision of the characters' triangles/Насколько мелко делятся треугольники персонажей
 list | r_om_ppl_models | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Character Lighting | Попиксельное освещение персонажей | requires=r_om_ppl_models | pc
 list | r_om_tess_round | 0,1 | Off,On | Выкл,Вкл | Object Tessellation | Тесселяция объектов | pc | requires=r_om_tess_round | tip=Round objects (barrels, lamps, columns) are tessellated like the characters/Круглые предметы (бочки, лампы, колонны) сглаживаются как персонажи
-list | r_om_tess_weapon | 0,2,3 | Off,Medium,High | Выкл,Средняя,Высокая | Weapon Tessellation | Тесселяция оружия | pc | requires=r_om_tess_weapon | tip=The weapon in your hands (the stock weapons are faceted: little gain)/Оружие в руках (стандартное оружие гранёное: выигрыш небольшой)
+slider | r_om_tess_weapon | 1 | 10 | 1 | Weapon Tessellation | Тесселяция оружия | pc | requires=r_om_tess_weapon | tip=Scale 1 to 10. At 10 the shotgun does not swell and its texture does not tear/Шкала от 1 до 10. На 10 дробовик не раздувается и текстура не рвётся
 
 # ---- RENDER SCALE / UPSCALING / POST ANTIALIASING (docs GFX-modern.md: r_om_renderscale, r_om_upscale, r_om_postaa)
 section | RENDER | РЕНДЕР | requires=r_om_renderscale
