@@ -42,6 +42,19 @@ int OM_CorpsePart(const float origin[3], const float angles[3], const om_part_t 
 int OM_DeathSettle(float origin[3], float velocity[3], float feet_offset, int contact, int have_floor,
                    float floor_z);
 
+/* 1 when the ghoul instance may pause on this pose.
+   is_death: the current animation is a death. A standing idle (std_istand)
+   is not, so the 7 second fallback must not freeze it in the air.
+   looping: a dance or a writhe. It is not a rest pose.
+   anim_done: the animation has finished.
+   paused: an in-air hold is already on. The timeout does not add another
+   pause. A finished death still pauses.
+   since_death: seconds since the body died.
+   A non-looping death pauses when it has finished, or when it is still the
+   pose after OM_CORPSE_FREEZE_S seconds. Anything else stays unpaused. */
+#define OM_CORPSE_FREEZE_S 7.0f
+int OM_CorpseFreeze(int is_death, int looping, int anim_done, int paused, float since_death);
+
 #ifdef __cplusplus
 }
 #endif

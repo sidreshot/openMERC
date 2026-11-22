@@ -11,6 +11,7 @@
 # running renderer does not register stay hidden.
 
 section | DISPLAY | ЭКРАН | tip=Display settings are applied with the Apply button/Настройки экрана применяются кнопкой Применить
+list | om_showintro | 0,1 | Off,On | Выкл,Вкл | Studio logos and campaign intro | Заставки студий и интро кампании | tip=Off skips the studio logos and the campaign intro. A cinematic inside a level still ends on the use key/Выкл пропускает заставки студий и интро кампании. Ролик внутри уровня по-прежнему кончается клавишей действия
 list | vid_surfacescale | 0.5,0.6,0.75,1 | 50%,60%,75%,100% (native) | 50%,60%,75%,100% (родное) | Screen Resolution | Разрешение экрана | mobile | tip=The game draws a smaller picture and the phone scales it up: lower is faster and saves the battery/Игра рисует картинку меньше, телефон растягивает её: ниже - быстрее и экономнее для батареи
 list | vid_maxfps | 30,45,60,0 | 30,45,60,Screen Rate | 30,45,60,По частоте экрана | Frame Rate Limit | Ограничение кадров | mobile | tip=Lower keeps the phone cooler and the battery longer/Меньше - телефон меньше греется и дольше работает от батареи
 rmf | <list "^MENU_OMVIDEO_DESKTOP^" match "desktop" vidmodes atext "^MENU_OMVIDEO_MODES_LABEL^" split 230 cvar menu_mode key mouse1 "set menu_settings_changed 1"><hbr> | pc
