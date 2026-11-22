@@ -108,6 +108,7 @@ pistol, Sabre "shoots the hostage and hits nothing".
   fifth of the way from the bolt towards the target's origin instead of exactly at the bolt. The bolts sit on the skin
   (sbolt_mouth on the face); a ray at one grazed the mesh and passed through - Sabre's lethal shot at the kneeling
   hostage (tsr1 nycintro, ai 182) missed, and a lethal action ends only with the target's death.
+- **A corpse bolt that is not in the death sequence** (g3_ghoul.cpp G3G_BoltMatrix, g3_shot.cpp, g3_human.cpp RecordZone): GetBoltMatrix writes the identity at the local origin when the bolt is absent, so the old 1e30 marker never survived and the volume sat on the model origin. A bolt that is not in the current sequence is skipped. A standing volume with no gore owner still selects the head zone or a leg zone, so the wound path runs.
 - **Scripted kill setting only on a living body** (SPEC-720 11.1, g3_human.cpp): a corpse keeps the hit's own damage.
   The tsr1 executioner's second lethal action (ai 101) shot the dead officer; that hit resolved no zone, so the corpse
   zone rule (11.6) did not cut the 9999 and health - damage < -750 gibbed him.

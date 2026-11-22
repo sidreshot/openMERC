@@ -70,4 +70,17 @@ void OMGhoul_PartsOff(const char *folder, const char *name, void *object, void *
 void OMGhoul_Command(int argc, const char *const *argv) { GserverCommand(argc, argv); }
 float OMGhoul_SizeMatters(void) { return G().gs.sizeMatters; }
 
+int OM_GhoulBoltInSequence(void *inst_v, float time, int bolt)
+{
+	Inst *inst = static_cast<Inst *>(inst_v);
+	if (!inst || !inst->obj || bolt <= 0)
+		return 0;
+	Pose p;
+	if (!inst->EvalPose(time, p) || !p.file)
+		return 0;
+	/* NodeOf is negative when this sequence file has no node for the bolt.
+	   BoltMatrix still returns the identity in that case. */
+	return inst->obj->NodeOf(p.file, bolt) >= 0 ? 1 : 0;
+}
+
 } // extern "C"

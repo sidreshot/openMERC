@@ -206,6 +206,39 @@ int main(void)
 	expect_int("supported corpse does not keep the fall", OM_CorpseKeepFall(1, 1), 0);
 	expect_int("living body does not keep the fall", OM_CorpseKeepFall(0, 0), 0);
 
+	/* A bolt missing from the sequence comes back as the identity at the local origin.
+	   That origin is not stored, so a ray through it is a miss. A bolt that is in the
+	   sequence is kept even when its translation is the origin. The 1e30 sentinel is
+	   an unwritten matrix, also a miss. */
+	{
+		float zorigin[3] = {0.0f, 0.0f, 0.0f};
+		float zang[3] = {0.0f, 0.0f, 0.0f};
+		float z0[3] = {-40.0f, 0.0f, 0.0f};
+		float z1[3] = {40.0f, 0.0f, 0.0f};
+		om_part_t stored[1];
+		int nstored = 0;
+		if (OM_BoltPoseOk(0, 0.0f, 0.0f, 0.0f)) {
+			stored[0].center[0] = 0.0f;
+			stored[0].center[1] = 0.0f;
+			stored[0].center[2] = 0.0f;
+			stored[0].radius = 12.0f;
+			stored[0].id = OM_PART_HEAD;
+			nstored = 1;
+		}
+		expect_int("missing bolt is not an origin hit",
+		           OM_CorpsePart(zorigin, zang, stored, nstored, z0, z1, NULL, NULL), OM_PART_NONE);
+	}
+	expect_int("bolt at the origin in the sequence is kept", OM_BoltPoseOk(1, 0.0f, 0.0f, 0.0f), 1);
+	expect_int("unwritten bolt matrix is not a hit", OM_BoltPoseOk(1, 1.0e30f, 1.0e30f, 1.0e30f), 0);
+	expect_int("posed bolt away from the origin is kept", OM_BoltPoseOk(1, 4.0f, -2.0f, 30.0f), 1);
+
+	/* The standing fallback has owner 0. The part id still selects a zone. */
+	expect_int("fallback head selects a head zone", OM_CorpseZone(OM_PART_HEAD, 0), OM_ZONE_HEAD);
+	expect_int("fallback leg selects a leg zone", OM_CorpseZone(OM_PART_LEG, 0), OM_ZONE_LEG);
+	expect_int("fallback body selects a body zone", OM_CorpseZone(OM_PART_BODY, 0), OM_ZONE_BODY);
+	expect_int("named owner is not a fallback zone", OM_CorpseZone(OM_PART_HEAD, 42), OM_ZONE_NONE);
+	expect_int("empty part is not a zone", OM_CorpseZone(OM_PART_NONE, 0), OM_ZONE_NONE);
+
 	if (failures)
 		fprintf(stderr, "corpse_hit_settle_test failures=%d\n", failures);
 	else

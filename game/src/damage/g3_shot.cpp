@@ -15,6 +15,7 @@ void Dmg_ShotClear(void)
 {
 	dmg_shot.ent = NULL;
 	dmg_shot.count = 0;
+	dmg_shot.fallbackPart = 0;
 }
 
 void Dmg_ShotBegin(const vec3_t start, const vec3_t end)
@@ -137,23 +138,86 @@ static int GatherVolumes(edict_t *ent, CorpseVol *out, int maxn)
 			n++;
 		}
 	}
-	if (n == 0) {
+	/* Nothing posed, or the death sequence has no head or leg bolt: the standing
+	   centres still cover those parts. A posed head is not replaced.
+	   base is the count before these volumes. Testing n would skip the body
+	   after the first standing volume incremented it. */
+	{
+		int base = n;
 		static const float fb[6][5] = {
 			{0, 0, 30, 12, (float)OM_PART_HEAD}, {0, 8, -6, 18, (float)OM_PART_LEG},
 			{0, -8, -6, 18, (float)OM_PART_LEG}, {0, 8, -22, 14, (float)OM_PART_LEG},
 			{0, -8, -22, 14, (float)OM_PART_LEG}, {0, 0, 8, 16, (float)OM_PART_BODY},
 		};
+		if (base != 0 && saw_head && saw_leg)
+			return n;
 		for (int i = 0; i < 6 && n < maxn; i++) {
+			int id = (int)fb[i][4];
+			if (base > 0 && id == OM_PART_HEAD && saw_head)
+				continue;
+			if (base > 0 && id == OM_PART_LEG && saw_leg)
+				continue;
+			if (base > 0 && id == OM_PART_BODY)
+				continue;
 			out[n].part.center[0] = fb[i][0];
 			out[n].part.center[1] = fb[i][1];
 			out[n].part.center[2] = fb[i][2];
 			out[n].part.radius = fb[i][3];
-			out[n].part.id = (int)fb[i][4];
+			out[n].part.id = id;
 			out[n].owner = 0;
 			n++;
 		}
 	}
 	return n;
+}
+
+int Dmg_HitZone(const ghoul::HitRecord &r, G3Gore *gore, const float *point, bool knifeDM)
+{
+	if (!gore)
+		return -1;
+	/* Owner 0 used to die in RecordZone before any zone was chosen. The part id
+	   still names a head, a leg, or the body. */
+	if (dmg_shot.fallbackPart && (r.part & 0xF000) == 0xF000) {
+		int z = OM_CorpseZone(dmg_shot.fallbackPart, 0);
+		if (z >= 0 && z < gore->numZones)
+			return z;
+		for (int i = 0; i < gore->numZones; i++) {
+			int id = PartOfSegment(gore->zones[i].segment);
+			if (i == 0 && id == OM_PART_BODY)
+				id = OM_PART_HEAD;
+			if (id == dmg_shot.fallbackPart)
+				return i;
+		}
+		return -1;
+	}
+	if (!r.part)
+		return -1;
+	return gore->ZoneByOwnerPart(r.part, point, knifeDM);
+}
+
+/* Owner id written onto the hit. 0 from the standing volume becomes the zone's
+   own part when that zone has one, otherwise a tagged part the wound path maps. */
+static GhoulID VolumeOwner(edict_t *ent, int part_id, GhoulID owner, int *fallback)
+{
+	*fallback = 0;
+	if (owner)
+		return owner;
+	int z = OM_CorpseZone(part_id, 0);
+	G3Body *body = ent ? ent->g3body : NULL;
+	if (body && body->gore && z >= 0) {
+		G3Gore *g = body->gore;
+		if (z < g->numZones && g->zones[z].owner)
+			return g->zones[z].owner;
+		for (int i = 0; i < g->numZones; i++) {
+			int id = PartOfSegment(g->zones[i].segment);
+			if (i == 0 && id == OM_PART_BODY)
+				id = OM_PART_HEAD;
+			if (id == part_id && g->zones[i].owner)
+				return g->zones[i].owner;
+		}
+	}
+	*fallback = part_id;
+	return (GhoulID)(0xF000u | (unsigned)(part_id & 0xFF));
 }
 
 static void AnglesForVolumes(const edict_t *ent, float ang[3])
@@ -192,7 +256,11 @@ static int CorpseVolumeHit(edict_t *ent, const vec3_t start, const vec3_t dir, f
 		return 0;
 	memset(&rec, 0, sizeof rec);
 	rec.inst = ent->ghoulInst;
-	rec.part = vols[idx].owner;
+	{
+		int fb = 0;
+		rec.part = VolumeOwner(ent, vols[idx].part.id, vols[idx].owner, &fb);
+		dmg_shot.fallbackPart = fb;
+	}
 	VectorSubtract(hit, start, delta);
 	rec.distance = DotProduct(delta, dir);
 	if (rec.distance < 0)
@@ -309,6 +377,7 @@ int Dmg_ShotFill(edict_t *ent, const vec3_t start, const vec3_t dir, float lengt
 		n = DMG_SHOT_MAX_HITS;
 	dmg_shot.ent = ent;
 	dmg_shot.count = n;
+	dmg_shot.fallbackPart = 0;
 	memcpy(dmg_shot.rec, recs, sizeof(recs[0]) * n);
 	VectorCopy(ls, dmg_shot.start);
 	VectorCopy(ld, dmg_shot.dir);
@@ -365,6 +434,7 @@ int Dmg_ShotFilter(trace_t *tr)
 		n = DMG_SHOT_MAX_HITS;
 	dmg_shot.ent = ent;
 	dmg_shot.count = n;
+	dmg_shot.fallbackPart = 0;
 	memcpy(dmg_shot.rec, recs, sizeof(recs[0]) * n);
 	VectorCopy(ls, dmg_shot.start);
 	VectorCopy(ld, dmg_shot.dir);

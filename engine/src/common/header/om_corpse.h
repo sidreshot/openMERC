@@ -65,6 +65,28 @@ int OM_CorpseKeepFall(int is_corpse, int on_ground);
 #define OM_CORPSE_FREEZE_S 7.0f
 int OM_CorpseFreeze(int is_death, int looping, int anim_done, int paused, float since_death);
 
+/* Human gore zone indexes for a standing volume that has no owner id.
+   Head is the front of the head, leg is the upper right thigh, body is the chest. */
+#define OM_ZONE_NONE (-1)
+#define OM_ZONE_HEAD 0
+#define OM_ZONE_LEG 16
+#define OM_ZONE_BODY 7
+
+/* 1 when the bolt matrix is a posed part.
+   in_sequence is 0 when the bolt is absent from the current sequence. GetBoltMatrix
+   still writes the identity, so the translation is the local origin. That origin is
+   not a hit. tx, ty, tz are the translation after the call. A component that is still
+   the 1e30 sentinel was never written, which is also not a hit. A bolt that is in the
+   sequence is a hit even when it sits on the origin. */
+int OM_BoltPoseOk(int in_sequence, float tx, float ty, float tz);
+
+/* Zone index for a volume hit.
+   owner_id nonzero: the gore table already names the part, so this returns OM_ZONE_NONE
+   and the caller keeps that owner.
+   owner_id 0: the standing fallback. OM_PART_HEAD selects OM_ZONE_HEAD, OM_PART_LEG
+   selects OM_ZONE_LEG, OM_PART_BODY selects OM_ZONE_BODY. Anything else is OM_ZONE_NONE. */
+int OM_CorpseZone(int part_id, int owner_id);
+
 #ifdef __cplusplus
 }
 #endif

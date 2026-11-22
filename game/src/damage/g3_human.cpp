@@ -1048,10 +1048,8 @@ public:
 	// and other parts belong to no zone)
 	int RecordZone(const HitRecord &r, bool knifeDM)
 	{
-		if (!gore || !r.part)
-			return -1;
 		vec3_t p = {r.point[0], r.point[1], r.point[2]};
-		return gore->ZoneByOwnerPart(r.part, p, knifeDM);
+		return Dmg_HitZone(r, gore, p, knifeDM);
 	}
 
 	// 10.2 (with SPEC-AMEND-005 G3.3, G3.4, G3.6, G3.12): returns the number of hit zones (0 or 1);

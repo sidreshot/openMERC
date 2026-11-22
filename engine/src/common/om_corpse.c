@@ -156,3 +156,27 @@ int OM_CorpseFreeze(int is_death, int looping, int anim_done, int paused, float 
 		return 1;
 	return 0;
 }
+
+int OM_BoltPoseOk(int in_sequence, float tx, float ty, float tz)
+{
+	/* The caller plants 1e30 before GetBoltMatrix. A miss in the test mock leaves it.
+	   The real pose call replaces a missing bolt with the identity at the origin. */
+	if (tx == 1.0e30f || ty == 1.0e30f || tz == 1.0e30f)
+		return 0;
+	if (!in_sequence)
+		return 0;
+	return 1;
+}
+
+int OM_CorpseZone(int part_id, int owner_id)
+{
+	if (owner_id != 0)
+		return OM_ZONE_NONE;
+	if (part_id == OM_PART_HEAD)
+		return OM_ZONE_HEAD;
+	if (part_id == OM_PART_LEG)
+		return OM_ZONE_LEG;
+	if (part_id == OM_PART_BODY)
+		return OM_ZONE_BODY;
+	return OM_ZONE_NONE;
+}

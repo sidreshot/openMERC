@@ -7,9 +7,17 @@
 #include "g3_local.h"
 #include "../ghoulglue/gg_ghoul.h"
 #include "../scriptglue/g_scriptglue.h"
+#include "../../../engine/src/common/header/om_corpse.h"
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 using namespace ghoul;
 
@@ -616,16 +624,48 @@ void G3_EntityDirToWorld(const edict_t *ent, const vec3_t ldir, vec3_t wdir)
 		wdir[i] = ldir[0] * f[i] + ldir[1] * l[i] + ldir[2] * u[i];
 }
 
+/* 1 when the engine says this bolt has a node in the pose playing now.
+   The unit-test mock has no engine symbol. It leaves the 1e30 sentinel in place,
+   and OM_BoltPoseOk rejects that. A missing symbol therefore still means "ask the sentinel". */
+static int BoltInCurrentSequence(IGhoulInst *inst, int bolt)
+{
+	typedef int (*fn_t)(void *, float, int);
+	static int looked;
+	static fn_t fn;
+
+	if (!looked) {
+		looked = 1;
+		fn = 0;
+#if defined(_WIN32)
+		HMODULE exe = GetModuleHandleA(NULL);
+		if (exe)
+			fn = (fn_t)GetProcAddress(exe, "OM_GhoulBoltInSequence");
+#else
+		void *sym = dlsym(RTLD_DEFAULT, "OM_GhoulBoltInSequence");
+		if (sym)
+			memcpy(&fn, &sym, sizeof fn);
+#endif
+	}
+	if (!fn)
+		return 1;
+	if (!inst || bolt <= 0)
+		return 0;
+	return fn(inst, G3_Time(), bolt);
+}
+
 bool G3G_BoltMatrix(IGhoulInst *inst, GhoulID bolt, Matrix4 *m, int mode, bool parents)
 {
-	if (!inst || !bolt)
+	if (!inst || !bolt || !m)
 		return false;
 	memset(m, 0, sizeof *m);
 	m->m[0][0] = m->m[1][1] = m->m[2][2] = m->m[3][3] = 1;
 	m->flags = 1;
 	m->m[3][0] = m->m[3][1] = m->m[3][2] = 1.0e30f; // marker: "bolt not in the current sequence"
 	inst->GetBoltMatrix(G3_Time(), m, bolt, mode, parents);
-	if (m->m[3][0] == 1.0e30f) {
+	/* GetBoltMatrix writes the identity before it can fail, so the marker above does not
+	   survive a bolt that is missing from the sequence. That identity sits on the local
+	   origin and must not become a volume. */
+	if (!OM_BoltPoseOk(BoltInCurrentSequence(inst, (int)bolt), m->m[3][0], m->m[3][1], m->m[3][2])) {
 		m->m[3][0] = m->m[3][1] = m->m[3][2] = 0;
 		return false;
 	}
