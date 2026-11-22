@@ -132,6 +132,18 @@ int OM_DeathSettle(float origin[3], float velocity[3], float feet_offset, int co
 	return 0;
 }
 
+int OM_CorpseSupport(int kind, float normal_z)
+{
+	if (normal_z < 0.7f)
+		return 0;
+	return kind >= 0 && kind <= 3;
+}
+
+int OM_CorpseKeepFall(int is_corpse, int on_ground)
+{
+	return is_corpse && !on_ground;
+}
+
 int OM_CorpseFreeze(int is_death, int looping, int anim_done, int paused, float since_death)
 {
 	if (!is_death || looping)

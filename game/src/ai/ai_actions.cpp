@@ -6,6 +6,7 @@
  * Owner: package G2.
  */
 #include "ai_local.h"
+#include "../../../engine/src/common/header/om_corpse.h"
 
 namespace om_ai {
 
@@ -441,6 +442,10 @@ bool GroundAction::Move(edict_t *ent, AI *ai)
 {
 	G3Body *b = ai->body;
 	VectorClear(step);
+	/* A corpse with no floor is still falling. Clearing its velocity here left it at the kill height:
+	   the death pose has almost no root motion, and StepMove refuses to run without a ground entity. */
+	if (OM_CorpseKeepFall(ent->solid == SOLID_CORPSE, ent->groundentity != nullptr))
+		return true;
 	if (b)
 		b->MoveDelta(move_scale, step);
 	VectorScale(ai->velocity, 0.9f, ai->velocity);
@@ -607,10 +612,8 @@ public:
 				k = fmaxf(0.0f, (tr.fraction * 120.0f - 56.0f) / 64.0f);
 			ent->velocity[0] = -200 * k * f[0];
 			ent->velocity[1] = -200 * k * f[1];
-			ent->velocity[2] = 100;
-			ent->maxs[2] -= 26;
-			ent->s.origin[2] += 26;
-			ent->groundentity = nullptr;
+			/* The upward 100 and the 26-unit lift are not applied. A kill above a prop
+			   (the next train) stayed at that raised height. The body keeps its floor. */
 			gi.linkentity(ent);
 		}
 		PlayRecord(ent, ai, this, false);

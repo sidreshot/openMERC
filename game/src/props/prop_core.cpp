@@ -903,7 +903,9 @@ void Riders(edict_t *self)
 		/* standing on it: the ground entity, or (characters) the feet within a few units of the roof inside its
 		   outline - characters woken on the tsr1 train settled on the roof without the ground entity being set */
 		bool on = p->groundentity == self;
-		if (!on && p->ai && p->health > 0) {
+		/* A corpse rides too. The old test required health, so a body killed on the train
+		   kept its world position and hung there after the car moved on. */
+		if (!on && p->ai) {
 			float feet = p->s.origin[2] + p->mins[2], top = self->absmax[2];
 			on = feet >= top - 4 && feet <= top + 6 && p->s.origin[0] >= self->absmin[0] &&
 			     p->s.origin[0] <= self->absmax[0] && p->s.origin[1] >= self->absmin[1] &&

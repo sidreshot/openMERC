@@ -42,6 +42,16 @@ int OM_CorpsePart(const float origin[3], const float angles[3], const om_part_t 
 int OM_DeathSettle(float origin[3], float velocity[3], float feet_offset, int contact, int have_floor,
                    float floor_z);
 
+/* 1 when this downward hit can hold a corpse.
+   kind: 0 world, 1 BSP, 2 ground, 3 a prop box (the subway train), 4 a character, 5 anything else.
+   A character is not a floor. A steep face (normal_z below 0.7) is not a floor. */
+int OM_CorpseSupport(int kind, float normal_z);
+
+/* 1 when a corpse that is not on a floor must keep the velocity physics gave it.
+   The death animation used to clear that velocity every think, so a body with
+   nothing under it stayed at the kill height. */
+int OM_CorpseKeepFall(int is_corpse, int on_ground);
+
 /* 1 when the ghoul instance may pause on this pose.
    is_death: the current animation is a death. A standing idle (std_istand)
    is not, so the 7 second fallback must not freeze it in the air.
