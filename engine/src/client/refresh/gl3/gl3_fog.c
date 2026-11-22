@@ -15,6 +15,9 @@
  */
 
 #include "header/local.h"
+#include "../../../common/header/om_fxcfg.h"
+#include <stdlib.h>
+#include <string.h>
 
 #define MAX_FOG_REGIONS 256
 #define MAX_FOG_PLANES 5
@@ -1038,13 +1041,90 @@ GL3_Fog_QueueModelSurface(msurface_t *surf, int region, const vec3_t origin, con
 	numqueued++;
 }
 
+/* om_gfx.cfg, once the filesystem can answer. A missing file keeps the built-in numbers. */
+static int fxcfg_loaded;
+
+void
+GL3_FxCfg_Load(void)
+{
+	char *buf = NULL;
+	char *text;
+	int len;
+
+	if (!ri.FS_LoadFile)
+	{
+		return;
+	}
+
+	len = ri.FS_LoadFile("om_gfx.cfg", (void **)&buf);
+	fxcfg_loaded = 1;
+
+	if (len <= 0 || !buf)
+	{
+		if (buf)
+		{
+			ri.FS_FreeFile(buf);
+		}
+
+		OM_FxCfg_UseText("");
+		return;
+	}
+
+	text = (char *)malloc((size_t)len + 1);
+
+	if (!text)
+	{
+		ri.FS_FreeFile(buf);
+		OM_FxCfg_UseText("");
+		return;
+	}
+
+	memcpy(text, buf, (size_t)len);
+	text[len] = 0;
+	ri.FS_FreeFile(buf);
+	OM_FxCfg_UseText(text);
+	free(text);
+}
+
+void
+GL3_FxCfg_Ensure(void)
+{
+	if (!fxcfg_loaded)
+	{
+		GL3_FxCfg_Load();
+	}
+}
+
 /* region parameters with the cvar overrides (SPEC-410 Parameters) */
 static void
 Params(const fogregion_t *r, float *start, float *range, float *maxalpha, float color[4])
 {
+	const char *map = "";
+	float k;
+
 	*start = (gl_fogstart->value >= 0) ? gl_fogstart->value : r->start;
 	*range = (gl_fogend->value >= 0) ? gl_fogend->value : r->range;
 	*maxalpha = (gl_fogdensity->value >= 0) ? gl_fogdensity->value * 255.0f : 255.0f * r->opacity;
+	GL3_FxCfg_Ensure();
+
+	if (gl3_worldmodel && gl3_worldmodel->name[0])
+	{
+		map = gl3_worldmodel->name;
+	}
+
+	/* Default keys multiply by 1, so the picture stays. A changed file scales it. */
+	k = OM_FxCfg_FogMul(map);
+	*maxalpha *= k;
+
+	if (*maxalpha > 255.0f)
+	{
+		*maxalpha = 255.0f;
+	}
+
+	if (*maxalpha < 0.0f)
+	{
+		*maxalpha = 0.0f;
+	}
 
 	color[0] = r->color[0];
 	color[1] = r->color[1];

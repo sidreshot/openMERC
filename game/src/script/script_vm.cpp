@@ -8,6 +8,7 @@
  * them): a game error sets ScriptSystem::error_, the running activation stops and the host raises the error.
  */
 #include "script_internal.h"
+#include "header/om_play.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -73,6 +74,9 @@ void ScriptSystem::clear_level()
 	scripts_.clear();
 	globals_.clear();
 	rof_cache_.clear();
+	opening_active_ = false;
+	opening_done_ = false;
+	opening_start_ = 0;
 }
 
 void ScriptSystem::fail(const std::string &msg)
@@ -184,11 +188,76 @@ bool ScriptSystem::skipping_cinematic()
 	return cinematic_ != 0 && host_->cvar_value("sv_jumpcinematic") != 0.0f;
 }
 
+/* True when a HandleSpawn builtin runs before the next timed wait.
+   The scan follows real instructions, so a 5 inside a string is ignored. */
+static bool upcoming_spawn(const Instance *s)
+{
+	std::vector<DecodedInstr> ins;
+	std::string err;
+	bool seen = false;
+	size_t i;
+
+	if (!s || s->code.empty())
+		return false;
+	if (!decode_script(s->code.data(), s->code.size(), ins, err))
+		return false;
+
+	for (i = 0; i < ins.size(); i++) {
+		const DecodedInstr &in = ins[i];
+
+		if (!seen) {
+			if (in.offset < s->ip)
+				continue;
+			seen = true;
+		}
+		if (in.op == 0x16)
+			return false;
+		if (in.op == 0x11 && in.offset + 2 < (int)s->code.size() &&
+		    s->code[(size_t)in.offset + 1] == 7 && s->code[(size_t)in.offset + 2] == 5)
+			return true;
+	}
+	return false;
+}
+
+float ScriptSystem::adjust_opening_wait(Instance *s, float now, float secs)
+{
+	float pad, wake, shifted, delta;
+
+	if (!s)
+		return secs;
+	if (secs < 0.0f)
+		secs = 0.0f;
+	pad = s->wait_pad;
+	s->wait_pad = 0;
+	if (pad > 0.0f)
+		secs += pad;
+	if (!opening_active_ || !upcoming_spawn(s))
+		return secs;
+
+	wake = now + secs;
+	shifted = OM_CineSpawnTime(wake, opening_start_, opening_start_ + 3600.0f, 1);
+	delta = wake - shifted;
+	if (delta < 0.0f)
+		delta = 0.0f;
+	if (delta > secs)
+		delta = secs;
+	/* The following wait grows by the same amount, so a camera beat after
+	   the spawn stays on the original clock while the spawn is earlier. */
+	s->wait_pad = delta;
+	return secs - delta;
+}
+
 void ScriptSystem::cinematic_start()
 {
 	/* SPEC-751 1.2 */
 	host_->cinematic_remove_player_knives();
 	if (host_->player_has_client() && cinematic_ == 0) {
+		/* The reel that starts with the map is the opening one. A cinematic
+		   that begins later is a scene inside the level and is not shifted. */
+		if (!opening_done_ && host_->level_time() < 45.0f) {
+			opening_active_ = true;
+			opening_start_ = host_->level_time();
+		}
 		cinematic_ = 1;
 		host_->add_command_text("-attack\n");
 		host_->add_command_text("-altattack\n");
@@ -205,6 +274,10 @@ void ScriptSystem::cinematic_end()
 	if (host_->cvar_value("sv_jumpcinematic") == 2.0f) {
 		host_->cvar_set("sv_jumpcinematic", "0");
 		host_->cvar_set("s_disable", "0");
+	}
+	if (opening_active_) {
+		opening_active_ = false;
+		opening_done_ = true;
 	}
 	cinematic_ = 0;
 	stopsound_latch_ = true;
@@ -1096,12 +1169,15 @@ Step step(Ctx &c)
 		if (c.pop_n(a, 1, "Time Wait")) {
 			float secs = c.f(a[0]);
 			if (secs > 0.0f) {
-				Event ev;
-				ev.kind = EV_WAIT;
-				ev.time = quantize(h->level_time() + secs);
-				queue_event(s, ev);
-				s->state = ST_WAIT_TIME;
-				result = STEP_YIELD;
+				secs = c.sys->adjust_opening_wait(s, h->level_time(), secs);
+				if (secs > 0.0f) {
+					Event ev;
+					ev.kind = EV_WAIT;
+					ev.time = quantize(h->level_time() + secs);
+					queue_event(s, ev);
+					s->state = ST_WAIT_TIME;
+					result = STEP_YIELD;
+				}
 			}
 		}
 		break;
@@ -1440,7 +1516,19 @@ Step step(Ctx &c)
 
 } /* namespace */
 
+static void run_body(ScriptSystem *sys, Instance *s);
+
+/* OpenMerc: the script being run is known to the host while it runs (the script audit names the script of each AI
+   command); a nested run (a script used from another) restores the outer one */
 void run(ScriptSystem *sys, Instance *s)
+{
+	int outer = sys->current_script();
+	sys->set_current_script(s->handle);
+	run_body(sys, s);
+	sys->set_current_script(outer);
+}
+
+static void run_body(ScriptSystem *sys, Instance *s)
 {
 	if (s->running || sys->failed())
 		return;

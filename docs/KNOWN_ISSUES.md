@@ -1,5 +1,7 @@
 # Known issues and unfinished work (release 0.1.1)
 
+Only mode B is built and maintained. The mode A column below is history of the retail Windows game DLL. It is not a target to finish.
+
 State on 2026-10-27 (`main`). Two columns matter: **mode A** = openMERC engine with the original game and player
 modules, **mode B** = everything openMERC (`base\gamex86.dll` and `base\player.dll` from this project).
 Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in `docs/impl/`.

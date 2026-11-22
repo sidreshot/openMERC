@@ -9,6 +9,7 @@
  */
 
 #include "fx_local.h"
+#include "../../common/header/om_fxcfg.h"
 
 static float
 FX_RandBetween(float a, float b)
@@ -477,6 +478,20 @@ FX_CreateParticle(fx_run_t *r, int prim, const vec3_t pos, qboolean attached,
 	p->q.color[1] = p->rgb[1];
 	p->q.color[2] = p->rgb[2];
 	p->q.color[3] = (byte)p->alpha;
+
+	/* A flare sprite with no light of its own still lights the ground. A positive
+	   radius written in the effect file is left as written. Smoke, sparks and
+	   ordinary fire stay dark. */
+	if (p->kind == FXK_BILLBOARD)
+	{
+		float rad = OM_FxLightRadius(0.0f, OM_FxGlowClass(d->graphic), p->d1);
+
+		if (rad > 0.0f)
+		{
+			CL_SoF_AddLight(0, pos, (int)p->rgb[0], (int)p->rgb[1], (int)p->rgb[2],
+					rad, OM_FxLightLifeMs(L), 0.0f);
+		}
+	}
 
 	/* Ghoul particle types with "Attached To Source" do not work in 1.07f: unattached
 	   (SPEC-AMEND-005 I5.16) */

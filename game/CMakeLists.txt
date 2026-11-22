@@ -4,7 +4,7 @@
 # Also builds g18probe.dll, the black-box interface probe used to measure unspecified layouts.
 # Implements: SPEC-001, SPEC-006, SPEC-760, SPEC-761, SPEC-780, SPEC-781, SPEC-782
 cmake_minimum_required(VERSION 3.20)
-project(OMGame CXX)
+project(OMGame C CXX)
 
 # OpenMerc: SoF / Quake code assumes a signed char (x86); ARM's default is unsigned
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM64)" OR ANDROID)
@@ -61,7 +61,9 @@ list(APPEND OM_GAME_CPP ${OM_GAME_PKG_CPP})
 set(OM_GAME_SOURCES ${OM_GAME_CPP} ${OM_GAME_H} ${OM_GAME_PKG_H})
 
 if(OM_GAME_CPP)
-  add_library(gamex86 SHARED ${OM_GAME_SOURCES} gamex86.def)
+  add_library(gamex86 SHARED ${OM_GAME_SOURCES} gamex86.def
+    ${CMAKE_CURRENT_SOURCE_DIR}/../engine/src/common/om_corpse.c)
+  target_include_directories(gamex86 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../engine/src/common)
   target_compile_definitions(gamex86 PRIVATE _CRT_SECURE_NO_WARNINGS GAME_INCLUDE)
   set_target_properties(gamex86 PROPERTIES PREFIX "" OUTPUT_NAME "gamex86")
   if(MSVC)
@@ -125,9 +127,11 @@ if(OM_G3_TESTS AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/damage/g3_damage.cpp)
     ${G3D}/test/g3_tests.cpp ${G3D}/test/g3_mock.cpp ${G3D}/test/g3_stubs.cpp
     ${G3D}/g3_damage.cpp ${G3D}/g3_shot.cpp ${G3D}/g3_gore.cpp ${G3D}/g3_body.cpp ${G3D}/g3_human.cpp
     ${G3D}/g3_animals.cpp ${G3D}/g3_fx.cpp ${G3D}/g3_ghoul.cpp ${G3D}/g3_save.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/effects/fx_emit.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/q_shared.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/effects/fx_emit.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/q_shared.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../engine/src/common/om_corpse.c)
   target_compile_definitions(g3tests PRIVATE _CRT_SECURE_NO_WARNINGS GAME_INCLUDE)
-  target_include_directories(g3tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_include_directories(g3tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../engine/src/common)
   if(NOT MSVC)
     target_compile_options(g3tests PRIVATE -fno-strict-aliasing)
     target_link_libraries(g3tests PRIVATE m)

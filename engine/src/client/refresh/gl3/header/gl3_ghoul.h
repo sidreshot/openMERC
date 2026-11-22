@@ -180,6 +180,9 @@ void GL3_GhoulEmu_SetRegionFog(qboolean on); /* E19 r_om_fogpix */
 void GL3_GhoulEmu_SetCsm(qboolean capture, qboolean replace);
 void GL3_GhoulEmu_SetCaster(qboolean casts);
 void GL3_GhoulEmu_SetTess(int level, float strength);
+/* weapscale 1..10 caps the PN offset (0: not a weapon). proplevel is the model
+   subdivision a round prop may rise to during the draw (0: do not). */
+void GL3_GhoulEmu_SetTessExtra(int weapscale, float pncap, int proplevel, float propk);
 qboolean GL3_GhoulEmu_TakeRound(void); /* the entity just drawn drew a round model's texture (r_om_tess) */
 void GL3_GhoulEmu_SetPPL(qboolean on);
 void GL3_GhoulEmu_SetAmbientCube(const float *cube); /* GFX-modern r_om_ambcube */

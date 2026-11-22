@@ -4,7 +4,7 @@
 # add_subdirectory(src/script).
 # Implements: SPEC-140, SPEC-141, SPEC-750, SPEC-751, SPEC-752
 cmake_minimum_required(VERSION 3.20)
-project(OMScript CXX)
+project(OMScript C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,8 +13,11 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(om_script STATIC
   script_host.h script_vm.h script_internal.h
-  script_value.cpp script_vm.cpp script_save.cpp script_ai_table.inc)
-target_include_directories(om_script PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+  script_value.cpp script_vm.cpp script_save.cpp script_ai_table.inc
+  ../../../engine/src/common/om_play.c)
+target_include_directories(om_script PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../engine/src/common)
 # linked into the shared gamex86 module: position-independent on every toolchain, not only where PIE is the default
 set_target_properties(om_script PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)

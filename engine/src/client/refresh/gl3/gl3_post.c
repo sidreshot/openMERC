@@ -23,6 +23,7 @@
  */
 
 #include "header/local.h"
+#include "../../../common/header/om_fxcfg.h"
 
 #define POST_MAXLEVELS 7
 
@@ -95,7 +96,7 @@ static struct
 	GLint down_tex, down_rect, down_half, down_mode, down_knee, down_clamp;
 	GLint up_tex, up_rect, up_half;
 	GLint comp_scene, comp_bloom, comp_emis, comp_rect, comp_intensity, comp_mode;
-	GLint comp_hdr, comp_exp, comp_sat, comp_grade;
+	GLint comp_hdr, comp_exp, comp_sat, comp_grade, comp_tune;
 
 	/* r_om_hdr: float scene, log luminance with mipmaps, exposure adapted over time (1x1 ping-pong) */
 	qboolean hdr;           /* the targets were made with a float scene */
@@ -950,6 +951,7 @@ static const char *post_comp_fs =
 	"uniform int hdr;\n"     /* r_om_hdr: exposure and the filmic curve */
 	"uniform float saturation;\n"
 	"uniform vec4 grade;\n"  /* -, shadow gamma, brightness, r_om_overbright (linear) */
+	"uniform vec4 omTune;\n" /* x gamma, y film shoulder. File defaults 2.2 and 0.6. */
 	/* r_om_look (gl3_look.c): the picture graded in float instead of SoF's 8-bit colour table */
 	"uniform int look;\n"
 	"uniform vec4 look0;\n"  /* exposure (EV), contrast, camera saturation, camera share (r_om_camera) */
@@ -1130,8 +1132,9 @@ static const char *post_comp_fs =
 	   original mid tones and shadows) */
 	"vec3 Shoulder(vec3 x)\n"
 	"{\n"
-	"	const float T = 0.6;\n"
-	"	vec3 s = T + (1.0 - T) * (1.0 - exp(-(x - T) / (1.0 - T)));\n"
+	"	float T = omTune.y;\n"
+	"	float span = max(1.0 - T, 0.001);\n"
+	"	vec3 s = T + span * (1.0 - exp(-(x - T) / span));\n"
 	"	return mix(x, s, step(T, x));\n"
 	"}\n"
 	/* the film camera: ACES RRT+ODT (Stephen Hill's fit, sRGB -> AP1 -> sRGB), pre-scaled so mid grey 0.18 stays 0.18;
@@ -1157,7 +1160,8 @@ static const char *post_comp_fs =
 	"vec3 Grade(vec3 c, float autoexp)\n"
 	"{\n"
 	/* the scene is display-encoded: to linear, exposure (auto, grade, menu brightness) */
-	"	vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * autoexp * exp2(look0.x) * grade.w;\n"
+	"	float gam = max(omTune.x, 0.001);\n"
+	"	vec3 l = pow(max(c, vec3(0.0)), vec3(gam)) * autoexp * exp2(look0.x) * grade.w;\n"
 	/* the plain picture: the shoulder curve */
 	"	vec3 p = Shoulder(max(mix(vec3(Luma(l)), l, look2.x), vec3(0.0)));\n"
 	/* the camera: white balance, saturation, contrast around mid grey, the filmic curve */
@@ -1169,7 +1173,7 @@ static const char *post_comp_fs =
 	"	vec3 cw = Camera(w);\n"
 	"	cw = mix(Shoulder(w), cw, smoothstep(0.008, 0.12, Luma(w)));\n"
 	"	l = (look0.w > 0.0) ? mix(p, cw, look0.w) : p;\n"
-	"	vec3 d = pow(l, vec3(1.0 / 2.2));\n"
+	"	vec3 d = pow(l, vec3(1.0 / gam));\n"
 	/* the menu's gamma, contrast and brightness as SoF's colour table had them (SPEC-413 В§9), in float: v^(1-g), an S
 	   curve of power k around the middle, an offset */
 	"	d = pow(max(d, vec3(0.0)), vec3(look2.a));\n"
@@ -1208,12 +1212,13 @@ static const char *post_comp_fs =
 	"		else if (hdr == 1)\n"
 	"		{\n"
 	/* the scene is display-encoded (the shaders applied vid_gamma): to linear, expose, curve, back */
-	"			vec3 l = pow(max(c, vec3(0.0)), vec3(2.2)) * texture(exptex, vec2(0.5)).r * grade.z * grade.w;\n"
+	"			float gam = max(omTune.x, 0.001);\n"
+	"			vec3 l = pow(max(c, vec3(0.0)), vec3(gam)) * texture(exptex, vec2(0.5)).r * grade.z * grade.w;\n"
 	"			l = Shoulder(l);\n"
 	"			float y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
 	"			l = clamp(mix(vec3(y), l, saturation), 0.0, 1.0);\n"
 	/* shadow gamma in display space: below 1 opens the dark tones, white stays white */
-	"			c = pow(pow(l, vec3(1.0 / 2.2)), vec3(grade.y));\n"
+	"			c = pow(pow(l, vec3(1.0 / gam)), vec3(grade.y));\n"
 	"		}\n"
 	/* r_om_vivid without HDR (phones): brightness, saturation and the shadow gamma on the finished picture - the bright,
 	   saturated look of the PlayStation ports at the cost of a few ALU per pixel */
@@ -1441,6 +1446,7 @@ CreatePrograms(void)
 	P.comp_exp = glGetUniformLocation(P.progcomp, "exptex");
 	P.comp_sat = glGetUniformLocation(P.progcomp, "saturation");
 	P.comp_grade = glGetUniformLocation(P.progcomp, "grade");
+	P.comp_tune = glGetUniformLocation(P.progcomp, "omTune");
 	P.lum_tex = glGetUniformLocation(P.proglum, "tex");
 	P.lum_rect = glGetUniformLocation(P.proglum, "rect");
 	P.exp_lum = glGetUniformLocation(P.progexp, "lum");
@@ -4414,6 +4420,8 @@ GL3_Post_EndView(void)
 
 		glUniform4f(P.comp_grade, 0.0f, Q_max(0.3f, Q_min(r_om_hdr_shadows->value, 2.0f)),
 			Q_max(0.1f, r_om_hdr_brightness->value), ob);
+		GL3_FxCfg_Ensure();
+		glUniform4f(P.comp_tune, OM_FxCfg_Live("hdr_gamma"), OM_FxCfg_Live("hdr_shoulder"), 0.0f, 0.0f);
 	}
 	if (hdr)
 	{
@@ -10297,8 +10305,29 @@ GL3_Post_Weather(void)
 				{1800.0f, 1300.0f, 250.0f, 340.0f, 16000.0f, 0.7f},
 				{3600.0f, 2200.0f, 650.0f, 880.0f, 14000.0f, 1.0f},
 			};
-			float dens = Q_min(r_om_snow->value, 3.0f);
+			float cap;
+			float mul;
+			float dens;
+			const char *mapn = "";
 			int l;
+
+			GL3_FxCfg_Ensure();
+
+			if (gl3_worldmodel && gl3_worldmodel->name[0])
+			{
+				mapn = gl3_worldmodel->name;
+			}
+
+			cap = OM_FxCfg_Live("snow_cap");
+
+			if (cap < 0.0f)
+			{
+				cap = 0.0f;
+			}
+
+			/* Default snow_sib1 divides back to 1, so sib1 snow stays as drawn today. */
+			mul = OM_FxCfg_SnowMul(mapn);
+			dens = Q_min(r_om_snow->value * mul, cap);
 
 			for (l = 0; l < 3; l++)
 			{

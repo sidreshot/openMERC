@@ -15,6 +15,7 @@
 
 #include "header/menu.h"
 #include "../../common/header/om_version.h"
+#include "../../common/header/om_play.h"
 #include "header/m_draw.h"
 #include "../header/sofclient.h" /* Touch_Enabled */
 #include "../../common/header/sof/engine.h"
@@ -869,6 +870,13 @@ M_OpenMenu(const char *rawname, const char *rawframe, qboolean forced)
 
 	Q_strlcpy(name, rawname, sizeof(name));
 	Q_strlwr(name);
+
+	/* Off skips the studio logos and the campaign intro only.
+	   A cinematic inside a level still ends on the use key. */
+	if (OM_IntroSkip((int)Cvar_VariableValue(OM_IntroCvarName()), name))
+	{
+		Q_strlcpy(name, "main", sizeof(name));
+	}
 
 	/* MENU-SCRATCH (owner t91u/t94u): the animated ARC main menu (globe
 	   screens amain/a_main/a_amain) is gone; every way into it - the
@@ -2495,6 +2503,9 @@ M_Init(void)
 {
 	menu_mouse_x = Cvar_Get("menu_mouse_x", "0", 0);
 	menu_mouse_y = Cvar_Get("menu_mouse_y", "0", 0);
+	/* 1: studio logos and the campaign intro. 0: skip that reel only. Archived. */
+	Cvar_Get(OM_IntroCvarName(), OM_IntroDefaultOn() ? "1" : "0",
+			OM_IntroArchived() ? CVAR_ARCHIVE : 0);
 	m_cursor_speed = Cvar_Get("m_cursor_speed", "8", CVAR_ARCHIVE);
 	m_cursor_accel = Cvar_Get("m_cursor_accel", "2", CVAR_ARCHIVE);
 	m_sensitivity_wheel = Cvar_Get("m_sensitivity_wheel", "1", 0);

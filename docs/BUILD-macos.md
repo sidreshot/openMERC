@@ -15,8 +15,8 @@ dedicated server, `ref_gl3`, the game and player modules, the OMsnd sound module
 That one session is all that was run: one level, no input, about 14 seconds. Not verified: play with keyboard and
 mouse, sound heard by a person, saving and loading, the other levels, full screen, the frame rate, the 0.2.3
 effects one by one, a re-bake started by the game itself (`r_om_relight`), omlight built without OpenMP on a
-map (it compiles; one thread), the dedicated server, Intel Macs, a package for players. Only mode B
-(OpenMerc's own modules) can run on a Mac: the original game and player modules are 32-bit Windows DLLs.
+map (it compiles; one thread), the dedicated server, Intel Macs, a package for players. Only mode B is built and maintained.
+Only mode B (OpenMerc's own modules) can run on a Mac: the original game and player modules are 32-bit Windows DLLs. Mode A is not a development target.
 
 macOS has no OpenGL newer than 4.1 and Apple marks OpenGL as deprecated. `ref_gl3` asks for a 3.2 core context
 and GLSL 1.50; macOS gives it `4.1 Metal` (Apple's OpenGL on top of Metal). The driver logged one warning during the

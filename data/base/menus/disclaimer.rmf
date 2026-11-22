@@ -1,0 +1,8 @@
+<stm nopush>
+<strings menu_generic>
+<include tints>
+<cursor 0>
+<backdrop bgcolor black>
+<cinclude om_showintro om_disclaimer_on>
+<cninclude om_showintro om_intro_skip>
+</stm>

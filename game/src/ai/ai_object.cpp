@@ -1102,6 +1102,7 @@ void OmAI::Die(edict_t *inflictor, edict_t *attacker, int damage, const vec3_t p
 			VectorCopy(point, body->deathPoint);
 	}
 	if (was_dead && !((ent->spawnflags & SF_DIE_IN_PLACE) && current && current->ClassCode() == 5)) {
+		OM_SettleDeadBody(ent);
 		gi.linkentity(ent);
 		return;
 	}
@@ -1131,6 +1132,8 @@ void OmAI::Die(edict_t *inflictor, edict_t *attacker, int damage, const vec3_t p
 	dead = 1;
 	gi.sound(ent, CHAN_VOICE, 0, 0.6f, 1, 0);
 	VectorCopy(ent->s.angles, death_angles);
+	/* Every airborne kill, on the train and everywhere else, lands before the death pose freezes. */
+	OM_SettleDeadBody(ent);
 	gi.linkentity(ent);
 }
 

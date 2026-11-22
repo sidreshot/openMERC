@@ -661,7 +661,7 @@ CL_Ghoul_AddViewWeapon(void)
 		CL_Ghoul_Dump("view weapon", &gun);
 	}
 
-	V_AddEntity(&gun);
+	V_AddViewWeapon(&gun, gun.angles[1]);
 }
 
 /* ---- menus ---------------------------------------------------------------------- */

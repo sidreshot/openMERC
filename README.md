@@ -33,11 +33,7 @@ writes into it.
 - **Menus**: a new widescreen menu with free fonts (Play, JetBrains Mono) that scale to any resolution and cover
   Latin and Cyrillic text. The parental lock is removed; violence is always at full level.
 - **Movement**: Quake II player movement with SoF's differences.
-- **Two ways to play**:
-  - *mode A* - openMERC engine + the original `gamex86.dll` / `player.dll` from your installation (the most
-    complete campaign today);
-  - *mode B* - everything open source (engine, renderer, sound, game and player modules). All 32 campaign maps
-    load and run; AI, some scripted sequences and some weapon details are unfinished.
+- **One mode**: Only mode B is built and maintained. That is everything open source (engine, renderer, sound, game and player modules). All 32 campaign maps load and run; AI, some scripted sequences and some weapon details are unfinished. The retail Windows game DLL (mode A) is not a development target.
 - **Multiplayer**: openMERC servers and clients play with each other. Original 1.07f servers, clients and demos are
   **not** compatible (see *Clean room*), and no compatibility mode is planned.
 - **Platforms**: Windows (32-bit engine on 64-bit Windows 10/11). Linux x86_64
@@ -135,7 +131,7 @@ player\build.cmd Release                 player module player.dll
 Assemble a game folder: the engine files and the sound module side by side, `gamex86.dll`, `player.dll` and
 `zz_openmerc.pak` in `base\`, and `dist\openMERC.cmd` on top. Start `openMERC.cmd`; on the first start it asks for
 your Soldier of Fortune folder (the one that contains `base\pak0.pak`). Settings, saves, screenshots and logs go to
-`user\` next to the launcher. For mode A delete `gamex86.dll` and `player.dll` from openMERC's `base\`.
+`user\` next to the launcher. Only mode B is built and maintained. Do not delete the openMERC game modules to load the retail DLL.
 
 Unit tests built with the engine and modules: `sofpm_test` (player movement), `omghoul_test` (Ghoul model
 library), `pm_unit` (player module rules). `python tools/legal_scan.py` checks the tree for copied tables and
@@ -212,11 +208,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - **Меню**: новое широкоформатное меню со свободными шрифтами (Play, JetBrains Mono), которые масштабируются под
   любое разрешение и поддерживают латиницу и кириллицу. Родительского замка нет, насилие всегда на максимуме.
 - **Перемещение**: движение игрока Quake II с отличиями SoF.
-- **Два режима**:
-  - *режим A* - движок openMERC + оригинальные `gamex86.dll` / `player.dll` из вашей установки (сейчас самая
-    полная кампания);
-  - *режим B* - всё открытое (движок, рендерер, звук, игровой модуль и модуль игрока). Все 32 карты кампании
-    загружаются и работают, но ИИ противников, часть скриптовых сцен и детали оружия ещё не доделаны.
+- **Один режим**: Only mode B is built and maintained. Это всё открытое (движок, рендерер, звук, игровой модуль и модуль игрока). Все 32 карты кампании загружаются и работают, но ИИ противников, часть скриптовых сцен и детали оружия ещё не доделаны. Розничная Windows-библиотека игры (режим A) не является целью разработки.
 - **Сетевая игра**: серверы и клиенты openMERC играют друг с другом. С оригинальными серверами, клиентами и демо
   1.07f openMERC **не совместим** (см. «Чистая комната»), режима совместимости не будет.
 - **Платформы**: Windows (32-битный движок на 64-битной Windows 10/11). Linux x86_64

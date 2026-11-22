@@ -17,6 +17,7 @@
 #include "../common/header/sof/refapi.h"
 #include "../common/header/sof/engine.h"
 #include "../common/header/sof/savegame.h"
+#include "../common/header/om_play.h"
 
 /* menu/m_draw.c: 128 x 128 RGBA of the drawn frame (renderer slot 0xd4) */
 qboolean MR_Thumbnail(byte *out128x128);
@@ -42,7 +43,8 @@ static struct
 	char lines[PRINT_MAXLINES][256];
 	int n;
 	int caption;          /* 0 centre print, 1 caption */
-	int endtime;          /* cls.realtime when it disappears */
+	int starttime;        /* cls.realtime when the title appeared */
+	int endtime;          /* cls.realtime when it has evaporated */
 } cprint;
 
 static void
@@ -127,6 +129,7 @@ SCR_SetPrint(const char *str, int caption)
 	}
 
 	cprint.caption = caption;
+	cprint.starttime = cls.realtime;
 	cprint.endtime = cls.realtime + (int)(1000 * (scr_centertime_c->value + 0.2f * spaces + 0.8f * cprint.n));
 }
 
@@ -170,10 +173,28 @@ SCR_DrawPrint(void)
 		y0 = (int)(0.9f * H - cprint.n * L);
 	}
 
-	for (i = 0; i < cprint.n; i++)
 	{
-		HUD_DrawFontText((W - HUD_TextWidth(cprint.lines[i], 1)) / 2, y0 + i * L,
-				cprint.lines[i], c_yellow, 1, i > 0);
+		int life = cprint.endtime - cprint.starttime;
+		int age = cls.realtime - cprint.starttime;
+		int alpha = OM_TitleFadeAlpha(age, life, 0);
+		unsigned char col[4];
+
+		if (alpha <= 0)
+		{
+			HUD_EndText();
+			return;
+		}
+
+		col[0] = c_yellow[0];
+		col[1] = c_yellow[1];
+		col[2] = c_yellow[2];
+		col[3] = (unsigned char)alpha;
+
+		for (i = 0; i < cprint.n; i++)
+		{
+			HUD_DrawFontText((W - HUD_TextWidth(cprint.lines[i], 1)) / 2, y0 + i * L,
+					cprint.lines[i], col, 1, i > 0);
+		}
 	}
 
 	HUD_EndText();
@@ -392,9 +413,11 @@ SCR_DrawCredit(void)
 	{
 		a = 255 * elapsed / credit.fadein;
 	}
-	else if ((credit.fadeout > 0) && (remaining < credit.fadeout))
+	else
 	{
-		a = 255 * remaining / credit.fadeout;
+		int fade_ms = (credit.fadeout > 0) ? (int)(credit.fadeout * 1000.0f) : 0;
+
+		a = (float)OM_TitleFadeAlpha((int)(elapsed * 1000.0f), (int)(credit.time * 1000.0f), fade_ms);
 	}
 
 	HUD_GetPicSize(&w, &h, credit.name);

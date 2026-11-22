@@ -42,6 +42,7 @@
 #include "header/cl_ghoul.h" /* I1c */
 #include "header/cl_player.h" /* I1d */
 #include "../ghoul/ghoul_host.h" /* openMERC: ghl_blend */
+#include "../common/header/om_fpslog.h" /* low-fps incident ring */
 
 void CL_ForwardToServer_f(void);
 void CL_Changing_f(void);
@@ -542,6 +543,14 @@ CL_InitLocal(void)
 	cl_noskins = Cvar_Get("cl_noskins", "0", 0);
 	cl_predict = Cvar_Get("cl_predict", "1", 0);
 	cl_showfps = Cvar_Get("cl_showfps", "0", CVAR_ARCHIVE);
+	{
+		char fpsdef[8];
+
+		/* On unless the player turns it off. The same default the incident
+		   writer reports, so a fresh profile records drops under 30 fps. */
+		Com_sprintf(fpsdef, sizeof(fpsdef), "%d", OM_FpsLog_EnabledByDefault());
+		Cvar_Get("om_fpslog", fpsdef, CVAR_ARCHIVE);
+	}
 	cl_showspeed = Cvar_Get("cl_showspeed", "0", CVAR_ARCHIVE);
 	cl_laseralpha = Cvar_Get("cl_laseralpha", "0.3", 0);
 	cl_nodownload_list = Cvar_Get("cl_nodownload_list", "", CVAR_ARCHIVE);
@@ -764,6 +773,121 @@ CL_UpdateWindowedMouse(void)
 	}
 }
 
+static void
+CL_FpsAppendCvar(char *dst, int dstlen, const char *key)
+{
+	size_t n = strlen(dst);
+	const char *v = Cvar_VariableString(key);
+
+	if ((int)n >= dstlen - 1)
+	{
+		return;
+	}
+
+	snprintf(dst + n, (size_t)(dstlen - (int)n), "%s%s=%s", n ? " " : "", key, v);
+}
+
+/* Hardware and the graphics settings, as they are right now. The incident
+   writer stores both texts with the view position. */
+static void
+CL_FpsDescribe(char *hardware, int hwlen, char *graphics, int gfxlen)
+{
+	static const char *const keys[] = {
+		"r_mode", "vid_fullscreen", "r_customwidth", "r_customheight",
+		"fov", "vid_gamma", "vid_renderer", "r_msaa_samples", "gl_texturemode",
+		"r_om_tess", "r_om_tess_weapon", "r_om_tess_models", "r_om_tess_round",
+		"r_om_snow", "r_om_fogpix"
+	};
+	int i;
+
+	snprintf(hardware, (size_t)hwlen,
+			"arch=%s cpu_speed=%s cpu_memory=%s gl_vendor=%s gl_renderer=%s",
+			YQ2ARCH,
+			Cvar_VariableString("cpu_speed"),
+			Cvar_VariableString("cpu_memory"),
+			Cvar_VariableString("gl_vendor"),
+			Cvar_VariableString("gl_renderer"));
+
+	graphics[0] = 0;
+
+	for (i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); i++)
+	{
+		CL_FpsAppendCvar(graphics, gfxlen, keys[i]);
+	}
+}
+
+static void
+CL_FpsWriteLog(const om_fps_log_t *log)
+{
+	char path[MAX_OSPATH];
+	char body[OM_FPS_LOG_SLOTS * OM_FPS_LINE];
+	const char *udir = FS_Userdir();
+	FILE *f;
+
+	if (!udir || !udir[0])
+	{
+		udir = ".";
+	}
+
+	Com_sprintf(path, sizeof(path), "%s/om_fps.log", udir);
+	FS_CreatePath(path);
+	OM_FpsLog_Format(log, body, (int)sizeof(body));
+	f = Q_fopen(path, "w");
+
+	if (!f)
+	{
+		return;
+	}
+
+	fputs(body, f);
+	fclose(f);
+}
+
+/* One incident when this rendered frame is under 30 fps. The ring keeps ten
+   and skips a place that is already stored, so a stutter does not spam. */
+static void
+CL_LowFpsIncident(int render_us)
+{
+	static om_fps_log_t log;
+	static qboolean ready;
+	static cvar_t *cv;
+	char hardware[OM_FPS_TEXT];
+	char graphics[OM_FPS_TEXT];
+	char line[OM_FPS_LINE];
+	int age;
+
+	if (!cv)
+	{
+		char def[8];
+
+		Com_sprintf(def, sizeof(def), "%d", OM_FpsLog_EnabledByDefault());
+		cv = Cvar_Get("om_fpslog", def, CVAR_ARCHIVE);
+	}
+
+	if (!cv->value || cls.state != ca_active)
+	{
+		return;
+	}
+
+	if (!ready)
+	{
+		OM_FpsLog_Clear(&log);
+		ready = true;
+	}
+
+	CL_FpsDescribe(hardware, (int)sizeof(hardware), graphics, (int)sizeof(graphics));
+
+	if (!OM_FpsLog_Write(&log, render_us, cl.refdef.vieworg, hardware, graphics))
+	{
+		return;
+	}
+
+	age = OM_FpsLog_Count(&log) - 1;
+	OM_FpsLog_FormatAt(&log, age, line, (int)sizeof(line));
+	Com_Printf("%s", line);
+	CL_FpsWriteLog(&log);
+}
+
 void
 CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, qboolean renderframe)
 {
@@ -913,6 +1037,7 @@ CL_Frame(int packetdelta, int renderdelta, int timedelta, qboolean packetframe, 
 
 		/* Update framecounter */
 		cls.framecount++;
+		CL_LowFpsIncident(renderdelta);
 
 		if (log_stats->value)
 		{

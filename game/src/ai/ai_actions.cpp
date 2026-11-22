@@ -635,16 +635,16 @@ public:
 			b->KeepOnFloor();
 			return false;
 		}
-		/* OpenMerc (DEVIATIONS): the in-air pause of a death also ends when the body has stopped falling without a
-		   ground entity - a corpse box touching a wall or a window sill never gets one, the death stayed on its
-		   standing frame and the 5 s corpse freeze kept the body upright */
+		/* The pause ends on a real floor. OM_SettleDeadBody puts an airborne kill on that
+		   floor first, so the death pose is not played at the kill height. */
 		if (b->pauseKind) {
 			float now = Now();
 			if (air_since == 0)
 				air_since = now;
-			bool resting = (now - air_since > 0.5f) && (fabsf(ent->s.origin[2] - air_z) < 0.25f);
+			/* A stable height is not a landing. Only a real floor ends the pause,
+			   otherwise a kill in the air played the death pose at the kill height. */
 			air_z = ent->s.origin[2];
-			if (ent->groundentity || resting || (now - air_since > 2.0f)) {
+			if (ent->groundentity || (now - air_since > 2.0f)) {
 				b->eventFlags |= BODYEV_THUD;
 				b->Resume();
 				air_since = 0;

@@ -5,7 +5,7 @@
 # Built as part of engine/CMakeLists.txt (add_subdirectory) or standalone:
 #   cmake -S engine/src/ghoul -B build-ghoul -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake_minimum_required(VERSION 3.16)
-project(omghoul LANGUAGES CXX)
+project(omghoul LANGUAGES C CXX)
 
 set(OMGHOUL_SOURCES
 	ghoul_common.cpp
@@ -23,10 +23,12 @@ set(OMGHOUL_SOURCES
 	ghoul_draw.cpp
 	ghoul_texture.cpp
 	ghoul_capi.cpp
+	../common/om_tess.c
 )
 
 add_library(omghoul STATIC ${OMGHOUL_SOURCES})
 target_include_directories(omghoul PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(omghoul PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 find_package(Threads REQUIRED) # ghoul_texture.cpp: an object's textures decoded on all cores
 target_link_libraries(omghoul PUBLIC Threads::Threads)
 set_target_properties(omghoul PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF

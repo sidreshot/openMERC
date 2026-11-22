@@ -1,5 +1,8 @@
 # OpenMerc: helpers for every way of playing (mouse, gamepad, touch), on the Gameplay page (menus/m_scale.rmf).
 # Same format as om_video.tbl.
+section | INTRO | ЗАСТАВКИ
+list | om_showintro | 0,1 | Off,On | Выкл,Вкл | Studio logos and campaign intro | Заставки студий и интро кампании | tip=Off skips the studio logos and the campaign intro. A cinematic inside a level still ends on the use key/Выкл пропускает заставки студий и интро кампании. Ролик внутри уровня по-прежнему кончается клавишей действия
+
 section | HELPERS | ПОМОЩЬ
 list | om_aimassist | 0,1 | Off,On | Выкл,Вкл | Aim Assist | Помощь в прицеливании | tip=Shots go to the enemy nearest the crosshair/Выстрелы идут в ближайшего к прицелу врага
 slider | om_aimassist_dist | 8 | 64 | 4 | Aim Assist Radius | Радиус помощи в прицеливании | tip=How close to the aim line (units) an enemy must be for shots to go to him/Насколько близко к линии прицела (в единицах) должен быть враг, чтобы выстрелы шли в него

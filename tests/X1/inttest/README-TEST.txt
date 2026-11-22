@@ -10,7 +10,7 @@
 Запуск
 ------
   play.cmd           - запуск с модулями, которые сейчас лежат в base\ (что именно - base\MODE.txt)
-  play-modeA.cmd     - режим A (по умолчанию): оригинальные gamex86.dll + player.dll 1.07f
+  play-modeA.cmd     - не поддерживается. Only mode B is built and maintained.
   play-modeB.cmd     - режим B: наши gamex86.dll + player.dll (OpenMerc)
   Выбор режима сохраняется до запуска другого .cmd. Параметры передаются дальше, например:
   play.cmd -Map kos1      play.cmd -Windowed      play.cmd -NoRec (без автозаписи)
