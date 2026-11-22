@@ -146,11 +146,25 @@ static void CorpseBox(edict_t *ent, vec3_t mins, vec3_t maxs)
 	}
 }
 
-static int OM_SupportBrush(edict_t *hit)
+/* 0 world, 1 BSP, 2 ground, 3 a prop box, 4 a character, 5 anything else. */
+static int OM_SolidKind(edict_t *hit)
 {
 	if (!hit || hit == world)
+		return 0;
+	if (hit->client || hit->ai || hit->solid == SOLID_CORPSE)
+		return 4;
+	if (hit->solid == SOLID_BSP)
 		return 1;
-	return hit->solid == SOLID_BSP || hit->solid == SOLID_GROUND;
+	if (hit->solid == SOLID_GROUND)
+		return 2;
+	if (hit->solid == SOLID_BBOX)
+		return 3;
+	return 5;
+}
+
+static int OM_SupportBrush(edict_t *hit, float normal_z)
+{
+	return OM_CorpseSupport(OM_SolidKind(hit), normal_z);
 }
 
 static float OM_CorpseFeet(edict_t *ent)
@@ -187,8 +201,8 @@ void OM_SettleDeadBody(edict_t *ent)
 		VectorCopy(p, q);
 		q[2] -= 24.0f;
 		tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_SOLID);
-		if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f && tr.plane.normal[2] >= 0.7f &&
-		    OM_SupportBrush(tr.ent)) {
+		if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f &&
+		    OM_SupportBrush(tr.ent, tr.plane.normal[2])) {
 			float gap = (ent->s.origin[2] + feet) - tr.endpos[2];
 			if (gap <= 12.0f && gap >= -16.0f) {
 				contact = 1;
@@ -204,21 +218,28 @@ void OM_SettleDeadBody(edict_t *ent)
 	if (!contact) {
 		VectorCopy(ent->s.origin, p);
 		p[2] += 8.0f;
-		for (int n = 0; n < 4 && !have_floor; n++) {
+		/* A character or a steep face used to end the probe, so the train box under that hit was never a floor
+		   and the body stayed at the kill height. Step past a hit that cannot hold the corpse. */
+		for (int n = 0; n < 8 && !have_floor; n++) {
 			trace_t tr;
 			VectorCopy(p, q);
-			q[2] = p[2] - 4096.0f;
+			q[2] = ent->s.origin[2] - 4096.0f;
+			if (q[2] >= p[2])
+				break;
 			tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_SOLID);
 			if (tr.startsolid || tr.allsolid) {
 				p[2] += 64.0f;
 				continue;
 			}
-			if (tr.fraction < 1.0f && tr.plane.normal[2] >= 0.7f && OM_SupportBrush(tr.ent)) {
+			if (tr.fraction >= 1.0f)
+				break;
+			if (OM_SupportBrush(tr.ent, tr.plane.normal[2])) {
 				have_floor = 1;
 				floorent = tr.ent;
 				floor_z = tr.endpos[2];
+				break;
 			}
-			break;
+			p[2] = tr.endpos[2] - 1.0f;
 		}
 	}
 	VectorCopy(ent->s.origin, origin);

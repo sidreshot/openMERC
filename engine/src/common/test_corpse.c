@@ -191,6 +191,21 @@ int main(void)
 	expect_int("paused unfinished death past 7s does not freeze", OM_CorpseFreeze(1, 0, 0, 1, 8.0f), 0);
 	expect_int("finished death freezes even when already paused", OM_CorpseFreeze(1, 0, 1, 1, 8.0f), 1);
 
+	/* The subway train is a prop box. Its roof holds a corpse. A character does not. A wall does not. */
+	expect_int("world roof supports", OM_CorpseSupport(0, 1.0f), 1);
+	expect_int("bsp roof supports", OM_CorpseSupport(1, 0.7f), 1);
+	expect_int("ground roof supports", OM_CorpseSupport(2, 0.9f), 1);
+	expect_int("prop box roof supports", OM_CorpseSupport(3, 1.0f), 1);
+	expect_int("steep prop is not a floor", OM_CorpseSupport(3, 0.69f), 0);
+	expect_int("character is not a floor", OM_CorpseSupport(4, 1.0f), 0);
+	expect_int("other solid is not a floor", OM_CorpseSupport(5, 1.0f), 0);
+	expect_int("downward face is not a floor", OM_CorpseSupport(1, -1.0f), 0);
+
+	/* No floor yet: the death think must not wipe the fall. On a floor, the animation may stop it. */
+	expect_int("airborne corpse keeps the fall", OM_CorpseKeepFall(1, 0), 1);
+	expect_int("supported corpse does not keep the fall", OM_CorpseKeepFall(1, 1), 0);
+	expect_int("living body does not keep the fall", OM_CorpseKeepFall(0, 0), 0);
+
 	if (failures)
 		fprintf(stderr, "corpse_hit_settle_test failures=%d\n", failures);
 	else
