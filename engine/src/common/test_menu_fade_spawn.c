@@ -223,8 +223,59 @@ main(void)
 		Check(tbl && RowHasToggle(tbl), "settings menu data has the startup-splash row");
 		Check(rmf && strstr(rmf, "menus/om_assist.tbl") != NULL,
 				"the gameplay page includes that row");
+		if (rmf)
+		{
+			const char *inc = strstr(rmf, "menus/om_assist.tbl");
+			const char *view = strstr(rmf, "MENU_OMSET_SECTION_VIEW");
+
+			Check(inc && view && inc < view,
+					"the startup-splash row is the first block on the gameplay page");
+		}
 		free(tbl);
 		free(rmf);
+	}
+
+	{
+		char vid[768];
+		char dir[640];
+		char *video = NULL;
+		int up;
+
+		vid[0] = 0;
+
+		if (getcwd(dir, (int)sizeof(dir)))
+		{
+			for (up = 0; up < 8; up++)
+			{
+				size_t n;
+
+				snprintf(vid, sizeof(vid), "%s/data/base/menus/om_video.tbl", dir);
+
+				if (Exists(vid))
+				{
+					break;
+				}
+
+				vid[0] = 0;
+				n = strlen(dir);
+
+				if (n + 4 >= sizeof(dir))
+				{
+					break;
+				}
+
+				memcpy(dir + n, "/..", 4);
+			}
+		}
+
+		if (vid[0])
+		{
+			video = ReadFile(vid);
+		}
+
+		Check(video && RowHasToggle(video),
+				"the video settings page shows the startup-splash row");
+		free(video);
 	}
 
 	Check(OM_TitleFadeAlpha(0, life, 0) == 255, "a new title is opaque");

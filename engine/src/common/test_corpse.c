@@ -179,6 +179,18 @@ int main(void)
 	expect_int("embedded supported", supported, 1);
 	expect_near("embedded feet", settle_o[2] - 24.0f, 100.0f);
 
+	/* std_istand is not a death. The 7 s fallback must not freeze it. */
+	expect_int("stand idle at 8s does not freeze", OM_CorpseFreeze(0, 1, 1, 0, 8.0f), 0);
+	expect_int("stand pose finished does not freeze", OM_CorpseFreeze(0, 0, 1, 0, 8.0f), 0);
+	expect_int("non-death at exactly 7s does not freeze", OM_CorpseFreeze(0, 0, 0, 0, 7.0f), 0);
+	expect_int("finished death freezes", OM_CorpseFreeze(1, 0, 1, 0, 1.0f), 1);
+	expect_int("death still playing under 7s does not freeze", OM_CorpseFreeze(1, 0, 0, 0, 6.9f), 0);
+	expect_int("death still the pose past 7s freezes", OM_CorpseFreeze(1, 0, 0, 0, 7.1f), 1);
+	expect_int("death at exactly 7s does not freeze yet", OM_CorpseFreeze(1, 0, 0, 0, 7.0f), 0);
+	expect_int("looping death does not freeze", OM_CorpseFreeze(1, 1, 1, 0, 8.0f), 0);
+	expect_int("paused unfinished death past 7s does not freeze", OM_CorpseFreeze(1, 0, 0, 1, 8.0f), 0);
+	expect_int("finished death freezes even when already paused", OM_CorpseFreeze(1, 0, 1, 1, 8.0f), 1);
+
 	if (failures)
 		fprintf(stderr, "corpse_hit_settle_test failures=%d\n", failures);
 	else

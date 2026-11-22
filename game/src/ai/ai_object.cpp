@@ -1119,8 +1119,15 @@ void OmAI::Die(edict_t *inflictor, edict_t *attacker, int damage, const vec3_t p
 	ClearActions(keep);
 	/* 9. death animation */
 	const G3Anim *rec = body ? body->ChooseDeath(attacker, inflictor, damage, dflags, nullptr) : nullptr;
-	if (!rec)
-		rec = Anim("std_stoknees_2bk_n_n");
+	/* A model that cannot play the kneel death used to be told to play it anyway.
+	   SetAnim failed, the body stayed on std_istand, and the corpse pause then
+	   froze that stand. Leave the record empty so the death action keeps asking
+	   for a death the body can play. */
+	if (!rec && body) {
+		const G3Anim *kneel = Anim("std_stoknees_2bk_n_n");
+		if (kneel && body->HasAnim(kneel))
+			rec = kneel;
+	}
 	if (rec && rec->cls != ANIMCLS_DEATH)
 		gi.dprintf("Death action %s not really a death\n", rec->name);
 	static vec3_t zero = {0, 0, 0};

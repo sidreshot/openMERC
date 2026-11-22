@@ -131,3 +131,16 @@ int OM_DeathSettle(float origin[3], float velocity[3], float feet_offset, int co
 	}
 	return 0;
 }
+
+int OM_CorpseFreeze(int is_death, int looping, int anim_done, int paused, float since_death)
+{
+	if (!is_death || looping)
+		return 0;
+	if (anim_done)
+		return 1;
+	if (paused)
+		return 0;
+	if (since_death > OM_CORPSE_FREEZE_S)
+		return 1;
+	return 0;
+}

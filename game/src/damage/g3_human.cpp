@@ -4,6 +4,7 @@
 // voices, faces, weapons, armour and precache.
 // Implements: SPEC-720 Behaviour 10, 11, 12 (armoured boss), SPEC-721 В§2-В§10 (as callers), SPEC-722 human part
 #include "g3_local.h"
+#include "../../../engine/src/common/header/om_corpse.h"
 
 using namespace ghoul;
 
@@ -2673,20 +2674,19 @@ public:
 		   too (jpn2 intro: the hostage Dekker shoots fell back with head and shoulders into the wall) */
 		if (frozenAt == 0)
 			SettleCorpse(6.0f);
-		/* every frame of the lie-down, not the freeze. The clip is authored at the standing
+		/* every frame of the lie-down, not only the freeze. The clip is authored at the standing
 		   origin, so the body lay in the air and dropped onto the floor on the last frame. */
 		if (cur && cur->cls == ANIMCLS_DEATH)
 			SeatOnFloor();
-		/* (not while the fall waits in the air: the body would stay on its standing frame). Only a finished DEATH
-		   animation freezes: ChooseDeath runs this before the death is set, and a pre-death idle or walk that had
-		   just finished froze the instance at the moment of death - the death then played on a paused body, which
-		   stayed upright (owner: "characters hang in one pose, every second time") */
-		/* A looping death (dance, twitching, writhing) counts as "done" for AnimDone() from its first frame; it is not
-		   the end of the death - its exit follows (DyingFollowUp) - so it never freezes the corpse */
-		/* pauseKind used to block the timeout, so a body that paused when it left the ground
-		   never sat down. Seven seconds is long enough for the death clip; after that it sits. */
-		if (frozenAt == 0 && ((AnimDone() && cur && cur->cls == ANIMCLS_DEATH && !(cur->flags & ANIMF_LOOP)) ||
-		                      (deathTime > 0 && now - deathTime > 7.0f))) {
+		/* ChooseDeath runs this before the death animation is set. A pre-death idle
+		   (std_istand) must not pause here: the death would then play on a paused body
+		   and stay upright, in the air as well as on the ground. A looping death counts
+		   as done from its first frame and is not a rest pose. OM_CorpseFreeze pauses
+		   only a non-looping death, when that animation has ended or when it has been
+		   the pose for more than 7 seconds. */
+		if (frozenAt == 0 && OM_CorpseFreeze(cur && cur->cls == ANIMCLS_DEATH,
+		                                      cur && (cur->flags & ANIMF_LOOP), AnimDone(),
+		                                      pauseKind != 0, now - deathTime)) {
 			for (int k = 0; k < 3; k++)
 				SettleCorpse(40.0f);
 			SeatOnFloor();
