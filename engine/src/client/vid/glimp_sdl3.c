@@ -209,7 +209,14 @@ CreateSDLWindow(SDL_WindowFlags flags, int fullscreen, int w, int h)
 	 * like kwin. See:
 	 *  * https://github.com/libsdl-org/SDL/issues/4039
 	 *  * https://github.com/libsdl-org/SDL/issues/3656 */
+#ifdef __APPLE__
+	/* openMERC macOS: not on the Mac. Cmd-Tab brings an app forward but leaves its minimised windows in the Dock,
+	   so a fullscreen window minimised on focus loss stays away after Cmd-Tab back. Not minimised, SDL drops the
+	   window to the normal level when it loses the focus (other apps come in front of it) and Cmd-Tab raises it. */
+	SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
+#else
 	SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "1");
+#endif
 
 	/* OpenMerc test aid vid_testwindow 1 (automated test runs, not for players): the window takes no focus, is not
 	   activated when shown and sits outside the desktop - the runs do not get in the way of the person at the PC */
@@ -529,6 +536,14 @@ GLimp_Init(void)
 		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 		/* the back button / gesture is the Escape key (menu), not the end of the activity */
 		SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+#endif
+#ifdef __APPLE__
+		/* openMERC macOS: desktop fullscreen (vid_fullscreen 2) as a window over the desktop, not in a Space of
+		   its own. In its own Space the window is not brought back when the player switches away (Cmd-Tab) and
+		   back: macOS makes openMERC the active app, but the window stays in the other Space and never gets the
+		   focus again. Without the Space it is a borderless window over the desktop that Cmd-Tab can raise
+		   (see the focus-loss hint in CreateSDLWindow). */
+		SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
 #endif
 		if (!SDL_Init(SDL_INIT_VIDEO))
 		{
