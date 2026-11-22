@@ -182,7 +182,7 @@ static float OM_CorpseFeet(edict_t *ent)
    on that surface instead of staying at the kill height. */
 void OM_SettleDeadBody(edict_t *ent)
 {
-	float feet, origin[3], vel[3], floor_z;
+	float feet, origin[3], vel[3], floor_z, floor_nz;
 	int contact, have_floor;
 	edict_t *floorent;
 	vec3_t p, q;
@@ -194,6 +194,7 @@ void OM_SettleDeadBody(edict_t *ent)
 	have_floor = 0;
 	floorent = NULL;
 	floor_z = 0;
+	floor_nz = 0;
 	VectorCopy(ent->s.origin, p);
 	p[2] = ent->s.origin[2] + feet + 2.0f;
 	for (int n = 0; n < 3 && !contact; n++) {
@@ -237,6 +238,7 @@ void OM_SettleDeadBody(edict_t *ent)
 				have_floor = 1;
 				floorent = tr.ent;
 				floor_z = tr.endpos[2];
+				floor_nz = tr.plane.normal[2];
 				break;
 			}
 			p[2] = tr.endpos[2] - 1.0f;
@@ -244,6 +246,18 @@ void OM_SettleDeadBody(edict_t *ent)
 	}
 	VectorCopy(ent->s.origin, origin);
 	VectorCopy(ent->velocity, vel);
+	/* Already standing on a real floor. The point probe and the movement box
+	   disagree on a slope, and snapping the origin each frame made the corpse
+	   hop. A far floor still lands an airborne kill. A character under the
+	   body is not this floor, so the train roof below one still catches it. */
+	if (!contact && have_floor && ent->groundentity) {
+		float gap = (ent->s.origin[2] + feet) - floor_z;
+		float slope_vz, slope_hop;
+		int close = gap <= 24.0f && gap >= -24.0f;
+		if (close && OM_CorpseSlope(OM_SolidKind(ent->groundentity), floor_nz, 1, vel[2], 0.0f, &slope_vz,
+		                            &slope_hop) == OM_SLOPE_REST)
+			contact = 1;
+	}
 	if (OM_DeathSettle(origin, vel, feet, contact, have_floor, floor_z)) {
 		VectorCopy(origin, ent->s.origin);
 		VectorCopy(vel, ent->velocity);
@@ -305,6 +319,30 @@ int SV_FlyMove(edict_t *ent, float time, int mask)
 		// the end position is tested again (unstick)
 		trace_t t2 = gi.trace(ent->s.origin, mins, maxs, ent->s.origin, ent, mask);
 		if (t2.startsolid) {
+			if (ent->solid == SOLID_CORPSE) {
+				/* The stuck unstick reverses velocity and adds a random hop.
+				   On a slope that hop is the corpse jumping in place. Rest on a
+				   supporting face. On a steeper face, do not add the hop. */
+				float nz = 0.0f;
+				int kind = 5;
+				float slope_vz, slope_hop;
+				int decision;
+				if (trace.fraction < 1.0f && trace.ent) {
+					nz = trace.plane.normal[2];
+					kind = OM_SolidKind(trace.ent);
+				}
+				decision = OM_CorpseSlope(kind, nz, 1, ent->velocity[2], 1.0f, &slope_vz, &slope_hop);
+				if (decision == OM_SLOPE_REST) {
+					VectorClear(ent->velocity);
+					if (trace.fraction < 1.0f && trace.ent) {
+						ent->groundentity = trace.ent;
+						ent->groundentity_linkcount = trace.ent->linkcount;
+					}
+					return blocked | 1;
+				}
+				ent->velocity[2] = slope_vz;
+				return blocked;
+			}
 			if (trace.fraction < 1 && trace.plane.normal[2] > 0.7f && trace.ent &&
 			    (trace.ent->solid == SOLID_BSP || trace.ent->solid == SOLID_GROUND)) {
 				ent->groundentity = trace.ent;
@@ -375,6 +413,11 @@ int SV_FlyMove(edict_t *ent, float time, int mask)
 		}
 
 		// SoF: only the vertical component is stopped when it changed sign
+		/* A corpse that was not already rising must not leave a slope upward. */
+		if (ent->solid == SOLID_CORPSE && ent->velocity[2] > 0.0f && primal_velocity[2] <= 0.0f) {
+			ent->velocity[2] = 0.0f;
+			return blocked;
+		}
 		if ((ent->velocity[2] > 0 && primal_velocity[2] < 0) || (ent->velocity[2] < 0 && primal_velocity[2] > 0)) {
 			ent->velocity[2] = 0;
 			return blocked;
@@ -711,6 +754,30 @@ static void SV_LinearFriction(edict_t *ent)
 	}
 }
 
+/* A stuck corpse box has no plane. Drop a point from above the origin until it
+   reads the face under the feet. A ceiling (normal down) is not that face. */
+static int OM_SlopeFace(edict_t *ent, trace_t *face)
+{
+	vec3_t a, b;
+	int mask = ent->clipmask ? ent->clipmask : MASK_SOLID;
+
+	for (int n = 0; n < 4; n++) {
+		VectorCopy(ent->s.origin, a);
+		a[2] = ent->s.origin[2] + 16.0f + 32.0f * (float)n;
+		VectorCopy(a, b);
+		b[2] = ent->s.origin[2] - 48.0f;
+		if (b[2] >= a[2])
+			return 0;
+		*face = gi.trace(a, vec3_origin, vec3_origin, b, ent, mask);
+		if (face->startsolid || face->allsolid)
+			continue;
+		if (face->fraction < 1.0f && face->plane.normal[2] > 0.0f)
+			return 1;
+		return 0;
+	}
+	return 0;
+}
+
 void SV_CheckGround(edict_t *ent)
 {
 	vec3_t point, mins, maxs;
@@ -725,6 +792,38 @@ void SV_CheckGround(edict_t *ent)
 		ent->groundentity_linkcount = tr.ent ? tr.ent->linkcount : 0;
 		return;
 	}
+	/* The corpse box cuts into a slope, so this trace is startsolid and used to
+	   clear the floor. The body then fell, landed, and hopped. A close supporting
+	   face holds it. A steep face stays a slide, with no upward kick. */
+	if (ent->solid == SOLID_CORPSE && tr.startsolid) {
+		trace_t face;
+		float gap, slope_vz, slope_hop;
+		int decision = OM_SLOPE_FALL;
+		slope_vz = ent->velocity[2];
+		if (OM_SlopeFace(ent, &face)) {
+			gap = (ent->s.origin[2] + OM_CorpseFeet(ent)) - face.endpos[2];
+			if (gap <= 24.0f && gap >= -24.0f)
+				decision = OM_CorpseSlope(OM_SolidKind(face.ent), face.plane.normal[2], 1, ent->velocity[2],
+				                          0.0f, &slope_vz, &slope_hop);
+		}
+		if (decision == OM_SLOPE_REST) {
+			ent->groundentity = face.ent ? face.ent : world;
+			ent->groundentity_linkcount = ent->groundentity->linkcount;
+			VectorClear(ent->velocity);
+			return;
+		}
+		if (decision == OM_SLOPE_SLIDE) {
+			ent->velocity[2] = slope_vz;
+			ent->groundentity = NULL;
+			return;
+		}
+		if (ent->velocity[2] > 0.0f)
+			ent->velocity[2] = 0.0f;
+		if (ent->groundentity && OM_CorpseSupport(OM_SolidKind(ent->groundentity), 1.0f))
+			return;
+		ent->groundentity = NULL;
+		return;
+	}
 	if (!tr.startsolid && tr.fraction == 1) {
 		ent->groundentity = NULL;
 		return;
@@ -734,6 +833,13 @@ void SV_CheckGround(edict_t *ent)
 		ent->groundentity = tr.ent;
 		ent->groundentity_linkcount = tr.ent ? tr.ent->linkcount : 0;
 		return;
+	}
+	if (ent->solid == SOLID_CORPSE && !tr.startsolid && tr.fraction < 1.0f && tr.plane.normal[2] > 0.0f &&
+	    tr.plane.normal[2] < 0.7f) {
+		float slope_vz, slope_hop;
+		if (OM_CorpseSlope(OM_SolidKind(tr.ent), tr.plane.normal[2], 0, ent->velocity[2], 0.0f, &slope_vz,
+		                   &slope_hop) == OM_SLOPE_SLIDE)
+			ent->velocity[2] = slope_vz;
 	}
 	ent->groundentity = NULL;
 }
