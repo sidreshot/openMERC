@@ -52,6 +52,28 @@ int OM_CorpseSupport(int kind, float normal_z);
    nothing under it stayed at the kill height. */
 int OM_CorpseKeepFall(int is_corpse, int on_ground);
 
+/* What a corpse does with a face its box is touching.
+   OM_SLOPE_FALL: not a slope decision. Origin and velocity stay.
+   OM_SLOPE_REST: the face can hold the body (OM_CorpseSupport). Clear velocity,
+   keep the origin, keep the ground. Do not add a hop.
+   OM_SLOPE_SLIDE: the face is too steep to be a floor. Keep the downhill speed,
+   drop any upward speed, and do not add a hop. Do not treat it as ground.
+   kind and normal_z match OM_CorpseSupport. embedded is 1 when the movement box
+   already intersects the face. vz is the vertical speed (positive is up).
+   hop is the upward kick a stuck-box unstick would add. vz_out and hop_out may
+   be null. A supporting face rests when the box is embedded or vz is not upward.
+   An upward speed on a supporting face the box has already left is a fall. */
+#define OM_SLOPE_FALL 0
+#define OM_SLOPE_REST 1
+#define OM_SLOPE_SLIDE 2
+int OM_CorpseSlope(int kind, float normal_z, int embedded, float vz, float hop, float *vz_out, float *hop_out);
+
+/* One slope decision applied to a body. The origin is never moved, so a second
+   call on the same face cannot pull the body back to an earlier height.
+   REST clears velocity. SLIDE removes an upward vz and does not add hop.
+   FALL leaves origin and velocity unchanged. Returns the decision. */
+int OM_CorpseSlopeStep(float origin[3], float velocity[3], int kind, float normal_z, int embedded, float hop);
+
 /* 1 when the ghoul instance may pause on this pose.
    is_death: the current animation is a death. A standing idle (std_istand)
    is not, so the 7 second fallback must not freeze it in the air.

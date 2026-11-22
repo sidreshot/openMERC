@@ -239,6 +239,83 @@ int main(void)
 	expect_int("named owner is not a fallback zone", OM_CorpseZone(OM_PART_HEAD, 42), OM_ZONE_NONE);
 	expect_int("empty part is not a zone", OM_CorpseZone(OM_PART_NONE, 0), OM_ZONE_NONE);
 
+	/* A corpse on a slope. The box starts inside the face, the ground check used
+	   to drop the floor, and the stuck unstick added a hop. The body landed and
+	   hopped again. A supporting face keeps the height and clears that hop.
+	   A second step must not pull the body back down. A steeper face is still
+	   not a floor: the downhill speed stays, the hop is not added. */
+	{
+		float slope_o[3] = {4.0f, 8.0f, 80.0f};
+		float slope_v[3] = {30.0f, -12.0f, -20.0f};
+		float again;
+		int decision;
+
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 1, 0.85f, 1, 1.0f);
+		expect_int("slope rest", decision, OM_SLOPE_REST);
+		expect_near("slope rest keeps x", slope_o[0], 4.0f);
+		expect_near("slope rest keeps the height", slope_o[2], 80.0f);
+		expect_near("slope rest clears the hop", slope_v[2], 0.0f);
+		expect_near("slope rest stops the crawl", slope_v[0], 0.0f);
+		expect_near("slope rest stops the side crawl", slope_v[1], 0.0f);
+		again = slope_o[2];
+		slope_v[2] = 40.0f;
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 1, 0.85f, 1, 1.0f);
+		expect_int("slope rest again", decision, OM_SLOPE_REST);
+		expect_near("slope rest again stays at that height", slope_o[2], again);
+		expect_near("slope rest again does not take an upward speed", slope_v[2], 0.0f);
+
+		slope_o[2] = 50.0f;
+		slope_v[0] = 10.0f;
+		slope_v[1] = 0.0f;
+		slope_v[2] = -8.0f;
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 1, 0.7f, 0, 1.0f);
+		expect_int("walkable slope at 0.7 rests", decision, OM_SLOPE_REST);
+		expect_near("walkable slope keeps the height", slope_o[2], 50.0f);
+		expect_near("walkable slope does not rise", slope_v[2], 0.0f);
+
+		slope_o[2] = 40.0f;
+		slope_v[0] = 12.0f;
+		slope_v[1] = 4.0f;
+		slope_v[2] = 25.0f;
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 1, 0.69f, 1, 5.0f);
+		expect_int("steep face is not a rest", decision, OM_SLOPE_SLIDE);
+		expect_int("steep face is still not a floor", OM_CorpseSupport(1, 0.69f), 0);
+		expect_near("steep slide keeps the height", slope_o[2], 40.0f);
+		expect_near("steep slide keeps the downhill speed", slope_v[0], 12.0f);
+		expect_near("steep slide keeps the side speed", slope_v[1], 4.0f);
+		expect_near("steep slide does not add the hop", slope_v[2], 0.0f);
+
+		slope_o[2] = 70.0f;
+		slope_v[0] = 6.0f;
+		slope_v[2] = -10.0f;
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 3, 0.69f, 0, 5.0f);
+		expect_int("steep touch slides", decision, OM_SLOPE_SLIDE);
+		expect_near("steep touch keeps the height", slope_o[2], 70.0f);
+		expect_near("steep touch keeps the run", slope_v[0], 6.0f);
+		expect_near("steep touch does not raise vz", slope_v[2], -10.0f);
+
+		slope_o[2] = 15.0f;
+		slope_v[2] = -5.0f;
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 4, 1.0f, 1, 1.0f);
+		expect_int("character is not a slope rest", decision, OM_SLOPE_SLIDE);
+		expect_near("character slide keeps the height", slope_o[2], 15.0f);
+
+		slope_o[2] = 90.0f;
+		slope_v[0] = 0.0f;
+		slope_v[2] = 40.0f;
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 1, 0.9f, 0, 7.0f);
+		expect_int("upward off a slope is still a fall", decision, OM_SLOPE_FALL);
+		expect_near("upward fall keeps the height", slope_o[2], 90.0f);
+		expect_near("upward fall keeps vz", slope_v[2], 40.0f);
+
+		slope_o[2] = 400.0f;
+		slope_v[2] = -50.0f;
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 0, -1.0f, 0, 1.0f);
+		expect_int("downward face is still a fall", decision, OM_SLOPE_FALL);
+		expect_near("downward face keeps the fall height", slope_o[2], 400.0f);
+		expect_near("downward face keeps vz", slope_v[2], -50.0f);
+	}
+
 	if (failures)
 		fprintf(stderr, "corpse_hit_settle_test failures=%d\n", failures);
 	else

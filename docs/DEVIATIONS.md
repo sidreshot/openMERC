@@ -137,6 +137,11 @@ thunderstorm on jpn2".
   physics gave it. The blown-back death does not add the upward 100 or lift the origin: that arc left the body at the
   kill height. A body whose box touched a wall or a window sill never got a ground entity: it stood frozen on the
   death's first frames (owner's jpn2 screenshot 2026-11-02, "NPCs often freeze in a pose and do not fall").
+- **Corpse on a slope** (g_phys.cpp SV_CheckGround, SV_FlyMove, OM_SettleDeadBody, om_corpse.c OM_CorpseSlope):
+  a movement box on a ramp starts inside the face, so the ground check cleared the floor and the stuck-move
+  unstick added an upward hop. The body landed and hopped again. A supporting face (normal_z at least 0.7) now
+  keeps the corpse where it already stands and clears that hop. A steeper face is still not a floor. The corpse
+  slides down it and does not jump. A kill in the air still drops onto the first real floor.
 - **MPG and flamethrower aim** (g_weapon.cpp WeaponFire): the stream goes from the muzzle to the point under the
   crosshair, as the converging bullet weapons do. From the muzzle parallel to the view it passed 9 units beside the
   centre, outside a character's +-8 box: neither weapon hurt anyone (owner 2026-11-02). The server's othermz beam and

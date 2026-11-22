@@ -144,6 +144,62 @@ int OM_CorpseKeepFall(int is_corpse, int on_ground)
 	return is_corpse && !on_ground;
 }
 
+int OM_CorpseSlope(int kind, float normal_z, int embedded, float vz, float hop, float *vz_out, float *hop_out)
+{
+	if (vz_out)
+		*vz_out = vz;
+	if (hop_out)
+		*hop_out = hop;
+
+	if (OM_CorpseSupport(kind, normal_z)) {
+		/* Embedded in a floor, or coming down onto one: stay. A hop here is the
+		   stuck box leaving and landing again. An upward speed that has already
+		   left the face is still a fall. */
+		if (embedded || vz <= 0.0f) {
+			if (vz_out)
+				*vz_out = 0.0f;
+			if (hop_out)
+				*hop_out = 0.0f;
+			return OM_SLOPE_REST;
+		}
+		return OM_SLOPE_FALL;
+	}
+
+	/* Too steep to stand on, or a character. Slide when the box is in the face,
+	   or when a downward move meets an upward face. Do not turn that into a jump. */
+	if (embedded || (normal_z > 0.0f && normal_z < 0.7f && vz <= 0.0f)) {
+		if (hop_out)
+			*hop_out = 0.0f;
+		if (vz_out && vz > 0.0f)
+			*vz_out = 0.0f;
+		return OM_SLOPE_SLIDE;
+	}
+
+	return OM_SLOPE_FALL;
+}
+
+int OM_CorpseSlopeStep(float origin[3], float velocity[3], int kind, float normal_z, int embedded, float hop)
+{
+	float vz, hop_out;
+	int decision;
+
+	if (!origin || !velocity)
+		return OM_SLOPE_FALL;
+	decision = OM_CorpseSlope(kind, normal_z, embedded, velocity[2], hop, &vz, &hop_out);
+	if (decision == OM_SLOPE_REST) {
+		velocity[0] = 0.0f;
+		velocity[1] = 0.0f;
+		velocity[2] = 0.0f;
+		return decision;
+	}
+	if (decision == OM_SLOPE_SLIDE) {
+		velocity[2] = vz;
+		return decision;
+	}
+	(void)hop_out;
+	return decision;
+}
+
 int OM_CorpseFreeze(int is_death, int looping, int anim_done, int paused, float since_death)
 {
 	if (!is_death || looping)
