@@ -20,7 +20,7 @@ static int RecordZones(G3Body *b, int *out, int max, int *firstZone, int *exitZo
 		if (r.inst != inst || !r.part)
 			continue;
 		vec3_t p = {r.point[0], r.point[1], r.point[2]};
-		int z = b->gore->ZoneByOwnerPart(r.part, p, false);
+		int z = Dmg_HitZone(r, b->gore, p, false);
 		if (z < 0)
 			continue;
 		if (*firstZone < 0)

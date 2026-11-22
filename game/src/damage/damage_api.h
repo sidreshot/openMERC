@@ -135,6 +135,7 @@ struct G3ShotHits {
 	vec3_t start;                                  // shot start in that entity's space
 	vec3_t dir;                                    // unit direction in that entity's space
 	vec3_t worldStart, worldDir;                   // the same in world space
+	int fallbackPart;                              // OM_PART_* when the volume owner was 0, else 0
 };
 extern G3ShotHits dmg_shot;
 void Dmg_ShotClear(void);

@@ -207,6 +207,8 @@ public:
 };
 extern int g3_gibCounter;          // G of SPEC-721 rule 8
 extern int g3_gibPieces;           // pieces of the current gib
+/* Zone of one shot record. A volume whose owner id is 0 still selects a head, leg, or body zone. */
+int Dmg_HitZone(const ghoul::HitRecord &r, G3Gore *gore, const float *point, bool knifeDM);
 int Gore_ArmourPoints(G3Body *body);
 G3Gore *G3_NewGore(G3Body *b, int zones);
 ghoul::IGhoulCallback *G3_NoteCallback(int note);

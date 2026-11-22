@@ -105,6 +105,18 @@ void OMGhoul_Command(int argc, const char *const *argv);
 /* ENG2: the shared size-matters value for the movement routine (SPEC-314 Inputs) */
 float OMGhoul_SizeMatters(void);
 
+/* 1 when `bolt` has a node in the instance's sequence at `time`.
+   GetBoltMatrix still writes the identity when the bolt is absent. Callers use this to
+   tell that identity from a bolt that really sits on the local origin.
+   inst is an IGhoulInst *. Returns 0 when inst is null, the pose cannot be evaluated,
+   or the bolt is not in the sequence. Exported: the game module looks it up by name. */
+#if defined(_WIN32)
+__declspec(dllexport)
+#else
+__attribute__((visibility("default")))
+#endif
+int OM_GhoulBoltInSequence(void *inst, float time, int bolt);
+
 #ifdef __cplusplus
 }
 #endif
