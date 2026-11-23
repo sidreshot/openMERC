@@ -6,7 +6,6 @@
 //             SPEC-AMEND-005 G6b.1 (worldspawn runner: single player, end of ClientBegin), G6b.2 (effects bit 0x4000)
 
 #include "sg_local.h"
-#include "header/om_play.h"
 #include "../ai/ai_hooks.h" /* om_scriptaudit */
 
 #include <string>
@@ -66,62 +65,14 @@ static void sync_to_game(void) { game.cinematic = System().cinematic_state() & 0
 // ------------------------------------------------------------------------------------------------------------
 // script_runner (SPEC-750 1.1-1.3)
 
-/* Entities nycintro removes before it hands the player the level. */
-static void om_free_named(const char *name)
-{
-	edict_t *e = NULL;
-	while ((e = G_Find(e, FOFS(targetname), name)))
-		G_FreeEdict(e);
-}
-
-static void om_use_named(const char *name, edict_t *activator)
-{
-	edict_t *e = NULL;
-	while ((e = G_Find(e, FOFS(targetname), name))) {
-		if (e->inuse && e->use)
-			e->use(e, activator, activator);
-	}
-}
-
-/* om_showintro 0 skips the tsr1 campaign reel (studio logos, then the New York
-   cameras). The same targetname on later maps is a level cinematic and plays. */
-static qboolean om_skip_campaign_intro(edict_t *self, edict_t *activator)
-{
-	static const char *drop[] = {
-		"introltrain", "walkingswatguy", "introswat3", "sabre1", "walkinguy",
-		"introhostage1", "introhostage2", "lastjohn", "lasthawk", "lastswatleader",
-		"finaltrain", NULL
-	};
-	const char *path;
-	cvar_t *cv;
-	int i;
-
-	if (!self->targetname || Q_stricmp(self->targetname, "startintro") || self->sg_script <= 0)
-		return false;
-	path = System().script_path(self->sg_script - 1);
-	if (!OM_IntroIsStartupScript(path))
-		return false;
-	cv = gi.cvar("om_showintro", "1", CVAR_ARCHIVE);
-	if (!cv || cv->value != 0) {
-		gi.dprintf("om_showintro: tsr1 campaign intro playing\n");
-		return false;
-	}
-	for (i = 0; drop[i]; i++)
-		om_free_named(drop[i]);
-	om_use_named("runguy", activator);
-	om_use_named("show_objectives", activator);
-	gi.dprintf("om_showintro: tsr1 campaign intro skipped\n");
-	return true;
-}
-
+/* om_showintro skips the startup splash only. A script_runner, including
+   tsr1/nycintro and every later mission reel, always runs its script. */
 static void runner_use(edict_t *self, edict_t *other, edict_t *activator)
 {
 	(void)other;
 	if (g_debug)
 		gi.dprintf("G6b: use %s (%s) by %d at %.1f\n", self->targetname ? self->targetname : "-",
 		           System().script_path(self->sg_script - 1), Num(activator), level.time);
-	if (om_skip_campaign_intro(self, activator))
-		return;
 	if (self->sg_script > 0)
 		System().use(self->sg_script - 1, Num(activator));
 }

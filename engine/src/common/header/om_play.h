@@ -13,19 +13,16 @@
 extern "C" {
 #endif
 
-/* Archived cvar. Default on: studio logos and the campaign intro play.
-   Off skips that startup reel only. */
+/* Archived cvar. Default on: the startup splash plays (disclaimer, then
+   studio logos). Off skips that splash only. Mission cinematics always play. */
 const char *OM_IntroCvarName(void);
 int OM_IntroDefaultOn(void);
 int OM_IntroArchived(void);
 
-/* 1 when showintro is off and this menu is the startup reel
-   (disclaimer or the studio intro). Any other menu, including a
-   cinematic inside a level, is left alone. */
+/* 1 when showintro is off and this menu is the startup splash
+   (disclaimer or the studio intro). Mission menus and every other
+   menu are left alone. */
 int OM_IntroSkip(int showintro, const char *menu);
-
-/* 1 when this script is the campaign opening reel. Other cinematics play. */
-int OM_IntroIsStartupScript(const char *path);
 
 /* End-of-level title alpha, 0..255. age_ms and life_ms are milliseconds
    from the moment the title appeared. fade_ms is the fade-out length;

@@ -76,45 +76,6 @@ OM_IntroSkip(int showintro, const char *menu)
 }
 
 int
-OM_IntroIsStartupScript(const char *path)
-{
-	const char *needle = "tsr1/nycintro";
-	int i;
-
-	if (!path)
-	{
-		return 0;
-	}
-
-	for (i = 0; path[i]; i++)
-	{
-		int k;
-
-		for (k = 0; needle[k]; k++)
-		{
-			char c = path[i + k];
-
-			if (c >= 'A' && c <= 'Z')
-			{
-				c = (char)(c - 'A' + 'a');
-			}
-
-			if (c != needle[k])
-			{
-				break;
-			}
-		}
-
-		if (!needle[k])
-		{
-			return 1;
-		}
-	}
-
-	return 0;
-}
-
-int
 OM_TitleFadeAlpha(int age_ms, int life_ms, int fade_ms)
 {
 	int fade;

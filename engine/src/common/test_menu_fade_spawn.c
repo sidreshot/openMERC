@@ -207,10 +207,7 @@ main(void)
 	Check(OM_IntroSkip(0, "main") == 0, "off does not skip the main menu");
 	Check(OM_IntroSkip(0, "sud1") == 0, "off does not skip an in-level menu");
 	Check(OM_IntroSkip(0, "mail") == 0, "off does not skip the briefing");
-
-	Check(OM_IntroIsStartupScript("ds/tsr1/nycintro.os") == 1, "the campaign reel is the startup script");
-	Check(OM_IntroIsStartupScript("ds/sud1/introcam.os") == 0, "a later cinematic is not the startup reel");
-	Check(OM_IntroIsStartupScript(NULL) == 0, "a missing script is not the startup reel");
+	Check(OM_IntroSkip(0, "introcam") == 0, "off does not skip a mission cinematic");
 
 	if (!FindMenus(tblpath, (int)sizeof(tblpath), rmfpath, (int)sizeof(rmfpath)))
 	{

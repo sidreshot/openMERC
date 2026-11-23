@@ -871,8 +871,8 @@ M_OpenMenu(const char *rawname, const char *rawframe, qboolean forced)
 	Q_strlcpy(name, rawname, sizeof(name));
 	Q_strlwr(name);
 
-	/* Off skips the studio logos and the campaign intro only.
-	   A cinematic inside a level still ends on the use key. */
+	/* Off skips the startup splash only (disclaimer and studio logos).
+	   A cinematic inside a mission still plays. */
 	if (OM_IntroSkip((int)Cvar_VariableValue(OM_IntroCvarName()), name))
 	{
 		Q_strlcpy(name, "main", sizeof(name));
@@ -2503,7 +2503,7 @@ M_Init(void)
 {
 	menu_mouse_x = Cvar_Get("menu_mouse_x", "0", 0);
 	menu_mouse_y = Cvar_Get("menu_mouse_y", "0", 0);
-	/* 1: studio logos and the campaign intro. 0: skip that reel only. Archived. */
+	/* 1: startup splash. 0: skip that splash only. Mission reels still play. Archived. */
 	Cvar_Get(OM_IntroCvarName(), OM_IntroDefaultOn() ? "1" : "0",
 			OM_IntroArchived() ? CVAR_ARCHIVE : 0);
 	m_cursor_speed = Cvar_Get("m_cursor_speed", "8", CVAR_ARCHIVE);
