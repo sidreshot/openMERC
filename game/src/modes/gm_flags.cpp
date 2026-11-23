@@ -207,6 +207,8 @@ static void gm_flag_touch(edict_t *self, edict_t *other, cplane_t *plane, csurfa
 	(void)surf;
 	if (gm.mode != GM_CTF || !GM_IsClient(other) || other->health <= 0 || !GM_TouchAllowed())
 		return;
+	if (other->client->spawnprotect_time > level.time)
+		GhoulSetTint(other, 1, 1, 1, 1);
 	other->client->spawnprotect_time = 0;
 	bool dropped = self->classname && !strcmp(self->classname, "ctf_dropped_flag");
 	if (dropped && self->owner == other && level.time < self->timestamp + 2)

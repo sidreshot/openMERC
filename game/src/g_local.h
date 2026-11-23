@@ -866,6 +866,8 @@ void G_MoverSoundsReset(void);
 void G_AddEvent(edict_t *ent, int ev, int parm);
 void SV_CheckGround(edict_t *ent);
 void OM_SettleDeadBody(edict_t *ent);
+float OM_CorpseBolt(edict_t *ent);
+float OM_CorpseLowest(edict_t *ent, float *handz);
 void Dmg_CorpseHull(edict_t *ent);
 void G_TriggerSoundNoise(edict_t *source, const vec3_t where);
 

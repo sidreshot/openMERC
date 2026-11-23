@@ -893,14 +893,14 @@ M_OpenMenu(const char *rawname, const char *rawframe, qboolean forced)
 		Q_strlcpy(name, "game", sizeof(name));
 	}
 
-	/* the mission terminal (arm1..3 scripts: "intermission login") opened the
-	   retired, empty login page; the mission briefing (mail, which leads on to
-	   the outfit screen) is opened at once instead.
-	   The end-of-mission pages acc and acc2 are the same kind of leftover: the
-	   level scripts still say "intermission acc", and that black screen used to
-	   open the main menu. The briefing is the page that carries menu_nextmap. */
+	/* The armory computer ("intermission login") and a chapter end
+	   ("intermission acc") set menu_mail_file. The letter turns the weapons
+	   on, and its next button opens the rack. acc2 is the short complete
+	   page (tsr1 to the tsr2 reel, trn1 to the armory): it loads menu_nextmap
+	   itself. Sending acc2 to the letter left an empty briefing and an empty
+	   rack, because no letter had turned a weapon on. */
 	if (!strcmp(name, "login") || !strcmp(name, "f_login") ||
-		!strcmp(name, "acc") || !strcmp(name, "acc2"))
+		!strcmp(name, "acc"))
 	{
 		Com_DPrintf("menu: %s opens the briefing\n", name);
 		Q_strlcpy(name, "mail", sizeof(name));

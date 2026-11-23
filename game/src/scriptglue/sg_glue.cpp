@@ -7,6 +7,8 @@
 
 #include "sg_local.h"
 #include "header/om_play.h"
+#include "../ai/ai_hooks.h" /* om_scriptaudit */
+
 #include <string>
 #include <string.h>
 #include <vector>
@@ -48,6 +50,7 @@ static void report_ai_done(int done_id)
 {
 	if (g_debug)
 		gi.dprintf("G6b: AI done %d at %.1f\n", done_id, level.time);
+	om_ai::ScriptAuditDone(done_id); /* test aid (om_scriptaudit) */
 	System().ai_action_completed(done_id);
 }
 

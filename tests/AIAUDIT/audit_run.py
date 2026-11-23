@@ -35,7 +35,7 @@ MAPS = ["tut1", "tsr1", "trn1", "kos1", "kos2", "kos3", "nyc1", "nyc2", "nyc3", 
 PORT = 29720
 
 
-def make(out, maps, timescale, settle):
+def make(out, maps, timescale, settle, command="omaudit"):
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("au_[0-9][0-9].cfg"):
         old.unlink()
@@ -45,7 +45,7 @@ def make(out, maps, timescale, settle):
             "// AIAUDIT: omaudit on %s (written by tests/AIAUDIT/audit_run.py). Needs +set cheats 1.\n"
             "// No semicolons in comments: the command buffer splits lines at them.\n"
             'alias w10 "wait;wait;wait;wait;wait;wait;wait;wait;wait;wait"\n'
-            'alias om_au_go "set sv_jumpcinematic 0;set timescale %g;omaudit"\n'
+            'alias om_au_go "set sv_jumpcinematic 0;set timescale %g;%s"\n'
             "killmenu\n"
             "set timescale 1\n"
             "set sv_jumpcinematic 1\n"
@@ -53,7 +53,7 @@ def make(out, maps, timescale, settle):
             "echo OMTEST audit %s\n"
             "map %s\n"
             "w10\n"
-            "om_delay %g om_au_go\n" % (m, timescale, nxt, m, m, settle))
+            "om_delay %g om_au_go\n" % (m, timescale, command, nxt, m, m, settle))
         with open(out / ("au_%02d.cfg" % n), "w", encoding="ascii", newline="\n") as f:
             f.write(text)
     return len(maps)
@@ -80,7 +80,7 @@ def watch(p, log, pos, maps, start_limit, quiet_limit, deadline):
                 if i >= 0 and ln[i + 13:].split():
                     cur, started, mark = ln[i + 13:].split()[0], False, time.time()
                     continue
-                if "OMWHY" in ln or "OMTRACE " in ln or "OMNOTE " in ln:
+                if "OMWHY" in ln or "OMTRACE " in ln or "OMNOTE " in ln or "OMSCRIPT " in ln:
                     mark = time.time()
                     continue
                 i = ln.find("OMAUDIT ")
@@ -141,12 +141,15 @@ def main():
     ap.add_argument("--max-sessions", type=int, default=0,
                     help="engine sessions to start at most (default: as many as needed; 1 = never start again)")
     ap.add_argument("--extra", default="", help="more engine arguments, e.g. \"+set r_mode 4\"")
+    ap.add_argument("--command", default="omaudit", choices=["omaudit", "omscriptrun"],
+                    help="the check on each map: omaudit (enemies react, default) or omscriptrun (every script of the "
+                         "level runs and the AI commands it waits on complete; game/src/ai/ai_scriptaudit.cpp)")
     ap.add_argument("--dry-run", action="store_true", help="write the scripts, print the command, start nothing")
     a = ap.parse_args()
 
     maps = [m for m in a.maps.replace(" ", ",").split(",") if m] or MAPS
     if a.make:
-        print("%d console scripts in %s" % (make(Path(a.make), maps, a.timescale, a.settle), a.make))
+        print("%d console scripts in %s" % (make(Path(a.make), maps, a.timescale, a.settle, a.command), a.make))
         return 0
     if not a.exe or not a.home:
         ap.error("--exe and --home are needed (or --make)")
@@ -157,7 +160,7 @@ def main():
         sys.exit("--home must be new or empty (nothing is overwritten): %s" % home)
     if a.game and not (Path(a.game) / "base" / "pak0.pak").is_file():
         sys.exit("no base/pak0.pak in %s" % a.game)
-    make(home, maps, a.timescale, a.settle)
+    make(home, maps, a.timescale, a.settle, a.command)
 
     cmd = [str(exe), "-portable"]
     if a.game:
@@ -180,7 +183,7 @@ def main():
     left, checked, skipped, sessions, code = list(maps), [], [], 0, 0
     while left:
         sessions += 1
-        make(home, left, a.timescale, a.settle)
+        make(home, left, a.timescale, a.settle, a.command)
         pos = log.stat().st_size if log.is_file() else 0
         sys.stdout.flush()
         ts = time.time()
@@ -214,6 +217,20 @@ def main():
 
     # the engine's own log holds every session; the standard output is the fallback (logfile off by --extra)
     src = next((q for q in (log, out_log) if q.is_file() and b"OMAUDIT " in q.read_bytes()), log)
+    if a.command == "omscriptrun":
+        # the script check: its OMSCRIPT lines go to <home>/scripts.txt; per map the summary line, then the counts
+        lines = [ln for ln in src.read_text("latin-1", "replace").splitlines() if ln.startswith("OMSCRIPT ")]
+        (home / "scripts.txt").write_text("\n".join(lines) + "\n", encoding="latin-1")
+        kinds = {}
+        for ln in lines:
+            w = ln.split()
+            if len(w) > 2:
+                kinds[w[2]] = kinds.get(w[2], 0) + 1
+            if len(w) > 2 and w[2] == "summary":
+                print("  " + " ".join(w[1:2] + w[3:]))
+        print("OMSCRIPT lines: " + ", ".join("%s %d" % kv for kv in sorted(kinds.items())) + " (" +
+              str(home / "scripts.txt") + ")")
+        return 1 if (skipped or left or code) else 0
     report = Path(__file__).resolve().parent / "audit_report.py"
     sys.stdout.flush()
     r = subprocess.call([sys.executable, "-I", str(report), str(src), "--json", str(home / "audit.json"),

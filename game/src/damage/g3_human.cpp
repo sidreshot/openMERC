@@ -2317,7 +2317,11 @@ public:
 			float reach = len + 12.0f;
 			VectorMA(start, reach, d, far);
 			trace_t tr;
-			gix.trace(start, NULL, NULL, far, ent, MASK_SOLID, &tr);
+			/* Props are CONTENTS_MONSTER. The thing the body is lying on
+			   (a train roof) is not a wall to push away from. */
+			gix.trace(start, NULL, NULL, far, ent, MASK_MONSTERSOLID, &tr);
+			if (ent->groundentity && tr.ent == ent->groundentity)
+				continue;
 			if (tr.startsolid || tr.allsolid || tr.fraction >= 1.0f)
 				continue;
 			float depth = (1.0f - tr.fraction) * reach + 2.0f;
@@ -2332,11 +2336,31 @@ public:
 		vec3_t end;
 		VectorMA(ent->s.origin, step, push, end);
 		trace_t tr;
-		gix.trace(ent->s.origin, ent->mins, ent->maxs, end, ent, MASK_SOLID, &tr);
-		if (tr.startsolid || tr.fraction <= 0)
+		/* The shot hull reaches about 52 below the origin, so this trace
+		   started inside the floor and the push never ran. A short box
+		   above the origin clears the floor and still stops on a wall. */
+		vec3_t cmins = {-12, -12, 4};
+		vec3_t cmaxs = {12, 12, 20};
+		gix.trace(ent->s.origin, cmins, cmaxs, end, ent, MASK_MONSTERSOLID, &tr);
+		if ((tr.startsolid || tr.allsolid) && ent->groundentity)
+			gix.trace(ent->s.origin, cmins, cmaxs, end, ent, MASK_SOLID, &tr);
+		if (tr.startsolid || tr.allsolid)
+			gix.trace(ent->s.origin, NULL, NULL, end, ent, MASK_SOLID, &tr);
+		if (tr.startsolid || tr.allsolid || tr.fraction <= 0)
 			return;
-		VectorCopy(tr.endpos, ent->s.origin);
+		if (ent->groundentity && tr.ent == ent->groundentity)
+			VectorCopy(end, ent->s.origin);
+		else
+			VectorCopy(tr.endpos, ent->s.origin);
 		gix.linkentity(ent);
+		if (G3_Cvar("om_corpsedebug") != 0) {
+			static int shown;
+			if (shown < 24) {
+				shown++;
+				G3_Printf("OMBODY push #%d step %.1f worst %.1f to %.1f %.1f %.1f\n",
+				          (int)(ent - g_edicts), step, worst, ent->s.origin[0], ent->s.origin[1], ent->s.origin[2]);
+			}
+		}
 	}
 
 	const G3Anim *Death(const char *n, const char *voice, int variants, bool commit, bool mute)

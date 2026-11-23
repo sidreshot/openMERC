@@ -344,6 +344,11 @@ CreateSDLWindow(SDL_WindowFlags flags, int fullscreen, int w, int h)
 		return false;
 	}
 
+	/* A negative position is clamped back onto the desktop by the window manager, and iconifying from
+	   outside is undone. Hide here so a test run never puts a window on the screen. */
+	if (testwin->value && !fullscreen)
+		SDL_HideWindow(window);
+
 	return true;
 }
 
@@ -1061,6 +1066,12 @@ GLimp_MenuMouse(qboolean on)
 void
 GLimp_GrabInput(qboolean grab)
 {
+	cvar_t *testwin = Cvar_Get("vid_testwindow", "0", 0);
+
+	if (window != NULL && testwin->value && !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) &&
+	    !(SDL_GetWindowFlags(window) & SDL_WINDOW_HIDDEN))
+		SDL_HideWindow(window);
+
 	if(window != NULL)
 	{
 		SDL_SetWindowMouseGrab(window, grab ? true : false);

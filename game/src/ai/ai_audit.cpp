@@ -16,6 +16,7 @@
  */
 #include "ai_decisions.h"
 #include "../scriptglue/g_scriptglue.h"
+#include "ai_hooks.h" /* ScriptRunActive */
 
 #include <vector>
 
@@ -258,7 +259,7 @@ bool Begin(edict_t *p)
 
 } // namespace
 
-bool AuditActive(void) { return g_on; }
+bool AuditActive(void) { return g_on || ScriptRunActive(); } /* omscriptrun holds level ends too */
 
 /* a level that ended itself during its check (a script or a trigger the guards did not catch): on to the next one.
  * Reads the cvar without creating it, so nothing happens in a session that never gave the command. */

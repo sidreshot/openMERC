@@ -79,6 +79,7 @@ void LevelStart(void)
 	fx::g_ai_noise = PropNoise;
 	ambient::g_angry_count = AngryCount;
 	g3hooks.explosionNoise = BodyExplosionNoise;
+	ScriptAuditLevelStart(); /* test aid (ai_scriptaudit.cpp) */
 	AuditLevelStart(); /* test aid (ai_audit.cpp) */
 }
 
@@ -228,6 +229,7 @@ void FrameBegin(void)
 	if (!cv.ai_freeze)
 		RegisterCvars();
 	AuditFrame(); /* test aid, inert unless started with omaudit (ai_audit.cpp) */
+	ScriptAuditFrame(); /* test aid, inert unless om_scriptaudit or omscriptrun (ai_scriptaudit.cpp) */
 	ReapOrphans();
 	if (CvarValue(cv.ai_savetest) && level.framenum == 200)
 		SaveSelfTest();

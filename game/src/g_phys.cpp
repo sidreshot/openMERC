@@ -169,7 +169,12 @@ static int OM_SupportBrush(edict_t *hit, float normal_z)
 
 static float OM_CorpseFeet(edict_t *ent)
 {
-	float z = ent->mins[2];
+	/* The shot hull is deeper than the posed body and is rewritten every
+	   settle. The ground bolt is the contact the animation is standing on.
+	   Using the hull here yanks a lying body back up to the standing height. */
+	float z = OM_CorpseBolt(ent);
+	if (z >= -1.0f || z < -80.0f)
+		z = ent->mins[2];
 	if (z < -40.0f)
 		z = -40.0f;
 	if (z > 0.0f)
@@ -197,11 +202,33 @@ void OM_SettleDeadBody(edict_t *ent)
 	floor_nz = 0;
 	VectorCopy(ent->s.origin, p);
 	p[2] = ent->s.origin[2] + feet + 2.0f;
-	for (int n = 0; n < 3 && !contact; n++) {
+	/* A monster volume around the feet makes the monster trace start solid.
+	   The long probe then climbs out and plants the body on a ceiling.
+	   A world face within a step is the ground the body is already standing on,
+	   and it wins before that climb. A train is not in MASK_SOLID, so this
+	   probe does not steal the roof from the monster trace below. */
+	{
 		trace_t tr;
 		VectorCopy(p, q);
 		q[2] -= 24.0f;
 		tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_SOLID);
+		if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f &&
+		    OM_SupportBrush(tr.ent, tr.plane.normal[2])) {
+			float gap = (ent->s.origin[2] + feet) - tr.endpos[2];
+			if (gap <= 12.0f && gap >= -16.0f) {
+				contact = 1;
+				floorent = tr.ent;
+				floor_z = tr.endpos[2];
+			}
+		}
+	}
+	for (int n = 0; n < 3 && !contact; n++) {
+		trace_t tr;
+		VectorCopy(p, q);
+		q[2] -= 24.0f;
+		/* A train is a bounding box, so the trace leaf is CONTENTS_MONSTER.
+		   MASK_SOLID walks through the car and the body lands on the track under it. */
+		tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_MONSTERSOLID);
 		if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f &&
 		    OM_SupportBrush(tr.ent, tr.plane.normal[2])) {
 			float gap = (ent->s.origin[2] + feet) - tr.endpos[2];
@@ -227,7 +254,7 @@ void OM_SettleDeadBody(edict_t *ent)
 			q[2] = ent->s.origin[2] - 4096.0f;
 			if (q[2] >= p[2])
 				break;
-			tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_SOLID);
+			tr = gi.trace(p, vec3_origin, vec3_origin, q, ent, MASK_MONSTERSOLID);
 			if (tr.startsolid || tr.allsolid) {
 				p[2] += 64.0f;
 				continue;
@@ -235,6 +262,15 @@ void OM_SettleDeadBody(edict_t *ent)
 			if (tr.fraction >= 1.0f)
 				break;
 			if (OM_SupportBrush(tr.ent, tr.plane.normal[2])) {
+				/* The climb out of a startsolid volume can exit above a shell
+				   and meet that shell on the way down. A train box may sit
+				   above the feet and still has to catch the body. A world
+				   face that far above the feet is a ceiling. */
+				if (OM_SolidKind(tr.ent) != 3 &&
+				    tr.endpos[2] > ent->s.origin[2] + feet + 48.0f) {
+					p[2] = tr.endpos[2] - 1.0f;
+					continue;
+				}
 				have_floor = 1;
 				floorent = tr.ent;
 				floor_z = tr.endpos[2];

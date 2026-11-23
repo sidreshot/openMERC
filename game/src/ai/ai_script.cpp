@@ -215,6 +215,13 @@ Decision *NewScriptedDecision(void) { return new ScriptedDecision(); }
 
 Decision *FindScripted(AI *ai) { return ai->FindDecision(DK_SCRIPTED); }
 
+/* test aid (ai_scriptaudit.cpp): the script actions a character has queued, -1 without a scripted decision */
+int ScriptQueueLength(edict_t *ent)
+{
+	Decision *d = (ent && ent->ai) ? FindScripted(ent->ai) : nullptr;
+	return d ? (int)static_cast<ScriptedDecision *>(d)->items.size() : -1;
+}
+
 static ScriptedDecision *GetScripted(AI *ai)
 {
 	Decision *d = FindScripted(ai);
@@ -348,6 +355,7 @@ void ScriptedDecision::Plan(edict_t *ent, AI *ai)
 		sub = kind == 1 ? ai->body->ChooseMove(in) : ai->body->ChooseStand(in);
 		gi.dprintf("script anim: %s not available for %s, using %s!\n", rec->name,
 		           ent->targetname ? ent->targetname : ent->classname, sub ? sub->name : "nothing");
+		ScriptAuditAnimSub(ent, rec->name, sub ? sub->name : nullptr); /* test aid (om_scriptaudit) */
 		rec = sub;
 	}
 	if (!rec && ai->body) {

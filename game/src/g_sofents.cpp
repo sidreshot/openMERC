@@ -644,8 +644,11 @@ static void spawner_use(edict_t *self, edict_t *other, edict_t *activator)
 	}
 	if (self->nextthink) {
 		self->nextthink = 0;
+		self->teleport_time = 0;
 		return;
 	}
+	/* clock for the "no hidden spot" fallback; cleared again if use toggles the spawner off */
+	self->teleport_time = level.time;
 	self->think = spawner_think;
 	self->nextthink = level.time + 1.0f;
 }
@@ -687,7 +690,9 @@ static bool spawner_spot_visible(edict_t *spot, edict_t *p, bool ambush)
 	return true;
 }
 
-static edict_t *spawner_spot(edict_t *master, vec3_t out)
+/* allow_visible: a limited wave (irq3a) may use a spot the player can see, never one inside the lip radius.
+   The hidden search is unchanged and always runs first. */
+static edict_t *spawner_spot(edict_t *master, vec3_t out, bool allow_visible)
 {
 	edict_t *p = G_FirstPlayer();
 	int n = 0;
@@ -705,17 +710,57 @@ static edict_t *spawner_spot(edict_t *master, vec3_t out)
 			continue;
 		vec3_t d;
 		VectorSubtract(p->s.origin, m->s.origin, d);
-		if (VectorLength(d) >= 769 || spawner_spot_visible(m, p, ambush))
+		float dist = VectorLength(d);
+		if (dist >= 769)
 			continue;
+		if (spawner_spot_visible(m, p, ambush)) {
+			if (!allow_visible)
+				continue;
+			float lip = m->speed > 0 ? m->speed : 450;
+			if (dist < lip)
+				continue;
+		}
 		vec3_t down, zero = {0, 0, 0};
 		VectorCopy(m->s.origin, down);
 		down[2] -= 256;
-		trace_t tr = gi.trace(m->s.origin, zero, zero, down, m, MASK_MONSTERSOLID);
+		/* World floor only. MASK_MONSTERSOLID starts inside the soldier already standing on this
+		   point and comes back as a miss (fraction 1), so the spots further along the facing were
+		   never tried and the quota stayed at one body (irq3a cargo door). A real miss still used
+		   to spawn the soldier 256 units under the spot, under the map. */
+		trace_t tr = gi.trace(m->s.origin, zero, zero, down, m, MASK_SOLID);
+		if (tr.fraction >= 1.0f || tr.startsolid)
+			continue;
 		VectorCopy(tr.endpos, out);
 		out[2] += 12;
-		vec3_t bmin = {-16, -16, 0}, bmax = {16, 16, 73};
-		tr = gi.trace(out, bmin, bmax, out, m, MASK_MONSTERSOLID);
-		if (tr.startsolid || tr.allsolid)
+		/* The designed point stays the first choice. irq3a's door holds one body, and that body never
+		   walks off the point, so the rest of the quota had nowhere to appear. Steps of 48 go along the
+		   spot's facing (into the room) while the box and a real floor are free, and not inside the lip. */
+		vec3_t fwd, base;
+		AngleVectors(m->s.angles, fwd, NULL, NULL);
+		VectorCopy(out, base);
+		float lip = m->speed > 0 ? m->speed : 450;
+		bool stood = false;
+		for (int step = 0; step < 4 && !stood; step++) {
+			vec3_t at, pd;
+			VectorMA(base, 48.0f * step, fwd, at);
+			VectorSubtract(p->s.origin, at, pd);
+			if (VectorLength(pd) < lip)
+				continue;
+			vec3_t bmin = {-16, -16, 0}, bmax = {16, 16, 73};
+			trace_t box = gi.trace(at, bmin, bmax, at, m, MASK_MONSTERSOLID);
+			if (box.startsolid || box.allsolid)
+				continue;
+			vec3_t drop;
+			VectorCopy(at, drop);
+			drop[2] -= 64;
+			trace_t fl = gi.trace(at, zero, zero, drop, m, MASK_SOLID);
+			if (fl.fraction >= 1.0f)
+				continue;
+			VectorCopy(at, out);
+			out[2] = fl.endpos[2] + 12;
+			stood = true;
+		}
+		if (!stood)
 			continue;
 		return m;
 	}
@@ -787,12 +832,23 @@ static void spawner_think(edict_t *self)
 			break;
 		}
 		vec3_t spot;
-		edict_t *m = spawner_spot(self, spot);
+		edict_t *m = spawner_spot(self, spot, false);
+		/* Limited wave, on for 4 s, and every in-range spot is in sight (irq3a: the cargo door in front of
+		   Hawk). Keep waiting and the quota never fills, so killtarget never runs and Hawk stands there.
+		   A spot inside the lip radius stays forbidden. Unlimited spawners are unchanged. killtarget still
+		   waits until the quota is met and nobody from the team is alive. */
+		bool forced = false;
+		if (!m && self->itemcount && self->teleport_time > 0.0f && level.time - self->teleport_time >= 4.0f) {
+			m = spawner_spot(self, spot, true);
+			forced = m != NULL;
+		}
 		if (!m) {
 			if (ei_show->value)
 				gi.dprintf("Level spawner can't spawn - no valid spots\n");
 			break;
 		}
+		if (forced && ei_show->value)
+			gi.dprintf("Level spawner using a spot the player can see\n");
 		const char *cls = classes[0];
 		if (!(self->spawnflags & 2) || !cls || !cls[0]) {
 			int pick = rand() % 3;
@@ -833,7 +889,8 @@ static void spawner_think(edict_t *self)
 		self->timestamp = (float)(int)level.time;
 		made++;
 		if (ei_show->value)
-			gi.dprintf("Level spawner spawned a guy\n");
+			gi.dprintf("Level spawner spawned a guy (%s at %.0f %.0f %.0f)\n", e->classname, e->s.origin[0],
+			           e->s.origin[1], e->s.origin[2]);
 	}
 	if (made && !ambush && interval > 1.0f)
 		self->nextthink = level.time + interval;
@@ -874,8 +931,10 @@ static void spawner_common(edict_t *ent)
 	ent->itemcount = ent->health ? 1 : 0; // total limited
 	ent->use = spawner_use;
 	ent->think = spawner_think;
-	if (!(ent->spawnflags & 1) && !(ent->spawnflags & 128))
+	if (!(ent->spawnflags & 1) && !(ent->spawnflags & 128)) {
 		ent->nextthink = level.time + 1.0f;
+		ent->teleport_time = level.time;
+	}
 	gi.linkentity(ent);
 }
 

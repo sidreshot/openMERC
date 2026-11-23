@@ -96,8 +96,8 @@ V_AddEntity(entity_t *ent)
 	r_entities[r_numentities++] = *ent;
 }
 
-/* The view weapon is added after the packet entities. A turn that fills the 128 slots
-   used to drop it. The slot ignores yaw: the gun stays in the draw set. */
+/* The view weapon is added after the packet entities. A full list used to drop
+   it. The slot ignores yaw: the gun stays in the draw set. */
 void
 V_AddViewWeapon(entity_t *ent, float yaw)
 {

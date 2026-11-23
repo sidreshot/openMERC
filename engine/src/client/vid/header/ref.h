@@ -31,7 +31,9 @@
 #include "vid.h"
 
 #define	MAX_DLIGHTS		32
-#define	MAX_ENTITIES	128
+/* The refresher copies at most SOF_MAX_ENTITIES (512). A client list of 128
+   dropped the view weapon and later bodies once a turn filled it. */
+#define	MAX_ENTITIES	512
 #define	MAX_PARTICLES	4096
 #define	MAX_LIGHTSTYLES	256
 

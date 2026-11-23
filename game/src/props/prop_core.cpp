@@ -911,10 +911,14 @@ void RidersMove(edict_t *self, const vec3_t move)
 		   outline - characters woken on the tsr1 train settled on the roof without the ground entity being set */
 		bool on = p->groundentity == self;
 		/* A corpse rides too. The old test required health, so a body killed on the train
-		   kept its world position and hung there after the car moved on. */
+		   kept its world position and hung there after the car moved on. A living rider
+		   stays within 4 below and 6 above the roof. A dead pose sinks further into the
+		   car box, about 18 under the roof on tsr1, so the dead window is wider. */
 		if (!on && p->ai) {
 			float feet = p->s.origin[2] + p->mins[2], top = self->absmax[2];
-			on = feet >= top - 4 && feet <= top + 6 && p->s.origin[0] >= self->absmin[0] &&
+			float below = p->health > 0 ? 4.0f : 24.0f;
+			float above = p->health > 0 ? 6.0f : 8.0f;
+			on = feet >= top - below && feet <= top + above && p->s.origin[0] >= self->absmin[0] &&
 			     p->s.origin[0] <= self->absmax[0] && p->s.origin[1] >= self->absmin[1] &&
 			     p->s.origin[1] <= self->absmax[1];
 		}
@@ -930,8 +934,9 @@ void RidersMove(edict_t *self, const vec3_t move)
 		lo[2] += 2;
 		trace_t tr = gi.trace(np, lo, p->maxs, np, p, p->client ? 0x02010003 : MASK_MONSTERSOLID);
 		/* a rider whose box touches the tunnel ceiling reads startsolid and was left behind when the train moved.
-		 * Someone already standing on this prop still has to ride */
-		if ((tr.startsolid || tr.allsolid) && p->groundentity != self)
+		 * Someone already standing on this prop still has to ride. A corpse's posed box sits inside the
+		 * car box, so the same trace is startsolid while the body is on the roof. */
+		if ((tr.startsolid || tr.allsolid) && p->groundentity != self && p->health > 0)
 			continue;
 		VectorCopy(np, p->s.origin);
 		gi.linkentity(p);

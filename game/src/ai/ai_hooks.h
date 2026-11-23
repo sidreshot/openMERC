@@ -9,6 +9,9 @@
 #define OM_AI_HOOKS_H
 
 struct edict_s;
+namespace om_script {
+struct AiCommand;
+}
 
 namespace om_ai {
 void LevelStart(void);                    /* SpawnEntities, before the map entities spawn */
@@ -36,6 +39,14 @@ void ReadLevelAI(void);
  * to the player; while it runs the level must not end */
 void AuditStart(struct edict_s *player);
 bool AuditActive(void);
+/* test aid, not in the original (ai_scriptaudit.cpp): cvar om_scriptaudit follows the AI commands of the scripts,
+ * omscriptrun runs every script of the level that has not run yet */
+void ScriptAuditCommand(int ent, struct edict_s *e, const om_script::AiCommand &cmd);
+void ScriptAuditDone(int done_id);
+void ScriptAuditReset(int ent);
+void ScriptRunStart(struct edict_s *player);
+void ScriptAuditKilled(struct edict_s *e, struct edict_s *inflictor, struct edict_s *attacker, int damage, int mod);
+bool ScriptRunActive(void);
 }
 
 #endif

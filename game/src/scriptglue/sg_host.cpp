@@ -40,9 +40,10 @@ void GameHost::cvar_set(const char *name, const char *value) { gix.cvar_set(name
 void GameHost::cvar_set_value(const char *name, float value) { gix.cvar_setvalue(name, value); }
 void GameHost::add_command_text(const char *text)
 {
-	/* test aid (omaudit): a script does not end the level while its enemies are being checked */
-	if (om_ai::AuditActive() &&
-	    (!strncmp(text, "map ", 4) || !strncmp(text, "gamemap", 7) || !strncmp(text, "intermission", 12)))
+	/* test aid (omaudit, omscriptrun): a script does not end the level while it is being checked - nor through the
+	   end-of-mission menu (kos1 endcrates: "menu blankscreen", whose page then starts menu_nextmap) */
+	if (om_ai::AuditActive() && (!strncmp(text, "map ", 4) || !strncmp(text, "gamemap", 7) ||
+	                             !strncmp(text, "intermission", 12) || !strncmp(text, "menu ", 5)))
 		return;
 	gix.AddCommandString(text);
 }
@@ -357,12 +358,14 @@ void GameHost::ai_command(int ent, const AiCommand &cmd)
 	if (g_debug)
 		gi.dprintf("G6b: ai %s cmd %d kind %d count %d flags 0x%x done %d at %.1f\n", entity_name(ent), cmd.command,
 		           cmd.kind, cmd.count, cmd.flags, cmd.done_id, level.time);
+	om_ai::ScriptAuditCommand(ent, e, cmd); /* test aid (om_scriptaudit) */
 	if (e)
 		om_ai::ScriptCommand(e, cmd);
 }
 
 void GameHost::ai_reset(int ent)
 {
+	om_ai::ScriptAuditReset(ent); /* test aid (om_scriptaudit) */
 	edict_t *e = EntInUse(ent);
 	if (e)
 		om_ai::ScriptReset(e);

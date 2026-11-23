@@ -106,6 +106,9 @@ void CasualtyRules(edict_t *victim, AI *ai, edict_t *attacker);
 /* ---- enemy reaction check (ai_audit.cpp; a test aid, inert unless started with the omaudit command) ---- */
 void AuditLevelStart(void);
 void AuditFrame(void);
+void ScriptAuditLevelStart(void);
+void ScriptAuditFrame(void);
+void ScriptAuditAnimSub(edict_t *e, const char *want, const char *got);
 
 /* ---- senses (ai_senses.cpp) ---- */
 Sense *NewSight(int code);

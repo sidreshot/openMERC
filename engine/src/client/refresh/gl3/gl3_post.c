@@ -5842,9 +5842,72 @@ GL3_Beam_AddCasterTris(const float *clip, int numverts, int stride)
 	ClipToWorld(clip, numverts - numverts % 3, stride, &B.dyn, &B.numdyn, &B.maxdyn, BEAM_MAXDYN);
 }
 
-/* axis, length and radii of a captured cone from its vertices */
-static qboolean
-FitBeam(const beamcap_t *c, beam_t *b)
+/* colour and distance of a beam whose apex, axis and length are already set */
+static void
+BeamColorDist(const beamcap_t *c, beam_t *b)
+{
+	int t = BeamTexIndex(c->tex);
+	const float *col = (t >= 0) ? B.markcol[t] : vec3_origin;
+	vec3_t d;
+	float h;
+
+	VectorCopy(col, b->color);
+	VectorSubtract(r_newrefdef.vieworg, b->apex, d);
+	h = Q_clamp(DotProduct(d, b->axis), 0.0f, b->len);
+	VectorMA(b->apex, h, b->axis, d);
+	VectorSubtract(r_newrefdef.vieworg, d, d);
+	b->dist = VectorLength(d);
+}
+
+/* a capture that is wide at both ends and narrow in the middle is two cones
+   meeting at the lamp (the spinning emergency light). One fit of that cloud is
+   a cylinder and draws as a solid bar. Each cone starts at the middle. */
+static int
+BeamPair(const beamcap_t *c, beam_t *b, beam_t *b2, const double cen[3], const double v[3],
+	double hmin, double hmax, double rlo, double rhi, double rw)
+{
+	const double lens[2] = {hmax, -hmin};
+	const double rads[2] = {rhi, rlo};
+	const double sign[2] = {1.0, -1.0};
+	int nout = 0, s;
+
+	for (s = 0; s < 2; s++)
+	{
+		beam_t *o = nout ? b2 : b;
+		int k;
+
+		if ((lens[s] < 8.0) || (rads[s] < 1.0))
+		{
+			continue;
+		}
+
+		if (!o)
+		{
+			break;
+		}
+
+		for (k = 0; k < 3; k++)
+		{
+			o->axis[k] = (float)(sign[s] * v[k]);
+			o->apex[k] = (float)cen[k];
+		}
+
+		o->len = (float)lens[s];
+		o->r0 = (float)Q_max(rw, 0.5);
+		o->r1 = (float)rads[s];
+		/* the texture fit runs the whole bar and would light the cylinder this split rejects */
+		o->hs = 0.02f;
+		o->he = 0.92f;
+		BeamColorDist(c, o);
+		nout++;
+	}
+
+	return nout;
+}
+
+/* axis, length and radii of a captured cone. 0, 1, or 2 beams (the second at b2). */
+static int
+FitBeam(const beamcap_t *c, beam_t *b, beam_t *b2)
 {
 	double cen[3] = {0, 0, 0}, cov[3][3] = {{0}}, v[3], ext[3];
 	double hmin = 1e30, hmax = -1e30, rlo = 0, rhi = 0, band;
@@ -5852,7 +5915,7 @@ FitBeam(const beamcap_t *c, beam_t *b)
 
 	if (n < 3)
 	{
-		return false;
+		return 0;
 	}
 
 	for (i = 0; i < n; i++)
@@ -5909,7 +5972,7 @@ FitBeam(const beamcap_t *c, beam_t *b)
 
 		if (l < 1e-12)
 		{
-			return false;
+			return 0;
 		}
 
 		for (j = 0; j < 3; j++)
@@ -5965,6 +6028,45 @@ FitBeam(const beamcap_t *c, beam_t *b)
 	rlo = nlo ? rlo / nlo : 0;
 	rhi = nhi ? rhi / nhi : 0;
 
+	/* both ends wide, and the middle much narrower: two cones, not a tube and not one pyramid */
+	{
+		double mid = 0.5 * (hmin + hmax), span = hmax - hmin, rmax = Q_max(rlo, rhi), rw = 0;
+		double wband = 0.15 * span;
+		int nw = 0;
+
+		if ((span > 8.0) && (rmax > 1.0) && (Q_min(rlo, rhi) > 0.55 * rmax))
+		{
+			for (i = 0; i < n; i++)
+			{
+				double h = 0, q[3], r;
+
+				for (k = 0; k < 3; k++)
+				{
+					h += (c->v[i * 3 + k] - cen[k]) * v[k];
+				}
+
+				if (fabs(h - mid) > wband)
+				{
+					continue;
+				}
+
+				for (k = 0; k < 3; k++)
+				{
+					q[k] = c->v[i * 3 + k] - cen[k] - h * v[k];
+				}
+
+				r = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
+				rw += r;
+				nw++;
+			}
+
+			if (nw && (rw / nw < 0.45 * rmax))
+			{
+				return BeamPair(c, b, b2, cen, v, hmin, hmax, rlo, rhi, rw / nw);
+			}
+		}
+	}
+
 	/* the axis runs from the narrow end (at the lamp) to the wide end */
 	if (rlo > rhi)
 	{
@@ -5987,7 +6089,7 @@ FitBeam(const beamcap_t *c, beam_t *b)
 
 	if ((b->len < 8) || (rhi < 1))
 	{
-		return false;
+		return 0;
 	}
 
 	/* where along the cone the painted texture actually shows light: t(h) by least squares over the
@@ -6064,27 +6166,8 @@ FitBeam(const beamcap_t *c, beam_t *b)
 
 	b->r0 = (float)Q_max(rlo, 0.5);
 	b->r1 = (float)rhi;
-
-	{
-		int t = BeamTexIndex(c->tex);
-		const float *col = (t >= 0) ? B.markcol[t] : vec3_origin;
-
-		VectorCopy(col, b->color);
-	}
-
-	/* distance from the eye to the axis segment, for the choice of the nearest beams */
-	{
-		vec3_t d;
-		float h;
-
-		VectorSubtract(r_newrefdef.vieworg, b->apex, d);
-		h = Q_clamp(DotProduct(d, b->axis), 0.0f, b->len);
-		VectorMA(b->apex, h, b->axis, d);
-		VectorSubtract(r_newrefdef.vieworg, d, d);
-		b->dist = VectorLength(d);
-	}
-
-	return true;
+	BeamColorDist(c, b);
+	return 1;
 }
 
 /* column-major view-projection of a beam's shadow map: from the narrow end along the axis */
@@ -6582,6 +6665,7 @@ BeamSelect(beam_t *bl, int *nb)
 	static float last = -1;
 	float now = r_newrefdef.time, dt = Q_clamp(now - last, 0.0f, 0.1f);
 	int n = *nb, i, j;
+	qboolean claimed[BEAM_HIST];
 
 	if ((last < 0) || (now < last))
 	{
@@ -6644,10 +6728,24 @@ BeamSelect(beam_t *bl, int *nb)
 		R_Printf(PRINT_ALL, "OMBEAMN fitted %d of %d cones\n", n, B.ncap);
 	}
 
+	memset(claimed, 0, sizeof(claimed));
+
 	for (i = 0; i < n; i++)
 	{
 		int h = bl[i].hist;
 		qboolean drawn = i < BEAM_DRAW;
+
+		/* two cones of one lamp share the apex, so they share one history slot */
+		if ((h >= 0) && claimed[h])
+		{
+			if (drawn)
+			{
+				beamhist[h].drawn = true;
+			}
+
+			bl[i].fade = beamhist[h].fade;
+			continue;
+		}
 
 		if (h < 0)
 		{
@@ -6676,6 +6774,7 @@ BeamSelect(beam_t *bl, int *nb)
 		beamhist[h].time = now;
 		beamhist[h].drawn = drawn;
 		bl[i].fade = beamhist[h].fade;
+		claimed[h] = true;
 	}
 
 	*nb = Q_min(n, BEAM_DRAW);
@@ -6685,7 +6784,7 @@ BeamSelect(beam_t *bl, int *nb)
 void
 GL3_Post_Beams(void)
 {
-	beam_t bl[BEAM_MAXCAP];
+	beam_t bl[BEAM_MAXCAP * 2];
 	float b0[BEAM_DRAW * 4], b1[BEAM_DRAW * 4], b2[BEAM_DRAW * 4], b3[BEAM_DRAW * 4], vps[BEAM_DRAW * 16];
 	int nb = 0, i, j;
 	qboolean shadows = false, half;
@@ -6703,9 +6802,19 @@ GL3_Post_Beams(void)
 
 	for (i = 0; i < B.ncap; i++)
 	{
-		if (FitBeam(&B.cap[i], &bl[nb]))
+		int room = (int)(sizeof(bl) / sizeof(bl[0])) - nb;
+		int nfit;
+
+		if (room <= 0)
 		{
-			nb++;
+			break;
+		}
+
+		nfit = FitBeam(&B.cap[i], &bl[nb], (room >= 2) ? &bl[nb + 1] : NULL);
+
+		if (nfit > 0)
+		{
+			nb += nfit;
 		}
 	}
 
@@ -13103,7 +13212,7 @@ static const char *skyrays_blur_fs =
 	"{\n"
 	"	const int N = 64;\n"
 	"	vec2 delta = (vuv - sun.xy) * prm.y / float(N);\n"
-	/* a per-pixel offset along the ray instead of banding from the 48 steps */
+	/* a per-pixel offset along the ray instead of banding from the 64 steps */
 	"	float j = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n"
 	"	vec2 c = vuv - delta * j * prm.w;\n"
 	"	float w = 1.0, sum = 0.0, norm = 0.0;\n"
@@ -13320,7 +13429,9 @@ SkyPaintedSun(vec3_t dir, vec3_t color)
 			{
 				const unsigned char *q = pix[k] + 4 * (Q_min((int)(t * ih[k]), ih[k] - 1) * iw[k] +
 					Q_min((int)(s * iw[k]), iw[k] - 1));
-				float l = 0.299f * q[0] + 0.587f * q[1] + 0.114f * q[2];
+				/* in whole numbers: a grey of 215 is 215 here (in floats 214.99998, under the threshold below - the
+				   sudctf1 sun, painted 215 215 215, was missed and the rays came from the map's sun beside it) */
+				float l = (float)(299 * q[0] + 587 * q[1] + 114 * q[2]) / 1000.0f;
 
 				lum[y][x] = l;
 				hist += l;

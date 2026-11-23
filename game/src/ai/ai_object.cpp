@@ -51,6 +51,13 @@ void OmAI::SetBBoxPreset(int i, const vec3_t mins, const vec3_t maxs)
 	VectorCopy(maxs, bbox_maxs[i]);
 }
 
+float OM_CorpseBolt(edict_t *ent)
+{
+	if (!ent || !ent->ai)
+		return 0.0f;
+	return ent->ai->floor_height;
+}
+
 /* SPEC-700 rule 15 */
 int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 {
@@ -59,6 +66,51 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 	vec3_t mins, maxs, org;
 	VectorCopy(ent->s.origin, org);
 	if (i == bbox_current) {
+		/* A corpse hull is the posed shot volume, rewritten every settle.
+		   Smoothing mins toward floor_height walks the origin down through
+		   the ground. The ground bolt still has to meet the floor: a death
+		   pose lifts that bolt, and the body hangs at the kill height when
+		   the origin does not follow. Drop to the face and stop there.
+		   Living stances still smooth. */
+		if (ent->solid == SOLID_CORPSE) {
+			if (ent->groundentity && floor_height < -1.0f) {
+				vec3_t a, b;
+				trace_t tr;
+				VectorCopy(org, a);
+				a[2] = org[2] + floor_height + 2.0f;
+				VectorCopy(a, b);
+				b[2] -= 128.0f;
+				tr = Trace(a, vec3_origin, vec3_origin, b, ent, MASK_MONSTERSOLID);
+				if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f &&
+				    tr.plane.normal[2] >= 0.7f && tr.ent && !tr.ent->client &&
+				    !tr.ent->ai && tr.ent->solid != SOLID_CORPSE) {
+					float gap = (org[2] + floor_height) - tr.endpos[2];
+					float drop = (gap > 2.0f && gap <= 80.0f) ? gap : 0.0f;
+					/* The ground bolt is the pose contact, and the drop puts
+					   it on the face. A hand (or any lower bolt) hangs below
+					   that contact. Raising the origin so the hand clears
+					   lifts the torso by the same amount, so the body sits
+					   in the air whenever the pose dips a limb. Leave it. */
+					{
+						static cvar_t *dbg;
+						static int shown;
+						if (!dbg)
+							dbg = gi.cvar("om_corpsedebug", "0", 0);
+						if (dbg->value && shown < 48) {
+							shown++;
+							gi.dprintf("OMBODY plant #%d z %.1f bolt %.1f floor %.1f gap %.1f drop %.1f\n",
+							           (int)(ent - g_edicts), org[2], floor_height, tr.endpos[2], gap, drop);
+						}
+					}
+					if (drop > 0.0f) {
+						org[2] = org[2] - drop;
+						VectorCopy(org, ent->s.origin);
+						gi.linkentity(ent);
+					}
+				}
+			}
+			return 1;
+		}
 		/* same preset: only the floor offset is smoothed */
 		VectorCopy(ent->mins, mins);
 		VectorCopy(ent->maxs, maxs);
@@ -1089,7 +1141,9 @@ void OmAI::Die(edict_t *inflictor, edict_t *attacker, int damage, const vec3_t p
 	}
 	/* 6. corpse */
 	ent->solid = SOLID_CORPSE;
-	ent->clipmask = 0x4010003;
+	/* A train is a bounding box, so its leaf is CONTENTS_MONSTER. Without that
+	   bit the ground test walks through the car and the body falls off when it moves. */
+	ent->clipmask = 0x4010003 | CONTENTS_MONSTER;
 	ent->svflags |= SVF_DEADMONSTER;
 	ent->movetype = MOVETYPE_STEP;
 	ent->friction = 0.5f; /* SPEC-AMEND-006 G2.15: the corpse "gravity 0.5" is its ground friction */

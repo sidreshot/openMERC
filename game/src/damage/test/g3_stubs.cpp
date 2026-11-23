@@ -484,3 +484,8 @@ int test_clientDamaged = 0;
 void ScriptGlue_ClientDamaged(edict_t *) { test_clientDamaged++; }
 int ScriptGlue_CinematicState(void) { return 0; }
 void GG_RegisterCallback(ghoul::IGhoulCallback *) {}
+
+// G2 test aid (ai_scriptaudit.cpp): inert here
+namespace om_ai {
+void ScriptAuditKilled(edict_t *, edict_t *, edict_t *, int, int) {}
+}

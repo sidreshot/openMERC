@@ -522,7 +522,11 @@ static void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t
 	if (!inv)
 		return;
 
-	cl->spawnprotect_time = 0; // a touch ends spawn protection (SPEC-780 4)
+	/* a touch ends spawn protection (SPEC-780 4). The fade is the Ghoul tint; clearing only the
+	   timer left the player at the spawn alpha. */
+	if (cl->spawnprotect_time > level.time)
+		GhoulSetTint(other, 1, 1, 1, 1);
+	cl->spawnprotect_time = 0;
 
 	bool dropped = (ent->spawnflags & DROPPED_ITEM) != 0;
 	if (dropped && ent->owner == other && level.time < ent->timestamp + 2)

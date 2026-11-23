@@ -26,6 +26,51 @@ void Dmg_ShotBegin(const vec3_t start, const vec3_t end)
 	shotLen = VectorNormalize(shotDir);
 }
 
+/* World Z of the lowest posed bolt. Gore zones cover the body, and the hands
+   are wbolt_hand_*: the lower-arm zone bolt is the elbow, so a hand in the
+   floor is not in that list. 1e9 when the body has no bolts. handz, when
+   passed, is the lower of the two hand bolts (1e9 when neither is posed). */
+float OM_CorpseLowest(edict_t *ent, float *handz)
+{
+	float best = 1.0e9f;
+	float hands = 1.0e9f;
+	G3Body *body;
+	IGhoulInst *inst;
+	static const char *handbolts[] = {"wbolt_hand_l", "wbolt_hand_r"};
+
+	if (handz)
+		*handz = hands;
+	if (!ent)
+		return best;
+	inst = ent->ghoulInst;
+	body = ent->g3body;
+	if (inst && body && body->gore) {
+		for (int i = 0; i < body->gore->numZones; i++) {
+			vec3_t bp;
+			G3Zone &z = body->gore->zones[i];
+			GhoulID bolt = z.goreBolt ? z.goreBolt : (z.bodyCapBolt ? z.bodyCapBolt : z.pieceCapBolt);
+			if (!bolt || !G3G_BoltWorld(ent, inst, bolt, bp))
+				continue;
+			if (bp[2] < best)
+				best = bp[2];
+		}
+	}
+	if (inst) {
+		for (unsigned k = 0; k < sizeof handbolts / sizeof handbolts[0]; k++) {
+			vec3_t bp;
+			if (!G3G_BoltWorldByName(ent, handbolts[k], bp))
+				continue;
+			if (bp[2] < hands)
+				hands = bp[2];
+			if (bp[2] < best)
+				best = bp[2];
+		}
+	}
+	if (handz)
+		*handz = hands;
+	return best;
+}
+
 static int CorpseEntity(edict_t *ent)
 {
 	if (!ent || !ent->ghoulInst)

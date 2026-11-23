@@ -1207,6 +1207,19 @@ void Bot_Think(Bot *b, edict_t *ent, usercmd_t *cmd)
 	if (ent->client)
 		b->view_yaw = ent->client->v_angle[YAW];
 
+	/* test aid: hold the pose so a screenshot can see the body, the gun and the feet */
+	{
+		static cvar_t *still;
+		if (!still)
+			still = gi.cvar("om_botstill", "0", 0);
+		if (still->value) {
+			if (ent->client)
+				b->view_pitch = ent->client->v_angle[PITCH];
+			Finalize(b, ent, cmd);
+			return;
+		}
+	}
+
 	if (ent->health <= 0 || ent->deadflag) {
 		b->enemy = NULL;
 		b->cur_wp = 0;

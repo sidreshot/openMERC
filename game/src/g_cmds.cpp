@@ -185,6 +185,159 @@ static void Cmd_OmNear_f(edict_t *ent)
 	gi.AddCommandString(va("cmd omsetpos %.0f %.0f %.0f %.0f 0\n", o[0], o[1], o[2], yaw));
 }
 
+/* ombot (test aid): one line per connected player. Feet against the floor, Ghoul tint, mesh box and the
+   weapon flash bolt against the view. "ombot look" then stands the caller in front of the nearest living bot. */
+static void OmBotDump(edict_t *e)
+{
+	gclient_t *c = e->client;
+	float tr, tg, tb, ta;
+	tr = tg = tb = ta = -1;
+	if (e->ghoulInst)
+		e->ghoulInst->GetTint(&tr, &tg, &tb, &ta);
+
+	vec3_t down;
+	VectorCopy(e->s.origin, down);
+	down[2] -= 256;
+	trace_t fl = gi.trace(e->s.origin, NULL, NULL, down, e, MASK_SOLID);
+	float feet = e->s.origin[2] + e->mins[2];
+	float floorz = fl.fraction < 1 ? fl.endpos[2] : -9999.0f;
+
+	float bmin[3], bmax[3];
+	VectorClear(bmin);
+	VectorClear(bmax);
+	if (e->ghoulInst) {
+		ghoul::Matrix4 root;
+		memset(&root, 0, sizeof(root));
+		root.m[0][0] = root.m[1][1] = root.m[2][2] = root.m[3][3] = 1;
+		root.flags = 1;
+		e->ghoulInst->GetBounds(level.time, &root, bmin, bmax, 0, false);
+	}
+
+	vec3_t hand, heel, flash;
+	VectorClear(hand);
+	VectorClear(heel);
+	VectorClear(flash);
+	int handok = GhoulBoltPos(e, "wbolt_hand_r", hand);
+	int heelok = GhoulBoltPos(e, "sbolt_heel_r", heel);
+	int flashok = 0;
+	int flashbolt = -1;
+	if (e->ghoulInst) {
+		int nc = e->ghoulInst->NumChildren();
+		for (int i = 0; i < nc; i++) {
+			ghoul::GhoulID bid = 0;
+			ghoul::IGhoulInst *ch = e->ghoulInst->GetChild(i, &bid);
+			vec3_t f;
+			if (ch && GhoulInstBoltPos(ch, e->s.origin, e->s.angles, "flash", f)) {
+				VectorCopy(f, flash);
+				flashok = 1;
+				flashbolt = (int)bid;
+				break;
+			}
+		}
+	}
+
+	vec3_t fwd, barrel;
+	AngleVectors(c->v_angle, fwd, NULL, NULL);
+	float bardot = -2;
+	float baryaw = 0;
+	if (handok && flashok) {
+		VectorSubtract(flash, hand, barrel);
+		if (VectorNormalize(barrel) > 0.01f) {
+			bardot = DotProduct(fwd, barrel);
+			baryaw = vectoyaw(barrel);
+		}
+	}
+
+	float protect = (c->spawnprotect_time > level.time) ? c->spawnprotect_time - level.time : 0;
+	gi.dprintf("OMBOT %s #%d bot %d org %.0f %.0f %.0f feet %.0f floor %.0f gap %.0f ground %d "
+	           "tint %.2f protect %.1f view %.0f %.0f sang %.0f %.0f meshz %.0f..%.0f "
+	           "hand %d %.0f %.0f %.0f heel %d %.0f flash %d bolt %d %.0f %.0f %.0f bardot %.2f baryaw %.0f\n",
+	           c->pers.netname, (int)(e - g_edicts), c->pers.isbot ? 1 : 0,
+	           e->s.origin[0], e->s.origin[1], e->s.origin[2], feet, floorz, floorz > -9000 ? feet - floorz : -9999.0f,
+	           e->groundentity ? 1 : 0, ta, protect, c->v_angle[PITCH], c->v_angle[YAW], e->s.angles[PITCH],
+	           e->s.angles[YAW], bmin[2], bmax[2], handok, hand[0], hand[1], hand[2], heelok, heelok ? heel[2] : 0.0f,
+	           flashok, flashbolt, flash[0], flash[1], flash[2], bardot, baryaw);
+}
+
+static void Cmd_OmBot_f(edict_t *ent)
+{
+	if (!CheatsOK(ent) || !ent->client)
+		return;
+	edict_t *best = NULL;
+	float bd = 1e9f;
+	int n = 0;
+	int limit = game.maxclients;
+	if (limit > globals.num_edicts - 1)
+		limit = globals.num_edicts - 1;
+	for (int i = 1; i <= limit; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || !e->client || !e->client->pers.connected)
+			continue;
+		OmBotDump(e);
+		n++;
+		if (e == ent || !e->client->pers.isbot || e->health <= 0)
+			continue;
+		vec3_t d;
+		VectorSubtract(e->s.origin, ent->s.origin, d);
+		float dist = VectorLength(d);
+		if (dist < bd) {
+			bd = dist;
+			best = e;
+		}
+	}
+	if (!n)
+		gi.dprintf("OMBOT none\n");
+	if (best && gi.argc() >= 3 && !Q_stricmp(gi.argv(1), "face")) {
+		float yaw = (float)atof(gi.argv(2));
+		best->s.angles[YAW] = yaw;
+		best->s.angles[PITCH] = best->s.angles[ROLL] = 0;
+		best->client->v_angle[YAW] = yaw;
+		best->client->v_angle[PITCH] = 0;
+		best->client->v_angle[ROLL] = 0;
+		VectorCopy(best->client->v_angle, best->client->ps.viewangles);
+		best->client->ps.pmove.delta_angles[YAW] = (short)ANGLE2SHORT(yaw);
+		best->client->ps.pmove.delta_angles[PITCH] = 0;
+		best->client->ps.pmove.delta_angles[ROLL] = 0;
+		gi.cvar_set("om_botstill", "1");
+		gi.dprintf("OMBOT face #%d yaw %.0f\n", (int)(best - g_edicts), yaw);
+		return;
+	}
+	if (!best || gi.argc() < 2 || Q_stricmp(gi.argv(1), "look"))
+		return;
+
+	/* Park the bot on the floor in front of the caller and hold still. The caller is already
+	   standing where the picture should be taken from. */
+	vec3_t fwd, spot, to;
+	AngleVectors(ent->client->v_angle, fwd, NULL, NULL);
+	fwd[2] = 0;
+	if (VectorNormalize(fwd) < 0.1f)
+		VectorSet(fwd, 1, 0, 0);
+	VectorMA(ent->s.origin, 96, fwd, spot);
+	vec3_t drop = {spot[0], spot[1], spot[2] - 160};
+	vec3_t top = {spot[0], spot[1], ent->s.origin[2] + 64};
+	trace_t fl = gi.trace(top, NULL, NULL, drop, best, MASK_SOLID);
+	if (fl.fraction < 1)
+		spot[2] = fl.endpos[2] + 24;
+	VectorCopy(spot, best->s.origin);
+	VectorClear(best->velocity);
+	VectorSubtract(ent->s.origin, spot, to);
+	vec3_t ang;
+	vectoangles(to, ang);
+	best->s.angles[YAW] = ang[YAW];
+	best->s.angles[PITCH] = best->s.angles[ROLL] = 0;
+	best->client->v_angle[YAW] = ang[YAW];
+	best->client->v_angle[PITCH] = 0;
+	best->client->v_angle[ROLL] = 0;
+	VectorCopy(best->client->v_angle, best->client->ps.viewangles);
+	best->client->ps.pmove.delta_angles[YAW] = (short)ANGLE2SHORT(ang[YAW]);
+	best->client->ps.pmove.delta_angles[PITCH] = 0;
+	best->client->ps.pmove.delta_angles[ROLL] = 0;
+	gi.linkentity(best);
+	gi.cvar_set("om_botstill", "1");
+	gi.dprintf("OMBOT park #%d at %.0f %.0f %.0f face %.0f\n", (int)(best - g_edicts), spot[0], spot[1], spot[2],
+	           ang[YAW]);
+}
+
 /* ominv (test aid): the weapons owned and the current one's clip and reserve (not WriteInfo: writing the info
    moves the clips into the reserve, each call added them again) */
 static void Cmd_OmInv_f(edict_t *ent)
@@ -523,9 +676,11 @@ static void Cmd_OmCorpse_f(edict_t *ent)
 		gi.cprintf(ent, PRINT_HIGH, "omcorpse: none\n");
 		return;
 	}
-	gi.cprintf(ent, PRINT_HIGH, "omcorpse %s at %s solid %d svflags 0x%x clipmask 0x%x mins %s maxs %s\n",
-		best->classname, vtos(best->s.origin), (int)best->solid, best->svflags, best->clipmask, vtos(best->mins),
-		vtos(best->maxs));
+	gi.cprintf(ent, PRINT_HIGH,
+	           "omcorpse %s #%d at %s solid %d svflags 0x%x clipmask 0x%x mins %s maxs %s ground %d\n",
+	           best->classname, G_EdictNum(best), vtos(best->s.origin), (int)best->solid, best->svflags,
+	           best->clipmask, vtos(best->mins), vtos(best->maxs),
+	           best->groundentity ? G_EdictNum(best->groundentity) : -1);
 }
 
 static void Cmd_Gimme_f(edict_t *ent)
@@ -586,11 +741,17 @@ static void Cmd_OmKill_f(edict_t *ent)
 {
 	if (!CheatsOK(ent))
 		return;
+	/* omkill <classname prefix>: only that family (irq3a waves are m_irq, Hawk is m_x_mmerc) */
+	const char *want = NULL;
+	if (gi.argc() >= 2 && Q_stricmp(gi.argv(1), "dance"))
+		want = gi.argv(1);
 	edict_t *best = NULL;
 	float bd = 1e9f;
 	for (int i = 1; i < globals.num_edicts; i++) {
 		edict_t *e = &g_edicts[i];
 		if (!e->inuse || e->client || !(e->svflags & SVF_MONSTER) || e->health <= 0)
+			continue;
+		if (want && (!e->classname || Q_strncasecmp(e->classname, want, (int)strlen(want))))
 			continue;
 		vec3_t d;
 		VectorSubtract(e->s.origin, ent->s.origin, d);
@@ -604,6 +765,9 @@ static void Cmd_OmKill_f(edict_t *ent)
 	vec3_t dir;
 	VectorSubtract(best->s.origin, ent->s.origin, dir);
 	VectorNormalize(dir);
+	gi.dprintf("omkill %s at %.0f %.0f %.0f vel %.0f %.0f %.0f ground %d\n", best->classname,
+	           best->s.origin[0], best->s.origin[1], best->s.origin[2], best->velocity[0], best->velocity[1],
+	           best->velocity[2], best->groundentity ? 1 : 0);
 	/* omkill dance: as a burst of an automatic weapon (the 0x10000 "dance" death flag, SPEC-722) */
 	int dflags = DAMAGE_NO_PROTECTION;
 	if (gi.argc() >= 2 && !Q_stricmp(gi.argv(1), "dance"))
@@ -978,6 +1142,8 @@ void ClientCommand(edict_t *ent)
 	}
 	else if (Q_stricmp(cmd, "omnear") == 0)
 		Cmd_OmNear_f(ent);
+	else if (Q_stricmp(cmd, "ombot") == 0)
+		Cmd_OmBot_f(ent);
 	else if (Q_stricmp(cmd, "omaim") == 0)
 		Cmd_OmAim_f(ent);
 	else if (Q_stricmp(cmd, "gimme") == 0)
@@ -998,6 +1164,10 @@ void ClientCommand(edict_t *ent)
 	}
 	else if (Q_stricmp(cmd, "omaudit") == 0)
 		Cmd_OmAudit_f(ent);
+	else if (Q_stricmp(cmd, "omscriptrun") == 0) {
+		if (CheatsOK(ent))
+			om_ai::ScriptRunStart(ent); /* test aid: run every script of the level that has not run (ai_scriptaudit.cpp) */
+	}
 	else if (Q_stricmp(cmd, "omkill") == 0)
 		Cmd_OmKill_f(ent);
 	else if (Q_stricmp(cmd, "killallmonsters") == 0)

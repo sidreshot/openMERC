@@ -1992,3 +1992,13 @@ past 1.0, the shoulder from 0.6), and past white the curve has nothing more to s
 Cost up to +0.004 ms. So A was taken out again and B2 stays open: what makes the effects look painted on is the faint
 part added in display values, which only B or C change. The choice between them (and whether it waits for B4) is the
 owner's.
+
+## r_om_skyrays: the sudctf1 sun found again (2026-11-13)
+
+* The painted-sun search (SkyPaintedSun) missed the ugan sky of sudctf1: its sun is painted 215 215 215, and the
+  luminance 0.299 r + 0.587 g + 0.114 b in floats came out 214.99998, under the 215 threshold. The map's sun
+  (_sun_angle 135 -80: azimuth 315, 80 degrees up) took over and the fan of rays stood about 19 degrees beside the
+  disc (azimuth 35, 72 degrees up) - the very thing the search was written for. The luminance is now
+  summed in whole numbers (a grey of 215 is 215.0).
+* Checked: dm/sudctf1 at 1600x900, views at yaw 0, 10, 20, 35, 60: the fan comes out of the disc; the train sky
+  (a "light" line) does not go through the search. Phones (GLES) still have no read-back and keep the map's sun.

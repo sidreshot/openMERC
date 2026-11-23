@@ -446,10 +446,15 @@ bool GroundAction::Move(edict_t *ent, AI *ai)
 {
 	G3Body *b = ai->body;
 	VectorClear(step);
-	/* A corpse with no floor is still falling. Clearing its velocity here left it at the kill height:
-	   the death pose has almost no root motion, and StepMove refuses to run without a ground entity. */
-	if (OM_CorpseKeepFall(ent->solid == SOLID_CORPSE, ent->groundentity != nullptr))
+	/* A corpse is not walked by the animation. In the air, clearing velocity
+	   left the body at the kill height. On the ground the posed hull is inside
+	   the floor, and StepMove reads that as a step and lifts the body.
+	   ChangeBBox lowers the origin until the ground bolt meets the floor. */
+	if (ent->solid == SOLID_CORPSE) {
+		if (ent->groundentity)
+			VectorClear(ai->velocity);
 		return true;
+	}
 	if (b)
 		b->MoveDelta(move_scale, step);
 	VectorScale(ai->velocity, 0.9f, ai->velocity);

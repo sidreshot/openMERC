@@ -7,6 +7,7 @@
 #include "../bots/bot_api.h"
 #include "../modes/g_modes.h"
 #include "../scriptglue/g_scriptglue.h"
+#include "../ai/ai_hooks.h" /* om_scriptaudit */
 
 int dmg_lastMod;
 bool dmg_knifeDeflected;
@@ -543,6 +544,7 @@ int Dmg_CharacterDamage(G3Hit &h)
 		if (t->health < -999)
 			t->health = -999;
 		t->flags |= FL_NO_KNOCKBACK;
+		om_ai::ScriptAuditKilled(t, h.inflictor, attacker, final, h.mod); /* test aid (om_scriptaudit) */
 		if (ai)
 			ai->Die(h.inflictor, attacker, final, h.point, h.dflags);
 		return 1;
