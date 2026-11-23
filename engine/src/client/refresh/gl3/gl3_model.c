@@ -901,6 +901,11 @@ GL3_Mod_FreeAll(void)
 			Mod_Free(&mod_known[i]);
 		}
 	}
+
+	/* the world was one of them: a renderer restart must not read its emptied slot. On macOS the library is not
+	   unloaded, so this pointer outlives GL3_Shutdown; the shaders made at the next start then took bspversion 0
+	   for a non-SoF map (GL3_DynLight_ShaderWants) and built the CPU light path, one sampler too many for 16 units */
+	gl3_worldmodel = NULL;
 }
 
 /*
