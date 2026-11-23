@@ -721,14 +721,41 @@ static matarena_t matarenas[MAT_ARENAS];
 
 #if defined(_MSC_VER)
 static __declspec(thread) matarena_t *matcur;
+#define MatCur() matcur
+#define MatSetCur(a) (matcur = (a))
+#elif defined(__APPLE__)
+/* macOS: a pthread key, not __thread. dyld never unloads a library with thread-local variables, so with __thread
+   every static of the renderer outlived vid_restart (a stale world pointer, GL names of the old context). The key
+   is made in GL3_Mat_Init and deleted in GL3_Mat_Shutdown (the workers are stopped by then); no key: no arena, the
+   heap. */
+#include <pthread.h>
+static pthread_key_t matkey;
+static qboolean matkeyok;
+
+static matarena_t *
+MatCur(void)
+{
+	return matkeyok ? (matarena_t *)pthread_getspecific(matkey) : NULL;
+}
+
+static void
+MatSetCur(matarena_t *a)
+{
+	if (matkeyok)
+	{
+		pthread_setspecific(matkey, a);
+	}
+}
 #else
 static __thread matarena_t *matcur;
+#define MatCur() matcur
+#define MatSetCur(a) (matcur = (a))
 #endif
 
 static void *
 MatAlloc(size_t n)
 {
-	matarena_t *a = matcur;
+	matarena_t *a = MatCur();
 
 	n = (n + 63) & ~(size_t)63;
 
@@ -746,7 +773,7 @@ MatAlloc(size_t n)
 static void
 MatFree(void *p)
 {
-	matarena_t *a = matcur;
+	matarena_t *a = MatCur();
 
 	if (!p || (a && a->base && ((char *)p >= a->base) && ((char *)p < a->base + MAT_ARENA)))
 	{
@@ -762,7 +789,7 @@ MatArenaBegin(void)
 {
 	int i;
 
-	matcur = NULL;
+	MatSetCur(NULL);
 
 	for (i = 0; i < MAT_ARENAS; i++)
 	{
@@ -778,7 +805,7 @@ MatArenaBegin(void)
 			}
 
 			matarenas[i].used = 0;
-			matcur = &matarenas[i];
+			MatSetCur(&matarenas[i]);
 			return;
 		}
 	}
@@ -787,10 +814,12 @@ MatArenaBegin(void)
 static void
 MatArenaEnd(void)
 {
-	if (matcur)
+	matarena_t *a = MatCur();
+
+	if (a)
 	{
-		matcur->busy = 0;
-		matcur = NULL;
+		a->busy = 0;
+		MatSetCur(NULL);
 	}
 }
 
@@ -1958,6 +1987,13 @@ GL3_Mat_Init(void)
 {
 	r_om_materials = ri.Cvar_Get("r_om_materials", "materials/om_materials.txt", CVAR_ARCHIVE);
 
+#if defined(__APPLE__) && !defined(_MSC_VER)
+	if (!matkeyok)
+	{
+		matkeyok = (pthread_key_create(&matkey, NULL) == 0);
+	}
+#endif
+
 	if (!matcmds)
 	{
 		ri.Cmd_AddCommand("r_om_materials_reload", MatReload_f);
@@ -1995,4 +2031,12 @@ GL3_Mat_Shutdown(void)
 	ri.Cmd_RemoveCommand("r_om_materials_reload");
 	ri.Cmd_RemoveCommand("r_om_material");
 	matcmds = false;
+
+#if defined(__APPLE__) && !defined(_MSC_VER)
+	if (matkeyok)
+	{
+		pthread_key_delete(matkey);
+		matkeyok = false;
+	}
+#endif
 }
