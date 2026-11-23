@@ -768,6 +768,10 @@ void door_hit_top(edict_t *self)
 {
 	Mover_EndSound(self);
 	self->moveinfo.state = STATE_TOP;
+	/* START_OPEN: pos2 is the sealed place (the map brush). Arriving there closes the passage.
+	   A toggle door returns below, so this has to happen first (sib3 blastdr). */
+	if (self->spawnflags & DOOR_START_OPEN)
+		door_hold_portals(self, false);
 	if (self->spawnflags & DOOR_TOGGLE)
 		return;
 	if (self->flags & FL_TEAMSLAVE)
@@ -784,7 +788,10 @@ void door_hit_bottom(edict_t *self)
 {
 	Mover_EndSound(self);
 	self->moveinfo.state = STATE_BOTTOM;
-	door_hold_portals(self, false);
+	/* START_OPEN: the bottom is the open place. The portal was opened when the door left the seal
+	   (door_go_down). Closing it here left the open octagon looking out at the sky. */
+	if (!(self->spawnflags & DOOR_START_OPEN))
+		door_hold_portals(self, false);
 }
 
 void door_go_down(edict_t *self)
@@ -794,6 +801,9 @@ void door_go_down(edict_t *self)
 		self->health = self->max_health;
 	}
 	self->moveinfo.state = STATE_DOWN;
+	/* START_OPEN: this move leaves the sealed place and returns to the open one. Open the passage now. */
+	if (self->spawnflags & DOOR_START_OPEN)
+		door_hold_portals(self, true);
 	if (IsRotatingDoor(self)) {
 		if (!strcmp(self->classname, "func_door_rotating_smart")) {
 			// reset the direction for the next opening (SPEC-761 1.2)
@@ -1078,6 +1088,47 @@ static void door_common(edict_t *ent)
 	ent->nextthink = level.time + FRAMETIME;
 	ent->think = Think_DoorSetup;
 	Mover_DeferSounds(ent);
+}
+
+static void portcullis_use(edict_t *self, edict_t *other, edict_t *activator);
+void door_secret_use(edict_t *self, edict_t *other, edict_t *activator);
+void door_secret_blocked(edict_t *self, edict_t *other);
+void door_secret_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point);
+
+/* a 0.2.4 save stored the door callbacks as none. Position and state stay as saved.
+   A portcullis and a secret door do not share door_use. */
+void Door_Repair(edict_t *ent)
+{
+	if (!ent->classname)
+		return;
+	if (!strcmp(ent->classname, "func_door_secret")) {
+		if (!ent->use)
+			ent->use = door_secret_use;
+		if (!ent->plUse)
+			ent->plUse = door_secret_use;
+		if (!ent->blocked)
+			ent->blocked = door_secret_blocked;
+		if (ent->health && !ent->die)
+			ent->die = door_secret_die;
+		return;
+	}
+	if (!strcmp(ent->classname, "func_door_portcullis")) {
+		if (!ent->use)
+			ent->use = portcullis_use;
+		if (!ent->blocked)
+			ent->blocked = door_blocked;
+		return;
+	}
+	if (!ent->use)
+		ent->use = door_use;
+	if (!ent->blocked)
+		ent->blocked = door_blocked;
+	if (ent->health && !ent->die)
+		ent->die = door_killed;
+	if ((!ent->targetname || (ent->spawnflags & DOOR_PLAYER_USABLE)) && !ent->plUse)
+		ent->plUse = door_direct_use;
+	if (ent->targetname && (ent->message || ent->sp_message) && !ent->touch)
+		ent->touch = door_touch;
 }
 
 void SP_func_door(edict_t *ent)

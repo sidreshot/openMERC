@@ -45,6 +45,14 @@ typedef struct om_ghoul_host_s
 	/* openMERC: the length of a file by game path without reading it, -1 when there is none; recorded as used like
 	   load_file. May be NULL (load_file is used). */
 	int (*file_length)(void *ctx, const char *path);
+
+	/* openMERC: the same as load_file, but only a loose file (a directory mount, highest first), never a pak.
+	   May be NULL. Used so a skin dropped in base/ghoul replaces the one in the pak. */
+	int (*load_loose)(void *ctx, const char *path, void **data);
+
+	/* openMERC: png or jpeg bytes to malloc'd RGBA8, top row first. w and h are set. NULL if this host has no
+	   decoder or the bytes are not such an image. The caller free()s the buffer. May be NULL. */
+	unsigned char *(*decode_image)(void *ctx, const void *data, int len, int *w, int *h);
 } om_ghoul_host_t;
 
 /* Engine bit buffer passed to the engine-only network methods (system methods 16, 18, 24, 25).

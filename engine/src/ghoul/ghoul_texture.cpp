@@ -199,14 +199,110 @@ static Texture *GetTexture(const std::string &name)
 	return r;
 }
 
+static bool Pow2(int v);
+
+/* png/jpg are top row first. The TGA path stores bottom-up and flips; this copies straight and applies the same gamma. */
+static bool DecodeRGBA(const uint8_t *px, int w, int h, const std::string &name, Texture &out)
+{
+	if (!Pow2(w) || !Pow2(h))
+		return false;
+	out.width = w;
+	out.height = h;
+	out.rgba.resize((size_t)w * h * 4);
+	const unsigned char *gamma = G().gamma;
+	unsigned opaque = 255;
+	for (int y = 0; y < h; y++)
+	{
+		const uint8_t *src = px + (size_t)y * w * 4;
+		uint8_t *dst = &out.rgba[(size_t)y * w * 4];
+		for (int x = 0; x < w; x++, src += 4, dst += 4)
+		{
+			dst[0] = gamma[src[0]];
+			dst[1] = gamma[src[1]];
+			dst[2] = gamma[src[2]];
+			dst[3] = src[3];
+			opaque &= src[3];
+		}
+	}
+	out.hasAlpha = opaque != 255;
+	out.nomip = name.find("_NOMIP") != std::string::npos;
+	return true;
+}
+
+/* a replacement of a Ghoul skin: a loose .tga/.png/.jpg (directory mounts, so base/ghoul wins over the pak), else a
+   .png/.jpg anywhere in the search. The pak .tga is left for the caller. kind 0 = tga, 1 = png/jpg. */
+static bool LoadReplacement(const std::string &name, void **data, int *n, int *kind)
+{
+	static const char *looseExt[] = {".TGA", ".PNG", ".JPG"};
+	*data = nullptr;
+	*n = -1;
+	*kind = 0;
+	if (Host().load_loose)
+	{
+		for (const char *e : looseExt)
+		{
+			void *d = nullptr;
+			int len = Host().load_loose(Host().ctx, (name + e).c_str(), &d);
+			if (len >= 0 && d)
+			{
+				*data = d;
+				*n = len;
+				*kind = e[1] == 'T' ? 0 : 1;
+				return true;
+			}
+		}
+	}
+	if (!Host().load_file)
+		return false;
+	static const char *alt[] = {".PNG", ".JPG"};
+	for (const char *e : alt)
+	{
+		void *d = nullptr;
+		int len = Host().load_file(Host().ctx, (name + e).c_str(), &d);
+		if (len >= 0 && d)
+		{
+			*data = d;
+			*n = len;
+			*kind = 1;
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool DecodeLoaded(Texture *t, void *d, int n, int kind)
+{
+	if (kind == 0)
+		return DecodeTGA((const uint8_t *)d, (size_t)n, t->name, *t);
+	if (!Host().decode_image)
+		return false;
+	int w = 0, h = 0;
+	unsigned char *px = Host().decode_image(Host().ctx, d, n, &w, &h);
+	if (!px)
+		return false;
+	bool ok = DecodeRGBA(px, w, h, t->name, *t);
+	free(px);
+	return ok;
+}
+
 // openMERC: decoded from the host's buffer (LoadBytes copied the whole file first)
 static bool DecodeFile(Texture *t)
 {
-	if (!Host().load_file)
+	if (!Host().load_file && !Host().load_loose)
 		return false;
 	void *d = nullptr;
-	int n = Host().load_file(Host().ctx, (t->name + ".TGA").c_str(), &d);
-	bool ok = n >= 0 && d && DecodeTGA((const uint8_t *)d, (size_t)n, t->name, *t);
+	int n = -1, kind = 0;
+	bool repl = LoadReplacement(t->name, &d, &n, &kind);
+	bool ok = repl && DecodeLoaded(t, d, n, kind);
+	if (d && Host().free_file)
+		Host().free_file(Host().ctx, d);
+	if (ok)
+		return true;
+	if (!Host().load_file)
+		return false;
+	d = nullptr;
+	n = Host().load_file(Host().ctx, (t->name + ".TGA").c_str(), &d);
+	ok = n >= 0 && d && DecodeTGA((const uint8_t *)d, (size_t)n, t->name, *t);
 	if (d && Host().free_file)
 		Host().free_file(Host().ctx, d);
 	return ok;
@@ -282,6 +378,16 @@ void DecodeAhead(const std::vector<std::pair<ImageList *, int>> &want)
 			dup |= (j.t == t);
 		if (dup)
 			continue;
+		void *repl = nullptr;
+		int rn = -1, rkind = 0;
+		if (LoadReplacement(t->name, &repl, &rn, &rkind))
+		{
+			t->decoded = DecodeLoaded(t, repl, rn, rkind);
+			if (repl && Host().free_file)
+				Host().free_file(Host().ctx, repl);
+			if (t->decoded)
+				continue;
+		}
 		void *d = nullptr;
 		int n = Host().load_file(Host().ctx, (t->name + ".TGA").c_str(), &d);
 		const uint8_t *h = (const uint8_t *)d;

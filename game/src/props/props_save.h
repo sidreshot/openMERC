@@ -22,4 +22,5 @@
 namespace props {
 void WriteLevelProps(void);
 void ReadLevelProps(void);
+void RestoreTrains(void);
 } // namespace props

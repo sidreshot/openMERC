@@ -148,7 +148,10 @@ Package ids (I1b, G2 …) refer to `docs/IMPLEMENTATION.md` and the journals in 
   `ooze` note); the corpse now sends it once when it comes to rest. Checked on tsr1 (pool under the corpse).
 - **#5 texture packs: done.** With `r_retexturing 1` (default) a `.tga`, `.png`, `.jpg` and now also `.dds`
   (uncompressed 24/32-bit, DXT1/3/5) with the same path as the original texture replaces it, e.g.
-  `user\textures\subway\1_soda_front_a.dds`. Ghoul model skins are `.tga` files and are replaced by name.
+  `user\textures\subway\1_soda_front_a.dds`. Ghoul model skins are `.tga` files. A loose `.tga`, `.png` or `.jpg`
+  of the same path (for example `base\ghoul\enemy\meso\skin.tga`, or the same file in the user folder) replaces the
+  one in the pak while `r_retexturing` is 1; a `.png` or `.jpg` in a pak does too. `.dds` replaces world textures,
+  not Ghoul skins. A loose file wins over the HD pack for that one skin.
 - **#4 limbs do not fly off / #7 corpse stops reacting: not reproduced.** Corpses take hits in both modes (mode A:
   every hit restarts the corpse twitch; mode B: wounds, knife severs a limb after more than 500 points on the zone,
   as SPEC-721 rule 3). Torso hits never sever (rule 3). Needed: mode, map, weapon and where the body was hit.

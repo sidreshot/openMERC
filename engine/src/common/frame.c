@@ -493,14 +493,17 @@ Qcommon_Init(int argc, char **argv)
 	SCR_EndLoadingPlaque();
 #endif
 
-	/* 15. + commands from the command line, else the default start */
+	/* 15. + commands from the command line, else the default start.
+	   om_skipintro 1 opens the main menu instead of the disclaimer and the intro movie. */
 	if (!Cbuf_AddLateCommands())
 	{
 		if (!COM_CheckParm("-nostart"))
 		{
 			if (!dedicated->value)
 			{
-				Cbuf_AddText("start\n");
+				cvar_t *skip = Cvar_Get("om_skipintro", "0", CVAR_ARCHIVE);
+
+				Cbuf_AddText(skip->value ? "menu amain\n" : "start\n");
 			}
 			else
 			{

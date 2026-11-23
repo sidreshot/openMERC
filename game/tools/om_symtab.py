@@ -96,7 +96,7 @@ def build(symbols):
         addrs[name].add(off)
     rows = set()
     for name, off, obj in symbols:
-        key = name if len(addrs[name]) == 1 else obj + "!" + name
+        key = name if len(addrs[name]) == 1 else "%s@%x!%s" % (obj, off, name)
         rows.add((off, key))
     rows = sorted(rows)
     strings = bytearray()
@@ -108,27 +108,72 @@ def build(symbols):
     return blob, len(rows)
 
 
+def nm_symbols(path):
+    """(name, offset, object) from nm. GNU ld's map lists only globals, so a static callback such as
+    props::train_think was never in the table and every save stored it as none. nm -a still has the locals
+    of an unstripped module. The address in a shared object is the offset from the load base."""
+    import subprocess
+    text = subprocess.check_output(["nm", "-a", "--defined-only", path], text=True, errors="replace")
+    out = []
+    for line in text.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) != 3:
+            continue
+        addr, typ, name = parts
+        if typ not in "tTdDbBrRvVwW":
+            continue
+        if name.startswith(".") or name.startswith("$"):
+            continue
+        try:
+            off = int(addr, 16)
+        except ValueError:
+            continue
+        out.append((name, off, "nm"))
+    return out
+
+
+def find_slot(data):
+    at = data.find(PLACEHOLDER)
+    if at >= 0:
+        if data.find(PLACEHOLDER, at + 1) >= 0:
+            sys.exit("om_symtab: placeholder found twice")
+        return at
+    # a second run: the real table, not a chance "OMSYMTB1" inside instructions
+    idx = 0
+    while True:
+        at = data.find(b"OMSYMTB1", idx)
+        if at < 0:
+            return -1
+        if at + 16 <= len(data):
+            n, sb = struct.unpack_from("<II", data, at + 8)
+            if n < 200000 and sb < SIZE and 16 + n * 8 + sb <= SIZE:
+                return at
+        idx = at + 1
+
+
 def main():
     readers = {"--msvc": msvc_symbols, "--lld": lld_symbols, "--ld64": ld64_symbols}
-    if len(sys.argv) != 4 or sys.argv[1] not in readers:
-        sys.exit(__doc__ or "usage: om_symtab.py --msvc|--lld|--ld64 MAP MODULE")
-    syms = readers[sys.argv[1]](sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == "--nm":
+        syms = nm_symbols(sys.argv[2])
+        module = sys.argv[2]
+    elif len(sys.argv) == 4 and sys.argv[1] in readers:
+        syms = readers[sys.argv[1]](sys.argv[2])
+        module = sys.argv[3]
+    else:
+        sys.exit(__doc__ or "usage: om_symtab.py --nm MODULE | --msvc|--lld|--ld64 MAP MODULE")
+    if not syms:
+        sys.exit("om_symtab: no symbols from %s" % sys.argv[1])
     blob, n = build(syms)
     if len(blob) > SIZE:
         sys.exit("om_symtab: table of %d bytes does not fit the %d reserved" % (len(blob), SIZE))
-    data = bytearray(open(sys.argv[3], "rb").read())
-    at = data.find(PLACEHOLDER)
+    data = bytearray(open(module, "rb").read())
+    at = find_slot(data)
     if at < 0:
-        if data.find(b"OMSYMTB1") >= 0:
-            # already patched (a relink rewrites the file, so this is a second run on the same output)
-            at = data.find(b"OMSYMTB1")
-        else:
-            sys.exit("om_symtab: placeholder not found in " + sys.argv[3])
-    elif data.find(PLACEHOLDER, at + 1) >= 0:
-        sys.exit("om_symtab: placeholder found twice")
+        sys.exit("om_symtab: placeholder not found in " + module)
+    # duplicate names at different addresses must not collapse onto one key
     data[at:at + SIZE] = blob + bytes(SIZE - len(blob))
-    open(sys.argv[3], "wb").write(data)
-    print("om_symtab: %d symbols, %d bytes into %s" % (n, len(blob), sys.argv[3]))
+    open(module, "wb").write(data)
+    print("om_symtab: %d symbols, %d bytes into %s" % (n, len(blob), module))
 
 
 if __name__ == "__main__":

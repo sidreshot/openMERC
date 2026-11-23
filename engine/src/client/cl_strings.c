@@ -435,13 +435,50 @@ CL_SP_Print(int id, const byte *data, int len, qboolean obit)
 	}
 	else
 	{
+		int before = con.current;
+
 		Com_Printf("%s", out);
 
-		/* OpenMerc: during play a plain print (an item picked up, "can't carry more ammo") is also the HUD's pickup
-		   line, readable on a phone (owner 16) */
+		/* OpenMerc: a plain print during play (a pickup, "can't carry more"). cl_pickupmsg 0 is the small
+		   line in the top left, out of the view. 1 is the large centred line only (a phone, where the touch
+		   trays cover the corner). 2 is both, 3 is neither. The text stays in the console log. */
 		if (cls.state == ca_active && !obit)
 		{
-			HUD_PickupText(out);
+			const char *p;
+			int n = 0, mode = (int)Cvar_VariableValue("cl_pickupmsg");
+			qboolean oneline = true;
+
+			if ((mode < 0) || (mode > 3))
+			{
+				mode = 0;
+			}
+
+			if ((mode == 1) || (mode == 2))
+			{
+				HUD_PickupText(out);
+			}
+
+			for (p = out; *p; p++)
+			{
+				if ((*p == '\n') || (*p == '\r'))
+				{
+					if (p[1])
+					{
+						oneline = false;
+					}
+				}
+				else
+				{
+					n++;
+				}
+			}
+
+			/* The centred line keeps 127 characters. A longer notice stays in the corner, which can show
+			   every line, unless messages are off. */
+			if ((mode == 3) || ((mode == 1) && oneline && (n > 0) && (n < 128)))
+			{
+				Con_QuietNotify(before);
+			}
 		}
 	}
 }

@@ -1054,9 +1054,9 @@ HUD_CentredText(int y, const char *s, const unsigned char *c, const om_fontref_t
 	D_Text((HUD_W() - D_TextWidth(s, f)) / 2, y, s, c, f);
 }
 
-/* OpenMerc: the last pickup or notice (owner 16: what was just picked up could not be read - it only went to the
-   small console lines in the corner, under the touch layout's trays). Shown 3 s centred under the top of the HUD in
-   the medium font with a shadow, fading over the last second; a new one replaces it. */
+/* OpenMerc: the large pickup line, used when cl_pickupmsg is 1 or 2. Shown 3 s centred under the top of the HUD
+   in the medium font with a shadow, fading over the last second; a new one replaces it. The default on a desktop
+   is the small line in the top left instead (cl_strings.c): a pickup on every body was in the middle of the view. */
 static char hud_pickup[128];
 static int hud_pickuptime = -100000;
 
@@ -2448,6 +2448,13 @@ HUD_Init(void)
 	char name[16];
 
 	scr_interface = Cvar_Get("scr_interface", "1", CVAR_ARCHIVE);
+	/* 0 top left, 1 centred, 2 both, 3 off. A phone covers the corner with the touch trays, so the centred line
+	   is the default there. Elsewhere the small corner line stays out of the view. */
+#ifdef __ANDROID__
+	Cvar_Get("cl_pickupmsg", "1", CVAR_ARCHIVE);
+#else
+	Cvar_Get("cl_pickupmsg", "0", CVAR_ARCHIVE);
+#endif
 	crosshair_cvar = Cvar_Get("crosshair", "0", CVAR_ARCHIVE);
 	shownames = Cvar_Get("shownames", "0", CVAR_ARCHIVE);
 	spectator_cvar = Cvar_Get("spectator", "0", CVAR_USERINFO);

@@ -130,6 +130,14 @@ bool G10_ReadChunk(const char *id, void *data, int size)
 	return gix.ReadChunk(G10_ChunkId(id), data, size, NULL) == size;
 }
 
+int G10_ReadUpTo(const char *id, void *data, int cap)
+{
+	if (!gix.ReadChunk || cap <= 0)
+		return 0;
+	/* negative length: the engine copies a shorter chunk and rejects a longer one */
+	return gix.ReadChunk(G10_ChunkId(id), data, -cap, NULL);
+}
+
 int G10_ReadChunkAny(const char *id, void **data)
 {
 	*data = NULL;

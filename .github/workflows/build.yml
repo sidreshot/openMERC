@@ -1,8 +1,9 @@
-# Build, test and package openMERC for Windows (x86, MSVC + vcpkg) and Linux (x86_64 and arm64, Debian 13).
-# Every push and pull request builds both and runs the unit tests; the packages are kept as workflow artifacts.
-# macOS (arm64) is built and tested too, without a release package (docs/BUILD-macos.md).
-# A pushed tag v* also attaches openMERC-<version>-win32.zip and openMERC-<version>-linux-x86_64.tar.gz (+ .sha256)
+# Build, test and package openMERC for Windows (x86, MSVC + vcpkg), Linux (x86_64 and arm64, Debian 13)
+# and macOS (arm64). Every push and pull request builds them and runs the unit tests; the packages are kept
+# as workflow artifacts.
+# A pushed tag v* attaches the Windows, Linux x86_64, Linux arm64 and macOS arm64 packages (+ .sha256)
 # to the GitHub release of that tag, when the release exists (create it, as a draft, before pushing the tag).
+# The Android package is not attached.
 name: build
 
 on:
@@ -175,6 +176,17 @@ jobs:
         with:
           name: openMERC-linux-arm64
           path: dist-out/*
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apt-get install -y --no-install-recommends gh || { echo "gh not available"; exit 1; }
+          tag='${{ github.ref_name }}'
+          if ! gh release view "$tag" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            echo "no release for $tag yet - the package stays a workflow artifact"; exit 0
+          fi
+          gh release upload "$tag" dist-out/* --clobber --repo '${{ github.repository }}'
 
   macos:
     name: macOS arm64
@@ -189,7 +201,19 @@ jobs:
         run: OM_BUILD_DIR="$GITHUB_WORKSPACE/out" tools/build/build-macos.sh arm64 Release
       - name: omlight uses OpenMP
         run: otool -L out/release/omlight | grep -q libomp
+      - name: Package
+        run: tools/build/package-macos.sh "$GITHUB_WORKSPACE/out/release" "$GITHUB_WORKSPACE/dist-out"
       - uses: actions/upload-artifact@v4
         with:
           name: openMERC-macos-arm64
-          path: out/release/*
+          path: dist-out/*
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='${{ github.ref_name }}'
+          if ! gh release view "$tag" --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            echo "no release for $tag yet - the package stays a workflow artifact"; exit 0
+          fi
+          gh release upload "$tag" dist-out/* --clobber --repo '${{ github.repository }}'

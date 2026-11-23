@@ -240,6 +240,15 @@ extern "C" void ItemList_Add(edict_t *ent)
 		ItemAddToList(ent);
 }
 
+/* a 0.2.4 save stored the item table pointer and Touch_Item as none. */
+void Item_Repair(edict_t *ent)
+{
+	if (!ent->item && ent->classname)
+		ent->item = FindItemByClassname(ent->classname);
+	if (ent->item && !ent->touch)
+		ent->touch = Touch_Item;
+}
+
 void SpawnItem(edict_t *ent, gitem_t *item)
 {
 	int idx = ITEMNUM(item);

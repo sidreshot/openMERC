@@ -41,6 +41,38 @@ SV_ReadChunk(int id, void *buffer, int length, void **allocated)
 	int len = 0;
 	void *data;
 
+	/* length < 0: the buffer holds -length bytes and a shorter chunk is a
+	   previous build (0.2.4 wrote a 640-byte INVN, this one is 656). A longer
+	   chunk still does not fit. A positive length keeps the exact-size check. */
+	if (buffer && (length < 0))
+	{
+		int max = -length;
+		int got = 0;
+		void *data = SG_ReadChunkAlloc((unsigned)id, &got);
+
+		if (got > max)
+		{
+			if (data)
+			{
+				Z_Free(data);
+			}
+
+			Com_Error(ERR_DROP, "Loaded chunk has different length than requested");
+		}
+
+		if (data && (got > 0))
+		{
+			memcpy(buffer, data, got);
+		}
+
+		if (data)
+		{
+			Z_Free(data);
+		}
+
+		return got;
+	}
+
 	if (buffer && (length > 0))
 	{
 		return SG_ReadChunk((unsigned)id, buffer, length);

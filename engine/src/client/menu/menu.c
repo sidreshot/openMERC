@@ -893,11 +893,16 @@ M_OpenMenu(const char *rawname, const char *rawframe, qboolean forced)
 		Q_strlcpy(name, "game", sizeof(name));
 	}
 
-	/* the mission terminal (arm1..3 scripts: "intermission login") opened the
-	   retired, empty login page; the mission briefing (mail, which leads on to
-	   the outfit screen) is opened at once instead */
-	if (!strcmp(name, "login") || !strcmp(name, "f_login"))
+	/* The armory computer ("intermission login") and a chapter end
+	   ("intermission acc") set menu_mail_file. The letter turns the weapons
+	   on, and its next button opens the rack. acc2 is the short complete
+	   page (tsr1 to the tsr2 reel, trn1 to the armory): it loads menu_nextmap
+	   itself. Sending acc2 to the letter left an empty briefing and an empty
+	   rack, because no letter had turned a weapon on. */
+	if (!strcmp(name, "login") || !strcmp(name, "f_login") ||
+		!strcmp(name, "acc"))
 	{
+		Com_DPrintf("menu: %s opens the briefing\n", name);
 		Q_strlcpy(name, "mail", sizeof(name));
 	}
 
@@ -1417,6 +1422,35 @@ M_MouseAbs(int x, int y)
 	ms.my = y / MR_Scale();
 }
 
+/* Where the drawn pointer is, in window pixels, so the desktop cursor can be put there. */
+void
+M_PointerPixels(int *x, int *y)
+{
+	float s;
+
+	if (!x || !y)
+	{
+		return;
+	}
+
+	if (!ms.active)
+	{
+		*x = viddef.width / 2;
+		*y = viddef.height / 2;
+		return;
+	}
+
+	s = MR_Scale();
+
+	if (s < 0.5f)
+	{
+		s = 0.5f;
+	}
+
+	*x = (int)(ms.mx * s + (ms.mx >= 0 ? 0.5f : -0.5f));
+	*y = (int)(ms.my * s + (ms.my >= 0 ? 0.5f : -0.5f));
+}
+
 static void
 M_ClampPointer(void)
 {
@@ -1593,6 +1627,12 @@ M_InView(mwidget_t *w)
 	top = f->fy + f->pad + pg->screen->originy;
 	bottom = f->fy + f->fh - f->pad + pg->screen->originy;
 
+	/* a row in the pinned-button band is clipped, so it is not a place to land */
+	if (pg->dock && !(w->flags & WF_NOSCROLL))
+	{
+		bottom -= pg->dock;
+	}
+
 	return y + ML_TotalH(w) > top && y < bottom;
 }
 
@@ -1716,14 +1756,14 @@ M_PadNext(qboolean back, qboolean bolted)
 
 		h = ML_TotalH(w);
 
-		for (tries = 0; pg->vbar && !(w->flags & (WF_BOLTED | WF_NOTPLACED)) && tries < 512; tries++)
+		for (tries = 0; pg->vbar && !(w->flags & (WF_BOLTED | WF_NOTPLACED | WF_NOSCROLL)) && tries < 512; tries++)
 		{
 			int old = pg->scroll;
 
 			ML_WidgetScreenPos(pg, w, &x, &y);
 			y -= w->bpad + w->yoff;
 			top = f->fy + f->pad + scr->originy;
-			bottom = f->fy + f->fh - f->pad + scr->originy;
+			bottom = f->fy + f->fh - f->pad + scr->originy - pg->dock;
 
 			if (y < top)
 			{
@@ -1954,6 +1994,12 @@ M_PageHover(mscreen_t *scr, mframe_t *f, mpage_t *pg)
 		{
 			x += w->xoff;
 			y += w->yoff;
+		}
+
+		/* a scrolled row under the pinned buttons is not there */
+		if (pg->dock && !(w->flags & (WF_NOSCROLL | WF_BOLTED)) && y >= y1 - pg->dock)
+		{
+			continue;
 		}
 
 		ML_PageMouse(pg, w, &mx, &my);

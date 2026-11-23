@@ -64,6 +64,7 @@ void Con_CenteredPrint (char *text);
 void Con_Clear_f (void);
 void Con_DrawNotify (void);
 void Con_ClearNotify (void);
+void Con_QuietNotify (int before); /* lines printed after this con.current stay in the log, not the corner */
 void Con_ToggleConsole_f (void);
 
 /* MENU-SCRATCH: console text in the monospaced OFL face (menu/m_draw.c) */

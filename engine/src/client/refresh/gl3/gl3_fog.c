@@ -22,6 +22,9 @@
 #define MAX_FOG_REGIONS 256
 #define MAX_FOG_PLANES 5
 #define MAX_FOG_QUEUE 1024
+/* pockets of one volume farther apart than this stay separate boxes */
+#define FOG_BOXES 4
+#define FOG_BOX_GAP 64.0f
 
 typedef struct
 {
@@ -42,6 +45,10 @@ typedef struct
 	float farwall;       /* 36: non-zero = far fog wall */
 
 	vec3_t mins, maxs, size;
+	/* separate pockets of this volume (one box around all of them fogs the
+	   clear rooms between: tsr1 volume 8). The per-pixel fog tests each. */
+	vec3_t bmin[FOG_BOXES], bmax[FOG_BOXES];
+	int nboxes;
 	cplane_t *planes[MAX_FOG_PLANES];
 	int numplanes;
 	qboolean planemarked[MAX_FOG_PLANES];
@@ -189,6 +196,299 @@ EdgeVertex(gl3model_t *mod, int surfedge, vec3_t out)
 	{
 		VectorCopy(mod->vertexes[mod->edges[-e].v[1]].position, out);
 	}
+}
+
+static int
+FindRoot(int *parent, int x)
+{
+	while (parent[x] != x)
+	{
+		parent[x] = parent[parent[x]];
+		x = parent[x];
+	}
+
+	return x;
+}
+
+/* one box around every polygon of a volume fogs the clear space between
+   pockets (tsr1 volume 8: a yard and a patch, the corridor between them
+   went solid orange). Keep up to FOG_BOXES boxes. */
+static void
+ClusterRegion(int region)
+{
+	enum { BUCKETS = 4096 };
+	int i, n = 0, fi, a, b, k, nbox, nlinks = 0, caplinks;
+	int *face, *parent, *head;
+	typedef struct
+	{
+		short x, y, z;
+		int face, next;
+	} link_t;
+	link_t *links;
+	float (*cmn)[3], (*cmx)[3];
+
+	for (i = 0; i < numfogsurfs; i++)
+	{
+		if ((fogsurfs[i].region == region) && (fogsurfs[i].numpolys > 0))
+		{
+			n++;
+		}
+	}
+
+	regions[region].nboxes = 0;
+
+	if (n <= 0)
+	{
+		return;
+	}
+
+	face = malloc(sizeof(int) * n);
+	parent = malloc(sizeof(int) * n);
+	head = malloc(sizeof(int) * BUCKETS);
+	caplinks = n * 8;
+	links = malloc(sizeof(link_t) * caplinks);
+
+	if (!face || !parent || !head || !links)
+	{
+		free(face);
+		free(parent);
+		free(head);
+		free(links);
+		VectorCopy(regions[region].mins, regions[region].bmin[0]);
+		VectorCopy(regions[region].maxs, regions[region].bmax[0]);
+		regions[region].nboxes = (regions[region].mins[0] <= regions[region].maxs[0]) ? 1 : 0;
+		return;
+	}
+
+	n = 0;
+
+	for (i = 0; i < numfogsurfs; i++)
+	{
+		if ((fogsurfs[i].region == region) && (fogsurfs[i].numpolys > 0))
+		{
+			face[n] = i;
+			parent[n] = n;
+			n++;
+		}
+	}
+
+	for (i = 0; i < BUCKETS; i++)
+	{
+		head[i] = -1;
+	}
+
+	for (fi = 0; fi < n; fi++)
+	{
+		const fogsurf_t *s = &fogsurfs[face[fi]];
+		int c0[3], c1[3], step = 1, nx, ny, nz, x, y, z;
+
+		for (k = 0; k < 3; k++)
+		{
+			c0[k] = (int)floorf((s->mins[k] - FOG_BOX_GAP * 0.5f) / FOG_BOX_GAP);
+			c1[k] = (int)floorf((s->maxs[k] + FOG_BOX_GAP * 0.5f) / FOG_BOX_GAP);
+		}
+
+		nx = c1[0] - c0[0] + 1;
+		ny = c1[1] - c0[1] + 1;
+		nz = c1[2] - c0[2] + 1;
+
+		if (nx < 1)
+		{
+			nx = 1;
+		}
+
+		if (ny < 1)
+		{
+			ny = 1;
+		}
+
+		if (nz < 1)
+		{
+			nz = 1;
+		}
+
+		while ((nx / step) * (ny / step) * (nz / step) > 512)
+		{
+			step++;
+		}
+
+		for (z = c0[2]; z <= c1[2]; z += step)
+		{
+			for (y = c0[1]; y <= c1[1]; y += step)
+			{
+				for (x = c0[0]; x <= c1[0]; x += step)
+				{
+					unsigned h = (unsigned)x * 73856093u ^ (unsigned)y * 19349663u ^ (unsigned)z * 83492791u;
+					int bucket = (int)(h & (BUCKETS - 1));
+					int L;
+
+					for (L = head[bucket]; L >= 0; L = links[L].next)
+					{
+						int ra, rb;
+
+						if ((links[L].x != x) || (links[L].y != y) || (links[L].z != z))
+						{
+							continue;
+						}
+
+						ra = FindRoot(parent, fi);
+						rb = FindRoot(parent, links[L].face);
+
+						if (ra != rb)
+						{
+							parent[rb] = ra;
+						}
+					}
+
+					if (nlinks >= caplinks)
+					{
+						link_t *grown = realloc(links, sizeof(link_t) * (size_t)caplinks * 2);
+
+						if (!grown)
+						{
+							continue;
+						}
+
+						links = grown;
+						caplinks *= 2;
+					}
+
+					links[nlinks].x = (short)x;
+					links[nlinks].y = (short)y;
+					links[nlinks].z = (short)z;
+					links[nlinks].face = fi;
+					links[nlinks].next = head[bucket];
+					head[bucket] = nlinks++;
+				}
+			}
+		}
+	}
+
+	cmn = malloc(sizeof(float[3]) * n);
+	cmx = malloc(sizeof(float[3]) * n);
+	nbox = 0;
+
+	if (cmn && cmx)
+	{
+		int *rootface = malloc(sizeof(int) * n);
+
+		if (rootface)
+		{
+			for (fi = 0; fi < n; fi++)
+			{
+				int root = FindRoot(parent, fi);
+				const fogsurf_t *s = &fogsurfs[face[fi]];
+				int slot = -1;
+
+				for (a = 0; a < nbox; a++)
+				{
+					if (rootface[a] == root)
+					{
+						slot = a;
+						break;
+					}
+				}
+
+				if (slot < 0)
+				{
+					slot = nbox++;
+					rootface[slot] = root;
+
+					for (k = 0; k < 3; k++)
+					{
+						cmn[slot][k] = s->mins[k];
+						cmx[slot][k] = s->maxs[k];
+					}
+				}
+				else
+				{
+					for (k = 0; k < 3; k++)
+					{
+						cmn[slot][k] = Q_min(cmn[slot][k], s->mins[k]);
+						cmx[slot][k] = Q_max(cmx[slot][k], s->maxs[k]);
+					}
+				}
+			}
+
+			free(rootface);
+		}
+	}
+
+	free(face);
+	free(parent);
+	free(head);
+	free(links);
+
+	if (!cmn || !cmx || (nbox <= 0))
+	{
+		free(cmn);
+		free(cmx);
+		VectorCopy(regions[region].mins, regions[region].bmin[0]);
+		VectorCopy(regions[region].maxs, regions[region].bmax[0]);
+		regions[region].nboxes = (regions[region].mins[0] <= regions[region].maxs[0]) ? 1 : 0;
+		return;
+	}
+
+	/* more pockets than the table holds: join the closest pair */
+	while (nbox > FOG_BOXES)
+	{
+		int ba = 0, bb = 1;
+		float bestd = 1e30f;
+
+		for (a = 0; a < nbox; a++)
+		{
+			for (b = a + 1; b < nbox; b++)
+			{
+				float sep = 0;
+
+				for (k = 0; k < 3; k++)
+				{
+					float g = 0;
+
+					if (cmx[a][k] < cmn[b][k])
+					{
+						g = cmn[b][k] - cmx[a][k];
+					}
+					else if (cmx[b][k] < cmn[a][k])
+					{
+						g = cmn[a][k] - cmx[b][k];
+					}
+
+					if (g > sep)
+					{
+						sep = g;
+					}
+				}
+
+				if (sep < bestd)
+				{
+					bestd = sep;
+					ba = a;
+					bb = b;
+				}
+			}
+		}
+
+		for (k = 0; k < 3; k++)
+		{
+			cmn[ba][k] = Q_min(cmn[ba][k], cmn[bb][k]);
+			cmx[ba][k] = Q_max(cmx[ba][k], cmx[bb][k]);
+			cmn[bb][k] = cmn[nbox - 1][k];
+			cmx[bb][k] = cmx[nbox - 1][k];
+		}
+
+		nbox--;
+	}
+
+	for (a = 0; a < nbox; a++)
+	{
+		VectorCopy(cmn[a], regions[region].bmin[a]);
+		VectorCopy(cmx[a], regions[region].bmax[a]);
+	}
+
+	regions[region].nboxes = nbox;
+	free(cmn);
+	free(cmx);
 }
 
 /*
@@ -388,6 +688,7 @@ GL3_Fog_LoadRegions(gl3model_t *mod, const byte *mod_base, const lump_t *lfaces,
 	for (i = 0; i < numregions; i++)
 	{
 		VectorSubtract(regions[i].maxs, regions[i].mins, regions[i].size);
+		ClusterRegion(i);
 	}
 
 	numleafregions = lleafs->filelen / (int)sizeof(dleaf46_t);
@@ -1026,12 +1327,31 @@ GL3_Fog_VolumeRegions(float *out, int max)
 			continue;
 		}
 
-		for (k = 0; k < 3; k++)
-		{
-			float e = r_newrefdef.vieworg[k];
-			float o = (e < r->mins[k]) ? r->mins[k] - e : ((e > r->maxs[k]) ? e - r->maxs[k] : 0);
+		d2 = 1e30f;
 
-			d2 += o * o;
+		if (r->nboxes > 0)
+		{
+			int box;
+
+			for (box = 0; box < r->nboxes; box++)
+			{
+				float bd = BoxDist2(r->bmin[box], r->bmax[box], r_newrefdef.vieworg);
+
+				if (bd < d2)
+				{
+					d2 = bd;
+				}
+			}
+		}
+		else
+		{
+			for (k = 0; k < 3; k++)
+			{
+				float e = r_newrefdef.vieworg[k];
+				float o = (e < r->mins[k]) ? r->mins[k] - e : ((e > r->maxs[k]) ? e - r->maxs[k] : 0);
+
+				d2 += o * o;
+			}
 		}
 
 		/* insertion by distance */
@@ -1046,72 +1366,81 @@ GL3_Fog_VolumeRegions(float *out, int max)
 		n++;
 	}
 
-	if (n > max)
 	{
-		n = max;
-	}
+		int written = 0;
 
-	for (i = 0; i < n; i++)
-	{
-		fogregion_t *r = &regions[idx[i]];
-		float *o = out + i * 32;
-		float start, range, maxalpha, color[4], full;
-
-		Params(r, &start, &range, &maxalpha, color);
-		full = start + range * maxalpha;
-		full = (full > 1) ? sqrtf(full) : 1;
-
-		VectorCopy(r->mins, o);
-		o[3] = 2.0f / full;
-		VectorCopy(r->maxs, (o + 4));
-		o[7] = ((r->flags & 2) && (r->size[2] > 0)) ? 1 : 0;
-		o[8] = color[0] / 255.0f;
-		o[9] = color[1] / 255.0f;
-		o[10] = color[2] / 255.0f;
-		o[11] = (range > 0) ? maxalpha / 255.0f : 0;
-
-		for (k = 0; k < MAX_FOG_PLANES; k++)
+		for (i = 0; (i < n) && (written < max); i++)
 		{
-			float *pl = o + 12 + k * 4;
+			fogregion_t *r = &regions[idx[i]];
+			int nb = (r->nboxes > 0) ? r->nboxes : 1;
+			int box;
 
-			pl[0] = pl[1] = pl[2] = 0;
-			pl[3] = -1;
-
-			if (k < r->numplanes)
+			for (box = 0; (box < nb) && (written < max); box++)
 			{
-				cplane_t *p = r->planes[k];
-				float lo = 1e30f, hi = -1e30f;
-				int c;
+				const float *bm = (r->nboxes > 0) ? r->bmin[box] : r->mins;
+				const float *bx = (r->nboxes > 0) ? r->bmax[box] : r->maxs;
+				float *o = out + written * 32;
+				float start, range, maxalpha, color[4], full;
 
-				/* the inside is the side holding most of the region's box */
-				for (c = 0; c < 8; c++)
+				Params(r, &start, &range, &maxalpha, color);
+				full = start + range * maxalpha;
+				full = (full > 1) ? sqrtf(full) : 1;
+
+				VectorCopy(bm, o);
+				o[3] = 2.0f / full;
+				VectorCopy(bx, (o + 4));
+				o[7] = ((r->flags & 2) && (bx[2] > bm[2])) ? 1 : 0;
+				o[8] = color[0] / 255.0f;
+				o[9] = color[1] / 255.0f;
+				o[10] = color[2] / 255.0f;
+				o[11] = (range > 0) ? maxalpha / 255.0f : 0;
+
+				for (k = 0; k < MAX_FOG_PLANES; k++)
 				{
-					vec3_t v;
-					float d;
+					float *pl = o + 12 + k * 4;
 
-					v[0] = (c & 1) ? r->maxs[0] : r->mins[0];
-					v[1] = (c & 2) ? r->maxs[1] : r->mins[1];
-					v[2] = (c & 4) ? r->maxs[2] : r->mins[2];
-					d = DotProduct(p->normal, v) - p->dist;
-					lo = (d < lo) ? d : lo;
-					hi = (d > hi) ? d : hi;
+					pl[0] = pl[1] = pl[2] = 0;
+					pl[3] = -1;
+
+					if (k < r->numplanes)
+					{
+						cplane_t *p = r->planes[k];
+						float lo = 1e30f, hi = -1e30f;
+						int c;
+
+						/* the inside is the side holding most of this pocket */
+						for (c = 0; c < 8; c++)
+						{
+							vec3_t v;
+							float d;
+
+							v[0] = (c & 1) ? bx[0] : bm[0];
+							v[1] = (c & 2) ? bx[1] : bm[1];
+							v[2] = (c & 4) ? bx[2] : bm[2];
+							d = DotProduct(p->normal, v) - p->dist;
+							lo = (d < lo) ? d : lo;
+							hi = (d > hi) ? d : hi;
+						}
+
+						if (hi >= -lo)
+						{
+							VectorCopy(p->normal, pl);
+							pl[3] = p->dist - 1;
+						}
+						else
+						{
+							VectorNegate(p->normal, pl);
+							pl[3] = -p->dist - 1;
+						}
+					}
 				}
 
-				if (hi >= -lo)
-				{
-					VectorCopy(p->normal, pl);
-					pl[3] = p->dist - 1;
-				}
-				else
-				{
-					VectorNegate(p->normal, pl);
-					pl[3] = -p->dist - 1;
-				}
+				written++;
 			}
 		}
-	}
 
-	return n;
+		return written;
+	}
 }
 
 /* point fog for effects (SPEC-410 Point fog): factor f and colour */
@@ -1824,7 +2153,7 @@ DrawQueued(int from, int to, int mode)
  * volumetric fog, far wall region + 1, its distance; the eye; the regions of this frame (far ones first) - and one
  * row per region.
  */
-#define RF_W 13
+#define RF_W 19 /* 13 plus three extra pocket boxes (texels 13..18) */
 #define RF_MAXVIS 8
 #define RF_UNIT 17
 
@@ -1917,31 +2246,41 @@ PixFrame(void)
 		float d = 0;
 
 		/* a region without faces (its box never set: kos1 8) fogs nothing in SoF (only a far wall of its own) */
-		if (r->mins[0] > r->maxs[0])
+		if ((r->nboxes <= 0) || (r->mins[0] > r->maxs[0]))
 		{
 			continue;
 		}
 
 		{
-			int c, front = 0;
+			int c, box, front = 0;
 
-			for (c = 0; (c < 8) && !front; c++)
+			d = 1e30f;
+
+			for (box = 0; box < r->nboxes; box++)
 			{
-				vec3_t p, e;
+				float bd = BoxDist2(r->bmin[box], r->bmax[box], r_newrefdef.vieworg);
 
-				p[0] = (c & 1) ? r->maxs[0] : r->mins[0];
-				p[1] = (c & 2) ? r->maxs[1] : r->mins[1];
-				p[2] = (c & 4) ? r->maxs[2] : r->mins[2];
-				VectorSubtract(p, r_newrefdef.vieworg, e);
-				front = (DotProduct(e, fwd) > 0);
+				if (bd < d)
+				{
+					d = bd;
+				}
+
+				for (c = 0; (c < 8) && !front; c++)
+				{
+					vec3_t p, e;
+
+					p[0] = (c & 1) ? r->bmax[box][0] : r->bmin[box][0];
+					p[1] = (c & 2) ? r->bmax[box][1] : r->bmin[box][1];
+					p[2] = (c & 4) ? r->bmax[box][2] : r->bmin[box][2];
+					VectorSubtract(p, r_newrefdef.vieworg, e);
+					front = (DotProduct(e, fwd) > 0);
+				}
 			}
 
 			if (!front)
 			{
 				continue;
 			}
-
-			d = BoxDist2(r->mins, r->maxs, r_newrefdef.vieworg);
 		}
 
 		if (nvis < RF_MAXVIS)
@@ -2012,10 +2351,25 @@ PixFrame(void)
 		int np = 0;
 
 		Params(r, &start, &range, &maxalpha, color);
-		VectorCopy(r->mins, t);
-		t[3] = (r->mins[0] > r->maxs[0]) ? 1 : 0;
-		{ float *mx = t + 4; VectorCopy(r->maxs, mx); }
-		t[7] = ((r->flags & 2) && (r->size[2] > 0)) ? 1 : 0;
+
+		{
+			float *mx = t + 4;
+
+			if (r->nboxes > 0)
+			{
+				VectorCopy(r->bmin[0], t);
+				t[3] = 0;
+				VectorCopy(r->bmax[0], mx);
+				t[7] = ((r->flags & 2) && (r->bmax[0][2] > r->bmin[0][2])) ? 1 : 0;
+			}
+			else
+			{
+				VectorCopy(r->mins, t);
+				t[3] = 1; /* no pocket: this row fogs nothing */
+				VectorCopy(r->maxs, mx);
+				t[7] = 0;
+			}
+		}
 		t[8] = start;
 		t[9] = range;
 		t[10] = maxalpha / 255.0f;
@@ -2048,6 +2402,23 @@ PixFrame(void)
 		for (k = 0; k < 10; k++)
 		{
 			t[40 + k] = r->w[k];
+		}
+
+		/* pockets after the first: texels 13..18, w of the min is 1 when unused */
+		for (k = 1; k < FOG_BOXES; k++)
+		{
+			float *mn = t + (13 + (k - 1) * 2) * 4;
+			float *mx = mn + 4;
+
+			mn[3] = 1;
+
+			if (k < r->nboxes)
+			{
+				VectorCopy(r->bmin[k], mn);
+				mn[3] = 0;
+				VectorCopy(r->bmax[k], mx);
+				mx[3] = ((r->flags & 2) && (r->bmax[k][2] > r->bmin[k][2])) ? 1 : 0;
+			}
 		}
 	}
 

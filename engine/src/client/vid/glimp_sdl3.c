@@ -209,7 +209,14 @@ CreateSDLWindow(SDL_WindowFlags flags, int fullscreen, int w, int h)
 	 * like kwin. See:
 	 *  * https://github.com/libsdl-org/SDL/issues/4039
 	 *  * https://github.com/libsdl-org/SDL/issues/3656 */
+#ifdef __APPLE__
+	/* openMERC macOS: not on the Mac. Cmd-Tab brings an app forward but leaves its minimised windows in the Dock,
+	   so a fullscreen window minimised on focus loss stays away after Cmd-Tab back. Not minimised, SDL drops the
+	   window to the normal level when it loses the focus (other apps come in front of it) and Cmd-Tab raises it. */
+	SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
+#else
 	SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "1");
+#endif
 
 	/* OpenMerc test aid vid_testwindow 1 (automated test runs, not for players): the window takes no focus, is not
 	   activated when shown and sits outside the desktop - the runs do not get in the way of the person at the PC */
@@ -529,6 +536,14 @@ GLimp_Init(void)
 		SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 		/* the back button / gesture is the Escape key (menu), not the end of the activity */
 		SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+#endif
+#ifdef __APPLE__
+		/* openMERC macOS: desktop fullscreen (vid_fullscreen 2) as a window over the desktop, not in a Space of
+		   its own. In its own Space the window is not brought back when the player switches away (Cmd-Tab) and
+		   back: macOS makes openMERC the active app, but the window stays in the other Space and never gets the
+		   focus again. Without the Space it is a borderless window over the desktop that Cmd-Tab can raise
+		   (see the focus-loss hint in CreateSDLWindow). */
+		SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
 #endif
 		if (!SDL_Init(SDL_INIT_VIDEO))
 		{
@@ -935,12 +950,126 @@ GLimp_ShutdownGraphics(void)
 /*
  * (Un)grab Input
  */
+static void
+WindowToPixels(float x, float y, int *px, int *py)
+{
+	int ww = 1, wh = 1, pw = 1, ph = 1;
+
+	if (window != NULL)
+	{
+		if (!SDL_GetWindowSize(window, &ww, &wh) || !SDL_GetWindowSizeInPixels(window, &pw, &ph))
+		{
+			ww = wh = pw = ph = 1;
+		}
+	}
+
+	if (ww < 1)
+	{
+		ww = 1;
+	}
+
+	if (wh < 1)
+	{
+		wh = 1;
+	}
+
+	if (pw < 1)
+	{
+		pw = ww;
+	}
+
+	if (ph < 1)
+	{
+		ph = wh;
+	}
+
+	*px = (int)(x * (float)pw / (float)ww + (x >= 0.0f ? 0.5f : -0.5f));
+	*py = (int)(y * (float)ph / (float)wh + (y >= 0.0f ? 0.5f : -0.5f));
+}
+
+void
+GLimp_WindowToPixels(float x, float y, int *px, int *py)
+{
+	if (!px || !py)
+	{
+		return;
+	}
+
+	WindowToPixels(x, y, px, py);
+}
+
+void
+GLimp_WarpMousePixels(int x, int y)
+{
+	int ww = 1, wh = 1, pw = 1, ph = 1;
+
+	if (window == NULL)
+	{
+		return;
+	}
+
+	if (!SDL_GetWindowSize(window, &ww, &wh) || !SDL_GetWindowSizeInPixels(window, &pw, &ph))
+	{
+		return;
+	}
+
+	if (pw < 1)
+	{
+		pw = 1;
+	}
+
+	if (ph < 1)
+	{
+		ph = 1;
+	}
+
+	/* While relative mode is still on, the warp does not emit a motion event. */
+	SDL_WarpMouseInWindow(window, (float)x * (float)ww / (float)pw,
+			(float)y * (float)wh / (float)ph);
+}
+
+/*
+ * Menus follow the desktop cursor (its speed and acceleration). The grab keeps
+ * it inside the window. The menu draws its own pointer, so the system cursor stays hidden.
+ */
+qboolean
+GLimp_MenuMouse(qboolean on)
+{
+	static qboolean seen_error;
+
+	if ((window == NULL) || !on)
+	{
+		return false;
+	}
+
+	if (!SDL_SetWindowRelativeMouseMode(window, false))
+	{
+		if (!seen_error)
+		{
+			seen_error = true;
+			Com_Printf("WARNING: Setting Relative Mousemode failed, reason: %s\n", SDL_GetError());
+		}
+
+		return false;
+	}
+
+	SDL_SetWindowMouseGrab(window, true);
+	SDL_HideCursor();
+	return true;
+}
+
 void
 GLimp_GrabInput(qboolean grab)
 {
 	if(window != NULL)
 	{
 		SDL_SetWindowMouseGrab(window, grab ? true : false);
+
+		if (!grab)
+		{
+			/* A menu hid the cursor. Relative mode is what hides it during play. */
+			SDL_ShowCursor();
+		}
 	}
 
 	if(!SDL_SetWindowRelativeMouseMode(window, grab ? true : false))

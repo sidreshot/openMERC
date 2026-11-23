@@ -1315,9 +1315,10 @@ SoF_ParsePlayerstate(frame_t *oldframe, frame_t *newframe)
 
 	if (flags & SOF_PS_RDFLAGS)
 	{
-		/* only "underwater" is known to match Quake II */
+		/* underwater is the Quake II bit. Night vision is SoF bit 0x4 (RDF_IRGOGGLES).
+		   Dropping it here left the goggles sound working and the view unchanged (issue 34). */
 		x->rdflags = MSG_ReadByte(&net_message);
-		state->rdflags = x->rdflags & RDF_UNDERWATER;
+		state->rdflags = x->rdflags & (RDF_UNDERWATER | RDF_IRGOGGLES);
 	}
 
 	statbits = SoF_ReadULong();

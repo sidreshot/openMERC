@@ -743,6 +743,7 @@ qboolean IN_NumpadIsOn()
  * input magic.
  */
 static qboolean touchclick_down, touchclick_up;
+static qboolean menu_desktop_pointer; /* menu pointer tracks the desktop cursor, not the raw grab */
 
 /* menu.c: a menu input field tapped on a touch screen */
 qboolean M_TextEditing(void);
@@ -750,10 +751,67 @@ int M_TextEditTaps(void);
 struct mpage_s;
 void M_TextEditEnd(struct mpage_s *pg);
 
+/*
+ * Play keeps the raw grab. A menu lets the desktop cursor through, so the
+ * pointer moves at the speed the desktop already uses. Done before the poll:
+ * this frame's motion events then carry a desktop position, not a raw delta.
+ * The cursor is warped to the drawn pointer while the raw grab is still on,
+ * which does not emit a motion event, so the pointer does not jump.
+ */
+static void
+IN_SyncMouseMode(void)
+{
+	static qboolean was_menu;
+	qboolean menu;
+	qboolean want_grab;
+
+	menu = (cls.key_dest == key_menu) && !Touch_Enabled();
+
+	if (menu)
+	{
+		if (!was_menu)
+		{
+			int px, py;
+
+			/* Warp before the raw grab is released, so this is not a motion event. */
+			M_PointerPixels(&px, &py);
+			GLimp_WarpMousePixels(px, py);
+		}
+
+		/* No window yet: try again next frame, and keep the raw path until then. */
+		if (!GLimp_MenuMouse(true))
+		{
+			menu_desktop_pointer = false;
+			was_menu = false;
+			return;
+		}
+
+		menu_desktop_pointer = true;
+		was_menu = true;
+		return;
+	}
+
+	menu_desktop_pointer = false;
+	was_menu = false;
+
+	if (in_grab->value == 3)
+	{
+		want_grab = windowed_mouse->value;
+	}
+	else
+	{
+		want_grab = (vid_fullscreen->value || in_grab->value == 1 ||
+			(in_grab->value == 2 && windowed_mouse->value));
+	}
+
+	/* calling GLimp_GrabInput() each frame is a bit ugly but simple and should work.
+	   The called SDL functions return after a cheap check, if there's nothing to do. */
+	GLimp_GrabInput(want_grab);
+}
+
 void
 IN_Update(void)
 {
-	qboolean want_grab;
 	SDL_Event event;
 	unsigned int key;
 
@@ -838,6 +896,9 @@ IN_Update(void)
 		Key_Event(K_MOUSE1, false, true);
 	}
 
+	/* The menu wants the desktop cursor before this frame's motion events arrive. */
+	IN_SyncMouseMode();
+
 	/* Get and process an event */
 	while (SDL_PollEvent(&event))
 	{
@@ -918,8 +979,19 @@ IN_Update(void)
 				}
 				else if (cls.key_dest == key_menu)
 				{
-					/* OpenMerc (I6m): the menu pointer moves by the raw movement (SPEC-801 7.2) */
-					M_MouseMove((int)event.motion.xrel, (int)event.motion.yrel);
+					if (menu_desktop_pointer)
+					{
+						/* Desktop cursor position, in window pixels. Play above keeps the raw grab. */
+						int px, py;
+
+						GLimp_WindowToPixels(event.motion.x, event.motion.y, &px, &py);
+						M_MouseAbs(px, py);
+					}
+					else
+					{
+						/* Touch screens, and a menu opened before the window exists: raw pixels. */
+						M_MouseMove((int)event.motion.xrel, (int)event.motion.yrel);
+					}
 				}
 				break;
 
@@ -1298,21 +1370,6 @@ IN_Update(void)
 			Key_EventEx(k, kdown, kext, Sys_Milliseconds() - age);
 		}
 	}
-
-	/* Grab and ungrab the mouse if the console or the menu is opened */
-	if (in_grab->value == 3)
-	{
-		want_grab = windowed_mouse->value;
-	}
-	else
-	{
-		want_grab = (vid_fullscreen->value || in_grab->value == 1 ||
-			(in_grab->value == 2 && windowed_mouse->value));
-	}
-
-	// calling GLimp_GrabInput() each frame is a bit ugly but simple and should work.
-	// The called SDL functions return after a cheap check, if there's nothing to do.
-	GLimp_GrabInput(want_grab);
 
 	// We need to save the frame time so other subsystems
 	// know the exact time of the last input events.

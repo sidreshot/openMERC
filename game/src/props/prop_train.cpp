@@ -75,6 +75,7 @@ static void TriggerRespawn(edict_t *ent)
 
 // ---------------------------------------------------------------------------------------------------------------
 // train: v0 = stop point S, v1 = m (run axis), i0 = state, f0 = top speed, f1 = accel
+// TrainRiders: t0, t1 = origin at the last think, t2 = scale, f2, f3 = predicted rider move, i1 = seen once
 
 enum { TS_NONE, TS_ACCEL, TS_CRUISE, TS_BRAKE, TS_STOPPED };
 
@@ -134,10 +135,45 @@ static bool StopCheck(edict_t *self)
 	return false;
 }
 
+/* riders follow the train's actual move (DEVIATIONS.md "Riders move with the train's actual move"). The think runs
+ * before the train's move, so the riders rule moves them by velocity * FRAMETIME, a prediction. A train held by an
+ * obstacle keeps its velocity (elasticity -1, SPEC-760 B4.7) and does not move, and the prediction carried the riders
+ * on: at the end of the tsr1 ride the player on the roof slid off the front onto the track. Each think the riders get
+ * last think's error (the train's actual move minus what they were moved), and this think's prediction scaled by the
+ * part of its predicted move the train made last think. The train itself is unchanged.
+ * t0, t1: train origin at the last think; f2, f3: riders' predicted move then; t2: the scale; i1: set once seen */
+static void TrainRiders(edict_t *self)
+{
+	PropData &d = D(self);
+	vec3_t move = {0, 0, 0};
+	if (!d.i1)
+		d.t2 = 1;
+	else {
+		float ax = self->s.origin[0] - d.t0, ay = self->s.origin[1] - d.t1;
+		move[0] = ax - d.f2;
+		move[1] = ay - d.f3;
+		float p2 = d.f2 * d.f2 + d.f3 * d.f3;
+		if (p2 > 0.25f) {
+			float k = (ax * d.f2 + ay * d.f3) / p2;
+			d.t2 = k < 0 ? 0 : k > 1 ? 1 : k;
+		} else if (ax * ax + ay * ay > 0.25f)
+			d.t2 = 1;
+	}
+	float px = d.t2 * FRAMETIME * self->velocity[0], py = d.t2 * FRAMETIME * self->velocity[1];
+	move[0] += px;
+	move[1] += py;
+	RidersMove(self, move);
+	d.t0 = self->s.origin[0];
+	d.t1 = self->s.origin[1];
+	d.f2 = px;
+	d.f3 = py;
+	d.i1 = 1;
+}
+
 static void train_think(edict_t *self)
 {
 	PropData &d = D(self);
-	Riders(self);
+	TrainRiders(self);
 	self->nextthink = level.time + FRAMETIME;
 	switch (d.i0) {
 	case TS_ACCEL: {
@@ -295,5 +331,38 @@ static void SP_train(edict_t *ent)
 
 static const SpawnEntry s_spawns[] = {{"misc_generic_train", SP_train}, {NULL, NULL}};
 static SpawnTable s_reg(s_spawns);
+
+/* A save written by a module whose symbol table was empty stores every callback as none. The train's
+ * state (i0, axis, speed) is still in the prop record. Put the callbacks back, and if it was already
+ * rolling give it its speed again so the first think does not treat a zero velocity as "arrived". */
+void RestoreTrains(void)
+{
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || !e->classname || Q_stricmp(e->classname, "misc_generic_train"))
+			continue;
+		PropData &d = D(e);
+		bool rolling = d.i0 == TS_ACCEL || d.i0 == TS_CRUISE || d.i0 == TS_BRAKE;
+		if (rolling) {
+			if (!e->velocity[0] && !e->velocity[1]) {
+				float sp = d.i0 == TS_ACCEL ? d.f1 : d.f0;
+				if (sp < 1)
+					sp = d.f1 > 1 ? d.f1 : 100;
+				VectorScale(d.v1, sp, e->velocity);
+			}
+			e->think = train_think;
+			e->nextthink = level.time + FRAMETIME;
+			e->use = NULL;
+		} else if ((e->spawnflags & (1 | 4)) && d.i0 == TS_NONE && !e->use) {
+			e->use = train_use;
+			e->movetype = MOVETYPE_DAN;
+			e->elasticity = -1;
+			e->flags |= FL_NO_KNOCKBACK;
+		}
+		if ((e->spawnflags & (1 | 4)) && !e->touch)
+			e->touch = train_touch;
+		gi.linkentity(e);
+	}
+}
 
 } // namespace props

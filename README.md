@@ -40,6 +40,21 @@ writes into it.
   (64-bit, OpenMerc's own game modules only): unpack `openMERC-<version>-linux-x86_64.tar.gz` into the game
   folder and run `./openMerc`; building: [docs/BUILD-linux.md](docs/BUILD-linux.md).
 
+## Screenshots
+
+The same places at 2560x1440. Left is the original drawing: the map's own textures and lightmaps, flat glass,
+the old warp water, no HDR, no bloom, no modern rain, shadows or post. Right is every graphics option at
+maximum. Each of those turns off on its own in the Video menu.
+
+| Original | Every option at maximum |
+|---|---|
+| ![Tokyo. A flat tinted window, the neon behind it.](docs/screenshots/tokyo-window-original.jpg) | ![Tokyo. The same window, clear glass with rain on the pane.](docs/screenshots/tokyo-window-high.jpg) |
+| ![Tokyo, the roof. The pool is the original warp surface.](docs/screenshots/tokyo-pool-original.jpg) | ![Tokyo, the roof. The same pool, with reflections.](docs/screenshots/tokyo-pool-high.jpg) |
+| ![The subway corridor, flat light, a shotgun.](docs/screenshots/subway-original.jpg) | ![The same corridor. The lamps bloom, the corners fill in.](docs/screenshots/subway-high.jpg) |
+
+Both columns are openMERC, from the same game data. The left one is the original path, as close as the port
+gets to the 2000 picture.
+
 ## Effects rewrite
 
 Every effect of the game is being redrawn with current techniques. The game's own effect data still decides when,
@@ -199,6 +214,21 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - **Платформы**: Windows (32-битный движок на 64-битной Windows 10/11). Linux x86_64
   (64 бита, только собственные игровые модули OpenMerc): распакуйте `openMERC-<версия>-linux-x86_64.tar.gz`
   в папку игры и запустите `./openMerc`; сборка: [docs/BUILD-linux.md](docs/BUILD-linux.md).
+
+### Снимки
+
+Одни и те же места, 2560x1440. Слева оригинальная отрисовка: свои текстуры и карты освещения, плоское стекло,
+старая вода с warp, без HDR, без bloom, без современного дождя, теней и постобработки. Справа все настройки
+графики на максимуме. Каждая выключается отдельно в меню «Видео».
+
+| Оригинал | Все настройки на максимуме |
+|---|---|
+| ![Токио. Плоское тонированное окно, за ним неон.](docs/screenshots/tokyo-window-original.jpg) | ![Токио. То же окно: прозрачное стекло, по нему идёт дождь.](docs/screenshots/tokyo-window-high.jpg) |
+| ![Токио, крыша. Бассейн - старая поверхность с warp.](docs/screenshots/tokyo-pool-original.jpg) | ![Токио, крыша. Тот же бассейн, с отражениями.](docs/screenshots/tokyo-pool-high.jpg) |
+| ![Коридор метро, плоский свет, дробовик.](docs/screenshots/subway-original.jpg) | ![Тот же коридор. Лампы светятся, углы заполнены.](docs/screenshots/subway-high.jpg) |
+
+Оба столбца рисует openMERC из одних и тех же данных игры. Левый - оригинальный путь, насколько порт
+вообще может совпасть с картинкой 2000 года.
 
 ### Переписывание эффектов
 

@@ -41,6 +41,20 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "refresh/files/stb_image.h"
 
+/* Ghoul skin replacements (png, jpg). RGBA8, top row first; the caller free()s it. */
+unsigned char *
+CL_DecodeImage(const void *data, int len, int *w, int *h)
+{
+	int comp = 0;
+
+	if (!data || len <= 0 || !w || !h)
+	{
+		return NULL;
+	}
+
+	return stbi_load_from_memory((const stbi_uc *)data, len, w, h, &comp, 4);
+}
+
 static const byte *
 PCX_RLE_Decode(byte *pix, byte *pix_max, const byte *raw, const byte *raw_max,
 	int bytes_per_line, qboolean *image_issues)

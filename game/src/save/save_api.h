@@ -35,6 +35,7 @@
 int G10_ChunkId(const char *four);                          // 'ABCD' packed big-endian (SPEC-303)
 void G10_WriteChunk(const char *id, const void *data, int size);
 bool G10_ReadChunk(const char *id, void *data, int size);   // exact size; the engine drops the level on a mismatch
+int G10_ReadUpTo(const char *id, void *data, int cap);      // cap bytes; a shorter chunk is kept, a longer one errors
 int G10_ReadChunkAny(const char *id, void **data);          // any length; free with G10_Free; returns the length
 void G10_Free(void *p);
 void G10_WriteInt(const char *id, int v);

@@ -60,6 +60,7 @@ typedef struct
 #define WF_DISABLED    0x20000
 #define WF_NOSCROLL    0x40000 /* vbar: does not scroll with the page */
 #define WF_ROWCENTER   0x80000 /* "rowcenter": flows left to right, the row is centred after layout */
+#define WF_OMBUTTON    0x100000 /* "ombutton": a bar button, pinned when the page is taller than the view */
 
 /* a key binding of a widget or a page (SPEC-800 section 5.4) */
 typedef struct mbind_s
@@ -172,6 +173,7 @@ struct mpage_s
 	mmodel_t *firstbg;   /* first <bghoul> */
 
 	int scroll;
+	int dock;            /* pixels held at the bottom of the view (ML_DockButtons), outside the scroll */
 	qboolean autoscroll;
 	float autorate;
 	int cursor;          /* -1 not set, 0 hidden, 1 shown */
@@ -366,6 +368,7 @@ int ML_TotalW(const mwidget_t *w);
 int ML_TotalH(const mwidget_t *w);
 int ML_ContentW(const mpage_t *pg);
 int ML_ContentH(const mpage_t *pg);
+void ML_DockButtons(mpage_t *pg);
 void ML_FoldColumns(mpage_t *pg);
 void ML_CenterRows(mpage_t *pg);
 int ML_FontHeight(const char *font);

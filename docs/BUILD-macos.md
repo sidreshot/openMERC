@@ -65,8 +65,10 @@ The script configures and builds four CMake trees under `build-macos-arm64-<cfg>
 | `base/player.dylib` | `player/` |
 | `base/zz_openmerc.pak` | `data/base/` packed by `tools/mkpak.py` |
 
-`openMerc` and `OMsnd.dylib` use the SDL 3 and OpenAL Soft libraries of Homebrew where they are installed; a
-package that brings its own copies does not exist yet.
+`openMerc` and `OMsnd.dylib` use the SDL 3 and OpenAL Soft libraries of Homebrew where they are installed.
+`tools/build/package-macos.sh` packs `release/` into `openMERC-<version>-macos-arm64.tar.gz`. The archive
+does not copy those libraries: the binaries keep the `/opt/homebrew` paths, and `dist/README-macos.txt` tells
+the player to `brew install sdl3 openal-soft libomp`.
 
 ## What differs from Linux
 
@@ -85,4 +87,5 @@ package that brings its own copies does not exist yet.
 ## Continuous integration
 
 The `macos` job of `.github/workflows/build.yml` runs `tools/build/build-macos.sh` with the unit tests on every
-push and pull request and keeps `release/` as a workflow artifact. It makes no release package.
+push and pull request, packs `release/` with `tools/build/package-macos.sh`, and on a tag `v*` attaches that
+archive to the GitHub release. Same for the Linux arm64 package. The Android package is not attached.

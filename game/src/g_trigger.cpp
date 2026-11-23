@@ -130,6 +130,30 @@ void SP_trigger_multiple(edict_t *ent)
 	gi.linkentity(ent);
 }
 
+/* a 0.2.4 save stored touch, use and the use-key handler as none. Spawnflags still say which one.
+   A trigger that already fired (wait <= 0 and a pending think) must not be armed again. */
+void Trigger_Repair(edict_t *ent)
+{
+	if (ent->wait <= 0 && ent->nextthink > 0) {
+		if (!ent->think)
+			ent->think = G_FreeEdict;
+		return;
+	}
+	/* spawnflag 4 starts solid-not until trigger_enable. After that enable, solid is a trigger. */
+	if ((ent->spawnflags & 4) && ent->solid != SOLID_TRIGGER) {
+		if (!ent->use)
+			ent->use = trigger_enable;
+	} else if (!ent->use)
+		ent->use = Use_Multi;
+	if (ent->spawnflags & 8) {
+		if (!ent->plUse)
+			ent->plUse = UseKey_Multi;
+	} else if (!ent->touch)
+		ent->touch = Touch_Multi;
+	if (ent->wait > 0 && ent->nextthink > 0 && !ent->think)
+		ent->think = multi_wait;
+}
+
 void SP_trigger_once(edict_t *ent)
 {
 	ent->wait = -1;

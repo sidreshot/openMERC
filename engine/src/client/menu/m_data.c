@@ -1724,6 +1724,24 @@ LB_CmpName(const void *a, const void *b)
 	return strcmp(x->name, y->name) * lb_sortsign;
 }
 
+/* SPEC-303 / SPEC-412: a save shot and maps/<map>.raw are stored bottom row
+   first. The menu quad puts texture t = 0 at the top of the picture, and GL
+   puts the first uploaded row at t = 0, so the shot was upside down (issue 33).
+   The stock tsr1.raw has the HUD in the first rows. */
+static void
+ShotPic(const char *name, const byte *bottom_up)
+{
+	byte top[128 * 128 * 4];
+	int y;
+
+	for (y = 0; y < 128; y++)
+	{
+		memcpy(top + (size_t)y * 128 * 4, bottom_up + (size_t)(127 - y) * 128 * 4, 128 * 4);
+	}
+
+	MR_RawPic(name, 128, 128, top);
+}
+
 /* MENU-SCRATCH (owner t96): the newest savegame for the landing page and
    "om_continue" outside a level; "current" (the running game) is skipped */
 qboolean
@@ -1810,7 +1828,7 @@ M_NewestSave(char *name, size_t namesize, char *level, size_t levelsize,
 		}
 	}
 
-	MR_RawPic("pics/menus/om/newest", 128, 128, shot);
+	ShotPic("pics/menus/om/newest", shot);
 	return true;
 }
 
@@ -1902,7 +1920,7 @@ LB_List(mpage_t *pg, mwidget_t *w)
 			}
 
 			Com_sprintf(picname, sizeof(picname), "save/%s", s->name);
-			MR_RawPic(picname, 128, 128, shot);
+			ShotPic(picname, shot);
 		}
 
 		{
@@ -2112,8 +2130,9 @@ LB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 			c = (c & 0xFF000000u) | 0x00808080u;
 		}
 
-		/* SPEC-803 open question 4: last argument 6 (passed through) */
-		MR_StretchPic(cx, cy, d->tw, d->th, s->blocked ? 0xFF505050u : 0xFFFFFFFFu, va("save/%s", s->name), 6);
+		/* ShotPic already turns the bottom-up shot upright. Argument 6 flipped it
+		   again, so the load tiles were upside down. */
+		MR_StretchPic(cx, cy, d->tw, d->th, s->blocked ? 0xFF505050u : 0xFFFFFFFFu, va("save/%s", s->name), 0);
 
 		/* the hovered tile framed (fingers and mouse) */
 		if (i == hover)
@@ -2293,7 +2312,7 @@ LVB_Finish(mparse_t *p, mwidget_t *w)
 
 			if (d->pics[i])
 			{
-				MR_RawPic(va("om/lv_%s", lvb_levels[i].map), 128, 128, raw);
+				ShotPic(va("om/lv_%s", lvb_levels[i].map), raw);
 			}
 
 			if (len >= 0)
@@ -2366,7 +2385,7 @@ LVB_Draw(mpage_t *pg, mwidget_t *w, int x, int y)
 
 		if (d->pics[i])
 		{
-			MR_StretchPic(cx, cy, d->tw, d->th, 0xFFFFFFFFu, va("om/lv_%s", lvb_levels[i].map), 6);
+			MR_StretchPic(cx, cy, d->tw, d->th, 0xFFFFFFFFu, va("om/lv_%s", lvb_levels[i].map), 0);
 		}
 		else
 		{

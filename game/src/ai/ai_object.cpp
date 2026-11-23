@@ -69,13 +69,17 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 		bool airborne = !ent->groundentity && ent->solid != SOLID_CORPSE;
 		if (airborne || fabsf(mins[2] - floor_height) <= 1.0f)
 			return 1;
-		float delta = floor_height - mins[2];
-		if (CvarValue(cv.ai_trace) >= 2)
-			Dbg("ai %d floor: bottom %.1f stored %.1f ground offset %.1f -> origin z %+.1f\n", G_EdictNum(ent),
-			    mins[2], floor_height, ground_offset, -delta);
-		mins[2] += delta;
-		maxs[2] += delta;
-		org[2] -= delta;
+		/* a corpse is seated from its posed bolts. Dragging the origin down to the
+		   ground bolt puts the legs through the floor. The flat-box clamp below still runs. */
+		if (ent->health > 0) {
+			float delta = floor_height - mins[2];
+			if (CvarValue(cv.ai_trace) >= 2)
+				Dbg("ai %d floor: bottom %.1f stored %.1f ground offset %.1f -> origin z %+.1f\n", G_EdictNum(ent),
+				    mins[2], floor_height, ground_offset, -delta);
+			mins[2] += delta;
+			maxs[2] += delta;
+			org[2] -= delta;
+		}
 	} else {
 		float bottom = ent->mins[2];
 		float height = scale * (bbox_maxs[i][2] - bbox_mins[i][2]);
@@ -91,6 +95,9 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 	   column above them that stopped shots and blocked the way (deviation from SPEC-700 rule 15) */
 	if (ent->health > 0 && i == 0 && maxs[2] < ent->viewheight - 4)
 		maxs[2] = (float)ent->viewheight;
+	/* a prone corpse keeps the preset it died in unless this clamps it; that preset is a standing column */
+	if (ent->health <= 0 && maxs[2] > mins[2] + 16.0f)
+		maxs[2] = mins[2] + 16.0f;
 	if (ent->movetype != MOVETYPE_NOCLIP) {
 		trace_t tr = Trace(org, mins, maxs, org, ent, 0x2020003);
 		if (tr.startsolid || tr.allsolid) {
@@ -479,6 +486,14 @@ static void FacePlayer1(edict_t *ent)
 void OmAI::Think(edict_t *ent)
 {
 	float now = Now();
+	/* a dead character can leave this function at the wake check, before the flatten at the end */
+	if (ent->health <= 0) {
+		ent->svflags |= SVF_DEADMONSTER;
+		ent->solid = SOLID_CORPSE;
+		if (ent->maxs[2] > ent->mins[2] + 24.0f)
+			ent->maxs[2] = ent->mins[2] + 16.0f;
+		gi.linkentity(ent);
+	}
 	/* 2. the previous think's helper */
 	RemoveHelper(ent, this);
 	/* 3. */
@@ -516,8 +531,13 @@ void OmAI::Think(edict_t *ent)
 	if (CvarValue(cv.ai_goretest) && !(ent->spawnflags & SF_DORMANT) && !awake)
 		Wake(ent);
 	if (!awake) {
-		if (!WakeChecks(ent, this))
+		if (!WakeChecks(ent, this)) {
+			/* a dormant body that dies never runs an action, so the corpse seat never ran
+			   and the death pose stayed in the air (nyc2 piperunguy1) */
+			if (ent->health <= 0 && body)
+				body->Think();
 			return;
+		}
 		Wake(ent);
 		/* openMERC, black box (kos1 grunt -824 -1632, original module): a character that wakes while the player is
 		   in its line of sight knows him at once, whatever way it faces - the player standing 106, 125, 170 units
@@ -590,6 +610,15 @@ void OmAI::Think(edict_t *ent)
 	/* 14. helper */
 	if (ent->health > 0)
 		MakeHelper(ent, this);
+	else {
+		/* a corpse is not a crate: the dead flag is what the player trace skips, and a death that never
+		   left the standing preset used to keep a ~70 unit column you could walk on */
+		ent->svflags |= SVF_DEADMONSTER;
+		ent->solid = SOLID_CORPSE;
+		if (ent->maxs[2] > ent->mins[2] + 24.0f)
+			ent->maxs[2] = ent->mins[2] + 16.0f;
+		gi.linkentity(ent);
+	}
 }
 
 bool OmAI::PartsReadyToRemove(edict_t *ent)

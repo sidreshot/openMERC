@@ -146,12 +146,157 @@ ML_ContentW(const mpage_t *pg)
 int
 ML_ContentH(const mpage_t *pg)
 {
+	int h;
+
 	if (!pg->frame)
 	{
 		return 0;
 	}
 
-	return pg->frame->fh - 2 * pg->frame->pad;
+	h = pg->frame->fh - 2 * pg->frame->pad - pg->dock;
+
+	return h > 0 ? h : 0;
+}
+
+/*
+ * A page taller than its view keeps its bar buttons (Apply, Defaults, Reset
+ * Section) on the bottom of the view. They used to scroll away, and the last
+ * one was cut by the ticker. Only a trailing stack is pinned: a button with
+ * real rows after it stays in the flow.
+ */
+void
+ML_DockButtons(mpage_t *pg)
+{
+	int i, n = 0, view, first = 1 << 30, dock, y, gap = 4;
+	mwidget_t *btns[8];
+
+	if (!pg->frame)
+	{
+		return;
+	}
+
+	view = pg->frame->fh - 2 * pg->frame->pad;
+
+	if (view < 64 || pg->contenth <= view)
+	{
+		return;
+	}
+
+	for (i = 0; i < pg->numwidgets; i++)
+	{
+		mwidget_t *w = pg->widgets[i];
+
+		if ((w->flags & (WF_NOTPLACED | WF_BOLTED)) || !(w->flags & WF_OMBUTTON))
+		{
+			continue;
+		}
+
+		if (n < 8)
+		{
+			btns[n++] = w;
+		}
+
+		if (w->y < first)
+		{
+			first = w->y;
+		}
+	}
+
+	if (n == 0)
+	{
+		return;
+	}
+
+	for (i = 0; i < pg->numwidgets; i++)
+	{
+		mwidget_t *w = pg->widgets[i];
+
+		if (w->flags & (WF_NOTPLACED | WF_BOLTED))
+		{
+			continue;
+		}
+
+		if (w->y + ML_TotalH(w) <= first)
+		{
+			continue;
+		}
+
+		if (w->flags & WF_OMBUTTON)
+		{
+			continue;
+		}
+
+		/* a row, a slider, a key: the buttons are not a footer */
+		if (w->flags & WF_INTERACTIVE)
+		{
+			return;
+		}
+	}
+
+	for (i = 1; i < n; i++)
+	{
+		int j = i;
+
+		while (j > 0 && btns[j - 1]->y > btns[j]->y)
+		{
+			mwidget_t *t = btns[j - 1];
+
+			btns[j - 1] = btns[j];
+			btns[j] = t;
+			j--;
+		}
+	}
+
+	/* pin only a button that does not fit. A trailing spacer can make the page
+	   a few pixels too tall while the buttons themselves are already on screen;
+	   pulling those down would open a hole under a short list. */
+	{
+		int covered = btns[n - 1]->y + ML_TotalH(btns[n - 1]);
+
+		if (covered <= view)
+		{
+			return;
+		}
+	}
+
+	dock = gap;
+
+	for (i = 0; i < n; i++)
+	{
+		dock += ML_TotalH(btns[i]) + (i ? gap : 0);
+	}
+
+	dock += 2;
+
+	if (dock > view / 2)
+	{
+		return;
+	}
+
+	pg->dock = dock;
+	y = view - dock + gap;
+
+	for (i = 0; i < n; i++)
+	{
+		btns[i]->y = y;
+		btns[i]->flags |= WF_NOSCROLL;
+		y += ML_TotalH(btns[i]) + gap;
+	}
+
+	/* the list ends where the stack used to start */
+	pg->contenth = first;
+
+	if (pg->contenth < ML_ContentH(pg))
+	{
+		pg->contenth = ML_ContentH(pg);
+	}
+
+	if (pg->vbar)
+	{
+		pg->vbar->h = pg->vbar->minh = ML_ContentH(pg);
+	}
+
+	pg->scroll = 0;
 }
 
 int
@@ -1298,7 +1443,7 @@ ML_DrawPage(mscreen_t *scr, mframe_t *f, mpage_t *pg)
 
 	if (pg->autoscroll)
 	{
-		int L = pg->contenth - (pf->fh - 2 * pf->pad);
+		int L = pg->contenth - ML_ContentH(pg);
 
 		if (L > 0)
 		{
@@ -1386,14 +1531,32 @@ ML_DrawPage(mscreen_t *scr, mframe_t *f, mpage_t *pg)
 		if (!(w->flags & WF_BOLTED))
 		{
 			int ty = y - w->bpad - w->yoff;
+			int cull = bottom;
 
-			if (ty + th <= top || ty >= bottom)
+			/* scrolling rows stop above the pinned buttons, whole rows only:
+			   a label cut through the middle of the glyphs reads as a glitch */
+			if (pg->dock && !(w->flags & WF_NOSCROLL))
+			{
+				cull -= pg->dock;
+
+				if (ty + th > cull && !(w->flags & WF_NOTPLACED))
+				{
+					continue;
+				}
+			}
+
+			if (ty + th <= top || ty >= cull)
 			{
 				if (!(w->flags & WF_NOTPLACED))
 				{
 					continue;
 				}
 			}
+		}
+
+		if (pg->dock)
+		{
+			MR_SetClip(cx, cy, cw, (w->flags & WF_NOSCROLL) ? ch : ch - pg->dock);
 		}
 
 		w->flags &= ~WF_HIDEBORDER;

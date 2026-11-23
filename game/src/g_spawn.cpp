@@ -558,6 +558,48 @@ void G_SetMaterialFlag(int pos, char c)
 		level.materialflags[pos] = c;
 }
 
+/* 0.2.4 Linux wrote an empty callback table, so a loaded level came back with use, touch,
+   die and the item pointer empty. Doors, triggers, windows and pickups are wired again.
+   Positions and health stay as saved. */
+void G_RepairLoadedEntities(void)
+{
+	int nitem = 0, ndoor = 0, ntrig = 0, nbreak = 0, nrun = 0;
+	for (int i = 1; i < globals.num_edicts; i++) {
+		edict_t *e = &g_edicts[i];
+		if (!e->inuse || !e->classname)
+			continue;
+		if (!strncmp(e->classname, "item_", 5)) {
+			bool dead = !e->item || !e->touch;
+			Item_Repair(e);
+			if (dead && e->item && e->touch)
+				nitem++;
+		} else if (!strncmp(e->classname, "func_door", 9)) {
+			bool dead = !e->use;
+			Door_Repair(e);
+			if (dead && e->use)
+				ndoor++;
+		} else if (!strcmp(e->classname, "trigger_once") || !strcmp(e->classname, "trigger_multiple")) {
+			bool dead = !e->touch && !e->plUse;
+			Trigger_Repair(e);
+			if (dead && (e->touch || e->plUse))
+				ntrig++;
+		} else if (!strcmp(e->classname, "func_breakable_brush")) {
+			bool dead = !e->die && !(e->spawnflags & 1);
+			Breakable_Repair(e);
+			if (dead && e->die)
+				nbreak++;
+		} else if (!strcmp(e->classname, "script_runner")) {
+			bool dead = e->sg_script > 0 && !e->use;
+			ScriptGlue_RepairRunner(e);
+			if (dead && e->use)
+				nrun++;
+		}
+	}
+	if (nitem || ndoor || ntrig || nbreak || nrun)
+		gi.dprintf("save repair: items %d doors %d triggers %d windows %d scripts %d\n",
+		           nitem, ndoor, ntrig, nbreak, nrun);
+}
+
 static void GameRulesReset(void)
 {
 	GM_LevelInit(); /* G9: SPEC-790 B1.1 */

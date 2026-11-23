@@ -95,7 +95,8 @@ if(OM_GAME_CPP)
     set(OM_SYMTAB_ARGS --ld64 ${CMAKE_CURRENT_BINARY_DIR}/gamex86.linkmap)
   else()
     target_link_options(gamex86 PRIVATE -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/gamex86.linkmap)
-    set(OM_SYMTAB_ARGS --lld ${CMAKE_CURRENT_BINARY_DIR}/gamex86.linkmap)
+    # GNU ld's map omits local symbols, and its columns are not LLD's. nm sees the static callbacks.
+    set(OM_SYMTAB_ARGS --nm)
   endif()
   if(Python3_Interpreter_FOUND)
     add_custom_command(TARGET gamex86 POST_BUILD

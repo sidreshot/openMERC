@@ -811,48 +811,61 @@ void GL3_Post_RegionFog(void);
 	"	{\n" \
 	"		if (i >= n) break;\n" \
 	"		int r = int(texelFetch(omRFTab, ivec2(2 + i, 0), 0).x + 0.5) + 1;\n" \
-	"		vec4 mn = texelFetch(omRFTab, ivec2(0, r), 0);\n" \
-	"		vec4 mx = texelFetch(omRFTab, ivec2(1, r), 0);\n" \
 	"		vec4 pr = texelFetch(omRFTab, ivec2(2, r), 0);\n" \
 	"		vec4 cl = texelFetch(omRFTab, ivec2(3, r), 0);\n" \
-	"		float t0 = 0.0, t1 = dist;\n" \
-	"		if (mn.w < 0.5)\n" \
+	"		for (int b = 0; b < 4; b++)\n" \
 	"		{\n" \
-	"			vec3 ta = (mn.xyz - eye) * idir, tb = (mx.xyz - eye) * idir;\n" \
-	"			vec3 lo = min(ta, tb), hi = max(ta, tb);\n" \
-	"			t0 = max(t0, max(max(lo.x, lo.y), lo.z));\n" \
-	"			t1 = min(t1, min(min(hi.x, hi.y), hi.z));\n" \
-	"			int np = (r == vr) ? 0 : int(texelFetch(omRFTab, ivec2(9, r), 0).x + 0.5);\n" \
-	"			for (int k = 0; k < 5; k++)\n" \
+	"			vec4 mn = (b == 0) ? texelFetch(omRFTab, ivec2(0, r), 0)\n" \
+	"				: texelFetch(omRFTab, ivec2(13 + (b - 1) * 2, r), 0);\n" \
+	"			vec4 mx = (b == 0) ? texelFetch(omRFTab, ivec2(1, r), 0)\n" \
+	"				: texelFetch(omRFTab, ivec2(14 + (b - 1) * 2, r), 0);\n" \
+	"			float t0 = 0.0, t1 = dist;\n" \
+	"			if (mn.w > 0.5) continue;\n" \
 	"			{\n" \
-	"				if (k >= np) break;\n" \
-	"				vec4 pl = texelFetch(omRFTab, ivec2(4 + k, r), 0);\n" \
-	"				float de = dot(pl.xyz, dir), se = dot(pl.xyz, eye) - pl.w;\n" \
-	"				if (abs(de) < 1e-6) { if (se > 0.0) t1 = -1.0; }\n" \
-	"				else if (de > 0.0) t1 = min(t1, -se / de);\n" \
-	"				else t0 = max(t0, -se / de);\n" \
+	"				vec3 ta = (mn.xyz - eye) * idir, tb = (mx.xyz - eye) * idir;\n" \
+	"				vec3 lo = min(ta, tb), hi = max(ta, tb);\n" \
+	"				t0 = max(t0, max(max(lo.x, lo.y), lo.z));\n" \
+	"				t1 = min(t1, min(min(hi.x, hi.y), hi.z));\n" \
+	"				int np = (r == vr) ? 0 : int(texelFetch(omRFTab, ivec2(9, r), 0).x + 0.5);\n" \
+	"				for (int k = 0; k < 5; k++)\n" \
+	"				{\n" \
+	"					if (k >= np) break;\n" \
+	"					vec4 pl = texelFetch(omRFTab, ivec2(4 + k, r), 0);\n" \
+	"					float de = dot(pl.xyz, dir), se = dot(pl.xyz, eye) - pl.w;\n" \
+	"					if (abs(de) < 1e-6) { if (se > 0.0) t1 = -1.0; }\n" \
+	"					else if (de > 0.0) t1 = min(t1, -se / de);\n" \
+	"					else t0 = max(t0, -se / de);\n" \
+	"				}\n" \
 	"			}\n" \
+	"			if (t1 <= t0) continue;\n" \
+	"			float L = t1 - t0;\n" \
+	"			float D = L * L;\n" \
+	"			vec3 q = eye + dir * t1;\n" \
+	"			if (pr.w > 0.5)\n" \
+	"			{\n" \
+	"				int wi = int(mod(floor(abs(q.x) + abs(q.y) + abs(q.z)), 10.0));\n" \
+	"				vec4 w = texelFetch(omRFTab, ivec2(10 + wi / 4, r), 0);\n" \
+	"				int wc = wi - (wi / 4) * 4;\n" \
+	"				D += (wc == 0) ? w.x : (wc == 1) ? w.y : (wc == 2) ? w.z : w.w;\n" \
+	"			}\n" \
+	"			float al = (pr.y != 0.0) ? clamp((D - pr.x) / pr.y / 255.0, 0.0, pr.z) : 0.0;\n" \
+	"			if (mx.w > 0.5)\n" \
+	"			{\n" \
+	"				float hh = clamp((mx.z - q.z) / max(mx.z - mn.z, 1.0), 0.0, 1.0);\n" \
+	"				al *= hh * hh;\n" \
+	"			}\n" \
+	/* the box face used to cut a wall in one pixel (kos1, the brick by the water at
+	   -1475 -2173). A surface inside the volume fades in over the first 64 units. */ \
+	"			if (dist - t1 < 2.0)\n" \
+	"			{\n" \
+	"				vec3 pin = min(p - mn.xyz, mx.xyz - p);\n" \
+	"				float inset = min(min(pin.x, pin.y), pin.z);\n" \
+	"				al *= smoothstep(0.0, 64.0, inset);\n" \
+	"			}\n" \
+	"			al *= mix(hd.y, 1.0, al);\n" \
+	"			C = C * (1.0 - al) + cl.rgb * al;\n" \
+	"			A = 1.0 - (1.0 - A) * (1.0 - al);\n" \
 	"		}\n" \
-	"		if (t1 <= t0) continue;\n" \
-	"		float L = t1 - t0;\n" \
-	"		float D = L * L;\n" \
-	"		vec3 q = eye + dir * t1;\n" \
-	"		if (pr.w > 0.5)\n" \
-	"		{\n" \
-	"			int wi = int(mod(floor(abs(q.x) + abs(q.y) + abs(q.z)), 10.0));\n" \
-	"			vec4 w = texelFetch(omRFTab, ivec2(10 + wi / 4, r), 0);\n" \
-	"			int wc = wi - (wi / 4) * 4;\n" \
-	"			D += (wc == 0) ? w.x : (wc == 1) ? w.y : (wc == 2) ? w.z : w.w;\n" \
-	"		}\n" \
-	"		float al = (pr.y != 0.0) ? clamp((D - pr.x) / pr.y / 255.0, 0.0, pr.z) : 0.0;\n" \
-	"		if (mx.w > 0.5)\n" \
-	"		{\n" \
-	"			float hh = clamp((mx.z - q.z) / max(mx.z - mn.z, 1.0), 0.0, 1.0);\n" \
-	"			al *= hh * hh;\n" \
-	"		}\n" \
-	"		al *= mix(hd.y, 1.0, al);\n" \
-	"		C = C * (1.0 - al) + cl.rgb * al;\n" \
-	"		A = 1.0 - (1.0 - A) * (1.0 - al);\n" \
 	"	}\n" \
 	"	int wr = int(hd.z + 0.5);\n" \
 	"	if (wr > 0 && dist > hd.w)\n" \
@@ -861,6 +874,9 @@ void GL3_Post_RegionFog(void);
 	"		C = C * (1.0 - wc4.a) + wc4.rgb * wc4.a;\n" \
 	"		A = 1.0 - (1.0 - A) * (1.0 - wc4.a);\n" \
 	"	}\n" \
+	/* a lamp you are standing against was fully fogged: the first couple of metres stay clear, then the
+	   region's own curve takes over */ \
+	"	A *= smoothstep(18.0, 110.0, dist);\n" \
 	"	return vec4(C, A);\n" \
 	"}\n"
 /* gl3_sofapi.c: the lights of Ghoul models kept for the frames they are culled */

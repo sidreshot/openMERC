@@ -178,7 +178,11 @@ void GroundAction::HandleEvents(edict_t *ent, AI *ai, uint32_t ev)
 		AddEntityEvent(ent, 3);
 	if (ev & BODYEV_FIRE)
 		Fire(ent, ai);
-	if ((ev & BODYEV_JUMP) && (move_flags & MF_JUMP_IMPULSE) && ent->groundentity && !(ent->flags & FL_FLY)) {
+	/* a scripted jump also takes off from the air: an actor placed above a ledge (spawnflag 16 is not dropped to the
+	 * floor) got no push and fell straight down, as kos2's outro John did into the pit (DEVIATIONS.md "A scripted jump
+	 * also takes off from the air") */
+	if ((ev & BODYEV_JUMP) && (move_flags & MF_JUMP_IMPULSE) && (ent->groundentity || (script_flags & 0x80000000)) &&
+	    !(ent->flags & FL_FLY)) {
 		float g = CvarValue(cv.sv_gravity);
 		if (g <= 0)
 			g = 800;
@@ -631,6 +635,7 @@ public:
 			b->Think();
 			if (record)
 				ai->ChangeBBox(ent, b->cur ? b->cur->posture : record->posture, true);
+			b->KeepOnFloor();
 			return false;
 		}
 		/* The pause ends on a real floor. OM_SettleDeadBody puts an airborne kill on that
@@ -652,6 +657,44 @@ public:
 		Step(ent, ai, false, true);
 		if (!ent->inuse || ent->ai != ai)
 			return false;
+		/* the death's root motion and the blown-back velocity push the mesh into the wall and into the
+		   corpse already there. The clip box is only the origin; the body lies about 52 units behind it. */
+		{
+			vec3_t f, a, b, mins, maxs;
+			AngleVectors(ent->s.angles, f, nullptr, nullptr);
+			VectorSet(mins, -10, -10, 0);
+			VectorSet(maxs, 10, 10, 12);
+			VectorCopy(ent->s.origin, b);
+			VectorMA(ent->s.origin, -52, f, a);
+			trace_t tr = gi.trace(b, mins, maxs, a, ent, MASK_SOLID);
+			if (tr.startsolid)
+				VectorMA(ent->s.origin, 8, f, ent->s.origin);
+			else if (tr.fraction < 1.0f)
+				VectorMA(ent->s.origin, (1.0f - tr.fraction) * 52.0f + 4.0f, f, ent->s.origin);
+			VectorCopy(ent->s.origin, b);
+			VectorMA(ent->s.origin, 24, f, a);
+			tr = gi.trace(b, mins, maxs, a, ent, MASK_SOLID);
+			if (!tr.startsolid && tr.fraction < 1.0f)
+				VectorMA(ent->s.origin, -((1.0f - tr.fraction) * 24.0f + 4.0f), f, ent->s.origin);
+			edict_t *o = nullptr;
+			int guard = 0;
+			while ((o = findradius(o, ent->s.origin, 40)) != nullptr && guard++ < 8) {
+				if (o == ent || o->health > 0 || !(o->svflags & SVF_DEADMONSTER))
+					continue;
+				vec3_t d;
+				VectorSubtract(ent->s.origin, o->s.origin, d);
+				d[2] = 0;
+				float len = VectorNormalize(d);
+				if (len < 1.0f) {
+					d[0] = G_EdictNum(ent) < G_EdictNum(o) ? 1.0f : -1.0f;
+					d[1] = 0;
+					len = 0;
+				}
+				if (len < 32.0f)
+					VectorMA(ent->s.origin, (32.0f - len) * 0.5f, d, ent->s.origin);
+			}
+			gi.linkentity(ent);
+		}
 		if (b->AnimDone() && !notified)
 			notified = 1;
 		const G3Anim *d = b->ChooseDeath(ent->enemy, nullptr, 0, 0, nullptr);
@@ -662,6 +705,9 @@ public:
 				b->SetAnim(d, false);
 			record = d;
 		}
+		/* root motion has already run this frame. Seat after it, or the lie-down stays at the
+		   standing height until the clip ends and one drop puts the body on the floor. */
+		b->KeepOnFloor();
 		return false;
 	}
 
@@ -761,6 +807,10 @@ public:
 class JumpAction : public GroundAction { /* class 9 */
 public:
 	vec3_t start_velocity = {0, 0, 0};
+	/* a scripted jump by an actor placed above the floor: where it began. Not saved, a load only ends the stop over
+	 * the target */
+	bool began_in_air = false;
+	vec3_t air_from = {0, 0, 0};
 	void SaveTail(SaveRec &r) override { r.V(112, start_velocity); } /* SPEC-711 class 9 tail */
 	JumpAction() : GroundAction(9, AK_JUMP) {}
 	void Start(edict_t *ent, AI *ai) override
@@ -776,6 +826,8 @@ public:
 			VectorMA(ent->s.origin, 64, f, D);
 			VectorCopy(D, destination);
 		}
+		began_in_air = (script_flags & 0x80000000) && !ent->groundentity;
+		VectorCopy(ent->s.origin, air_from);
 		float g = CvarValue(cv.sv_gravity);
 		if (g <= 0)
 			g = 800;
@@ -823,6 +875,13 @@ public:
 			return true;
 		float now = Now();
 		if (!ent->groundentity) {
+			/* a jump begun in the air falls further than its impulse allows for and keeps its sideways speed: kos2's
+			 * outro John flew past his mark and ended inside a wall, every step of his run refused. The sideways speed
+			 * is cut once he has covered the distance to the target */
+			if (began_in_air && HDist2(ent->s.origin, air_from) >= HDist2(destination, air_from)) {
+				ent->velocity[0] = ent->velocity[1] = 0;
+				began_in_air = false;
+			}
 			if (ent->velocity[2] > 0 && now < landing_check) {
 				float left = landing_check - now;
 				if (left > 0.05f) {
@@ -856,9 +915,42 @@ public:
 	}
 };
 
+/* A narrow box under the origin. The standing box is wide enough to rest on the rim of a hatch while
+ * the centre is already over the shaft (kos1 `downupperguy`: feet at -32 snag the lip, a player box with
+ * feet at -24 falls through the same point). Farther than a step means he is standing over a drop. */
+static bool FallOverDrop(edict_t *ent)
+{
+	vec3_t start, end, mins, maxs;
+	VectorCopy(ent->s.origin, start);
+	VectorCopy(start, end);
+	end[2] -= 256.0f;
+	VectorSet(mins, -8, -8, -8);
+	VectorSet(maxs, 8, 8, 8);
+	trace_t tr = Trace(start, mins, maxs, end, ent, 0x2020003);
+	if (tr.startsolid || tr.allsolid)
+		return false;
+	float dist = start[2] - tr.endpos[2];
+	return tr.fraction >= 1.0f || dist > 48.0f;
+}
+
+/* The drop pulls the feet up so the rim misses the ground check. Put the standing box back on landing,
+ * or the character is left floating by the amount the feet were shortened. */
+static void RestoreFallBox(edict_t *ent, AI *ai)
+{
+	float feet = ai->bbox_mins[0][2];
+	if (feet >= -8.0f)
+		feet = -32.0f;
+	if (ent->mins[2] <= feet + 1.0f)
+		return;
+	ent->mins[2] = feet;
+	gi.linkentity(ent);
+	DropToFloor(ent, ai);
+}
+
 class FallAction : public GroundAction { /* class 10 */
 public:
 	int left_ground = 0;
+	int no_dest = 0; /* script gave no landing point: destination is the spot he already stands on */
 	void SaveTail(SaveRec &r) override /* SPEC-711 class 10 tail: 112 landed state, 116 the fall record */
 	{
 		r.I(112, left_ground);
@@ -869,6 +961,10 @@ public:
 	{
 		left_ground = 0; /* also when the previous fall action is reused (SPEC-700 rule 8) */
 		GroundAction::Start(ent, ai);
+		/* a relative (0,0,0) command stores the origin as the destination (kos1 downupperguy). A real
+		 * drop command, such as introjohn2's (0, 64, -112), points somewhere else and must keep the
+		 * animation-end completion: that one rides a ROF and never lands. */
+		no_dest = HDist(destination, ent->s.origin) < 1.0f && fabsf(destination[2] - ent->s.origin[2]) < 1.0f;
 	}
 	bool Think(edict_t *ent, AI *ai, float *m, float *r) override
 	{
@@ -877,15 +973,33 @@ public:
 		/* a scripted fall completes when its drop animation ends, in the air or not, and the animation is not held
 		 * while airborne (black-box, original module: the AI-done of kos1 `introjohn2` (moved by a ROF, never
 		 * "lands") and sud1 `intplayer2` comes 2.0 / 1.75 s after the start, the length of `std_jdrop`; holding the
-		 * animation until the landing put irq2a's intro ~1 s behind) */
+		 * animation until the landing put irq2a's intro ~1 s behind). A fall whose centre is still over a shaft
+		 * does not take that shortcut: the animation would end while he is clipped in the opening. */
 		bool scripted = (script_flags & 0x80000000) != 0;
 		if (!Step(ent, ai, false, false))
 			return true;
+		bool over_drop = no_dest && FallOverDrop(ent);
+		if (over_drop) {
+			/* feet of -8 sit above the lip that a -32 box catches. Physics on the next frame then misses
+			 * the rim and gravity takes him down the shaft. */
+			if (ent->mins[2] < -8.0f)
+				ent->mins[2] = -8.0f;
+			if (ent->groundentity) {
+				if (CvarValue(cv.ai_trace))
+					Dbg("ai %d fall through opening at (%.0f %.0f %.0f)\n", G_EdictNum(ent), ent->s.origin[0],
+					    ent->s.origin[1], ent->s.origin[2]);
+				ent->groundentity = nullptr;
+				if (ent->velocity[2] > -80.0f)
+					ent->velocity[2] = -80.0f;
+			}
+			gi.linkentity(ent);
+		}
 		/* the drop animation holds itself at its `inair` note until a landing; a character a ROF carries down (kos1
 		 * `introjohn2`) stays on the ground and never "lands", so on the ground the hold is released at once */
-		if (scripted && b && b->pauseKind && ent->groundentity)
+		if (scripted && b && b->pauseKind && ent->groundentity && !over_drop)
 			b->Resume();
-		if (scripted && b && b->AnimDone()) {
+		if (scripted && b && b->AnimDone() && !over_drop) {
+			RestoreFallBox(ent, ai);
 			*m = *r = 1;
 			return true;
 		}
@@ -909,11 +1023,12 @@ public:
 			}
 			return false;
 		}
-		if (ent->groundentity) {
+		if (ent->groundentity && !over_drop) {
 			if (b && b->pauseKind)
 				b->Resume();
 			if (!b || b->AnimDone()) {
 				VectorClear(ent->velocity);
+				RestoreFallBox(ent, ai);
 				float feet = ent->s.origin[2] + ent->mins[2];
 				float ok = (!IsZero(destination) && feet - destination[2] > 10) ? 0.0f : 1.0f;
 				*m = *r = ok;

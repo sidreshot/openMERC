@@ -135,6 +135,8 @@ char datadir[MAX_OSPATH];                 /* Yamagi -datadir (= -basedir) */
 qboolean file_from_protected_pak;
 /* FS_LoadFileShadowed: matches still to pass over in the search path */
 static int fs_skipmatches;
+/* FS_LoadLooseFile: the search walks directory mounts only, so a file next to the paks wins over them */
+static qboolean fs_loose_only;
 
 cvar_t *fs_basedir;
 cvar_t *fs_cddir;
@@ -1064,6 +1066,11 @@ FS_OpenFileExInner(const char *rawname, fileHandle_t *f, qboolean gamedir_only,
 
 		if (search->pack)
 		{
+			if (fs_loose_only)
+			{
+				continue;
+			}
+
 			fsPack_t *pack = search->pack;
 			int i = FS_PackFind(pack, upper);
 
@@ -1443,6 +1450,25 @@ int
 FS_LoadFile(const char *path, void **buffer)
 {
 	return FS_LoadFile2(path, buffer, 2);
+}
+
+/* the same read as FS_LoadFile, but directory mounts only (highest first). A loose file in base/ then wins over
+   the copy in pak0. -1 when no directory has it, and while r_retexturing is 0. */
+int
+FS_LoadLooseFile(const char *path, void **buffer)
+{
+	cvar_t *r = Cvar_Get("r_retexturing", "1", CVAR_ARCHIVE);
+	int size;
+
+	if (!r->value)
+	{
+		return -1;
+	}
+
+	fs_loose_only = true;
+	size = FS_LoadFile2(path, buffer, 2);
+	fs_loose_only = false;
+	return size;
 }
 
 /* the copy of path that the first `shadowed` higher-priority copies hide

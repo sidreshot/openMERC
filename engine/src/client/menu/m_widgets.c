@@ -342,6 +342,7 @@ Text_Option(mparse_t *p, mwidget_t *w, const char *kw)
 	if (!Q_stricmp(kw, "ombutton"))
 	{
 		Text_Icon(w)->button = true;
+		w->flags |= WF_OMBUTTON;
 		return true;
 	}
 

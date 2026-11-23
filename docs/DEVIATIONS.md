@@ -59,6 +59,7 @@ behaviour where that makes sense.
 | Bordered menu texts (MENU2) | text in a bordered `<text ... border>` sits on the bottom border | the text is lifted by 2/9 of the font height so it is centred inside the border (all pages and stock dialogs) | the title font's glyphs sit low in their cell | - |
 | Dialog backdrop (MENU2) | a dialog (`resize` screen) is drawn over the full-brightness screen below, whose texts run on beside the dialog box | the screen below is darkened with a black fill of alpha `menu_dialogdim` (archived, 0.6) before the dialog is drawn | the question stands out; page texts no longer look like stray glyphs next to it | `set menu_dialogdim 0` |
 | Gamepad menu navigation (MENU2) | gamepad buttons reach the menus only as JOY/AUX keys (nothing uses them); the pointer can only be moved with the mouse or ALT+arrows | with `menu_gamepad 1` (archived): d-pad up/down go to the previous/next interactive widget of the page content in TAB order, scrolling a scrolling page so that widget shows; the shoulder buttons go through the fixed tabs and buttons; d-pad left/right act as LEFTARROW/RIGHTARROW (sliders, lists); A acts as ENTER; B and BACK as ESCAPE. Key-binding rows waiting for a key still get the button itself. Keyboard TAB keeps the stock order (SPEC-801 7.5) | menus usable from a controller | `set menu_gamepad 0` |
+| Menu pointer | the pointer moves by the raw mouse movement in screen pixels, with no sensitivity (SPEC-801 7.2). The grab stays on while a menu is open, so that movement is the unscaled raw device | while a menu is open the raw grab is released and the drawn pointer tracks the desktop cursor, including its speed and acceleration. Play keeps the raw grab. A touch screen is unchanged (the finger places the pointer) | at 4K the raw pointer takes a long physical move to cross the menu and ignores the speed the desktop cursor already has | - |
 | Savegame date labels (MENU2) | the load/save grid shows the savegame time as stored ("Mon Oct 26 22:55:57 2026"), wider than its 128-pixel cell, so labels of neighbouring saves run into each other | shown as "2026-10-26 22:55"; a time in another format is shown unchanged; the file is not changed | labels stay inside their cell | - |
 | Desktop defaults (V1) | first start: `vid_fullscreen 1`, `gl_mode 3` = 640x480 (`default_video.cfg`, SPEC-301/302) | first start without a config: `r_mode -2` (desktop resolution), `vid_fullscreen 2` (borderless), `r_vsync 1`, `vid_maxfps 0` (= display refresh rate), `fov 95`, `horplus 1`, GL3 renderer; `vid_fullscreen`, `r_mode`, `snd_dll` stay archived | a modern PC should start at its native resolution | `default_video.cfg` of the stock pak, or the video page |
 | Max quality defaults ([pt69u]) | stock SoF / earlier OpenMerc: `r_msaa_samples 0`, `r_anisotropic 2`, `gl_texturemode GL_LINEAR_MIPMAP_NEAREST`, `r_farsee 0`; modern FX masters off | fresh config: `r_msaa_samples 8`, `r_anisotropic 16`, `gl_texturemode GL_LINEAR_MIPMAP_LINEAR`, `r_farsee 1`; modern FX masters ON at high (`r_om_*`, see docs/impl/GFX-modern.md §14) | owner asked for maximum graphics by default; archived configs keep saved values | lower the video-menu rows / cvars |
@@ -187,8 +188,10 @@ thunderstorm on jpn2".
   a shelf needed a jump onto it).
 - **A dropped weapon comes loaded** (g_items.cpp): a weapon a character dropped carries no rounds and was given with an
   empty clip; it is given with a full clip, as a weapon lying in the map.
-- **Pickup line** (cl_hud.c): plain prints during play (pickups, "can't carry more") are also shown for 3 s centred
-  under the top of the HUD in the medium font; they went only to the small console lines.
+- **Pickup line** (cl_hud.c, cl_strings.c, `cl_pickupmsg` on the Gameplay page): a plain print during play (a pickup,
+  "can't carry more") is the small line in the top left, out of the view. `cl_pickupmsg` 1 is the large line centred
+  under the top of the HUD for 3 s (a phone, where the touch trays cover the corner), 2 is both, 3 is neither. The
+  text stays in the console log. On Android the default is the centred line.
 - **Damage direction marker** (cl_hud.c, g_combat.cpp): a short red arc around the crosshair towards the attacker,
   turning with the view and fading over a second; the attacker's world yaw rides in the unused high bits of
   stats[15] (0x4000, bits 7-13) beside SoF's direction flags. Test aid: cl_om_dmgtest <yaw>.
@@ -251,3 +254,66 @@ thunderstorm on jpn2".
   (spawnflag 1) and is toggled back to its open place is never held. Test: tests/X1/sib3_blastdoors.cfg; test aids
   `om_doordebug 1` (prints who holds a door), `omusetarget` (what the use key would act on, with every candidate),
   `omuse <entity>` (its use-key reaction as a press would call it).
+
+## A crouched character stands up to move (2026-11-14)
+
+- **A crouched owner with no crouched move record stands up to move** (ai_decisions.cpp `CombatDecision::PlanMove`,
+  irq3b): the move choice gives a crouched body the first it has of the crouched run and the crouched aim stances
+  (SPEC-722 crouched list). A body with no crouched run for its weapon gets the aim stance, so a move planned while
+  it kneels, closing in or backing off, never takes a step: it kneels and aims for good. When the answer to a move
+  is not a move record and the body is crouched, the move is asked again standing; the owner stands up and moves
+  on its next think. Not for a character that never moves (spawnflag 128), nor for one standing on a train or on
+  a prop that moves: every step off it is refused, and the tsr1 train riders, kneeling to shoot, stood up and ran
+  against the train's edge. irq3b: the bodyguard with the sniper rifle on the upper floor (entity 455, about
+  -2500 1041 256), too close to the player after a crouched shot, only queued `cch_a_fwd_r_2`.
+
+## A move that gets nowhere is given up (2026-11-14)
+
+- **Three failed moves in a row, and the combat plan stops moving for 3 s** (ai_decisions.cpp
+  `CombatDecision::NonIdealPlan`, `ActionDone`; sud2): SPEC-710 C5 backs off along the retreat path or closes in
+  along the navigation path on every plan, with no limit. Where the step is refused (a wall, a ledge, a prop in the
+  way) the owner planned the same move think after think and did nothing else. After three such moves in a row
+  that failed, it plans for 3 s as with no retreat point or no path: it attacks in place with a clear shot, else
+  it stands; then it tries the move again. Fleeing (code 4) is unchanged. sud2: the worker `cutter2` at
+  717 -2128 -93, too close to the player, ran on the spot against its own retreat for good.
+
+## A scripted jump also takes off from the air (2026-11-14)
+
+- **A scripted jump begun above the floor gets its push, and stops over its target** (ai_actions.cpp
+  `GroundAction::HandleEvents`, `JumpAction`; kos2): the jump push was given only on the ground. A cut-scene actor
+  placed above a ledge (spawnflag 16: not dropped to the floor) got none and fell straight down. kos2's outro: John,
+  placed above the ledge in front of the gun, fell into the pit and never ran across the last shot. A scripted jump
+  now takes off from the air too; since such a jump falls further than its push allows for, its sideways speed is
+  cut once the actor has covered the distance to its target, so it lands clear of the wall beyond.
+
+## Backing off while firing (2026-11-14)
+
+- **Too close, a clear shot, and no record to back off with: attack from the spot** (ai_decisions.cpp
+  `CombatDecision::NonIdealPlan`, irq3b): an owner closer than its weapon's range steps away and fires on the way,
+  with the record its body gives for that step. A body with no such record for its posture and weapon gives none, or
+  a stand, and nothing or an idle stand was queued think after think: the owner faced the player and did nothing.
+  When the answer is not a move, an attack or an aim record, the owner attacks from where it stands. irq3b: the
+  commander with the pistol at -2600 2491 -68 (entity 134). Owners that back off without firing (PFlags 8) take the
+  other path and are unchanged, and so is an owner standing on a train or on a prop that moves: after the shot the
+  tsr1 train riders got back-off records and ran against the train's edge.
+
+## Riders move with the train's actual move (2026-11-14)
+
+- **Riders follow where the train went, not its velocity** (props/prop_train.cpp `TrainRiders`, props/prop_core.cpp
+  `RidersMove`, tsr1): the train thinks before it moves, so the riders rule (SPEC-770 5.9) moved whoever stands on
+  it by velocity * FRAMETIME. A train held by an obstacle keeps its velocity (elasticity -1, SPEC-760 B4.7) without
+  moving, and the riders were carried on: the tsr1 ride ends at a metal plate across the rails, and the player on the
+  roof slid off the front and dropped to the track. Each think the riders now get last think's error (the train's
+  actual move minus what they were moved) and the predicted move scaled by the part of it the train made last think.
+  The train, its stop and its end handling are unchanged; other props that carry riders use `Riders` as before.
+
+## Enemies on a train walk the roof (2026-11-15)
+
+- **A rider approaches along the car, and a step can stand on the train** (ai_decisions.cpp `TrainRoofPoint`,
+  ai_util.cpp `SlideOnTrain` and `CheckGround`, props/prop_core.cpp `RidersMove`, tsr1): world navigation points at
+  nodes on the track. The corner test traces points, and a point does not hit a bbox, so every step on
+  `rtskinhead1-3` was refused and they stood where the script woke them. On a train the approach is the point on
+  that roof closest to the enemy, inset from the ends. The anim step slides along the roof instead of onto the
+  track, the ground check keeps the train while the feet are still on it, and a rider the ceiling makes "solid"
+  is still carried. Not in the original. One of the three (the one who starts furthest from that point) still
+  drops off the car after a few steps; the other two stay on it and the one already nearest the player holds there.

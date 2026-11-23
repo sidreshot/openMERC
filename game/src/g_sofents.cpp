@@ -103,6 +103,19 @@ static void breakable_use(edict_t *self, edict_t *other, edict_t *activator)
 	breakable_break(self, activator);
 }
 
+/* a 0.2.4 save stored die/pain/use as none. The brush keeps its health and model. */
+void Breakable_Repair(edict_t *ent)
+{
+	if (!(ent->spawnflags & 1)) {
+		if (!ent->die)
+			ent->die = breakable_die;
+		if (!ent->pain)
+			ent->pain = breakable_pain;
+	}
+	if (ent->targetname && !ent->use)
+		ent->use = breakable_use;
+}
+
 void SP_func_breakable_brush(edict_t *ent)
 {
 	ent->solid = SOLID_BSP;

@@ -271,6 +271,13 @@ void CombatDecision::ActionDone(edict_t *ent, AI *ai, Action *a, float m)
 {
 	if (a->Kind() != AK_ATTACK)
 		success = 0.75f * success + 0.25f * m;
+	if (last_plan_move) {
+		if (m <= 0.25f) {
+			move_fails++;
+			move_fail_time = Now();
+		} else
+			move_fails = 0;
+	}
 	if (m <= 0.25f)
 		Unstick(ent, ai);
 	else if (pending_set && !PendingExecutable(ent))
@@ -499,6 +506,59 @@ void CombatDecision::PlanAttack(edict_t *ent, AI *ai, edict_t *t, const vec3_t a
 	ai->fire_flags &= ~1;
 }
 
+/* standing on a train, moving or stopped, or on another prop while it moves. A step off it is refused by the ledge
+ * test, so a move from there only runs against the edge */
+static bool OnCarryingProp(edict_t *ent)
+{
+	edict_t *g = ent->groundentity;
+	if (!g || g == g_edicts || g->ai)
+		return false;
+	if (g->classname && !Q_stricmp(g->classname, "misc_generic_train"))
+		return true;
+	return DotProduct(g->velocity, g->velocity) > 1.0f;
+}
+
+/* the point on a train roof closest to `target`, inset from the ends. World navigation nodes are on the track, not
+ * on the car, so an approach from the roof steps off it and then, the step refused, the rider stands where he woke
+ * (tsr1 rtskinhead1-3). Local +X is AngleVectors forward; local +Y is -right. */
+static bool TrainRoofPoint(edict_t *ent, const vec3_t target, vec3_t out)
+{
+	edict_t *g = ent->groundentity;
+	if (!g || !g->classname || Q_stricmp(g->classname, "misc_generic_train"))
+		return false;
+	vec3_t fwd, right, lx, ly;
+	AngleVectors(g->s.angles, fwd, right, nullptr);
+	fwd[2] = right[2] = 0;
+	if (VectorNormalize(fwd) < 0.1f || VectorNormalize(right) < 0.1f)
+		return false;
+	VectorCopy(fwd, lx);
+	VectorNegate(right, ly);
+	float spanx = g->maxs[0] - g->mins[0];
+	float spany = g->maxs[1] - g->mins[1];
+	vec3_t axis;
+	float half;
+	if (spany >= spanx) {
+		VectorCopy(ly, axis);
+		half = spany * 0.5f;
+	} else {
+		VectorCopy(lx, axis);
+		half = spanx * 0.5f;
+	}
+	vec3_t rel;
+	VectorSubtract(target, g->s.origin, rel);
+	float along = DotProduct(rel, axis);
+	float lim = half - 48.0f;
+	if (lim < 16.0f)
+		lim = 16.0f;
+	if (along > lim)
+		along = lim;
+	if (along < -lim)
+		along = -lim;
+	VectorMA(g->s.origin, along, axis, out);
+	out[2] = ent->s.origin[2];
+	return true;
+}
+
 void CombatDecision::PlanMove(edict_t *ent, AI *ai, const vec3_t dest, const vec3_t face, bool running, bool aiming,
                               bool strafing)
 {
@@ -506,6 +566,20 @@ void CombatDecision::PlanMove(edict_t *ent, AI *ai, const vec3_t dest, const vec
 	FillInput(in, ent, ai, dest, face, aiming ? target : nullptr, -1, running, aiming, strafing, nullptr);
 	S = Now();
 	const G3Anim *rec = ai->body ? ai->body->ChooseMove(in) : nullptr;
+	/* a crouched owner whose body has no crouched move record for its weapon gets a crouched aim stance from the
+	 * move choice (SPEC-722 crouched list), so the move never takes a step: closing in or backing off, it kneels
+	 * and aims for good. The move is asked again standing: the owner stands up, and moves on its next think
+	 * (DEVIATIONS.md "A crouched character stands up to move"). Not on a train: the tsr1 riders, kneeling to shoot
+	 * across the gap, stood up and ran against the train's edge */
+	if (rec && rec->cls != ANIMCLS_MOVE && ai->body->cur && ai->body->cur->posture == POSTURE_CROUCH &&
+	    !(ent->spawnflags & SF_STATIONARY) && !OnCarryingProp(ent) && dest && HDist2(dest, ent->s.origin) >= 1.0f) {
+		FillInput(in, ent, ai, dest, face, aiming ? target : nullptr, POSTURE_STAND, running, aiming, strafing, nullptr);
+		const G3Anim *up = ai->body->ChooseMove(in);
+		if (CvarValue(cv.ai_trace) >= 2)
+			Dbg("ai %d: crouched move %s, stands up: %s\n", G_EdictNum(ent), rec->name, up ? up->name : "none");
+		if (up)
+			rec = up;
+	}
 	QueueRecord(ent, ai, this, rec, dest, face, aiming ? target : nullptr);
 }
 
@@ -641,9 +715,15 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 	VectorSubtract(target_pos, ent->s.origin, to_t);
 	to_t[2] = 0;
 	float dist_t = VectorNormalize(to_t);
+	/* a move of this plan whose steps keep failing (a wall, a ledge, a prop in the way) is given up for 3 s after three
+	 * in a row; the owner then plans as with no retreat point or no path: it attacks in place with a clear shot, else
+	 * it stands. Fleeing (code 4) is unchanged (DEVIATIONS.md "A move that gets nowhere is given up") */
+	if (move_fails && Now() - move_fail_time >= 3.0f)
+		move_fails = 0;
+	bool stuck = move_fails >= 3 && code != 4;
 	if (code == 2 || code == 8) {
-		vec3_t P;
-		bool retreat = NavPoint(ent, ai, target_pos, NAV_FLEE, P);
+		vec3_t P = {0, 0, 0};
+		bool retreat = !stuck && NavPoint(ent, ai, target_pos, NAV_FLEE, P);
 		vec3_t r = {0, 0, 0};
 		if (retreat) {
 			VectorSubtract(P, ent->s.origin, r);
@@ -713,11 +793,23 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 			}
 			vec3_t goal;
 			VectorMA(ent->s.origin, stepd, r, goal);
+			last_plan_move = true;
 			if (may_attack && !(PFlags(ai) & 8) && ClearShotTo(ent, ai, nullptr, target, target_pos)) {
 				G3MoveInput in;
 				FillInput(in, ent, ai, goal, face, target, -1, true, true, strafe, nullptr);
 				S = now;
 				const G3Anim *rec = ai->body ? ai->body->ChooseAttack(in) : nullptr;
+				/* backing off while firing needs a record that moves or fires. A body with neither for its posture
+				 * and weapon answers with an aim stance (a stand for D3) or with nothing, and the owner aims for
+				 * good without a shot or a step. It attacks from where it is then (DEVIATIONS.md "Backing off
+				 * while firing"). Not on a train or a moving prop: after the shot the tsr1 riders got back-off
+				 * records and ran against the train's edge, every step off it being refused */
+				bool acts = rec && (rec->cls == ANIMCLS_MOVE || rec->cls == ANIMCLS_ATTACK || (rec->flags & ANIMF_AIM));
+				if (!acts && !OnCarryingProp(ent)) {
+					last_plan_move = false;
+					PlanAttack(ent, ai, target, target_pos, false, nullptr);
+					return;
+				}
 				QueueRecord(ent, ai, this, rec, goal, face, target);
 			} else
 				PlanMove(ent, ai, goal, face, true, false, strafe);
@@ -738,7 +830,32 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 	}
 	/* too far, out of time, no clear shot, flee (4), search (7) */
 	vec3_t pathpt;
-	if (!NavPoint(ent, ai, target_pos, NAV_APPROACH, pathpt)) {
+	bool on_train = TrainRoofPoint(ent, target_pos, pathpt);
+	if (on_train) {
+		/* already at the point on this car closest to the enemy: shoot if the line is clear, otherwise aim there.
+		 * Walking further only steps off the roof */
+		vec3_t dir;
+		VectorSubtract(pathpt, ent->s.origin, dir);
+		dir[2] = 0;
+		float dist = VectorNormalize(dir);
+		if (dist <= 36.0f) {
+			if (may_attack && ClearShotTo(ent, ai, nullptr, target, target_pos))
+				PlanAttack(ent, ai, target, target_pos, false, nullptr);
+			else
+				PlanStand(ent, ai, target ? target->s.origin : nullptr, target, false, nullptr);
+			return;
+		}
+		/* a run step is about 20 units and the arrival test ends the action once that covers the goal, so the goal
+		 * stays a short way along the roof and the body keeps the looping run */
+		float stepd = dist < 48.0f ? dist : 48.0f;
+		vec3_t goal, look;
+		VectorMA(ent->s.origin, stepd, dir, goal);
+		VectorMA(ent->s.origin, 400, dir, look);
+		last_plan_move = true;
+		PlanMove(ent, ai, goal, look, true, false, false);
+		return;
+	}
+	if (stuck || !NavPoint(ent, ai, target_pos, NAV_APPROACH, pathpt)) {
 		if (may_attack && ClearShotTo(ent, ai, nullptr, target, target_pos))
 			PlanAttack(ent, ai, target, target_pos, false, nullptr);
 		else
@@ -770,9 +887,10 @@ void CombatDecision::NonIdealPlan(edict_t *ent, AI *ai, int code)
 		VectorMA(ent->s.origin, 500, dir, face);
 	bool far_enough = dist_t > 50 || code == 4;
 	if (stepd * stepd >= 2 && far_enough && !((PFlags(ai) & 2) && code != 4)) {
-		if (Steer(ent, ai, goal))
+		if (Steer(ent, ai, goal)) {
+			last_plan_move = code != 4;
 			PlanMove(ent, ai, goal, face, true, may_attack && !(PFlags(ai) & 128) && code != 4 && code != 7, strafe);
-		else
+		} else
 			PlanStand(ent, ai, face, nullptr, false, nullptr);
 		return;
 	}
@@ -1018,6 +1136,8 @@ bool CombatDecision::Evaluate(edict_t *ent, AI *ai, int *priority)
 
 void CombatDecision::Plan(edict_t *ent, AI *ai)
 {
+	/* the action that just finished already read this in ActionDone */
+	last_plan_move = false;
 	if (kind >= DK_DEKKER1 && kind <= DK_DEKKER_LAST)
 		DekkerShock(ent, ai);
 	if (kind == DK_SEARCH) {

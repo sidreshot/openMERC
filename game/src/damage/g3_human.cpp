@@ -835,7 +835,9 @@ public:
 			return;
 		UpdateFace();
 		WeaponCharge();
-		if (ent->health <= 0 && cur && cur->cls == ANIMCLS_DEATH)
+		/* any dead body, not only one whose current clip is classed as a death. A fall or a
+		   paused pose (nyc2 tunnel) never reached the seat and stayed in the air. */
+		if (ent->health <= 0)
 			CorpseState();
 	}
 

@@ -547,8 +547,22 @@ edict_t *G_UseTarget(edict_t *player)
 		if (dot < bestdot)
 			continue;
 		trace_t tr = gi.trace(eye, NULL, NULL, c, player, MASK_PLAYERSOLID);
-		if (tr.fraction < 1.0f && tr.ent != e)
-			continue;
+		if (tr.fraction < 1.0f && tr.ent != e) {
+			/* the centre can sit inside the wall behind a thin prop (kos1 valve: the
+			 * centre trace dies in the lip, the near face is in the open). A trace to
+			 * the nearest point of the box still has to reach that face. */
+			vec3_t near;
+			for (int j = 0; j < 3; j++) {
+				near[j] = eye[j];
+				if (near[j] < e->absmin[j])
+					near[j] = e->absmin[j];
+				else if (near[j] > e->absmax[j])
+					near[j] = e->absmax[j];
+			}
+			tr = gi.trace(eye, NULL, NULL, near, player, MASK_PLAYERSOLID);
+			if (tr.fraction < 1.0f && tr.ent != e)
+				continue;
+		}
 		best = e;
 		bestdot = dot;
 	}
@@ -561,6 +575,25 @@ edict_t *G_UseTarget(edict_t *player)
 	trace_t tr = gi.trace(eye, NULL, NULL, end, player, MASK_PLAYERSOLID);
 	if (tr.ent && tr.ent->inuse && tr.ent->plUse)
 		return tr.ent;
+
+	/* 4: a use-key trigger is not player-solid, so step 3 walks through it.
+	   Sample the same 75 units. kos1's pipe hatch is this case: from the valve
+	   lip the view passes through the trigger and hits nothing. */
+	for (int s = 1; s <= 8; s++) {
+		vec3_t p, mn, mx;
+		VectorMA(eye, 75.0f * s / 8.0f, fwd, p);
+		for (int k = 0; k < 3; k++) {
+			mn[k] = p[k] - 1.0f;
+			mx[k] = p[k] + 1.0f;
+		}
+		edict_t *list[16];
+		int n = gi.BoxEdicts(mn, mx, list, 16, 2);
+		for (int i = 0; i < n; i++) {
+			edict_t *e = list[i];
+			if (e->inuse && e->plUse && e->classname && strstr(e->classname, "trigger"))
+				return e;
+		}
+	}
 	return NULL;
 }
 
