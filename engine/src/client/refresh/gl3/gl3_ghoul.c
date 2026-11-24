@@ -1378,6 +1378,10 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			else
 			{
 				level = ((flags & SOF_RF_CASTSHADOW) || round) ? models : 0;
+				/* The same edge limit as a weapon. A coat looked at from above is a long thin
+				   triangle with normals that disagree, and the curved surface leaves it as a spike.
+				   Close to the camera that triangle is large, so the spike shows only at that angle. */
+				pncap = OM_WEAPON_PN_EDGE;
 
 				/* by size on the screen: the small triangles cost the GPU (MSAA shades the pixels along every edge
 				   twice; three characters close by at level 3 took 4.8 ms on a GTX 1050 Ti, at level 2 2.4). A man-high

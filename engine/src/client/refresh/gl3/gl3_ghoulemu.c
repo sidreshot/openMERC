@@ -150,7 +150,7 @@ static struct
 	int tess;
 	float tessk;    /* how far toward the PN surface (r_om_tess / 10) */
 	int weapscale;  /* 1..10: cap the PN offset. 0: a character or a prop */
-	float pncap;    /* OM_WEAPON_PN_EDGE for a weapon, else 0 */
+	float pncap;    /* OM_WEAPON_PN_EDGE for a weapon, a character and a round prop, else 0 */
 	int proplevel;  /* model subdivision a round prop may rise to, 0 off */
 	float propk;
 	qboolean ppl;   /* per-pixel lighting of the entity being drawn (r_om_ppl_models) */
