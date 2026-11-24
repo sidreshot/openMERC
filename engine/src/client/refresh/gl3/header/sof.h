@@ -152,6 +152,7 @@ void GL3_FX_Shutdown(void);
 void GL3_FX_Flush(void);
 void GL3_FX_BeginFrame3D(void);
 void GL3_FX_SortedPass(void);
+qboolean GL3_FX_DrawCoveredEntities(void); /* solid models before the screen fog */
 void GL3_FX_ScreenOverlays(void);
 void GL3_FX_AddAlphaSurface(msurface_t *surf, entity_t *ent);
 /* gl3_main.c r_om_worldvbo: the world's polygons in one static buffer, a batch then holds only indices */
@@ -392,6 +393,7 @@ void GL3_Post_Init(void);
 void GL3_Post_Shutdown(void);
 qboolean GL3_Post_BeginView(int x, int y, int w, int h);
 void GL3_Post_DepthCopy(void);
+void GL3_Post_DepthStale(void); /* the next fog pass copies the depth again */
 qboolean GL3_Post_DepthReady(void);
 qboolean GL3_Post_WaterCopy(void);
 qboolean GL3_Post_GlassCopy(const float *box);
@@ -461,6 +463,7 @@ char *GL3_CSM_Prepend(const char *src);
 char *GL3_CSM_PrependLamps(const char *src, qboolean lamps); /* lamps false: no lamp shadow receiver */
 void GL3_CSM_BindProgram(GLuint prog);
 const float *GL3_CSM_InvPV(void);
+void GL3_CSM_InvalidateInvPV(void);
 void GL3_CSM_AddCasterTris(const float *clip, int numverts, int stride);
 qboolean GL3_CSM_DrawDepth(const float *vp, const float *dyn, int numdynfloats, qboolean world);
 /* the casters of the previous frame: one segment per primitive drawn, vertices into tris (3 floats each) */

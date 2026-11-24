@@ -2154,6 +2154,14 @@ GL3_Post_DepthCopy(void)
 	P.depthcopied = true;
 }
 
+/* The copy above is the world only. Solid models are drawn after it and before the screen fog,
+   which has to fog their depth, not the wall behind them. */
+void
+GL3_Post_DepthStale(void)
+{
+	P.depthcopied = false;
+}
+
 qboolean
 GL3_Post_DepthReady(void)
 {
@@ -12393,6 +12401,9 @@ MirrorPass(const float *n, float d, GLuint fbo, const float *box, int tw, int th
 	gl3state.projMat3D = saveproj;
 	gl3state.uni3DData.transProjViewMat4 = savepv;
 	GL3_UpdateUBO3D();
+	/* Ghoul in this pass is the first reader of the inverse projection. Drop that cache:
+	   it holds the oblique mirror matrix, and the beam pass would rebuild the main view with it. */
+	GL3_CSM_InvalidateInvPV();
 	GL3_FX_BeginFrame3D();
 	GL3_Fog_BeginFrame();
 	return true;
@@ -12823,6 +12834,7 @@ ProbeFace(probe_t *pr, int f)
 	gl3state.projMat3D = saveproj;
 	gl3state.uni3DData.transProjViewMat4 = savepv;
 	GL3_UpdateUBO3D();
+	GL3_CSM_InvalidateInvPV();
 	GL3_FX_BeginFrame3D();
 	GL3_Fog_BeginFrame();
 

@@ -2182,6 +2182,22 @@ GL3_Fog_PixOn(void)
 	return pixon;
 }
 
+/* Set while the solid models are drawn ahead of the screen fog. Their shader must not fog them too:
+   the pass that follows fogs the colour they wrote, shadows included. */
+static qboolean screencovers;
+
+void
+GL3_Fog_ScreenCovers(qboolean on)
+{
+	screencovers = on;
+}
+
+qboolean
+GL3_Fog_ScreenCovering(void)
+{
+	return screencovers;
+}
+
 static void
 PixFrame(void)
 {

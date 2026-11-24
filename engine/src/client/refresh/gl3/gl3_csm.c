@@ -92,6 +92,7 @@ static struct
 	int capkey;             /* the entity being drawn (GL3_CSM_SetCasterKey) */
 	vec3_t caporg;
 	float invpv[16];
+	float invsrc[16]; /* the projection * view those 16 floats were inverted from */
 	qboolean invvalid;
 	csmubo_t u;
 	qboolean uboenabled;
@@ -1457,13 +1458,26 @@ Invert4(const float *m, float *out)
 	return true;
 }
 
-/* the inverse of this frame's projection * view (after SetupGL) */
+/* the inverse of the projection * view installed right now. A mirror or a probe
+   swaps that matrix and Ghoul reads the inverse while the swap is up; the cache
+   is dropped as soon as the bytes change back, so the beam pass does not rebuild
+   the main view with the oblique mirror camera. */
+void
+GL3_CSM_InvalidateInvPV(void)
+{
+	C.invvalid = false;
+}
+
 const float *
 GL3_CSM_InvPV(void)
 {
-	if (!C.invvalid)
+	const float *m = &gl3state.uni3DData.transProjViewMat4.Elements[0][0];
+
+	if (!C.invvalid || memcmp(C.invsrc, m, sizeof(C.invsrc)) != 0)
 	{
-		if (!Invert4(&gl3state.uni3DData.transProjViewMat4.Elements[0][0], C.invpv))
+		memcpy(C.invsrc, m, sizeof(C.invsrc));
+
+		if (!Invert4(m, C.invpv))
 		{
 			memset(C.invpv, 0, sizeof(C.invpv));
 		}

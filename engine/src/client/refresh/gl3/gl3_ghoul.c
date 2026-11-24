@@ -1238,7 +1238,8 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 
 	/* E19 r_om_fogpix: the model's shader fogs it per pixel (the regions the view crosses), not the whole model by
 	   its origin; the view weapon stays clear as before */
-	GL3_GhoulEmu_SetRegionFog(!weapon && GL3_Fog_PixOn());
+	/* ahead of the screen fog the pass fogs the pixels they wrote, shadows included */
+	GL3_GhoulEmu_SetRegionFog(!weapon && GL3_Fog_PixOn() && !GL3_Fog_ScreenCovering());
 
 	if (!weapon && !GL3_Fog_PixOn())
 	{

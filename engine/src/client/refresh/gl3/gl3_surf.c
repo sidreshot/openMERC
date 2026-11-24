@@ -1132,6 +1132,10 @@ GL3_DrawWorld(void)
 
 	VectorCopy(r_newrefdef.vieworg, modelorg);
 
+	/* The mirror pass walks this list from the reflected eye and leaves the
+	   back sides of panes on it. Drawn in the real view they are the white sheet. */
+	gl3_alpha_surfaces = NULL;
+
 	/* auto cycle the world frame for texture animation */
 	memset(&ent, 0, sizeof(ent));
 	ent.frame = (int)(GL3_GameTime() * 2); /* OpenMerc: SoF animates by the game clock */
@@ -1178,23 +1182,72 @@ LeafHasSky(const mleaf_t *leaf)
 	return false;
 }
 
+/* Squared distance from a point to a leaf box. 0 when the point is inside. */
+static float
+LeafBoxDist2(const mleaf_t *leaf, const vec3_t p)
+{
+	float d = 0;
+	int i;
+
+	for (i = 0; i < 3; i++)
+	{
+		float e = p[i];
+
+		if (e < leaf->minmaxs[i])
+		{
+			e = leaf->minmaxs[i] - e;
+			d += e * e;
+		}
+		else if (e > leaf->minmaxs[i + 3])
+		{
+			e = e - leaf->minmaxs[i + 3];
+			d += e * e;
+		}
+	}
+
+	return d;
+}
+
+static void
+MarkLeaf(mleaf_t *leaf)
+{
+	mnode_t *node = (mnode_t *)leaf;
+
+	if (!gl3_pvssky && LeafHasSky(leaf))
+	{
+		gl3_pvssky = true;
+	}
+
+	do
+	{
+		if (node->visframe == gl3_visframecount)
+		{
+			break;
+		}
+
+		node->visframe = gl3_visframecount;
+		node = node->parent;
+	}
+	while (node);
+}
+
+/* A leaf this close is drawn even when its vis bit is clear. The PVS drops
+   whole sectors, and the skybox shows through the gap. 4096 is about 100 m:
+   the next stretch, not the whole map. */
+#define GL3_NEAR_SECTOR 4096.0f
+
 void
 GL3_MarkLeaves(void)
 {
 	const byte *vis;
 	YQ2_ALIGNAS_TYPE(int) byte fatvis[MAX_MAP_LEAFS / 8];
-	mnode_t *node;
 	int i, c;
 	mleaf_t *leaf;
 	int cluster;
+	float near2 = GL3_NEAR_SECTOR * GL3_NEAR_SECTOR;
 
-	if ((gl3_oldviewcluster == gl3_viewcluster) &&
-		(gl3_oldviewcluster2 == gl3_viewcluster2) &&
-		!r_novis->value &&
-		(gl3_viewcluster != -1))
-	{
-		return;
-	}
+	/* Rebuilt every frame. The old early-out kept the last PVS, so a sector
+	   stayed missing until the eye crossed into another cluster. */
 
 	/* development aid to let you run around
 	   and see exactly where the pvs ends */
@@ -1256,24 +1309,11 @@ GL3_MarkLeaves(void)
 
 		if (vis[cluster >> 3] & (1 << (cluster & 7)))
 		{
-			if (!gl3_pvssky && LeafHasSky(leaf))
-			{
-				gl3_pvssky = true;
-			}
-
-			node = (mnode_t *)leaf;
-
-			do
-			{
-				if (node->visframe == gl3_visframecount)
-				{
-					break;
-				}
-
-				node->visframe = gl3_visframecount;
-				node = node->parent;
-			}
-			while (node);
+			MarkLeaf(leaf);
+		}
+		else if (LeafBoxDist2(leaf, r_newrefdef.vieworg) <= near2)
+		{
+			MarkLeaf(leaf);
 		}
 	}
 }

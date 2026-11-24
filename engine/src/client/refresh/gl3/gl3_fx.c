@@ -1450,6 +1450,22 @@ DecalRelief(const sofalphaquad_t *q, const gl3image_t *image, gl3fxstate_t *st)
 	st->relief[3] = 0;
 }
 
+/* Soft fade is for a puff that sinks into a wall. The signal-flare sprite is a
+   few units across and sits on the stick, so that fade wiped the flame out
+   and left the smoke, which rises clear of the ground. */
+static int
+FlareSoft(int blend, qboolean billboard, qboolean depthtest, const gl3image_t *image)
+{
+	int soft = GL3_Post_SoftMode(blend, billboard, depthtest);
+
+	if (soft && image && Q_strcasestr(image->name, "flare4"))
+	{
+		return 0;
+	}
+
+	return soft;
+}
+
 /* one alpha quad drawn alone (SPEC-412 §8) */
 static void
 DrawAlphaQuad(sofalphaquad_t *q)
@@ -1480,8 +1496,8 @@ DrawAlphaQuad(sofalphaquad_t *q)
 	DecalRelief(q, image, &st);
 	SetPointFog(&st, QuadFog(q), q->origin, blend);
 	/* GFX-modern: camera-facing smoke, dust and blood fade where they cut into the world */
-	st.soft = GL3_Post_SoftMode(blend, (q->flags & SOF_AQ_BILLBOARD) &&
-		!(q->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)), st.depthtest);
+	st.soft = FlareSoft(blend, (q->flags & SOF_AQ_BILLBOARD) &&
+		!(q->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)), st.depthtest, image);
 
 	/* GFX-modern r_om_fxvolume: a puff lit as a ball, a fan around its centre */
 	{
@@ -1621,8 +1637,8 @@ DrawQuadChain(sofquadchain_t *chain)
 	DecalMaterial(first, image, blend, &st);
 	DecalRelief(first, image, &st);
 	SetPointFog(&st, QuadFog(first), first->origin, blend);
-	st.soft = GL3_Post_SoftMode(blend, billboard && !(first->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)),
-		st.depthtest);
+	st.soft = FlareSoft(blend, billboard && !(first->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)),
+		st.depthtest, image);
 	GL3_FX_SetState(&st);
 
 	prevdrawn = false;
@@ -2049,6 +2065,44 @@ DrawEntity(entity_t *e, int index)
 	glEnable(GL_BLEND);
 }
 
+/* Solid models before the screen fog (gl3_main.c). The sorted pass still draws the view weapon
+   and everything that does not write a surface under the fog: quads, chains, translucent faces. */
+static qboolean solidsbeforefog;
+
+qboolean
+GL3_FX_DrawCoveredEntities(void)
+{
+	int i;
+
+	solidsbeforefog = false;
+
+	/* Without the screen pass these models keep the fog in their own shader, inside the sorted pass. */
+	if (!GL3_Fog_PixOn() || !gl3post.active || !gl3_sofframe.active || !r_drawentities->value)
+	{
+		return false;
+	}
+
+	GL3_Fog_ScreenCovers(true);
+
+	for (i = 0; i < r_newrefdef.num_entities; i++)
+	{
+		entity_t *e = &r_newrefdef.entities[i];
+
+		if (e->flags & SOF_RF_WEAPONMODEL)
+		{
+			continue;
+		}
+
+		DrawEntity(e, i);
+	}
+
+	GL3_Fog_ScreenCovers(false);
+	GL3_FX_Flush();
+	GL3_Draw3DBatchesNow();
+	solidsbeforefog = true;
+	return true;
+}
+
 void
 GL3_FX_SortedPass(void)
 {
@@ -2209,6 +2263,12 @@ GL3_FX_SortedPass(void)
 				DrawAlphaSurface((msurface_t *)it->ptr, it->ent);
 				break;
 			case ITEM_ENTITY:
+				/* already drawn, under the screen fog; the weapon is not */
+				if (solidsbeforefog && !(it->ent->flags & SOF_RF_WEAPONMODEL))
+				{
+					break;
+				}
+
 				DrawEntity(it->ent, (int)(intptr_t)it->ptr);
 				break;
 		}

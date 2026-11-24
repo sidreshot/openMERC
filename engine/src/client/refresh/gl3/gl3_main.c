@@ -2565,7 +2565,15 @@ GL3_RenderView(refdef_t *fd)
 
 	/* fog overlay for the faces collected by the world walk, with shimmer and far wall */
 	GL3_Fog_DrawPass(true);
-	/* E19 r_om_fogpix: instead, the regions' fog over the world and the sky per pixel */
+	/* Models and the shadows they cast used to be drawn after the screen fog, so a body and its
+	   ground shadow sat on top of the fog. They are drawn first. The pass then fogs them with the
+	   world, from the depth they wrote. The view weapon stays in the sorted pass. */
+	if (GL3_FX_DrawCoveredEntities())
+	{
+		GL3_Post_DepthStale();
+	}
+
+	/* E19 r_om_fogpix: the regions' fog over the world, the solid models and the sky, per pixel */
 	GL3_Post_RegionFog();
 	GL3_Post_ProfMark("fogov");
 

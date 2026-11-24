@@ -1078,9 +1078,13 @@ static const char* fragmentSrcOmWorld =
 	"vec3 omMirrorColor(vec3 c, vec3 wp)\n"
 	"{\n"
 	"	vec2 su = gl_FragCoord.xy * omMirrorRect.xy;\n"
-	"	if (omMirror.x > 0.5 && abs(dot(omMirrorPlane.xyz, wp) - omMirrorPlane.w) <= 1.5)\n"
+	"	vec3 n = normalize(passNormal);\n"
+	/* the 1.5-unit slab around the plane also crosses the ceiling, the floor and a door.
+	   Only a face that lies on the pane takes the reflection, or that slab paints the
+	   mirror picture onto them and the picture moves when the camera turns. */
+	"	if (omMirror.x > 0.5 && abs(dot(n, omMirrorPlane.xyz)) > 0.65 && abs(dot(omMirrorPlane.xyz, wp) - omMirrorPlane.w) <= 1.5)\n"
 	"		return mix(c, texture(omMirrorTex, su).rgb, omMirrorRect.z * 0.92);\n"
-	"	if (omMirror.y > 0.5 && abs(dot(omMirrorPlane2.xyz, wp) - omMirrorPlane2.w) <= 1.5)\n"
+	"	if (omMirror.y > 0.5 && abs(dot(n, omMirrorPlane2.xyz)) > 0.65 && abs(dot(omMirrorPlane2.xyz, wp) - omMirrorPlane2.w) <= 1.5)\n"
 	"		return mix(c, texture(omMirrorTex2, su).rgb, omMirrorRect.z * 0.92);\n"
 	"	return c;\n"
 	"}\n"
