@@ -735,12 +735,52 @@ static const char *ls_glsl =
 	"		vis += ci * st * (dy * 0.25);\n"
 	"	}\n"
 	"	return (tot > 0.0) ? vis / tot : 1.0;\n"
+	"}\n"
+	/* One lamp, for the Ghoul light whose origin sits on this slot. The compare samples are the
+	   same ones omLsModelVis takes: the static face, then four taps of the dynamic face. The
+	   sample point is pushed off the skin toward the lamp, so the surface does not shadow
+	   itself and a limb farther out still blocks. No raw depth read: that sampler is a
+	   different type from the fog table and must not be live in this program. */
+	"int omLsMatch(vec3 lworld)\n"
+	"{\n"
+	"	int n = int(omLsP.x + 0.5);\n"
+	"	for (int i = 0; i < 8; i++)\n"
+	"	{\n"
+	"		if (i >= n) break;\n"
+	"		if (omLsPos[i].w <= 1.0) continue;\n"
+	"		vec3 d = omLsPos[i].xyz - lworld;\n"
+	"		if (dot(d, d) <= 48.0 * 48.0) return i;\n"
+	"	}\n"
+	"	return -1;\n"
+	"}\n"
+	"float omLsSlotVis(int i, vec3 wp, vec3 N)\n"
+	"{\n"
+	"	int n = int(omLsP.x + 0.5);\n"
+	"	if (i < 0 || i >= n || omLsPos[i].w <= 1.0) return 1.0;\n"
+	"	vec3 L = omLsPos[i].xyz - wp;\n"
+	"	float d = length(L);\n"
+	"	if (d < 1.0 || d >= omLsPos[i].w) return 1.0;\n"
+	"	vec3 l = L / d;\n"
+	"	vec3 p = wp + (N * 0.5 + l) * (3.0 * d * omLsP.w);\n"
+	"	vec3 v = p - omLsPos[i].xyz;\n"
+	"	vec3 a = abs(v);\n"
+	"	int f = (a.x >= a.y && a.x >= a.z) ? (v.x < 0.0 ? 1 : 0) : ((a.y >= a.z) ? (v.y < 0.0 ? 3 : 2) : (v.z < 0.0 ? 5 : 4));\n"
+	"	vec4 sc = omLsVP[i * 6 + f] * vec4(p, 1.0);\n"
+	"	vec3 uvz = sc.xyz / sc.w * 0.5 + 0.5;\n"
+	"	float layer = float(i * 12 + f);\n"
+	"	float st = texture(omLsMap, vec4(uvz.xy, layer, uvz.z));\n"
+	"	float dy = 0.0;\n"
+	"	for (int k = 0; k < 4; k++)\n"
+	"		dy += texture(omLsMap, vec4(uvz.xy + omLsDisk[k * 4] * omLsP2.x * 1.5, layer + 6.0, uvz.z));\n"
+	"	return st * (dy * 0.25);\n"
 	"}\n";
 
 /* a GPU without the two texture units: the world shaders get an empty function */
 static const char *ls_glsl_none =
 	"void omLsApply(inout vec3 lm, vec3 lm0, vec3 wp, vec3 nrm) {}\n"
-	"float omLsModelVis(vec3 wp, vec3 N) { return 1.0; }\n";
+	"float omLsModelVis(vec3 wp, vec3 N) { return 1.0; }\n"
+	"float omLsSlotVis(int i, vec3 wp, vec3 N) { return 1.0; }\n"
+	"int omLsMatch(vec3 lworld) { return -1; }\n";
 
 const char *
 GL3_LShadow_GlslNone(void)
