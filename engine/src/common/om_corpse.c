@@ -134,9 +134,105 @@ int OM_DeathSettle(float origin[3], float velocity[3], float feet_offset, int co
 
 int OM_CorpseSupport(int kind, float normal_z)
 {
-	if (normal_z < 0.7f)
+	if (normal_z < OM_CORPSE_SLOPE_MIN)
 		return 0;
 	return kind >= 0 && kind <= 3;
+}
+
+static int om_unit(const float in[3], float out[3])
+{
+	float len;
+
+	if (!in)
+		return 0;
+	len = sqrtf(in[0] * in[0] + in[1] * in[1] + in[2] * in[2]);
+	if (len < 1.0e-8f)
+		return 0;
+	out[0] = in[0] / len;
+	out[1] = in[1] / len;
+	out[2] = in[2] / len;
+	return 1;
+}
+
+int OM_CorpseAlign(float yaw, const float normal[3], float *pitch, float *roll)
+{
+	float n[3], sy, cy, dot_f, sr, cr, sp, cp;
+	const float deg = 57.2957795f;
+	const float rad = 0.01745329252f;
+
+	if (!pitch || !roll || !om_unit(normal, n))
+		return 0;
+	if (n[2] < OM_CORPSE_SLOPE_MIN)
+		return 0;
+	sy = sinf(yaw * rad);
+	cy = cosf(yaw * rad);
+	/* Horizontal forward (cos yaw, sin yaw) and Quake right (sin yaw, -cos yaw). */
+	dot_f = n[0] * cy + n[1] * sy;
+	sr = n[0] * sy - n[1] * cy;
+	cr = sqrtf(dot_f * dot_f + n[2] * n[2]);
+	if (cr < 1.0e-6f)
+		return 0;
+	sp = dot_f / cr;
+	cp = n[2] / cr;
+	/* AngleVectors up of (P, yaw, R) is the normal. s.angles stores -P and -R. */
+	*pitch = -atan2f(sp, cp) * deg;
+	*roll = -atan2f(sr, cr) * deg;
+	return 1;
+}
+
+int OM_CorpseSlideVel(const float normal[3], float velocity[3])
+{
+	float n[3], vn;
+	int k;
+
+	if (!velocity || !om_unit(normal, n))
+		return 0;
+	if (n[2] <= 0.0f || n[2] >= OM_CORPSE_SLOPE_MIN)
+		return 0;
+	/* Upward speed on a steep face is the hop. Do not turn it into a climb. */
+	if (velocity[2] > 0.0f) {
+		velocity[0] = 0.0f;
+		velocity[1] = 0.0f;
+		velocity[2] = 0.0f;
+		return 1;
+	}
+	vn = velocity[0] * n[0] + velocity[1] * n[1] + velocity[2] * n[2];
+	if (vn < 0.0f) {
+		for (k = 0; k < 3; k++)
+			velocity[k] -= vn * n[k];
+	}
+	return 1;
+}
+
+float OM_CorpseUnstick(float normal_z, int embedded)
+{
+	if (!embedded || normal_z <= 0.0f || normal_z >= OM_CORPSE_SLOPE_MIN)
+		return 0.0f;
+	return 1.0f;
+}
+
+int OM_CorpsePlant(float origin[3], float feet, const float plane_point[3], const float normal[3])
+{
+	float n[3], bolt[3], dist;
+	int k;
+
+	if (!origin || !plane_point || !om_unit(normal, n))
+		return 0;
+	if (n[2] < OM_CORPSE_SLOPE_MIN)
+		return 0;
+	bolt[0] = origin[0];
+	bolt[1] = origin[1];
+	bolt[2] = origin[2] + feet;
+	dist = 0.0f;
+	for (k = 0; k < 3; k++)
+		dist += (bolt[k] - plane_point[k]) * n[k];
+	/* Above the plane by more than a step, and not a different floor. Under the
+	   plane is left where it is: pulling it up is how a dipped limb floats the torso. */
+	if (dist <= 2.0f || dist > 80.0f)
+		return 0;
+	for (k = 0; k < 3; k++)
+		origin[k] -= n[k] * dist;
+	return 1;
 }
 
 int OM_CorpseKeepFall(int is_corpse, int on_ground)
@@ -166,8 +262,9 @@ int OM_CorpseSlope(int kind, float normal_z, int embedded, float vz, float hop, 
 	}
 
 	/* Too steep to stand on, or a character. Slide when the box is in the face,
-	   or when a downward move meets an upward face. Do not turn that into a jump. */
-	if (embedded || (normal_z > 0.0f && normal_z < 0.7f && vz <= 0.0f)) {
+	   or when a downward move meets an upward face. Do not turn that into a jump.
+	   The band between the old 0.7 walkable test and 45 degrees slides too. */
+	if (embedded || (normal_z > 0.0f && normal_z < OM_CORPSE_SLOPE_MIN && vz <= 0.0f)) {
 		if (hop_out)
 			*hop_out = 0.0f;
 		if (vz_out && vz > 0.0f)

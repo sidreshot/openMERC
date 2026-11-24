@@ -6,6 +6,7 @@
  * Owner: package G2.
  */
 #include "ai_local.h"
+#include "../../../engine/src/common/header/om_corpse.h"
 
 using namespace om_ai;
 
@@ -81,16 +82,20 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 				VectorCopy(a, b);
 				b[2] -= 128.0f;
 				tr = Trace(a, vec3_origin, vec3_origin, b, ent, MASK_MONSTERSOLID);
-				if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f &&
-				    tr.plane.normal[2] >= 0.7f && tr.ent && !tr.ent->client &&
-				    !tr.ent->ai && tr.ent->solid != SOLID_CORPSE) {
-					float gap = (org[2] + floor_height) - tr.endpos[2];
-					float drop = (gap > 2.0f && gap <= 80.0f) ? gap : 0.0f;
-					/* The ground bolt is the pose contact, and the drop puts
-					   it on the face. A hand (or any lower bolt) hangs below
-					   that contact. Raising the origin so the hand clears
-					   lifts the torso by the same amount, so the body sits
-					   in the air whenever the pose dips a limb. Leave it. */
+				if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f && tr.ent &&
+				    !tr.ent->client && !tr.ent->ai && tr.ent->solid != SOLID_CORPSE) {
+					float pitch = 0.0f, roll = 0.0f;
+					/* Along the normal, and only while the bolt is still above
+					   the plane. A straight drop on a slope pushes the uphill
+					   corner through the face, and the unstick then hops.
+					   A hand below the bolt is left in the ground: pulling the
+					   origin up to clear it lifts the torso. */
+					int planted = OM_CorpsePlant(org, floor_height, tr.endpos, tr.plane.normal);
+					if (OM_CorpseAlign(ent->s.angles[YAW], tr.plane.normal, &pitch, &roll)) {
+						ent->s.angles[PITCH] = pitch;
+						ent->s.angles[ROLL] = roll;
+						VectorClear(ent->avelocity);
+					}
 					{
 						static cvar_t *dbg;
 						static int shown;
@@ -98,12 +103,12 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 							dbg = gi.cvar("om_corpsedebug", "0", 0);
 						if (dbg->value && shown < 48) {
 							shown++;
-							gi.dprintf("OMBODY plant #%d z %.1f bolt %.1f floor %.1f gap %.1f drop %.1f\n",
-							           (int)(ent - g_edicts), org[2], floor_height, tr.endpos[2], gap, drop);
+							gi.dprintf("OMBODY plant #%d z %.1f bolt %.1f floor %.1f pitch %.1f roll %.1f\n",
+							           (int)(ent - g_edicts), org[2], floor_height, tr.endpos[2],
+							           ent->s.angles[PITCH], ent->s.angles[ROLL]);
 						}
 					}
-					if (drop > 0.0f) {
-						org[2] = org[2] - drop;
+					if (planted) {
 						VectorCopy(org, ent->s.origin);
 						gi.linkentity(ent);
 					}

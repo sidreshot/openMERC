@@ -607,7 +607,9 @@ public:
 		MakeDead(ent, ai);
 		if (record && !strcmp(record->name, "std_sblown_2bk_n_n") && ent->velocity[2] < 10) {
 			vec3_t f, end, mins = {-16, -16, 0}, maxs = {16, 16, 8};
-			AngleVectors(ent->s.angles, f, nullptr, nullptr);
+			vec3_t yawonly = {0, ent->s.angles[YAW], 0};
+			/* Pitch and roll lie on the slope. The throw stays along the ground. */
+			AngleVectors(yawonly, f, nullptr, nullptr);
 			// openMERC: thrown only as far as the room behind allows (the corpse box is +-8, the drawn body
 			// lies about 56 units behind the origin, so a full throw put it into the wall)
 			float k = 1.0f;
@@ -666,20 +668,27 @@ public:
 		   corpse already there. The clip box is only the origin; the body lies about 52 units behind it. */
 		{
 			vec3_t f, a, b, mins, maxs;
-			AngleVectors(ent->s.angles, f, nullptr, nullptr);
+			vec3_t yawonly = {0, ent->s.angles[YAW], 0};
+			/* The probes are horizontal. The stored pitch and roll follow the
+			   slope, and a tilted forward treats that slope as a wall: the
+			   body is then shoved along it and never stays put. A face that
+			   still points up is the ground, including one too steep to hold
+			   the corpse. Only a wall moves the origin. */
+			AngleVectors(yawonly, f, nullptr, nullptr);
 			VectorSet(mins, -10, -10, 0);
 			VectorSet(maxs, 10, 10, 12);
 			VectorCopy(ent->s.origin, b);
 			VectorMA(ent->s.origin, -52, f, a);
 			trace_t tr = gi.trace(b, mins, maxs, a, ent, MASK_SOLID);
-			if (tr.startsolid)
-				VectorMA(ent->s.origin, 8, f, ent->s.origin);
-			else if (tr.fraction < 1.0f)
+			if (tr.startsolid) {
+				if (!ent->groundentity)
+					VectorMA(ent->s.origin, 8, f, ent->s.origin);
+			} else if (tr.fraction < 1.0f && tr.plane.normal[2] < 0.3f)
 				VectorMA(ent->s.origin, (1.0f - tr.fraction) * 52.0f + 4.0f, f, ent->s.origin);
 			VectorCopy(ent->s.origin, b);
 			VectorMA(ent->s.origin, 24, f, a);
 			tr = gi.trace(b, mins, maxs, a, ent, MASK_SOLID);
-			if (!tr.startsolid && tr.fraction < 1.0f)
+			if (!tr.startsolid && tr.fraction < 1.0f && tr.plane.normal[2] < 0.3f)
 				VectorMA(ent->s.origin, -((1.0f - tr.fraction) * 24.0f + 4.0f), f, ent->s.origin);
 			edict_t *o = nullptr;
 			int guard = 0;

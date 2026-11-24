@@ -7,6 +7,7 @@
 
 #include "header/om_corpse.h"
 
+#include <math.h>
 #include <stdio.h>
 
 static int failures;
@@ -193,7 +194,7 @@ int main(void)
 
 	/* The subway train is a prop box. Its roof holds a corpse. A character does not. A wall does not. */
 	expect_int("world roof supports", OM_CorpseSupport(0, 1.0f), 1);
-	expect_int("bsp roof supports", OM_CorpseSupport(1, 0.7f), 1);
+	expect_int("bsp face at 44 degrees supports", OM_CorpseSupport(1, 0.72f), 1);
 	expect_int("ground roof supports", OM_CorpseSupport(2, 0.9f), 1);
 	expect_int("prop box roof supports", OM_CorpseSupport(3, 1.0f), 1);
 	expect_int("steep prop is not a floor", OM_CorpseSupport(3, 0.69f), 0);
@@ -268,10 +269,12 @@ int main(void)
 		slope_v[0] = 10.0f;
 		slope_v[1] = 0.0f;
 		slope_v[2] = -8.0f;
-		decision = OM_CorpseSlopeStep(slope_o, slope_v, 1, 0.7f, 0, 1.0f);
-		expect_int("walkable slope at 0.7 rests", decision, OM_SLOPE_REST);
-		expect_near("walkable slope keeps the height", slope_o[2], 50.0f);
-		expect_near("walkable slope does not rise", slope_v[2], 0.0f);
+		decision = OM_CorpseSlopeStep(slope_o, slope_v, 1, 0.72f, 0, 1.0f);
+		expect_int("a 44 degree slope rests", decision, OM_SLOPE_REST);
+		expect_near("a 44 degree slope keeps the height", slope_o[2], 50.0f);
+		expect_near("a 44 degree slope does not rise", slope_v[2], 0.0f);
+		expect_int("exactly 45 degrees holds", OM_CorpseSupport(1, OM_CORPSE_SLOPE_MIN), 1);
+		expect_int("just steeper than 45 does not hold", OM_CorpseSupport(1, 0.70f), 0);
 
 		slope_o[2] = 40.0f;
 		slope_v[0] = 12.0f;
@@ -314,6 +317,115 @@ int main(void)
 		expect_int("downward face is still a fall", decision, OM_SLOPE_FALL);
 		expect_near("downward face keeps the fall height", slope_o[2], 400.0f);
 		expect_near("downward face keeps vz", slope_v[2], -50.0f);
+	}
+
+	/* The body lies on the plane. G3_EntityAxes negates pitch and roll, and that
+	   up is the face normal. Steeper than 45 degrees does not turn the body. */
+	{
+		float pitch = 9.0f, roll = 9.0f, up[3];
+		float flat[3] = {0.0f, 0.0f, 1.0f};
+		float slope[3] = {0.70710678f, 0.0f, 0.70710678f};
+		float side[3] = {0.70710678f, 0.0f, 0.70710678f};
+		float steep[3] = {0.7193f, 0.0f, 0.6947f};
+		const float rad = 0.01745329252f;
+
+		expect_int("flat face aligns", OM_CorpseAlign(37.0f, flat, &pitch, &roll), 1);
+		expect_near("flat pitch stays level", pitch, 0.0f);
+		expect_near("flat roll stays level", roll, 0.0f);
+
+		pitch = roll = 9.0f;
+		expect_int("45 degrees facing uphill aligns", OM_CorpseAlign(0.0f, slope, &pitch, &roll), 1);
+		expect_near("45 degrees stores the negated pitch", pitch, -45.0f);
+		expect_near("45 degrees stores no roll", roll, 0.0f);
+		{
+			float sy, cy, sp, cp, sr, cr, P = -pitch, R = -roll;
+			sy = sinf(0.0f);
+			cy = cosf(0.0f);
+			sp = sinf(P * rad);
+			cp = cosf(P * rad);
+			sr = sinf(R * rad);
+			cr = cosf(R * rad);
+			up[0] = cr * sp * cy + sr * sy;
+			up[1] = cr * sp * sy - sr * cy;
+			up[2] = cr * cp;
+		}
+		expect_near("45 degree up x", up[0], slope[0]);
+		expect_near("45 degree up z", up[2], slope[2]);
+
+		pitch = roll = 9.0f;
+		expect_int("45 degrees facing across the slope aligns", OM_CorpseAlign(90.0f, side, &pitch, &roll), 1);
+		expect_near("across-slope pitch is level", pitch, 0.0f);
+		expect_near("across-slope roll is the negated tilt", roll, -45.0f);
+		{
+			float sy, cy, sp, cp, sr, cr, P = -pitch, R = -roll, yaw = 90.0f;
+			sy = sinf(yaw * rad);
+			cy = cosf(yaw * rad);
+			sp = sinf(P * rad);
+			cp = cosf(P * rad);
+			sr = sinf(R * rad);
+			cr = cosf(R * rad);
+			up[0] = cr * sp * cy + sr * sy;
+			up[1] = cr * sp * sy - sr * cy;
+			up[2] = cr * cp;
+		}
+		expect_near("across-slope up x", up[0], side[0]);
+		expect_near("across-slope up y", up[1], side[1]);
+		expect_near("across-slope up z", up[2], side[2]);
+
+		pitch = 4.0f;
+		roll = 5.0f;
+		expect_int("steeper than 45 does not align", OM_CorpseAlign(0.0f, steep, &pitch, &roll), 0);
+		expect_near("steep align keeps pitch", pitch, 4.0f);
+		expect_near("steep align keeps roll", roll, 5.0f);
+	}
+
+	/* A fall into a steep face keeps the downhill speed and loses the hop. */
+	{
+		float n[3] = {0.8660254f, 0.0f, 0.5f};
+		float v[3] = {0.0f, 0.0f, -100.0f};
+		float up[3] = {0.0f, 0.0f, 40.0f};
+		float hold[3] = {3.0f, 0.0f, -20.0f};
+		float floor_n[3] = {0.0f, 0.0f, 1.0f};
+
+		expect_int("steep fall is a slide", OM_CorpseSlideVel(n, v), 1);
+		expect_near("slide keeps a downhill x", v[0], 43.30127f);
+		expect_near("slide keeps going down", v[2], -75.0f);
+		expect_int("upward speed on a steep face is cleared", OM_CorpseSlideVel(n, up), 1);
+		expect_near("hop x is gone", up[0], 0.0f);
+		expect_near("hop z is gone", up[2], 0.0f);
+		expect_int("a holding face is not a slide", OM_CorpseSlideVel(floor_n, hold), 0);
+		expect_near("holding face keeps the run", hold[0], 3.0f);
+		expect_near("holding face keeps the fall", hold[2], -20.0f);
+		expect_near("embedded steep face steps out", OM_CorpseUnstick(0.5f, 1), 1.0f);
+		expect_near("a holding face does not step out", OM_CorpseUnstick(0.9f, 1), 0.0f);
+		expect_near("a free steep face does not step out", OM_CorpseUnstick(0.5f, 0), 0.0f);
+	}
+
+	/* Plant along the normal. A flat floor is the old straight drop. A point
+	   already through the plane is not pulled up. */
+	{
+		float origin[3] = {10.0f, 20.0f, 80.0f};
+		float plane[3] = {10.0f, 20.0f, 40.0f};
+		float floor_n[3] = {0.0f, 0.0f, 1.0f};
+		float slope_n[3] = {0.70710678f, 0.0f, 0.70710678f};
+		float slope_p[3] = {10.0f, 20.0f, 40.0f};
+		float under[3] = {10.0f, 20.0f, 10.0f};
+		float under_p[3] = {10.0f, 20.0f, 40.0f};
+
+		expect_int("flat plant drops", OM_CorpsePlant(origin, -20.0f, plane, floor_n), 1);
+		expect_near("flat plant x stays", origin[0], 10.0f);
+		expect_near("flat plant meets the floor", origin[2], 60.0f);
+
+		origin[0] = 10.0f;
+		origin[1] = 20.0f;
+		origin[2] = 80.0f;
+		expect_int("slope plant follows the normal", OM_CorpsePlant(origin, -20.0f, slope_p, slope_n), 1);
+		expect_near("slope plant shifts downhill", origin[0], 10.0f - 0.70710678f * 14.142136f);
+		expect_near("slope plant lowers along the normal", origin[2], 80.0f - 0.70710678f * 14.142136f);
+
+		origin[2] = 10.0f;
+		expect_int("a bolt under the plane is not lifted", OM_CorpsePlant(under, -20.0f, under_p, floor_n), 0);
+		expect_near("under plane z stays", under[2], 10.0f);
 	}
 
 	if (failures)

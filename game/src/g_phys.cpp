@@ -167,6 +167,40 @@ static int OM_SupportBrush(edict_t *hit, float normal_z)
 	return OM_CorpseSupport(OM_SolidKind(hit), normal_z);
 }
 
+/* Lay an NPC on a face that can hold it. The stored pitch and roll are what
+   G3_EntityAxes negates, so the mesh up matches the plane. The player camera
+   has no ai and stays level. A steeper face leaves the angles alone. */
+static void OM_LayOnFace(edict_t *ent, const float normal[3])
+{
+	float pitch, roll;
+
+	if (!ent || !ent->ai || !normal)
+		return;
+	if (!OM_CorpseAlign(ent->s.angles[YAW], normal, &pitch, &roll))
+		return;
+	ent->s.angles[PITCH] = pitch;
+	ent->s.angles[ROLL] = roll;
+	VectorClear(ent->avelocity);
+}
+
+/* One unit out of a steep face, along its normal, so the box can slide.
+   A holding face and a free box stay put. */
+static void OM_StepOffSteep(edict_t *ent, const float normal[3])
+{
+	float step;
+	vec3_t n;
+
+	if (!ent || !normal)
+		return;
+	step = OM_CorpseUnstick(normal[2], 1);
+	if (step <= 0.0f)
+		return;
+	VectorCopy(normal, n);
+	VectorNormalize(n);
+	VectorMA(ent->s.origin, step, n, ent->s.origin);
+	gi.linkentity(ent);
+}
+
 static float OM_CorpseFeet(edict_t *ent)
 {
 	/* The shot hull is deeper than the posed body and is rewritten every
@@ -190,7 +224,7 @@ void OM_SettleDeadBody(edict_t *ent)
 	float feet, origin[3], vel[3], floor_z, floor_nz;
 	int contact, have_floor;
 	edict_t *floorent;
-	vec3_t p, q;
+	vec3_t p, q, floor_n;
 
 	if (!ent || !ent->inuse || ent->solid != SOLID_CORPSE)
 		return;
@@ -200,6 +234,7 @@ void OM_SettleDeadBody(edict_t *ent)
 	floorent = NULL;
 	floor_z = 0;
 	floor_nz = 0;
+	VectorClear(floor_n);
 	VectorCopy(ent->s.origin, p);
 	p[2] = ent->s.origin[2] + feet + 2.0f;
 	/* A monster volume around the feet makes the monster trace start solid.
@@ -219,6 +254,7 @@ void OM_SettleDeadBody(edict_t *ent)
 				contact = 1;
 				floorent = tr.ent;
 				floor_z = tr.endpos[2];
+				VectorCopy(tr.plane.normal, floor_n);
 			}
 		}
 	}
@@ -236,6 +272,7 @@ void OM_SettleDeadBody(edict_t *ent)
 				contact = 1;
 				floorent = tr.ent;
 				floor_z = tr.endpos[2];
+				VectorCopy(tr.plane.normal, floor_n);
 			}
 			break;
 		}
@@ -275,6 +312,7 @@ void OM_SettleDeadBody(edict_t *ent)
 				floorent = tr.ent;
 				floor_z = tr.endpos[2];
 				floor_nz = tr.plane.normal[2];
+				VectorCopy(tr.plane.normal, floor_n);
 				break;
 			}
 			p[2] = tr.endpos[2] - 1.0f;
@@ -301,6 +339,8 @@ void OM_SettleDeadBody(edict_t *ent)
 			ent->groundentity = floorent;
 			ent->groundentity_linkcount = floorent->linkcount;
 		}
+		/* The snap lands the feet. The mesh still has to follow the plane. */
+		OM_LayOnFace(ent, floor_n);
 	}
 	Dmg_CorpseHull(ent);
 	gi.linkentity(ent);
@@ -373,8 +413,14 @@ int SV_FlyMove(edict_t *ent, float time, int mask)
 					if (trace.fraction < 1.0f && trace.ent) {
 						ent->groundentity = trace.ent;
 						ent->groundentity_linkcount = trace.ent->linkcount;
+						OM_LayOnFace(ent, trace.plane.normal);
 					}
 					return blocked | 1;
+				}
+				if (decision == OM_SLOPE_SLIDE && trace.fraction < 1.0f &&
+				    OM_CorpseSlideVel(trace.plane.normal, ent->velocity)) {
+					OM_StepOffSteep(ent, trace.plane.normal);
+					return blocked;
 				}
 				ent->velocity[2] = slope_vz;
 				return blocked;
@@ -846,10 +892,14 @@ void SV_CheckGround(edict_t *ent)
 			ent->groundentity = face.ent ? face.ent : world;
 			ent->groundentity_linkcount = ent->groundentity->linkcount;
 			VectorClear(ent->velocity);
+			OM_LayOnFace(ent, face.plane.normal);
 			return;
 		}
 		if (decision == OM_SLOPE_SLIDE) {
-			ent->velocity[2] = slope_vz;
+			if (!OM_CorpseSlideVel(face.plane.normal, ent->velocity))
+				ent->velocity[2] = slope_vz;
+			else
+				OM_StepOffSteep(ent, face.plane.normal);
 			ent->groundentity = NULL;
 			return;
 		}
@@ -864,18 +914,30 @@ void SV_CheckGround(edict_t *ent)
 		ent->groundentity = NULL;
 		return;
 	}
-	if (!tr.startsolid && tr.plane.normal[2] >= 0.7f) {
+	/* A corpse uses 45 degrees. A living body keeps the old 0.7 walkable test. */
+	if (!tr.startsolid && tr.fraction < 1.0f && ent->solid == SOLID_CORPSE &&
+	    OM_CorpseSupport(OM_SolidKind(tr.ent), tr.plane.normal[2])) {
+		VectorCopy(tr.endpos, ent->s.origin);
+		ent->groundentity = tr.ent;
+		ent->groundentity_linkcount = tr.ent ? tr.ent->linkcount : 0;
+		VectorClear(ent->velocity);
+		OM_LayOnFace(ent, tr.plane.normal);
+		return;
+	}
+	if (!tr.startsolid && ent->solid != SOLID_CORPSE && tr.plane.normal[2] >= 0.7f) {
 		VectorCopy(tr.endpos, ent->s.origin);
 		ent->groundentity = tr.ent;
 		ent->groundentity_linkcount = tr.ent ? tr.ent->linkcount : 0;
 		return;
 	}
 	if (ent->solid == SOLID_CORPSE && !tr.startsolid && tr.fraction < 1.0f && tr.plane.normal[2] > 0.0f &&
-	    tr.plane.normal[2] < 0.7f) {
-		float slope_vz, slope_hop;
-		if (OM_CorpseSlope(OM_SolidKind(tr.ent), tr.plane.normal[2], 0, ent->velocity[2], 0.0f, &slope_vz,
-		                   &slope_hop) == OM_SLOPE_SLIDE)
-			ent->velocity[2] = slope_vz;
+	    tr.plane.normal[2] < OM_CORPSE_SLOPE_MIN) {
+		if (!OM_CorpseSlideVel(tr.plane.normal, ent->velocity)) {
+			float slope_vz, slope_hop;
+			if (OM_CorpseSlope(OM_SolidKind(tr.ent), tr.plane.normal[2], 0, ent->velocity[2], 0.0f, &slope_vz,
+			                   &slope_hop) == OM_SLOPE_SLIDE)
+				ent->velocity[2] = slope_vz;
+		}
 	}
 	ent->groundentity = NULL;
 }

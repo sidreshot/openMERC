@@ -42,10 +42,43 @@ int OM_CorpsePart(const float origin[3], const float angles[3], const om_part_t 
 int OM_DeathSettle(float origin[3], float velocity[3], float feet_offset, int contact, int have_floor,
                    float floor_z);
 
+/* cos(45 degrees). A face at least this upright can hold a corpse.
+   Steeper than 45 degrees slides. A flat floor is 1. */
+#define OM_CORPSE_SLOPE_MIN 0.70710678f
+
 /* 1 when this downward hit can hold a corpse.
    kind: 0 world, 1 BSP, 2 ground, 3 a prop box (the subway train), 4 a character, 5 anything else.
-   A character is not a floor. A steep face (normal_z below 0.7) is not a floor. */
+   A character is not a floor. A face steeper than 45 degrees (normal_z below
+   OM_CORPSE_SLOPE_MIN) is not a floor. */
 int OM_CorpseSupport(int kind, float normal_z);
+
+/* Pitch and roll to store in s.angles so the body lies on the plane.
+   G3_EntityAxes negates those two before AngleVectors, and that up matches normal.
+   Yaw is kept. Returns 1 when the face can hold the body.
+   Returns 0 when the face is steeper than 45 degrees or points down:
+   pitch and roll are left unchanged. normal does not have to be unit length. */
+int OM_CorpseAlign(float yaw, const float normal[3], float *pitch, float *roll);
+
+/* Take the velocity component that points into a face steeper than 45 degrees.
+   The part along the plane stays, so a falling body keeps moving downhill.
+   An upward speed is cleared: it is the hop. The origin is not moved.
+   Returns 1 when normal is a slide face. A holding face and a downward face
+   return 0 and leave velocity alone. */
+int OM_CorpseSlideVel(const float normal[3], float velocity[3]);
+
+/* How far to step out of a steep face along its normal, in world units.
+   1 when the box is embedded in a slide face. 0 when the face can hold the
+   body, points down, or the box is not embedded. A holding face must not be
+   pushed back out: that push is the hop. */
+float OM_CorpseUnstick(float normal_z, int embedded);
+
+/* Move origin along the normal so the point `feet` below the origin (feet is
+   negative) meets the plane through plane_point. Only toward the plane, and
+   only when the face can hold the body and the gap is between 2 and 80.
+   A flat floor moves straight down. A slope moves along the normal, not
+   straight down into the face. A point already under the plane is not lifted.
+   Returns 1 when origin changed. */
+int OM_CorpsePlant(float origin[3], float feet, const float plane_point[3], const float normal[3]);
 
 /* 1 when a corpse that is not on a floor must keep the velocity physics gave it.
    The death animation used to clear that velocity every think, so a body with
