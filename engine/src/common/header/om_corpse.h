@@ -80,6 +80,18 @@ float OM_CorpseUnstick(float normal_z, int embedded);
    Returns 1 when origin changed. */
 int OM_CorpsePlant(float origin[3], float feet, const float plane_point[3], const float normal[3]);
 
+/* Shift origin in the plane so `from` moves toward `toward` by `step` units.
+   A heel over the drop uses the pelvis as `toward`, and the body comes back
+   onto the snow. A holding face only. No shift along the normal, so a hand
+   under the plane stays under it. Returns 1 when origin changed. */
+int OM_CorpsePullOn(float origin[3], const float from[3], const float toward[3], const float normal[3],
+                    float step);
+
+/* Unit direction a body slides on a steep face: gravity projected onto the
+   plane, pointing downhill. Returns 1 when the face is a slide. A holding
+   face and a downward face return 0 and leave `dir` unchanged. */
+int OM_CorpseDownhill(const float normal[3], float dir[3]);
+
 /* 1 when a corpse that is not on a floor must keep the velocity physics gave it.
    The death animation used to clear that velocity every think, so a body with
    nothing under it stayed at the kill height. */

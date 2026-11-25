@@ -211,6 +211,57 @@ float OM_CorpseUnstick(float normal_z, int embedded)
 	return 1.0f;
 }
 
+int OM_CorpsePullOn(float origin[3], const float from[3], const float toward[3], const float normal[3],
+                    float step)
+{
+	float n[3], dir[3], len, dot;
+	int k;
+
+	if (!origin || !from || !toward || !om_unit(normal, n))
+		return 0;
+	if (n[2] < OM_CORPSE_SLOPE_MIN)
+		return 0;
+	if (step < 0.5f)
+		step = 0.5f;
+	if (step > 16.0f)
+		step = 16.0f;
+	dot = 0.0f;
+	for (k = 0; k < 3; k++) {
+		dir[k] = toward[k] - from[k];
+		dot += dir[k] * n[k];
+	}
+	for (k = 0; k < 3; k++)
+		dir[k] -= n[k] * dot;
+	len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+	/* The two bolts are already over the same part of the face. */
+	if (len < 8.0f)
+		return 0;
+	for (k = 0; k < 3; k++)
+		origin[k] += dir[k] / len * step;
+	return 1;
+}
+
+int OM_CorpseDownhill(const float normal[3], float dir[3])
+{
+	float n[3], vx, vy, vz, len;
+
+	if (!dir || !om_unit(normal, n))
+		return 0;
+	if (n[2] <= 0.0f || n[2] >= OM_CORPSE_SLOPE_MIN)
+		return 0;
+	/* Gravity (0, 0, -1) with the into-face part removed. */
+	vx = n[2] * n[0];
+	vy = n[2] * n[1];
+	vz = -1.0f + n[2] * n[2];
+	len = sqrtf(vx * vx + vy * vy + vz * vz);
+	if (len < 1.0e-6f)
+		return 0;
+	dir[0] = vx / len;
+	dir[1] = vy / len;
+	dir[2] = vz / len;
+	return 1;
+}
+
 int OM_CorpsePlant(float origin[3], float feet, const float plane_point[3], const float normal[3])
 {
 	float n[3], bolt[3], dist;

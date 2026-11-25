@@ -86,6 +86,14 @@ struct HumanVoiceDirs {
 	bool touchGreetOK;
 };
 
+/* Steps already used to walk a settled corpse back onto a slope. Keyed by
+   edict number, cleared when that body starts a new death. Not a save field. */
+static unsigned char om_bring_steps[MAX_EDICTS];
+/* Full exits already used to leave a steep face. A per-frame nudge walks
+   the body through the snow and off the bottom of the brush. */
+static unsigned char om_steep_left[MAX_EDICTS];
+static float om_steep_mark[MAX_EDICTS];
+
 class G3HumanBody : public G3Body {
 public:
 	int rightType, leftType;
@@ -2207,6 +2215,179 @@ public:
 		return true;
 	}
 
+	/* 1 when a straight-down trace from the bolt meets this face, close enough
+	   that the bolt is over the snow and not over the drop. */
+	int BoltOverFace(const vec3_t bolt, const vec3_t normal)
+	{
+		vec3_t hs, he;
+		trace_t ht;
+		float nd, gap;
+		VectorCopy(bolt, hs);
+		hs[2] += 24.0f;
+		VectorCopy(bolt, he);
+		he[2] -= 80.0f;
+		gix.trace(hs, NULL, NULL, he, ent, MASK_SOLID, &ht);
+		if (ht.startsolid || ht.allsolid || ht.fraction >= 1.0f)
+			return 0;
+		nd = DotProduct(ht.plane.normal, normal);
+		gap = bolt[2] - ht.endpos[2];
+		return nd > 0.90f && gap < 20.0f && gap > -8.0f;
+	}
+
+	/* 1 when the bolt is over any face that can hold a body. The neighbour
+	   sheet is allowed: the lip test is BoltOverFace, this is only the check
+	   that a step did not walk the pelvis into the air. */
+	int BoltOverHold(const vec3_t bolt)
+	{
+		vec3_t hs, he;
+		trace_t ht;
+		float gap;
+		VectorCopy(bolt, hs);
+		hs[2] += 24.0f;
+		VectorCopy(bolt, he);
+		he[2] -= 80.0f;
+		gix.trace(hs, NULL, NULL, he, ent, MASK_SOLID, &ht);
+		if (ht.startsolid || ht.allsolid || ht.fraction >= 1.0f)
+			return 0;
+		gap = bolt[2] - ht.endpos[2];
+		return ht.plane.normal[2] >= OM_CORPSE_SLOPE_MIN && gap < 24.0f && gap > -8.0f;
+	}
+
+	/* The lie leaves the feet over the drop. One shove in the plane, the sum
+	   of every sample past a heel that misses this face. A pull per heel
+	   cancels: the two feet sit on opposite sides of the pelvis. Nothing
+	   along the normal. Only a body that has already stopped. */
+	void BringOntoFace(void)
+	{
+		vec3_t pelvis, mouth, hs, he, kept, face_n;
+		trace_t face;
+		int idx, have_mouth, mouth_on;
+		idx = (int)(ent - g_edicts);
+		if (idx < 1 || idx >= MAX_EDICTS)
+			return;
+		if (om_bring_steps[idx] >= 8)
+			return;
+		if (VectorLength(ent->velocity) > 8.0f)
+			return;
+		if (!G3G_BoltWorldByName(ent, "quake_ground", pelvis))
+			return;
+		/* Still standing or still in the air. The pull that ran here buried
+		   the body, because the pose had not finished. */
+		if (ent->s.origin[2] - pelvis[2] > 14.0f)
+			return;
+		VectorCopy(pelvis, hs);
+		hs[2] += 16.0f;
+		VectorCopy(pelvis, he);
+		he[2] -= 40.0f;
+		gix.trace(hs, NULL, NULL, he, ent, MASK_SOLID, &face);
+		if (face.startsolid || face.allsolid || face.fraction >= 1.0f)
+			return;
+		if (face.plane.normal[2] < OM_CORPSE_SLOPE_MIN || face.plane.normal[2] >= 0.99f)
+			return;
+		if (pelvis[2] - face.endpos[2] > 8.0f || pelvis[2] - face.endpos[2] < -6.0f)
+			return;
+		VectorCopy(face.plane.normal, face_n);
+		have_mouth = G3G_BoltWorldByName(ent, "sbolt_mouth", mouth);
+		mouth_on = have_mouth && BoltOverFace(mouth, face_n);
+		VectorCopy(ent->s.origin, kept);
+		int hanging = 0;
+		vec3_t shove = {0, 0, 0};
+		/* A foot past the crest is still above snow, so a same-face test on the
+		   heel bolt says the leg is supported. Compare the snow to this plane:
+		   a drop means the mesh is in the air. Downhill of the plane is not a
+		   drop, the sheet just continues. */
+		static const float dir16[16][2] = {
+			{1, 0}, {0.924f, 0.383f}, {0.707f, 0.707f}, {0.383f, 0.924f},
+			{0, 1}, {-0.383f, 0.924f}, {-0.707f, 0.707f}, {-0.924f, 0.383f},
+			{-1, 0}, {-0.924f, -0.383f}, {-0.707f, -0.707f}, {-0.383f, -0.924f},
+			{0, -1}, {0.383f, -0.924f}, {0.707f, -0.707f}, {0.924f, -0.383f}};
+		static const float rads[2] = {36.0f, 56.0f};
+		for (int r = 0; r < 2; r++) {
+			for (int d = 0; d < 16; d++) {
+				vec3_t sample, back, ha, hb;
+				trace_t ht;
+				float along, expect, drop;
+				sample[0] = pelvis[0] + dir16[d][0] * rads[r];
+				sample[1] = pelvis[1] + dir16[d][1] * rads[r];
+				sample[2] = pelvis[2];
+				along = face_n[0] * (sample[0] - face.endpos[0]) + face_n[1] * (sample[1] - face.endpos[1]);
+				expect = face.endpos[2] - along / face_n[2];
+				VectorCopy(sample, ha);
+				ha[2] = expect + 24.0f;
+				VectorCopy(sample, hb);
+				hb[2] = expect - 80.0f;
+				gix.trace(ha, NULL, NULL, hb, ent, MASK_SOLID, &ht);
+				if (!ht.startsolid && !ht.allsolid && ht.fraction < 1.0f)
+					drop = expect - ht.endpos[2];
+				else
+					drop = 100.0f;
+				if (drop < 12.0f)
+					continue;
+				VectorSubtract(pelvis, sample, back);
+				back[2] = 0.0f;
+				if (VectorNormalize(back) < 0.5f)
+					continue;
+				VectorAdd(shove, back, shove);
+				hanging++;
+			}
+		}
+		if (hanging < 1 || VectorNormalize(shove) < 0.5f) {
+			om_bring_steps[idx] = 8;
+			if (G3_Cvar("om_corpsedebug") != 0) {
+				static int shown;
+				if (shown < 8) {
+					shown++;
+					G3_DPrintf("OMREST #%d stay %.0f %.0f %.0f hanging %d\n", idx, ent->s.origin[0],
+					           ent->s.origin[1], ent->s.origin[2], hanging);
+				}
+			}
+			return;
+		}
+		/* One shove. Opposite heels used to take turns and cancel. A step that
+		   walks the pelvis or the head off every holding face is retried shorter. */
+		int placed = 0;
+		for (int s = 0; s < 3; s++) {
+			float step = s == 0 ? 16.0f : (s == 1 ? 8.0f : 4.0f);
+			vec3_t from, toward;
+			VectorCopy(kept, ent->s.origin);
+			VectorCopy(ent->s.origin, from);
+			VectorMA(from, 16.0f, shove, toward);
+			if (!OM_CorpsePullOn(ent->s.origin, from, toward, face_n, step))
+				continue;
+			if (!G3G_BoltWorldByName(ent, "quake_ground", pelvis) || !BoltOverHold(pelvis)) {
+				VectorCopy(kept, ent->s.origin);
+				continue;
+			}
+			if (mouth_on &&
+			    (!G3G_BoltWorldByName(ent, "sbolt_mouth", mouth) || !BoltOverHold(mouth))) {
+				VectorCopy(kept, ent->s.origin);
+				continue;
+			}
+			placed = 1;
+			break;
+		}
+		if (!placed) {
+			VectorCopy(kept, ent->s.origin);
+			om_bring_steps[idx] = 8;
+			if (G3_Cvar("om_corpsedebug") != 0)
+				G3_DPrintf("OMREST #%d stay %.0f %.0f %.0f hanging %d\n", idx, ent->s.origin[0],
+				           ent->s.origin[1], ent->s.origin[2], hanging);
+			return;
+		}
+		om_bring_steps[idx]++;
+		VectorClear(ent->velocity);
+		gix.linkentity(ent);
+		if (G3_Cvar("om_corpsedebug") != 0) {
+			static int shown;
+			if (shown < 12) {
+				shown++;
+				G3_DPrintf("OMREST #%d step %d at %.0f %.0f %.0f dir %.2f %.2f hang %d\n", idx,
+				           (int)om_bring_steps[idx], ent->s.origin[0], ent->s.origin[1], ent->s.origin[2],
+				           shove[0], shove[1], hanging);
+			}
+		}
+	}
+
 	/* the death pose is authored around the pelvis. Snapping that bolt to the floor
 	   (ChangeBBox) leaves the legs through the ground (nyc1, the body by the fence).
 	   Once the fall has finished, sit the posed mesh on the floor under the origin. */
@@ -2293,6 +2474,98 @@ public:
 	// wall gives the depth the body reaches into it. The deepest one moves the entity away from that wall, at most
 	// maxstep units per call, through a box trace (never into another wall). The corpse box is only +-8 wide, so the
 	// drawn head and legs of a body that fell or slid next to a wall went through it.
+	/* A steep corner holds the body. Rays that start at the origin are already
+	   inside the snow, so they never find the open side. Look for a floor that
+	   can hold the body within a short walk, and put it there once. Downhill
+	   off the end of this face is the void, so that way is not a candidate. */
+	void LeaveSteepCorner(void)
+	{
+		static const float dir16[16][2] = {
+			{1, 0}, {-1, 0}, {0, 1}, {0, -1},
+			{0.707f, 0.707f}, {0.707f, -0.707f}, {-0.707f, 0.707f}, {-0.707f, -0.707f},
+			{0.924f, 0.383f}, {0.924f, -0.383f}, {-0.924f, 0.383f}, {-0.924f, -0.383f},
+			{0.383f, 0.924f}, {0.383f, -0.924f}, {-0.383f, 0.924f}, {-0.383f, -0.924f}};
+		int idx, found;
+		float best, groundz;
+		vec3_t a, b, dest;
+		trace_t dn;
+		idx = (int)(ent - g_edicts);
+		if (idx < 1 || idx >= MAX_EDICTS || om_steep_left[idx] != 2)
+			return;
+		/* Still sliding. A body with speed is doing the steep slide. */
+		if (VectorLength(ent->velocity) > 24.0f)
+			return;
+		VectorCopy(ent->s.origin, a);
+		a[2] += 24.0f;
+		VectorCopy(ent->s.origin, b);
+		b[2] -= 64.0f;
+		gix.trace(a, NULL, NULL, b, ent, MASK_SOLID, &dn);
+		if (!dn.startsolid && !dn.allsolid && dn.fraction < 1.0f &&
+		    dn.plane.normal[2] >= OM_CORPSE_SLOPE_MIN) {
+			om_steep_left[idx] = 255;
+			if (G3_Cvar("om_corpsedebug") != 0)
+				G3_DPrintf("OMLEAVE #%d hold %.0f %.0f %.0f\n", idx, ent->s.origin[0], ent->s.origin[1],
+				           ent->s.origin[2]);
+			return;
+		}
+		best = 1.0e9f;
+		groundz = 0.0f;
+		found = 0;
+		VectorCopy(ent->s.origin, dest);
+		for (int d = 0; d < 16; d++) {
+			vec3_t dir = {dir16[d][0], dir16[d][1], 0};
+			VectorNormalize(dir);
+			for (int s = 0; s < 3; s++) {
+				float dist = 48.0f + 32.0f * (float)s;
+				vec3_t sample, spot, up, cmins = {-16, -16, 0}, cmaxs = {16, 16, 20};
+				trace_t box;
+				if (dist >= best)
+					continue;
+				VectorMA(ent->s.origin, dist, dir, sample);
+				VectorCopy(sample, a);
+				a[2] += 48.0f;
+				VectorCopy(sample, b);
+				/* 160, not 400: further down is the void under the wedge. */
+				b[2] -= 160.0f;
+				gix.trace(a, NULL, NULL, b, ent, MASK_SOLID, &dn);
+				if (dn.startsolid || dn.allsolid || dn.fraction >= 1.0f)
+					continue;
+				if (dn.plane.normal[2] < OM_CORPSE_SLOPE_MIN)
+					continue;
+				if (dn.endpos[2] > ent->s.origin[2] - 24.0f)
+					continue;
+				VectorCopy(dn.endpos, spot);
+				/* The death pose hangs below the origin. +8 buried the mesh in
+				   the floor and the next sit could not trace out of the solid. */
+				spot[2] += 40.0f;
+				VectorCopy(spot, up);
+				up[2] += 2.0f;
+				gix.trace(spot, cmins, cmaxs, up, ent, MASK_SOLID, &box);
+				if (box.startsolid || box.allsolid)
+					continue;
+				best = dist;
+				groundz = dn.endpos[2];
+				VectorCopy(spot, dest);
+				found = 1;
+			}
+		}
+		if (!found) {
+			om_steep_left[idx] = 255;
+			if (G3_Cvar("om_corpsedebug") != 0)
+				G3_DPrintf("OMLEAVE #%d none %.0f %.0f %.0f\n", idx, ent->s.origin[0], ent->s.origin[1],
+				           ent->s.origin[2]);
+			return;
+		}
+		VectorCopy(dest, ent->s.origin);
+		VectorClear(ent->velocity);
+		ent->groundentity = NULL;
+		om_steep_left[idx] = 255;
+		gix.linkentity(ent);
+		if (G3_Cvar("om_corpsedebug") != 0)
+			G3_DPrintf("OMLEAVE #%d to %.0f %.0f %.0f ground %.0f\n", idx, ent->s.origin[0], ent->s.origin[1],
+			           ent->s.origin[2], groundz);
+	}
+
 	void SettleCorpse(float maxstep)
 	{
 		IGhoulInst *inst = Inst();
@@ -2300,9 +2573,77 @@ public:
 			return;
 		vec3_t push = {0, 0, 0};
 		float worst = 0;
+		/* A holding face under the origin is the snow the body is lying on.
+		   Bolts that clip that sheet are not a reason to shove it. */
+		int on_hold = 0;
+		{
+			vec3_t a, b;
+			trace_t dn;
+			VectorCopy(ent->s.origin, a);
+			a[2] += 18.0f;
+			VectorCopy(ent->s.origin, b);
+			b[2] -= 32.0f;
+			gix.trace(a, NULL, NULL, b, ent, MASK_SOLID, &dn);
+			if (!dn.startsolid && !dn.allsolid && dn.fraction < 1.0f &&
+			    dn.plane.normal[2] >= OM_CORPSE_SLOPE_MIN && ent->s.origin[2] - dn.endpos[2] < 36.0f &&
+			    ent->s.origin[2] - dn.endpos[2] > -8.0f)
+				on_hold = 1;
+		}
+		/* Nearest steep exit only. worst starts at 0, so a test written as
+		   "dist + 8 >= worst" accepts nothing, and the far side (the largest
+		   distance) walks the body through the brush. */
+		float best = 1.0e9f;
+		float solid_step = 0.0f;
+		int steep_ok = 0;
+		{
+			int idx = (int)(ent - g_edicts);
+			/* The bolt probe walked out through the far side of the brush. The
+			   one step into open air is LeaveSteepCorner. */
+			steep_ok = 0;
+			(void)idx;
+		}
 		for (int i = 0; i < gore->numZones; i++) {
 			vec3_t bp, start, d;
+			int took = 0;
 			if (!gore->zones[i].goreBolt || !G3G_BoltWorld(ent, inst, gore->zones[i].goreBolt, bp))
+				continue;
+			if (steep_ok && !on_hold && (gix.pointcontents(bp) & CONTENTS_SOLID)) {
+				static const float probe[10][3] = {
+					{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1},
+					{0.7f, 0.7f, 0}, {0.7f, -0.7f, 0}, {-0.7f, 0.7f, 0}, {-0.7f, -0.7f, 0},
+					{0, 0, -1}};
+				for (int p = 0; p < 10; p++) {
+					vec3_t a, b, nrm, outv;
+					trace_t out;
+					float dist, nlen, outd;
+					VectorMA(bp, 80.0f, probe[p], a);
+					VectorCopy(bp, b);
+					gix.trace(a, NULL, NULL, b, ent, MASK_SOLID, &out);
+					if (out.startsolid || out.allsolid || out.fraction >= 1.0f)
+						continue;
+					if (out.plane.normal[2] >= OM_CORPSE_SLOPE_MIN || out.plane.normal[2] <= 0.0f)
+						continue;
+					VectorCopy(out.plane.normal, nrm);
+					nlen = VectorNormalize(nrm);
+					if (nlen <= 0.0f)
+						continue;
+					VectorSubtract(out.endpos, bp, outv);
+					dist = VectorLength(outv);
+					if (dist > 40.0f || dist >= best)
+						continue;
+					if (DotProduct(outv, nrm) <= 0.0f)
+						continue;
+					best = dist;
+					outd = dist + 4.0f;
+					if (outd > 24.0f)
+						outd = 24.0f;
+					worst = outd;
+					solid_step = outd;
+					VectorCopy(nrm, push);
+					took = 1;
+				}
+			}
+			if (took)
 				continue;
 			VectorCopy(ent->s.origin, start);
 			start[2] = bp[2];
@@ -2324,15 +2665,24 @@ public:
 				continue;
 			if (tr.startsolid || tr.allsolid || tr.fraction >= 1.0f)
 				continue;
+			/* A face that can hold the body is the snow it lies on. Pushing off
+			   that face walks the legs into the opening. A real wall is steeper. */
+			if (tr.plane.normal[2] >= OM_CORPSE_SLOPE_MIN)
+				continue;
 			float depth = (1.0f - tr.fraction) * reach + 2.0f;
 			if (depth > worst) {
 				worst = depth;
 				VectorScale(d, -1.0f, push);
+				solid_step = 0.0f;
 			}
 		}
 		if (worst <= 0.5f)
 			return;
 		float step = worst < maxstep ? worst : maxstep;
+		/* One or two full exits. Crawling out six units at a time lets the
+		   body sink through the brush before the bolt is clear. */
+		if (solid_step > step)
+			step = solid_step;
 		vec3_t end;
 		VectorMA(ent->s.origin, step, push, end);
 		trace_t tr;
@@ -2352,6 +2702,15 @@ public:
 			VectorCopy(end, ent->s.origin);
 		else
 			VectorCopy(tr.endpos, ent->s.origin);
+		if (solid_step > 0.0f) {
+			int idx = (int)(ent - g_edicts);
+			if (idx > 0 && idx < MAX_EDICTS && om_steep_left[idx] > 0 && om_steep_left[idx] <= 2) {
+				if (om_steep_left[idx] > 1)
+					om_steep_left[idx]--;
+				else
+					om_steep_left[idx] = 255;
+			}
+		}
 		gix.linkentity(ent);
 		if (G3_Cvar("om_corpsedebug") != 0) {
 			static int shown;
@@ -2673,8 +3032,19 @@ public:
 		if (ent->health > 0)
 			return;
 		float now = G3_Time();
-		if (deathTime == 0)
+		if (deathTime == 0) {
 			deathTime = firstDeathTime = now;
+		}
+		{
+			int idx = (int)(ent - g_edicts);
+			/* deathTime is set before the first think, so the old gate never
+			   armed the steep exit. One pair of tries per death. */
+			if (idx > 0 && idx < MAX_EDICTS && firstDeathTime > 0.0f && om_steep_mark[idx] != firstDeathTime) {
+				om_steep_mark[idx] = firstDeathTime;
+				om_steep_left[idx] = 2;
+				om_bring_steps[idx] = 0;
+			}
+		}
 		if (cur && cur->cls == ANIMCLS_DEATH && AnimDone() && !deathNotified) {
 			float pctf = ArmourPercentF();
 			int pct = (int)pctf;
@@ -2700,6 +3070,12 @@ public:
 		   origin, so the body lay in the air and dropped onto the floor on the last frame. */
 		if (cur && cur->cls == ANIMCLS_DEATH)
 			SeatOnFloor();
+		/* One step per think, and only after the death pose has finished, so
+		   the heels are the ones the player sees. Five steps is the cap. */
+		if (frozenAt != 0 || (cur && cur->cls == ANIMCLS_DEATH && AnimDone())) {
+			BringOntoFace();
+			LeaveSteepCorner();
+		}
 		/* ChooseDeath runs this before the death animation is set. A pre-death idle
 		   (std_istand) must not pause here: the death would then play on a paused body
 		   and stay upright, in the air as well as on the ground. A looping death counts
@@ -2724,8 +3100,9 @@ public:
 				}
 			}
 			frozenAt = now;
-			G3_DPrintf("corpse %s frozen on %s (cls %d) after %.1f s\n", ent->classname, cur ? cur->name : "-",
-				cur ? cur->cls : -1, now - deathTime);
+			G3_DPrintf("corpse %s frozen on %s (cls %d) after %.1f s at %.0f %.0f %.0f\n", ent->classname,
+			           cur ? cur->name : "-", cur ? cur->cls : -1, now - deathTime, ent->s.origin[0],
+			           ent->s.origin[1], ent->s.origin[2]);
 			// the corpse has come to rest: its blood pool (SPEC-721 В§7; human models have no `ooze` note, issue #8)
 			if (!pooled && !gibbed) {
 				pooled = true;

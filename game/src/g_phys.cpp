@@ -183,8 +183,31 @@ static void OM_LayOnFace(edict_t *ent, const float normal[3])
 	VectorClear(ent->avelocity);
 }
 
+/* A steep face with room downhill keeps a body moving. A corner that is
+   already blocked stays put, so the nudge does not buzz in a crack. */
+static void OM_SlideIfOpen(edict_t *ent, const float normal[3])
+{
+	float dir[3], speed;
+	vec3_t mins, maxs, dest;
+	trace_t tr;
+
+	if (!ent || !OM_CorpseDownhill(normal, dir))
+		return;
+	speed = VectorLength(ent->velocity);
+	if (speed >= 40.0f)
+		return;
+	CorpseBox(ent, mins, maxs);
+	VectorMA(ent->s.origin, 48.0f, dir, dest);
+	tr = gi.trace(ent->s.origin, mins, maxs, dest, ent, MASK_SOLID);
+	if (tr.startsolid || tr.allsolid || tr.fraction < 0.5f)
+		return;
+	VectorScale(dir, 100.0f, ent->velocity);
+}
+
 /* One unit out of a steep face, along its normal, so the box can slide.
-   A holding face and a free box stay put. */
+   A holding face and a free box stay put. An origin buried in the snow
+   (a body wedged in a corner) comes out to the face in one step. A slide
+   that is only clipping the box stays at one unit, so it does not hop. */
 static void OM_StepOffSteep(edict_t *ent, const float normal[3])
 {
 	float step;
@@ -197,6 +220,40 @@ static void OM_StepOffSteep(edict_t *ent, const float normal[3])
 		return;
 	VectorCopy(normal, n);
 	VectorNormalize(n);
+	if (VectorLength(ent->velocity) < 20.0f) {
+		vec3_t a, b, hn;
+		trace_t tr;
+		float dist, along;
+
+		VectorMA(ent->s.origin, 96.0f, n, a);
+		VectorMA(ent->s.origin, -24.0f, n, b);
+		tr = gi.trace(a, vec3_origin, vec3_origin, b, ent, MASK_SOLID);
+		if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f) {
+			VectorCopy(tr.plane.normal, hn);
+			along = VectorNormalize(hn);
+			if (along > 0.0f && hn[2] > 0.0f && hn[2] < OM_CORPSE_SLOPE_MIN && DotProduct(hn, n) > 0.5f) {
+				dist = DotProduct(ent->s.origin, hn) - DotProduct(tr.endpos, hn);
+				if (dist < -8.0f) {
+					float push = -dist + 8.0f;
+					cvar_t *dbg;
+					if (push > 48.0f)
+						push = 48.0f;
+					VectorMA(ent->s.origin, push, hn, ent->s.origin);
+					gi.linkentity(ent);
+					dbg = gi.cvar("om_corpsedebug", "0", 0);
+					if (dbg->value) {
+						static int shown;
+						if (shown < 12) {
+							shown++;
+							gi.dprintf("OMEJECT at %.0f %.0f %.0f push %.0f\n", ent->s.origin[0],
+							           ent->s.origin[1], ent->s.origin[2], push);
+						}
+					}
+					return;
+				}
+			}
+		}
+	}
 	VectorMA(ent->s.origin, step, n, ent->s.origin);
 	gi.linkentity(ent);
 }
@@ -420,6 +477,7 @@ int SV_FlyMove(edict_t *ent, float time, int mask)
 				if (decision == OM_SLOPE_SLIDE && trace.fraction < 1.0f &&
 				    OM_CorpseSlideVel(trace.plane.normal, ent->velocity)) {
 					OM_StepOffSteep(ent, trace.plane.normal);
+					OM_SlideIfOpen(ent, trace.plane.normal);
 					return blocked;
 				}
 				ent->velocity[2] = slope_vz;
@@ -900,6 +958,7 @@ void SV_CheckGround(edict_t *ent)
 				ent->velocity[2] = slope_vz;
 			else
 				OM_StepOffSteep(ent, face.plane.normal);
+			OM_SlideIfOpen(ent, face.plane.normal);
 			ent->groundentity = NULL;
 			return;
 		}
@@ -938,6 +997,7 @@ void SV_CheckGround(edict_t *ent)
 			                   &slope_hop) == OM_SLOPE_SLIDE)
 				ent->velocity[2] = slope_vz;
 		}
+		OM_SlideIfOpen(ent, tr.plane.normal);
 	}
 	ent->groundentity = NULL;
 }

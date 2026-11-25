@@ -377,6 +377,15 @@ int main(void)
 		expect_int("steeper than 45 does not align", OM_CorpseAlign(0.0f, steep, &pitch, &roll), 0);
 		expect_near("steep align keeps pitch", pitch, 4.0f);
 		expect_near("steep align keeps roll", roll, 5.0f);
+
+		{
+			float n22[3] = {0.0f, 0.3846154f, 0.9230769f};
+			float lay_p = 0.0f, lay_r = 0.0f;
+
+			expect_int("22 degree face across the body aligns", OM_CorpseAlign(180.0f, n22, &lay_p, &lay_r), 1);
+			expect_near("across 22 degrees stores no pitch", lay_p, 0.0f);
+			expect_near("across 22 degrees stores the roll", lay_r, -22.62f);
+		}
 	}
 
 	/* A fall into a steep face keeps the downhill speed and loses the hop. */
@@ -426,6 +435,36 @@ int main(void)
 		origin[2] = 10.0f;
 		expect_int("a bolt under the plane is not lifted", OM_CorpsePlant(under, -20.0f, under_p, floor_n), 0);
 		expect_near("under plane z stays", under[2], 10.0f);
+	}
+
+	/* A heel over the drop is walked back toward the pelvis, along the plane. */
+	{
+		float origin[3] = {10.0f, 0.0f, 5.0f};
+		float pelvis[3] = {0.0f, 0.0f, 10.0f};
+		float heel[3] = {40.0f, 0.0f, 10.0f};
+		float floor_n[3] = {0.0f, 0.0f, 1.0f};
+		float steep[3] = {0.8660254f, 0.0f, 0.5f};
+		float near_heel[3] = {4.0f, 0.0f, 10.0f};
+
+		expect_int("heel over the drop is pulled on", OM_CorpsePullOn(origin, heel, pelvis, floor_n, 8.0f), 1);
+		expect_near("pull walks back along the plane", origin[0], 2.0f);
+		expect_near("pull does not lift", origin[2], 5.0f);
+		expect_int("a heel next to the pelvis stays", OM_CorpsePullOn(origin, near_heel, pelvis, floor_n, 8.0f), 0);
+		expect_int("a steep face is not a pull", OM_CorpsePullOn(origin, heel, pelvis, steep, 8.0f), 0);
+	}
+
+	/* Gravity on a steep face points downhill. A floor has no slide. */
+	{
+		float n[3] = {0.8660254f, 0.0f, 0.5f};
+		float floor_n[3] = {0.0f, 0.0f, 1.0f};
+		float dir[3] = {9.0f, 9.0f, 9.0f};
+
+		expect_int("60 degrees points downhill", OM_CorpseDownhill(n, dir), 1);
+		expect_near("downhill x", dir[0], 0.5f);
+		expect_near("downhill z", dir[2], -0.8660254f);
+		dir[0] = 4.0f;
+		expect_int("a holding face has no downhill", OM_CorpseDownhill(floor_n, dir), 0);
+		expect_near("holding downhill stays", dir[0], 4.0f);
 	}
 
 	if (failures)
