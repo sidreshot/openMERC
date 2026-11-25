@@ -778,6 +778,7 @@ static const char *emu_vs =
 	"			vec3 d = p - lin;\n"
 	"			float dl = length(d);\n"
 	"			float lim = omTessCap * el;\n"
+	"			if (lim > 1.0) lim = 1.0;\n"
 	"			if (dl > lim) p = lin + d * (lim / dl);\n"
 	"		}\n"
 	"		vColor = vec4(omTF(a + 4), omTF(a + 5), omTF(a + 6), omTF(a + 7)) * u +\n"

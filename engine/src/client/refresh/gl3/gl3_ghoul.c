@@ -1377,35 +1377,22 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			}
 			else
 			{
-				level = ((flags & SOF_RF_CASTSHADOW) || round) ? models : 0;
-				/* The same edge limit as a weapon. A coat looked at from above is a long thin
-				   triangle with normals that disagree, and the curved surface leaves it as a spike.
-				   Close to the camera that triangle is large, so the spike shows only at that angle. */
-				pncap = OM_WEAPON_PN_EDGE;
+				/* A coat looked at from above is one long triangle whose normals disagree.
+				   Curving it lifts that face into a fin (sib1, the body at the pink wall).
+				   A fraction of that edge is still the fin, and a coat piece small enough
+				   to be classed as a round prop took that path too. A character stays on
+				   the triangles it was built with. The light still follows the normals.
+				   A prop that does not cast a character shadow is curved below. */
+				level = 0;
+				k = 0.0f;
+				pncap = 0.0f;
+				(void)round;
 
-				/* by size on the screen: the small triangles cost the GPU (MSAA shades the pixels along every edge
-				   twice; three characters close by at level 3 took 4.8 ms on a GTX 1050 Ti, at level 2 2.4). A man-high
-				   model taller than 600 pixels (an arm's length) keeps the level, from 100 pixels at most 2, smaller
-				   ones none - their facets are a pixel or two */
-				/* A round prop keeps the full level whether or not this copy casts a shadow. The old test skipped
-				   the cull only when the prop did not cast, so two barrels of one mesh could split. */
-				if ((level > 1) && !round)
-				{
-					vec3_t d;
-					float dist, px;
-
-					VectorSubtract(e->origin, r_newrefdef.vieworg, d);
-					dist = Q_max(VectorLength(d), 1.0f);
-					px = 64.0f / dist * (r_newrefdef.height * 0.5f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f);
-					level = (px > 600.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
-				}
-
-				/* The draw may still find a round shell (the name list missed it, or the shadow flag and the
-				   one-frame mark disagreed). Both copies then take this same level. */
-				if (r_om_tess_round->value != 0)
+				if ((r_om_tess_round->value != 0) && !(flags & SOF_RF_CASTSHADOW))
 				{
 					proplevel = models;
 					propk = Q_clamp(r_om_tess->value, 0.0f, 10.0f) / 10.0f;
+					pncap = OM_WEAPON_PN_EDGE;
 				}
 			}
 
