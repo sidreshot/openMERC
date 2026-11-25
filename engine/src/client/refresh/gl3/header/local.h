@@ -857,12 +857,21 @@ void GL3_Post_RegionFog(void);
 	"				al *= hh * hh;\n" \
 	"			}\n" \
 	/* the box face used to cut a wall in one pixel (kos1, the brick by the water at
-	   -1475 -2173). A surface inside the volume fades in over the first 64 units. */ \
+	   -1475 -2173). A surface inside the volume fades in over the first 64 units,
+	   and only when the eye is near that same face. A far face of a large pocket
+	   (sib1, the snow caps in the sky opening) keeps the fog it travelled through. */ \
 	"			if (dist - t1 < 2.0)\n" \
 	"			{\n" \
 	"				vec3 pin = min(p - mn.xyz, mx.xyz - p);\n" \
 	"				float inset = min(min(pin.x, pin.y), pin.z);\n" \
-	"				al *= smoothstep(0.0, 64.0, inset);\n" \
+	"				float ed = 1e9;\n" \
+	"				ed = (p.x - mn.x <= inset + 0.5) ? min(ed, eye.x - mn.x) : ed;\n" \
+	"				ed = (mx.x - p.x <= inset + 0.5) ? min(ed, mx.x - eye.x) : ed;\n" \
+	"				ed = (p.y - mn.y <= inset + 0.5) ? min(ed, eye.y - mn.y) : ed;\n" \
+	"				ed = (mx.y - p.y <= inset + 0.5) ? min(ed, mx.y - eye.y) : ed;\n" \
+	"				ed = (p.z - mn.z <= inset + 0.5) ? min(ed, eye.z - mn.z) : ed;\n" \
+	"				ed = (mx.z - p.z <= inset + 0.5) ? min(ed, mx.z - eye.z) : ed;\n" \
+	"				al *= mix(smoothstep(0.0, 64.0, inset), 1.0, smoothstep(96.0, 256.0, ed));\n" \
 	"			}\n" \
 	"			al *= mix(hd.y, 1.0, al);\n" \
 	"			C = C * (1.0 - al) + cl.rgb * al;\n" \
