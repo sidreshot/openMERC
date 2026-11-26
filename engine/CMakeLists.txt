@@ -26,7 +26,7 @@ endif()
 # OpenMerc: the release version shown everywhere ("openMERC V<version>": menus, window title,
 # console stamp); `git describe` of the build goes only into the build info (OM_BUILD:
 # start-up banner, --help, cvar om_build)
-set(OM_VERSION "0.2.4")
+set(OM_VERSION "0.2.5")
 set(OM_BUILD "${OM_VERSION}")
 find_package(Git QUIET)
 if(GIT_FOUND)

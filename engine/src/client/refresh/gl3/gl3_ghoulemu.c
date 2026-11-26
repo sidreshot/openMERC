@@ -140,7 +140,7 @@ static struct
 	/* GFX-modern sun shadows (gl3_csm.c): the depth mask as set, whether the entity casts and whether its
 	   ground shadow gives way to the sun shadow */
 	qboolean depthmask, csmcapture, csmrepl;
-	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk, u_sunk, u_lsk, u_sssk;
+	GLint u_invpv, u_csmrepl, u_beamn, u_beam, u_ppl, u_pplL, u_pplM, u_pbrk, u_weap, u_sunk, u_lsk, u_sssk;
 
 	/* GFX-modern light beams (gl3_post.c): whether the entity being drawn casts a shadow into beams */
 	qboolean casts;
@@ -167,6 +167,10 @@ static struct
 	/* the same on the GPU: the corners in a texture buffer, a vertex array without attributes */
 	GLuint tessvao, tbo, tbotex;
 	GLint u_tessL, u_tessK, u_tessCap, u_tessProj, u_tessTab;
+	/* round prop: origin xyz + height min, axis xyz + height max, 16 radii along that axis.
+	   height max <= height min means off */
+	float cyl0[4], cyl1[4], cylr[16];
+	GLint u_cyl0, u_cyl1, u_cylr;
 	int tesstabL;
 	int context; /* gl3_contextgen the GL objects were made in */
 } E;
@@ -688,7 +692,9 @@ Emit(float x, float y, float z)
 		v->fog = 1;
 	}
 
-	if ((E.tess > 1) || (E.lighting && E.ppl) || (E.softadd && E.blendon && (E.bdst == GL_ONE)))
+	/* proplevel is applied in Flush, after these vertices are stored. A round prop (the jpn1
+	   trash cans) otherwise tessellates whatever eye position the slot still holds. */
+	if ((E.tess > 1) || (E.proplevel > 1) || (E.lighting && E.ppl) || (E.softadd && E.blendon && (E.bdst == GL_ONE)))
 	{
 		float n[3], l, w = (eye[3] != 0) ? eye[3] : 1;
 
@@ -746,6 +752,9 @@ static const char *emu_vs =
 	"uniform int omTessL;\n"
 	"uniform float omTessK;\n"
 	"uniform float omTessCap;\n"   /* 0: no cap. A weapon: fraction of the edge the surface may leave the triangle */
+	"uniform vec4 omCyl0;\n"       /* round prop: origin xyz, height min. Off when omCyl1.w <= omCyl0.w */
+	"uniform vec4 omCyl1;\n"       /* axis xyz, height max */
+	"uniform float omCylR[16];\n"  /* circumradius of the authored corners along the axis */
 	"uniform mat4 omTessProj;\n"
 	"uniform ivec2 omTessTab[48];\n"
 	"uniform samplerBuffer omTessBuf;\n"
@@ -780,6 +789,19 @@ static const char *emu_vs =
 	"			float lim = omTessCap * el;\n"
 	"			if (lim > 1.0) lim = 1.0;\n"
 	"			if (dl > lim) p = lin + d * (lim / dl);\n"
+	"		}\n"
+	"		if (omCyl1.w > omCyl0.w + 0.5)\n"
+	"		{\n"
+	"			vec3 rel = lin - omCyl0.xyz;\n"
+	"			float h = dot(rel, omCyl1.xyz);\n"
+	"			vec3 radial = rel - omCyl1.xyz * h;\n"
+	"			float rl = length(radial);\n"
+	"			float hu = clamp((h - omCyl0.w) / (omCyl1.w - omCyl0.w), 0.0, 0.999);\n"
+	"			float f = hu * 16.0;\n"
+	"			int i0 = int(f);\n"
+	"			float R = mix(omCylR[i0], omCylR[min(i0 + 1, 15)], fract(f));\n"
+	"			if (R > 0.5 && rl > R * 0.72 && rl < R * 1.08)\n"
+	"				p = omCyl0.xyz + omCyl1.xyz * h + radial * (R / rl);\n"
 	"		}\n"
 	"		vColor = vec4(omTF(a + 4), omTF(a + 5), omTF(a + 6), omTF(a + 7)) * u +\n"
 	"			vec4(omTF(b + 4), omTF(b + 5), omTF(b + 6), omTF(b + 7)) * v +\n"
@@ -835,6 +857,7 @@ static const char *emu_fs =
 	"uniform sampler2D omSoftAddDepth;\n"
 	"uniform int omPPL;\n"
 	"uniform float omPbrK;\n"
+	"uniform int omWeap;\n"   /* 1: a weapon's gleam, 2: the colour laid over its spec map */
 	/* r_om_sss: light scattered through skin (strength) */
 	"uniform float omSssK;\n"   /* r_om_pbr_models: strength of the specular */
 	"uniform float omSunK;\n"
@@ -969,39 +992,45 @@ static const char *emu_fs =
 	"	float a = rough * rough;\n"
 	"	vec3 F0 = hasSpec ? clamp(omM[2].rgb * 0.5, vec3(0.04), vec3(0.5)) : vec3(0.035);\n"
 	"	omMetal = hasSpec ? 1.0 : 0.0;\n"
+	/* a weapon texture, view gun and world gun alike. Hands share the depth hack and are not this texture.
+	   The spec map is drawn first (omWeap 1). The colour is added on top (omWeap 2) and must not gleam again,
+	   or every facet of the low-poly gun lights up. Roughness stays broad: a soft sheen, not a mirror spike. */
+	"	if (omWeap == 1)\n"
+	"	{\n"
+	"		rough = 0.64;\n"
+	"		a = rough * rough;\n"
+	"		F0 = vec3(0.56);\n"
+	"		omMetal = 1.0;\n"
+	"	}\n"
+	"	else if (omWeap == 2)\n"
+	"	{\n"
+	"		rough = 1.0;\n"
+	"		a = 1.0;\n"
+	"		F0 = vec3(0.04);\n"
+	"		omMetal = 0.0;\n"
+	"	}\n"
+	"	vec3 omCap = (omWeap == 1) ? vec3(1.15) : vec3(3.0);\n"
 	"	float nv = max(dot(n, v), 1e-3);\n"
 	"	vec3 amb = ma.rgb * omM[5].rgb;\n"
 	"	vec3 c = omM[3].rgb + amb * omAmbK(n);\n"
 	"	vec3 sp = vec3(0.0);\n"
-	/* r_om_pbr_shadows: a Ghoul point light that sits on a lamp slot takes that lamp's cube only,
-	   and only on its direct colour. The fill term is not multiplied. The view weapon keeps the
-	   single weighted visibility: its depth is squeezed and must not sample the body cube. */
+	/* r_om_pbr_shadows: one weighted lamp visibility on every Ghoul light, direct colour only.
+	   A per-lamp cube painted one coat face gold or black (sib1, looking down at the body). */
 	"	float lsv = 1.0;\n"
-	"	vec3 wp = vec3(0.0);\n"
-	"	vec3 nw = omE2W * n;\n"
-	"	bool slot = (omLsK > 0.0) && !vm;\n"
 	"	if (omLsK > 0.0)\n"
 	"	{\n"
 	"		vec4 wq = omInvPV * vPos;\n"
-	"		wp = wq.xyz / wq.w;\n"
-	"		if (!slot)\n"
-	"			lsv = mix(1.0, omLsModelVis(wp, nw), omLsK);\n"
+	"		lsv = mix(1.0, omLsModelVis(wq.xyz / wq.w, omE2W * n), omLsK);\n"
 	"	}\n"
 	"	for (int i = 0; i < 8; i++)\n"
 	"	{\n"
 	"		if (omL[i * 6 + 1].w < 0.5) continue;\n"
 	"		vec4 P = omL[i * 6];\n"
 	"		vec3 L;\n"
-	"		float att = 1.0, spot = 1.0, lvis = lsv;\n"
+	"		float att = 1.0, spot = 1.0;\n"
 	"		if (P.w != 0.0)\n"
 	"		{\n"
 	"			L = P.xyz / P.w - vEP;\n"
-	"			if (slot)\n"
-	"			{\n"
-	"				int s = omLsMatch(wp + omE2W * L);\n"
-	"				if (s >= 0)\n"
-	"					lvis = mix(1.0, omLsSlotVis(s, wp, nw), omLsK);\n"
-	"			}\n"
 	"			float d = length(L);\n"
 	"			if (d > 0.0) L /= d;\n"
 	"			vec3 k = omL[i * 6 + 5].xyz;\n"
@@ -1021,7 +1050,7 @@ static const char *emu_fs =
 	"			spot = (cs < sd.w) ? 0.0 : pow(max(cs, 0.0), omL[i * 6 + 5].w);\n"
 	"		}\n"
 	"		float nl = max(dot(n, L), 0.0);\n"
-	"		vec3 Lc = att * spot * lvis * omL[i * 6 + 2].rgb;\n"
+	"		vec3 Lc = att * spot * lsv * omL[i * 6 + 2].rgb;\n"
 	"		c += att * spot * omL[i * 6 + 1].rgb * ma.rgb + nl * Lc * md.rgb;\n"
 	/* r_om_sss: the light that wraps past the terminator through skin (applied where the texture is skin, main) */
 	"		omScatter += Lc * md.rgb * max((dot(n, L) + 0.5) / 1.5 - nl, 0.0);\n"
@@ -1030,7 +1059,7 @@ static const char *emu_fs =
 	"			vec3 h = normalize(L + v);\n"
 	"			float nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);\n"
 	"			vec3 F = F0 + (vec3(1.0) - F0) * pow(1.0 - vh, 5.0);\n"
-	"			sp += min(Lc * nl * F * (3.14159 * omGGX(nh, a) * omVis(nl, nv, a)), vec3(3.0));\n"
+	"			sp += min(Lc * nl * F * (3.14159 * omGGX(nh, a) * omVis(nl, nv, a)), omCap);\n"
 	"		}\n"
 	"	}\n"
 	/* the sun (Ghoul never lit models by it): a directional light where the static world lets it through (the sun
@@ -1055,7 +1084,7 @@ static const char *emu_fs =
 	"				vec3 h = normalize(Ls + v);\n"
 	"				float nh = max(dot(n, h), 0.0), vh = max(dot(v, h), 0.0);\n"
 	"				vec3 F = F0 + (vec3(1.0) - F0) * pow(1.0 - vh, 5.0);\n"
-	"				sp += min(vec3(sk) * nl * F * (3.14159 * omGGX(nh, a) * omVis(nl, nv, a)), vec3(3.0));\n"
+	"				sp += min(vec3(sk) * nl * F * (3.14159 * omGGX(nh, a) * omVis(nl, nv, a)), omCap);\n"
 	"			}\n"
 	"		}\n"
 	"	}\n"
@@ -1072,8 +1101,22 @@ static const char *emu_fs =
 	"		env = Probe(wq.xyz / wq.w, omE2W * R, " EMU_PROBE_LOD " + rough * 4.0);\n"
 	"	}\n"
 #endif
-	"	sp += env * Fe * (0.6 - 0.4 * rough);\n"
-	"	omSpec = sp * omPbrK * (vm ? 0.6 : 1.0);\n"
+	"	float envk = 0.6 - 0.4 * rough;\n"
+	"	float speck = vm ? 0.6 : 1.0;\n"
+	"	if (omWeap == 1)\n"
+	"	{\n"
+	"		envk = 0.15;\n"
+	"		speck = 0.70;\n"
+	"	}\n"
+	"	else if (omWeap == 2)\n"
+	"	{\n"
+	"		envk = 0.0;\n"
+	"		speck = 0.0;\n"
+	"	}\n"
+	"	sp += env * Fe * envk;\n"
+	"	omSpec = sp * omPbrK * speck;\n"
+	"	if (omWeap != 0)\n"
+	"		c.rgb *= 0.88;\n"
 	"	return vec4(min(c, vec3(2.0)), clamp(md.a, 0.0, 1.0));\n"
 	"}\n"
 	/* GFX-modern light beams (gl3_post.c): the lamp pools of the last view; a ground shadow in one gives
@@ -1141,7 +1184,7 @@ static const char *emu_fs =
 	/* the gloss of a glossy SoF material (weapons, buckles, helmets) is coloured by the texture as a metal's; the sheen of
 	   the others is white like a dielectric's */
 	"	if (omPPL == 2 && (texenv == 0 || texenv == 1))\n"
-	"		c.rgb += omSpec * ((texenv == 1 && omMetal > 0.5) ? texture(tex, vTex).rgb * 1.6 : vec3(1.0));\n"
+	"		c.rgb += omSpec * ((texenv == 1 && omMetal > 0.5) ? texture(tex, vTex).rgb * ((omWeap == 1) ? 1.0 : 1.6) : vec3(1.0));\n"
 	/* GFX-modern r_om_sss: skin - a warm texel (red over green over blue, not grey, not white) - takes the wrapped
 	   light with the red of blood under it: the terminator on a face turns soft and warm instead of a hard grey line
 	   (the cheap pre-integrated look of console-era skin) */
@@ -1275,6 +1318,7 @@ USame(GLint loc, const void *p, int bytes)
 
 static void U1i(GLint l, int v) { if (!USame(l, &v, sizeof(v))) glUniform1i(l, v); }
 static void U1f(GLint l, float v) { if (!USame(l, &v, sizeof(v))) glUniform1f(l, v); }
+static void U1fv(GLint l, int n, const float *v) { if (!USame(l, v, n * (int)sizeof(float))) glUniform1fv(l, n, v); }
 static void U4f(GLint l, float a, float b, float c, float d)
 {
 	float v[4] = {a, b, c, d};
@@ -1419,6 +1463,7 @@ CreateObjects(void)
 	E.u_csmrepl = glGetUniformLocation(E.prog, "omCsmRepl");
 	E.u_ppl = glGetUniformLocation(E.prog, "omPPL");
 	E.u_pbrk = glGetUniformLocation(E.prog, "omPbrK");
+	E.u_weap = glGetUniformLocation(E.prog, "omWeap");
 	E.u_sssk = glGetUniformLocation(E.prog, "omSssK");
 	E.u_sunk = glGetUniformLocation(E.prog, "omSunK");
 	E.u_lsk = glGetUniformLocation(E.prog, "omLsK");
@@ -1434,6 +1479,9 @@ CreateObjects(void)
 	E.u_tessCap = glGetUniformLocation(E.prog, "omTessCap");
 	E.u_tessProj = glGetUniformLocation(E.prog, "omTessProj");
 	E.u_tessTab = glGetUniformLocation(E.prog, "omTessTab");
+	E.u_cyl0 = glGetUniformLocation(E.prog, "omCyl0");
+	E.u_cyl1 = glGetUniformLocation(E.prog, "omCyl1");
+	E.u_cylr = glGetUniformLocation(E.prog, "omCylR");
 	E.tesstabL = 0;
 	E.context = gl3_contextgen;
 	GL3_UseProgram(E.prog);
@@ -1569,6 +1617,450 @@ AddTri(emuvtx_t *out, int *n, int a, int b, int c, int provoking)
 	*n += 3;
 }
 
+/* A listed round prop is a short prism (the jpn1 cans are five sides). PN keeps those corners, so the
+   silhouette stays the prism. The new points on a face move out to the circle the corners already lie on. */
+
+static void
+CylClear(void)
+{
+	E.cyl0[3] = 0.0f;
+	E.cyl1[3] = 0.0f;
+}
+
+static int
+CylAngCmp(const void *pa, const void *pb)
+{
+	float d = *(const float *)pa - *(const float *)pb;
+
+	if (d < 0.0f)
+	{
+		return -1;
+	}
+
+	return (d > 0.0f) ? 1 : 0;
+}
+
+static int
+CylPower(const float c[3][3], float v[3], const float *lock, const float *lock2)
+{
+	int it;
+
+	for (it = 0; it < 24; it++)
+	{
+		float w[3], L, d;
+
+		w[0] = c[0][0] * v[0] + c[0][1] * v[1] + c[0][2] * v[2];
+		w[1] = c[1][0] * v[0] + c[1][1] * v[1] + c[1][2] * v[2];
+		w[2] = c[2][0] * v[0] + c[2][1] * v[1] + c[2][2] * v[2];
+
+		if (lock)
+		{
+			d = w[0] * lock[0] + w[1] * lock[1] + w[2] * lock[2];
+			w[0] -= d * lock[0];
+			w[1] -= d * lock[1];
+			w[2] -= d * lock[2];
+		}
+
+		if (lock2)
+		{
+			d = w[0] * lock2[0] + w[1] * lock2[1] + w[2] * lock2[2];
+			w[0] -= d * lock2[0];
+			w[1] -= d * lock2[1];
+			w[2] -= d * lock2[2];
+		}
+
+		L = sqrtf(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+
+		if (L < 1.0e-8f)
+		{
+			return 0;
+		}
+
+		v[0] = w[0] / L;
+		v[1] = w[1] / L;
+		v[2] = w[2] / L;
+	}
+
+	return 1;
+}
+
+static void
+CylBasis(const float axis[3], float u[3], float v[3])
+{
+	float ax = fabsf(axis[0]), ay = fabsf(axis[1]), az = fabsf(axis[2]);
+	float t[3], L;
+
+	if ((ax <= ay) && (ax <= az))
+	{
+		t[0] = 1.0f;
+		t[1] = 0.0f;
+		t[2] = 0.0f;
+	}
+	else if (ay <= az)
+	{
+		t[0] = 0.0f;
+		t[1] = 1.0f;
+		t[2] = 0.0f;
+	}
+	else
+	{
+		t[0] = 0.0f;
+		t[1] = 0.0f;
+		t[2] = 1.0f;
+	}
+
+	u[0] = t[1] * axis[2] - t[2] * axis[1];
+	u[1] = t[2] * axis[0] - t[0] * axis[2];
+	u[2] = t[0] * axis[1] - t[1] * axis[0];
+	L = sqrtf(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+
+	if (L < 1.0e-8f)
+	{
+		u[0] = 1.0f;
+		u[1] = 0.0f;
+		u[2] = 0.0f;
+		L = 1.0f;
+	}
+
+	u[0] /= L;
+	u[1] /= L;
+	u[2] /= L;
+	v[0] = axis[1] * u[2] - axis[2] * u[1];
+	v[1] = axis[2] * u[0] - axis[0] * u[2];
+	v[2] = axis[0] * u[1] - axis[1] * u[0];
+}
+
+/* Largest angular gap of the outer corners around axis. A pentagon is about 1.26. A flat or a box is wider. */
+static float
+CylGap(const emuvtx_t *in, int n, const float org[3], const float axis[3])
+{
+	static float ang[768];
+	float u[3], v[3], maxr = 0.0f;
+	int i, m = 0;
+
+	CylBasis(axis, u, v);
+
+	for (i = 0; i < n; i++)
+	{
+		float d0 = in[i].eye[0] - org[0], d1 = in[i].eye[1] - org[1], d2 = in[i].eye[2] - org[2];
+		float h = d0 * axis[0] + d1 * axis[1] + d2 * axis[2];
+		float rx = d0 - axis[0] * h, ry = d1 - axis[1] * h, rz = d2 - axis[2] * h;
+		float r = sqrtf(rx * rx + ry * ry + rz * rz);
+
+		if (r > maxr)
+		{
+			maxr = r;
+		}
+	}
+
+	if (maxr < 0.5f)
+	{
+		return 7.0f;
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		float d0 = in[i].eye[0] - org[0], d1 = in[i].eye[1] - org[1], d2 = in[i].eye[2] - org[2];
+		float h = d0 * axis[0] + d1 * axis[1] + d2 * axis[2];
+		float rx = d0 - axis[0] * h, ry = d1 - axis[1] * h, rz = d2 - axis[2] * h;
+		float r = sqrtf(rx * rx + ry * ry + rz * rz);
+		float x, y;
+
+		if ((r <= maxr * 0.65f) || (m >= 768))
+		{
+			continue;
+		}
+
+		x = rx * u[0] + ry * u[1] + rz * u[2];
+		y = rx * v[0] + ry * v[1] + rz * v[2];
+		ang[m++] = atan2f(y, x);
+	}
+
+	if (m < 5)
+	{
+		return 7.0f;
+	}
+
+	qsort(ang, (size_t)m, sizeof(ang[0]), CylAngCmp);
+
+	{
+		float gap = ang[0] + 6.2831853f - ang[m - 1];
+		int k;
+
+		for (k = 0; k < m - 1; k++)
+		{
+			float d = ang[k + 1] - ang[k];
+
+			if (d > gap)
+			{
+				gap = d;
+			}
+		}
+
+		return gap;
+	}
+}
+
+static void
+CylFit(const emuvtx_t *in, int n)
+{
+	float org[3], cov[3][3], axis[3][3], gap, bestgap, hmin, hmax, rb[16];
+	int i, k, best, filled;
+
+	CylClear();
+
+	if ((n < 12) || (n > 768))
+	{
+		return;
+	}
+
+	org[0] = org[1] = org[2] = 0.0f;
+
+	for (i = 0; i < n; i++)
+	{
+		org[0] += in[i].eye[0];
+		org[1] += in[i].eye[1];
+		org[2] += in[i].eye[2];
+	}
+
+	org[0] /= (float)n;
+	org[1] /= (float)n;
+	org[2] /= (float)n;
+	memset(cov, 0, sizeof(cov));
+
+	for (i = 0; i < n; i++)
+	{
+		float d[3];
+
+		d[0] = in[i].eye[0] - org[0];
+		d[1] = in[i].eye[1] - org[1];
+		d[2] = in[i].eye[2] - org[2];
+
+		for (k = 0; k < 3; k++)
+		{
+			int j;
+
+			for (j = 0; j < 3; j++)
+			{
+				cov[k][j] += d[k] * d[j];
+			}
+		}
+	}
+
+	axis[0][0] = 0.0f;
+	axis[0][1] = 0.0f;
+	axis[0][2] = 1.0f;
+
+	if (!CylPower(cov, axis[0], NULL, NULL))
+	{
+		return;
+	}
+
+	axis[1][0] = 1.0f;
+	axis[1][1] = 0.0f;
+	axis[1][2] = 0.0f;
+
+	if (!CylPower(cov, axis[1], axis[0], NULL))
+	{
+		return;
+	}
+
+	axis[2][0] = axis[0][1] * axis[1][2] - axis[0][2] * axis[1][1];
+	axis[2][1] = axis[0][2] * axis[1][0] - axis[0][0] * axis[1][2];
+	axis[2][2] = axis[0][0] * axis[1][1] - axis[0][1] * axis[1][0];
+	{
+		float L = sqrtf(axis[2][0] * axis[2][0] + axis[2][1] * axis[2][1] + axis[2][2] * axis[2][2]);
+
+		if (L < 1.0e-8f)
+		{
+			return;
+		}
+
+		axis[2][0] /= L;
+		axis[2][1] /= L;
+		axis[2][2] /= L;
+	}
+
+	best = -1;
+	bestgap = 1.50f;
+
+	for (k = 0; k < 3; k++)
+	{
+		gap = CylGap(in, n, org, axis[k]);
+
+		if (gap < bestgap)
+		{
+			bestgap = gap;
+			best = k;
+		}
+	}
+
+	if (best < 0)
+	{
+		return;
+	}
+
+	hmin = 1.0e30f;
+	hmax = -1.0e30f;
+
+	for (i = 0; i < n; i++)
+	{
+		float h = (in[i].eye[0] - org[0]) * axis[best][0] + (in[i].eye[1] - org[1]) * axis[best][1] +
+			(in[i].eye[2] - org[2]) * axis[best][2];
+
+		if (h < hmin)
+		{
+			hmin = h;
+		}
+
+		if (h > hmax)
+		{
+			hmax = h;
+		}
+	}
+
+	if (hmax < hmin + 1.0f)
+	{
+		return;
+	}
+
+	memset(rb, 0, sizeof(rb));
+
+	for (i = 0; i < n; i++)
+	{
+		float d0 = in[i].eye[0] - org[0], d1 = in[i].eye[1] - org[1], d2 = in[i].eye[2] - org[2];
+		float h = d0 * axis[best][0] + d1 * axis[best][1] + d2 * axis[best][2];
+		float rx = d0 - axis[best][0] * h, ry = d1 - axis[best][1] * h, rz = d2 - axis[best][2] * h;
+		float r = sqrtf(rx * rx + ry * ry + rz * rz);
+		float u = (h - hmin) / (hmax - hmin);
+		int b = (int)(u * 16.0f);
+
+		if (b < 0)
+		{
+			b = 0;
+		}
+
+		if (b > 15)
+		{
+			b = 15;
+		}
+
+		if (r > rb[b])
+		{
+			rb[b] = r;
+		}
+	}
+
+	filled = -1;
+
+	for (i = 0; i < 16; i++)
+	{
+		if (rb[i] <= 0.0f)
+		{
+			continue;
+		}
+
+		if ((filled >= 0) && (i > filled + 1))
+		{
+			int j;
+
+			for (j = filled + 1; j < i; j++)
+			{
+				float t = (float)(j - filled) / (float)(i - filled);
+
+				rb[j] = rb[filled] * (1.0f - t) + rb[i] * t;
+			}
+		}
+
+		filled = i;
+	}
+
+	if (filled < 0)
+	{
+		return;
+	}
+
+	for (i = 0; (i < 16) && (rb[i] <= 0.0f); i++)
+	{
+	}
+
+	for (k = 0; k < i; k++)
+	{
+		rb[k] = rb[i];
+	}
+
+	for (k = filled + 1; k < 16; k++)
+	{
+		rb[k] = rb[filled];
+	}
+
+	E.cyl0[0] = org[0];
+	E.cyl0[1] = org[1];
+	E.cyl0[2] = org[2];
+	E.cyl0[3] = hmin;
+	E.cyl1[0] = axis[best][0];
+	E.cyl1[1] = axis[best][1];
+	E.cyl1[2] = axis[best][2];
+	E.cyl1[3] = hmax;
+	memcpy(E.cylr, rb, sizeof(E.cylr));
+}
+
+/* Same rule as the omCyl block in the vertex shader. A point already on a corner stays. */
+static void
+CylMove(const float lin[3], float p[3])
+{
+	float rel0, rel1, rel2, h, rx, ry, rz, rl, span, hu, f, fr, R, scale;
+	int i0, i1;
+
+	if (!(E.cyl1[3] > E.cyl0[3] + 0.5f))
+	{
+		return;
+	}
+
+	rel0 = lin[0] - E.cyl0[0];
+	rel1 = lin[1] - E.cyl0[1];
+	rel2 = lin[2] - E.cyl0[2];
+	h = rel0 * E.cyl1[0] + rel1 * E.cyl1[1] + rel2 * E.cyl1[2];
+	rx = rel0 - E.cyl1[0] * h;
+	ry = rel1 - E.cyl1[1] * h;
+	rz = rel2 - E.cyl1[2] * h;
+	rl = sqrtf(rx * rx + ry * ry + rz * rz);
+	span = E.cyl1[3] - E.cyl0[3];
+	hu = (h - E.cyl0[3]) / span;
+
+	if (hu < 0.0f)
+	{
+		hu = 0.0f;
+	}
+
+	if (hu > 0.999f)
+	{
+		hu = 0.999f;
+	}
+
+	f = hu * 16.0f;
+	i0 = (int)f;
+
+	if (i0 > 15)
+	{
+		i0 = 15;
+	}
+
+	i1 = (i0 < 15) ? i0 + 1 : 15;
+	fr = f - (float)i0;
+	R = E.cylr[i0] * (1.0f - fr) + E.cylr[i1] * fr;
+
+	if ((R <= 0.5f) || (rl <= R * 0.72f) || (rl >= R * 1.08f) || (rl < 1.0e-4f))
+	{
+		return;
+	}
+
+	scale = R / rl;
+	p[0] = E.cyl0[0] + E.cyl1[0] * h + rx * scale;
+	p[1] = E.cyl0[1] + E.cyl1[1] * h + ry * scale;
+	p[2] = E.cyl0[2] + E.cyl1[2] * h + rz * scale;
+}
+
 /*
  * GFX-modern tessellation: each triangle becomes tess^2 triangles on the curved PN triangle (Vlachos et al.)
  * of its eye-space corners and normals; colour, texture coordinates and fog are interpolated linearly
@@ -1692,6 +2184,7 @@ Tessellate(emuvtx_t *in, int *n)
 							}
 						}
 
+						CylMove(lin, p);
 						p[3] = 1;
 						MatVec(proj, p, v->pos);
 
@@ -1794,6 +2287,65 @@ static GLuint roundtex[ROUND_MAX];
 static int numround;
 static qboolean sawround;
 
+/* weapon textures (hint param 4). Hands on the view model are a different texture. */
+#define WEAPON_MAX 128
+static GLuint weapontex[WEAPON_MAX];
+static int numweap;
+
+static void
+WeaponMark(GLuint tex)
+{
+	int i;
+
+	for (i = 0; i < numweap; i++)
+	{
+		if (weapontex[i] == tex)
+		{
+			return;
+		}
+	}
+
+	if (tex && numweap < WEAPON_MAX)
+	{
+		weapontex[numweap++] = tex;
+	}
+}
+
+static void
+WeaponForget(GLuint tex)
+{
+	int i;
+
+	for (i = 0; i < numweap; i++)
+	{
+		if (weapontex[i] == tex)
+		{
+			weapontex[i--] = weapontex[--numweap];
+		}
+	}
+}
+
+static qboolean
+IsWeapon(GLuint tex)
+{
+	int i;
+
+	if (!tex)
+	{
+		return false;
+	}
+
+	for (i = 0; i < numweap; i++)
+	{
+		if (weapontex[i] == tex)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static void
 RoundMark(GLuint tex)
 {
@@ -1874,6 +2426,7 @@ Flush(void)
 	}
 
 	out = E.tris;
+	CylClear();
 
 	switch (E.prim)
 	{
@@ -1987,47 +2540,63 @@ Flush(void)
 			shaped = OM_TessClass(NULL, NULL, 0, tmp, n);
 		}
 
-		if ((named || shaped) && (E.proplevel > 1))
+		/* Name only. The normal ring also matches a coat, and curving that face
+		   lifts it off the body. */
+		if (named && (E.proplevel > 1))
 		{
 			E.tess = E.proplevel;
 			E.tessk = E.propk;
 		}
 
-		/* a round prop modelled with split normals (the jpn1 trash cans: every side its own normal) gives the PN
-		   surface nothing to curve. Each corner gets the mean of the faces meeting there. */
+		/* Split normals give a face nothing to curve. Neighbours within about 75 degrees share a normal
+		   (a pentagon's sides meet at 72). The lid stays on its own normal. */
 		if ((mode == GL_TRIANGLES) && (E.tess > 1) && (named || shaped) && (n <= 3072))
-	{
-		static float sm[3072][3];
-		int a, b;
-
-		for (a = 0; a < n; a++)
 		{
-			VectorClear(sm[a]);
+			static float sm[3072][3], raw[3072][3];
+			int a, b;
 
-			for (b = 0; b < n; b++)
+			for (a = 0; a < n; a++)
 			{
-				if ((fabsf(out[a].eye[0] - out[b].eye[0]) < 0.01f) && (fabsf(out[a].eye[1] - out[b].eye[1]) < 0.01f) &&
-					(fabsf(out[a].eye[2] - out[b].eye[2]) < 0.01f))
+				VectorCopy(out[a].en, raw[a]);
+				VectorClear(sm[a]);
+			}
+
+			for (a = 0; a < n; a++)
+			{
+				for (b = 0; b < n; b++)
 				{
-					VectorAdd(sm[a], out[b].en, sm[a]);
+					float d;
+
+					if ((fabsf(out[a].eye[0] - out[b].eye[0]) >= 0.01f) || (fabsf(out[a].eye[1] - out[b].eye[1]) >= 0.01f) ||
+						(fabsf(out[a].eye[2] - out[b].eye[2]) >= 0.01f))
+					{
+						continue;
+					}
+
+					d = raw[a][0] * raw[b][0] + raw[a][1] * raw[b][1] + raw[a][2] * raw[b][2];
+
+					if ((a != b) && (d < 0.25f))
+					{
+						continue;
+					}
+
+					VectorAdd(sm[a], raw[b], sm[a]);
 				}
 			}
-		}
 
-		for (a = 0; a < n; a++)
-		{
-			if (VectorNormalize(sm[a]) > 0.01f)
+			for (a = 0; a < n; a++)
 			{
-				VectorCopy(sm[a], out[a].en);
+				if (VectorNormalize(sm[a]) > 0.01f)
+				{
+					VectorCopy(sm[a], out[a].en);
+				}
+			}
+
+			if (named)
+			{
+				CylFit(out, n);
 			}
 		}
-
-		if (r_om_tessdebug && (r_om_tessdebug->value >= 3))
-		{
-			R_Printf(PRINT_ALL, "OMROUND prim %d verts %d tris %d n0 %.2f %.2f %.2f\n", E.prim, count, n / 3, out[0].en[0],
-				out[0].en[1], out[0].en[2]);
-		}
-	}
 	}
 
 	/* the shadow passes take the triangles as modelled: curved silhouettes are lost in a shadow map's texels,
@@ -2145,6 +2714,12 @@ Flush(void)
 		if (E.u_tessCap >= 0)
 		{
 			U1f(E.u_tessCap, E.pncap);
+		}
+		if (E.u_cyl0 >= 0)
+		{
+			U4f(E.u_cyl0, E.cyl0[0], E.cyl0[1], E.cyl0[2], E.cyl0[3]);
+			U4f(E.u_cyl1, E.cyl1[0], E.cyl1[1], E.cyl1[2], E.cyl1[3]);
+			U1fv(E.u_cylr, 16, E.cylr);
 		}
 		UM4(E.u_tessProj, E.proj[E.projdepth]);
 		n = (n / 3) * gputess * gputess * 3;
@@ -2377,6 +2952,17 @@ Flush(void)
 		}
 
 		U1i(E.u_ppl, ppl);
+		/* 1: the gleam of a weapon texture. 2: its colour, added on top of the spec map. */
+		{
+			int weap = 0;
+
+			if (IsWeapon(E.boundtex))
+			{
+				weap = (E.blendon && (E.bsrc == GL_ONE) && (E.bdst == GL_ONE)) ? 2 : 1;
+			}
+
+			U1i(E.u_weap, weap);
+		}
 
 		if (ppl)
 		{
@@ -2827,6 +3413,7 @@ Emu_DeleteTextures(GLsizei n, const GLuint *textures)
 		TexRecForget(textures[i]);
 		GL3_Beam_ForgetTexture(textures[i]);
 		GlowMark(textures[i], false);
+		WeaponForget(textures[i]);
 
 		{
 			int k;
@@ -3374,7 +3961,11 @@ Emu_TexParameteri(GLenum target, GLenum pname, GLint param)
 	}
 	else if (pname == OM_GHL_BEAM_HINT) /* openMERC: the bound texture is a painted light cone (1) or halo (2) */
 	{
-		if (param == 3)
+		if (param == 4)
+		{
+			WeaponMark(E.boundtex);
+		}
+		else if (param == 3)
 		{
 			RoundMark(E.boundtex);
 		}
@@ -4036,7 +4627,7 @@ GL3_GhoulEmu_Shutdown(void)
 {
 	/* the glow / round texture names belong to the old context: a new skin given an old glow name drew only into
 	   the bloom source (invisible), an old round name tessellated an unrelated model */
-	numglow = numround = 0;
+	numglow = numround = numweap = 0;
 	sawround = false;
 
 	if (E.prog)

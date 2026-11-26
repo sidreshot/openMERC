@@ -1377,22 +1377,32 @@ GL3_Ghoul_DrawEntity(entity_t *e, sofentity_t *se)
 			}
 			else
 			{
-				/* A coat looked at from above is one long triangle whose normals disagree.
-				   Curving it lifts that face into a fin (sib1, the body at the pink wall).
-				   A fraction of that edge is still the fin, and a coat piece small enough
-				   to be classed as a round prop took that path too. A character stays on
-				   the triangles it was built with. The light still follows the normals.
-				   A prop that does not cast a character shadow is curved below. */
-				level = 0;
-				k = 0.0f;
-				pncap = 0.0f;
-				(void)round;
+				/* A character that casts a ground shadow curves with the model level.
+				   Forcing this to 0 left bodies on the flat mesh they were built with.
+				   The same edge cap as a weapon: a long coat triangle may leave its
+				   face by only a fraction of the edge. By size on the screen, an
+				   arm's length keeps the level, from 100 pixels at most 2, smaller
+				   none. A listed round prop keeps its own circle below. */
+				level = (flags & SOF_RF_CASTSHADOW) ? models : 0;
+				pncap = OM_WEAPON_PN_EDGE;
 
-				if ((r_om_tess_round->value != 0) && !(flags & SOF_RF_CASTSHADOW))
+				if ((level > 1) && !round)
 				{
-					proplevel = models;
+					vec3_t d;
+					float dist, px;
+
+					VectorSubtract(e->origin, r_newrefdef.vieworg, d);
+					dist = Q_max(VectorLength(d), 1.0f);
+					px = 64.0f / dist * (r_newrefdef.height * 0.5f) / tanf(r_newrefdef.fov_y * (float)M_PI / 360.0f);
+					level = (px > 600.0f) ? level : (px > 100.0f) ? Q_min(level, 2) : 0;
+				}
+
+				if (round)
+				{
+					/* A trash can is five sides. Level 3 still reads as that prism. Four is
+					   the GPU table, and the face is pulled out to the corners' circle. */
+					proplevel = (models > 1) ? 4 : 0;
 					propk = Q_clamp(r_om_tess->value, 0.0f, 10.0f) / 10.0f;
-					pncap = OM_WEAPON_PN_EDGE;
 				}
 			}
 

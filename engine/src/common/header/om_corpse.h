@@ -80,6 +80,38 @@ float OM_CorpseUnstick(float normal_z, int embedded);
    Returns 1 when origin changed. */
 int OM_CorpsePlant(float origin[3], float feet, const float plane_point[3], const float normal[3]);
 
+/* How far the pelvis may sit above the plane so a drawn part can meet it.
+   A deeper part stays under: lifting the torso by a dangling hand is the hop. */
+#define OM_CORPSE_LIMB_CAP 16.0f
+
+/* Move origin along a holding face.
+   support_above and limb_above are signed distances above the plane, positive
+   above it. The lower of the two meets the plane. When that would leave the
+   support more than OM_CORPSE_LIMB_CAP above the plane, the lift stops there.
+   A move already under 0.5 is left alone, so the same distances do not move
+   again. A drop past 80 is another floor. An upward move past 48 is ignored.
+   A face steeper than 45 degrees is ignored. Returns 1 when origin changed. */
+int OM_CorpseFit(float origin[3], const float normal[3], float support_above, float limb_above);
+
+/* Push origin away from other along the plane until they are `keep` apart.
+   At most `step` units this call. No component along the normal: the other
+   body is not a floor, and the shift is not a hop. Already `keep` apart, a
+   steep face, or a step under 1 returns 0. Two origins on the same point step
+   along the plane. Returns 1 when origin changed. */
+int OM_CorpseSeparate(float origin[3], const float other[3], const float normal[3], float keep, float step);
+
+/* 1 when the two world boxes cover each other in the horizontal plane by more
+   than 4 units on both axes. A prone body is longer than the gap between
+   origins, so that gap alone still hides one mesh inside the other. */
+int OM_CorpseStacked(const float a0[3], const float a1[3], const float b0[3], const float b1[3]);
+
+/* One step of origin along the plane, out of the other box, on the shorter
+   overlap. The boxes stay put: the caller moves them with the origin next
+   time. No component along the normal. A clear pair, a steep face, or a step
+   under 1 returns 0. */
+int OM_CorpseClear(float origin[3], const float mine0[3], const float mine1[3], const float other0[3],
+                   const float other1[3], const float normal[3], float step);
+
 /* Shift origin in the plane so `from` moves toward `toward` by `step` units.
    A heel over the drop uses the pelvis as `toward`, and the body comes back
    onto the snow. A holding face only. No shift along the normal, so a hand

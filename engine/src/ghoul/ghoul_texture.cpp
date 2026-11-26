@@ -36,6 +36,21 @@ static bool LoadBytes(const std::string &path, std::vector<uint8_t> &out)
 	return true;
 }
 
+// Guns, bolted and dropped weapons, turrets and thrown charges. Not the briefcase, not a scope lens,
+// not the arms skin (that one lives in comskin and is a different texture on the same view model).
+static bool IsWeaponMetal(const std::string &u)
+{
+	size_t slash = u.find_last_of('/');
+	const std::string base = slash == std::string::npos ? u : u.substr(slash + 1);
+	if (u.find("/WEAPON/") != std::string::npos)
+		return base != "WINDOW";
+	if (base.compare(0, 2, "W_") == 0 && base.find("BRIEFCASE") == std::string::npos)
+		return true;
+	if (u.find("/GUN_AUTO/") != std::string::npos || u.find("/GUN_BIG/") != std::string::npos)
+		return true;
+	return base == "GRENADE" || base == "CLAYMORE" || base == "C4" || base == "SHELL" || base == "SHELL_SHOTGUN";
+}
+
 // openMERC GFX-modern (r_om_tess): the models that are round in truth (barrels, bins, cans, cones, pots) and may
 // be drawn curved - Ghoul/om_round.txt, one folder or name part per line (upper case compare, '#' comments)
 static bool IsRound(const std::string &upper)
@@ -603,6 +618,10 @@ static void Upload(Texture *t)
 			else if (IsRound(u))
 				g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 3);
 		}
+		// param 4: a weapon texture. The view gun shares its model with the hands, so the metal
+		// is the texture, not the whole entity. A scope lens stays glass.
+		if (IsWeaponMetal(u))
+			g->TexParameteri(gl::TEXTURE_2D, gl::OM_BEAM_HINT, 4);
 	}
 	t->uploaded = true;
 }

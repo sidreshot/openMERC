@@ -71,6 +71,39 @@ float OM_CorpseLowest(edict_t *ent, float *handz)
 	return best;
 }
 
+/* World Z of the lowest drawn vertex. Part bounds are in the entity frame, the
+   same frame SeatOnFloor uses. 1e9 when the mesh has no bounds. A bolt is the
+   middle of a limb, so a hand bolt above the floor can still be a hand in it. */
+float OM_CorpseMeshBottom(edict_t *ent)
+{
+	float mesh = 1.0e9f;
+	IGhoulInst *inst;
+	G3Body *body;
+	float zmn[3], zmx[3];
+
+	if (!ent || !ent->ghoulInst)
+		return mesh;
+	inst = ent->ghoulInst;
+	inst->GetBounds(G3_Time(), NULL, zmn, zmx, 0, true);
+	if (!(zmn[2] == 0.0f && zmx[2] == 0.0f))
+		mesh = ent->s.origin[2] + zmn[2];
+	body = ent->g3body;
+	if (body && body->gore) {
+		for (int i = 0; i < body->gore->numZones; i++) {
+			float world;
+			if (!body->gore->zones[i].owner)
+				continue;
+			inst->GetBounds(G3_Time(), NULL, zmn, zmx, body->gore->zones[i].owner, true);
+			if (zmn[2] == 0.0f && zmx[2] == 0.0f)
+				continue;
+			world = ent->s.origin[2] + zmn[2];
+			if (world < mesh)
+				mesh = world;
+		}
+	}
+	return mesh;
+}
+
 static int CorpseEntity(edict_t *ent)
 {
 	if (!ent || !ent->ghoulInst)
@@ -183,19 +216,18 @@ static int GatherVolumes(edict_t *ent, CorpseVol *out, int maxn)
 			n++;
 		}
 	}
-	/* Nothing posed, or the death sequence has no head or leg bolt: the standing
-	   centres still cover those parts. A posed head is not replaced.
-	   base is the count before these volumes. Testing n would skip the body
-	   after the first standing volume incremented it. */
+	/* Nothing posed: the standing centres still cover a body with no bolts.
+	   A posed corpse does not grow a standing head in the air. That sphere is
+	   a hit the mesh does not have. base is the count before these volumes. */
 	{
 		int base = n;
+		if (base != 0)
+			return n;
 		static const float fb[6][5] = {
 			{0, 0, 30, 12, (float)OM_PART_HEAD}, {0, 8, -6, 18, (float)OM_PART_LEG},
 			{0, -8, -6, 18, (float)OM_PART_LEG}, {0, 8, -22, 14, (float)OM_PART_LEG},
 			{0, -8, -22, 14, (float)OM_PART_LEG}, {0, 0, 8, 16, (float)OM_PART_BODY},
 		};
-		if (base != 0 && saw_head && saw_leg)
-			return n;
 		for (int i = 0; i < 6 && n < maxn; i++) {
 			int id = (int)fb[i][4];
 			if (base > 0 && id == OM_PART_HEAD && saw_head)
@@ -273,8 +305,13 @@ static void AnglesForVolumes(const edict_t *ent, float ang[3])
 	ang[2] = -ent->s.angles[2];
 }
 
+/* Part 0 with exact bounds is defined to come back all zeros. Each shown mesh
+   part is measured on its own, in entity space, for the pose playing now. */
+static int MeshLocal(edict_t *ent, float out0[3], float out1[3]);
+
 /* The Ghoul mesh trace missed. A volume on the posed part still stops the shot
-   and names that zone's owner, so the existing wound path runs. */
+   and names that zone's owner, so the existing wound path runs. A body whose
+   mesh was measured does not: the sphere sits past the skin. */
 static int CorpseVolumeHit(edict_t *ent, const vec3_t start, const vec3_t dir, float length, trace_t *tr)
 {
 	CorpseVol vols[32];
@@ -287,6 +324,11 @@ static int CorpseVolumeHit(edict_t *ent, const vec3_t start, const vec3_t dir, f
 
 	if (!CorpseEntity(ent))
 		return 0;
+	{
+		float mesh0[3], mesh1[3];
+		if (MeshLocal(ent, mesh0, mesh1))
+			return 0;
+	}
 	n = GatherVolumes(ent, vols, 32);
 	if (n <= 0)
 		return 0;
@@ -335,17 +377,211 @@ static int CorpseVolumeHit(edict_t *ent, const vec3_t start, const vec3_t dir, f
 	return 1;
 }
 
-/* Shot hull follows the posed parts. Movement does not use this box:
-   CorpseBox keeps a narrow column so the body can still settle. */
+static int BoxEmpty(const float mn[3], const float mx[3])
+{
+	for (int a = 0; a < 3; a++) {
+		if (mn[a] != 0.0f || mx[a] != 0.0f)
+			return 0;
+	}
+	return 1;
+}
+
+static void UnionBox(float dst0[3], float dst1[3], int *any, const float mn[3], const float mx[3])
+{
+	if (BoxEmpty(mn, mx))
+		return;
+	if (!*any) {
+		VectorCopy(mn, dst0);
+		VectorCopy(mx, dst1);
+		*any = 1;
+		return;
+	}
+	for (int a = 0; a < 3; a++) {
+		if (mn[a] < dst0[a])
+			dst0[a] = mn[a];
+		if (mx[a] > dst1[a])
+			dst1[a] = mx[a];
+	}
+}
+
+/* Posed triangles of every shown mesh, in entity space. Cached for this
+   frame: the hull and the seat both ask. */
+static int MeshLocal(edict_t *ent, float out0[3], float out1[3])
+{
+	static const edict_t *cached_ent;
+	static float cached_time = -1.0f;
+	static int cached_ok;
+	static vec3_t cached0, cached1;
+	IGhoulObject *obj;
+	int nparts, any;
+
+	if (!ent || !ent->ghoulInst || !out0 || !out1)
+		return 0;
+	if (cached_ent == ent && cached_time == G3_Time()) {
+		if (!cached_ok)
+			return 0;
+		VectorCopy(cached0, out0);
+		VectorCopy(cached1, out1);
+		return 1;
+	}
+	cached_ent = ent;
+	cached_time = G3_Time();
+	cached_ok = 0;
+	obj = ent->ghoulInst->GetGhoulObject();
+	nparts = obj ? (int)obj->NumParts() : 0;
+	if (nparts > 512)
+		nparts = 512;
+	any = 0;
+	for (int i = 1; i <= nparts; i++) {
+		float mn[3], mx[3];
+		/* 1 is a mesh node. Bolts are not drawn and are not a shot. */
+		if (obj->PartType((GhoulID)i) != 1 || !G3G_PartShown(ent->ghoulInst, (GhoulID)i))
+			continue;
+		ent->ghoulInst->GetBounds(G3_Time(), NULL, mn, mx, (GhoulID)i, true);
+		UnionBox(out0, out1, &any, mn, mx);
+	}
+	if (!any)
+		return 0;
+	cached_ok = 1;
+	VectorCopy(out0, cached0);
+	VectorCopy(out1, cached1);
+	return 1;
+}
+
+/* Local mesh box, turned into an origin-relative world box. The linked hull
+   is what a shot has to touch before the mesh ray runs, so it has to cover
+   the drawn pose and not a standing column or a sphere past the skin. */
+static int MeshHull(edict_t *ent, float out_min[3], float out_max[3])
+{
+	float zmn[3], zmx[3];
+	int any, c;
+
+	if (!MeshLocal(ent, zmn, zmx))
+		return 0;
+	any = 0;
+	for (c = 0; c < 8; c++) {
+		vec3_t local, world, off;
+		local[0] = (c & 1) ? zmx[0] : zmn[0];
+		local[1] = (c & 2) ? zmx[1] : zmn[1];
+		local[2] = (c & 4) ? zmx[2] : zmn[2];
+		G3_EntityToWorld(ent, local, world);
+		VectorSubtract(world, ent->s.origin, off);
+		if (!any) {
+			VectorCopy(off, out_min);
+			VectorCopy(off, out_max);
+			any = 1;
+		} else {
+			for (int a = 0; a < 3; a++) {
+				if (off[a] < out_min[a])
+					out_min[a] = off[a];
+				if (off[a] > out_max[a])
+					out_max[a] = off[a];
+			}
+		}
+	}
+	if (!any)
+		return 0;
+	/* A shot on the skin is inside the box. Two units, not a limb radius. */
+	for (int a = 0; a < 3; a++) {
+		out_min[a] -= 2.0f;
+		out_max[a] += 2.0f;
+	}
+	return 1;
+}
+
+/* Signed distances of the ground bolt and the lowest drawn part above the plane.
+   The fit uses both. The limb is the posed mesh or a hand bolt, whichever
+   is closer to the snow. */
+int OM_CorpseContacts(edict_t *ent, const float plane_point[3], const float normal[3], float *support_above,
+                      float *limb_above)
+{
+	vec3_t pelvis;
+	float sup, low;
+	static const char *hands[] = {"wbolt_hand_l", "wbolt_hand_r"};
+
+	if (!ent || !plane_point || !normal || !support_above || !limb_above)
+		return 0;
+	/* No ground bolt: the caller keeps the old plant. Do not invent a contact
+	   from the shot box, or the fit and the hull chase each other. */
+	if (!G3G_BoltWorldByName(ent, "quake_ground", pelvis))
+		return 0;
+	sup = DotProduct(pelvis, normal) - DotProduct(plane_point, normal);
+	low = sup;
+	if (ent->ghoulInst) {
+		float zmn[3], zmx[3];
+		/* The eight corners of the posed mesh, not the world AABB. The AABB
+		   hangs below a pitched body and would lift the mesh off the snow.
+		   A hand bolt can sit past those corners. It counts too, and the fit
+		   cap stops a dangling hand from parking the torso in the air. */
+		if (MeshLocal(ent, zmn, zmx)) {
+			for (int c = 0; c < 8; c++) {
+				vec3_t local, world;
+				float d;
+				local[0] = (c & 1) ? zmx[0] : zmn[0];
+				local[1] = (c & 2) ? zmx[1] : zmn[1];
+				local[2] = (c & 4) ? zmx[2] : zmn[2];
+				G3_EntityToWorld(ent, local, world);
+				d = DotProduct(world, normal) - DotProduct(plane_point, normal);
+				if (d < low)
+					low = d;
+			}
+		}
+		for (unsigned k = 0; k < sizeof hands / sizeof hands[0]; k++) {
+			vec3_t hp;
+			float d;
+			if (!G3G_BoltWorldByName(ent, hands[k], hp))
+				continue;
+			d = DotProduct(hp, normal) - DotProduct(plane_point, normal);
+			if (d < low)
+				low = d;
+		}
+	}
+	*support_above = sup;
+	*limb_above = low;
+	return 1;
+}
+
+/* Shot hull follows the drawn pose. Movement does not use this box:
+   CorpseBox keeps a narrow column so the body can still settle.
+   A 16-unit slab left the head and the arms outside the shot. */
 void Dmg_CorpseHull(edict_t *ent)
 {
 	CorpseVol vols[32];
 	vec3_t f, left, u;
 	float minx, miny, minz, maxx, maxy, maxz;
-	int n;
+	float mesh0[3], mesh1[3];
+	int n, meshed;
 
 	if (!ent || ent->solid != SOLID_CORPSE || !ent->ghoulInst)
 		return;
+	meshed = MeshHull(ent, mesh0, mesh1);
+	if (meshed) {
+		minx = mesh0[0];
+		miny = mesh0[1];
+		minz = mesh0[2];
+		maxx = mesh1[0];
+		maxy = mesh1[1];
+		maxz = mesh1[2];
+		if (minx < -96.0f)
+			minx = -96.0f;
+		if (miny < -96.0f)
+			miny = -96.0f;
+		if (minz < -72.0f)
+			minz = -72.0f;
+		if (maxx > 96.0f)
+			maxx = 96.0f;
+		if (maxy > 96.0f)
+			maxy = 96.0f;
+		if (maxz > 80.0f)
+			maxz = 80.0f;
+		ent->mins[0] = minx;
+		ent->mins[1] = miny;
+		ent->mins[2] = minz;
+		ent->maxs[0] = maxx;
+		ent->maxs[1] = maxy;
+		ent->maxs[2] = maxz;
+		return;
+	}
 	n = GatherVolumes(ent, vols, 32);
 	if (n <= 0)
 		return;

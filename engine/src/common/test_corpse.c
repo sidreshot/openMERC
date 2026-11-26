@@ -453,6 +453,96 @@ int main(void)
 		expect_int("a steep face is not a pull", OM_CorpsePullOn(origin, heel, pelvis, steep, 8.0f), 0);
 	}
 
+	/* The mesh meets the plane. A deep hand does not lift the pelvis past the cap.
+	   The same distances a second time do not move. */
+	{
+		float origin[3] = {10.0f, 20.0f, 40.0f};
+		float floor_n[3] = {0.0f, 0.0f, 1.0f};
+		float slope_n[3] = {0.70710678f, 0.0f, 0.70710678f};
+		float steep[3] = {0.8660254f, 0.0f, 0.5f};
+
+		expect_int("already seated does not move", OM_CorpseFit(origin, floor_n, 0.0f, 0.0f), 0);
+		expect_near("seated z stays", origin[2], 40.0f);
+
+		expect_int("a gap closes onto the mesh", OM_CorpseFit(origin, floor_n, 10.0f, 10.0f), 1);
+		expect_near("gap drops straight down", origin[2], 30.0f);
+		expect_int("the closed gap stays", OM_CorpseFit(origin, floor_n, 0.0f, 0.0f), 0);
+
+		origin[2] = 40.0f;
+		expect_int("a hand under the plane comes up", OM_CorpseFit(origin, floor_n, 0.0f, -10.0f), 1);
+		expect_near("hand lift is the penetration", origin[2], 50.0f);
+		expect_int("the hand lift does not repeat", OM_CorpseFit(origin, floor_n, 10.0f, 0.0f), 0);
+
+		origin[2] = 40.0f;
+		expect_int("a deep hand stops at the cap", OM_CorpseFit(origin, floor_n, 0.0f, -40.0f), 1);
+		expect_near("cap lift is 16", origin[2], 56.0f);
+		expect_int("the cap does not climb", OM_CorpseFit(origin, floor_n, 16.0f, -24.0f), 0);
+
+		origin[2] = 40.0f;
+		expect_int("a buried pelvis comes up", OM_CorpseFit(origin, floor_n, -8.0f, -8.0f), 1);
+		expect_near("buried pelvis meets the plane", origin[2], 48.0f);
+
+		origin[2] = 40.0f;
+		expect_int("a different floor is not a snap", OM_CorpseFit(origin, floor_n, 100.0f, 100.0f), 0);
+		expect_near("far floor z stays", origin[2], 40.0f);
+		expect_int("a launch is not a seat", OM_CorpseFit(origin, floor_n, -60.0f, -60.0f), 0);
+
+		origin[0] = 10.0f;
+		origin[2] = 80.0f;
+		expect_int("slope fit follows the normal", OM_CorpseFit(origin, slope_n, 10.0f, 10.0f), 1);
+		expect_near("slope fit shifts downhill", origin[0], 10.0f - 7.0710678f);
+		expect_near("slope fit lowers along the normal", origin[2], 80.0f - 7.0710678f);
+		expect_int("a steep face is not a fit", OM_CorpseFit(origin, steep, 10.0f, -10.0f), 0);
+	}
+
+	/* Two bodies on one point step apart along the plane. The normal is not a hop. */
+	{
+		float origin[3] = {0.0f, 0.0f, 5.0f};
+		float other[3] = {0.0f, 0.0f, 5.0f};
+		float floor_n[3] = {0.0f, 0.0f, 1.0f};
+		float steep[3] = {0.8660254f, 0.0f, 0.5f};
+		float apart[3] = {40.0f, 0.0f, 5.0f};
+
+		expect_int("stacked bodies separate", OM_CorpseSeparate(origin, other, floor_n, 32.0f, 12.0f), 1);
+		expect_near("separate steps along x", origin[0], 12.0f);
+		expect_near("separate does not lift", origin[2], 5.0f);
+		expect_int("separate continues", OM_CorpseSeparate(origin, other, floor_n, 32.0f, 12.0f), 1);
+		expect_near("separate second step", origin[0], 24.0f);
+		expect_int("separate finishes at keep", OM_CorpseSeparate(origin, other, floor_n, 32.0f, 12.0f), 1);
+		expect_near("separate lands on keep", origin[0], 32.0f);
+		expect_int("separate stays once apart", OM_CorpseSeparate(origin, other, floor_n, 32.0f, 12.0f), 0);
+
+		expect_int("a body already aside stays", OM_CorpseSeparate(apart, other, floor_n, 32.0f, 12.0f), 0);
+		expect_near("aside x stays", apart[0], 40.0f);
+		expect_int("a steep face is not a separate", OM_CorpseSeparate(origin, other, steep, 32.0f, 12.0f), 0);
+	}
+
+	/* Origins 37 apart still hide one prone mesh in the other. The shorter
+	   overlap is the way out, and the origin does not rise off the plane. */
+	{
+		float origin[3] = {0.0f, 0.0f, 10.0f};
+		float mine0[3] = {-40.0f, -30.0f, 0.0f};
+		float mine1[3] = {40.0f, 30.0f, 20.0f};
+		float other0[3] = {-80.0f, -30.0f, 0.0f};
+		float other1[3] = {-10.0f, 30.0f, 20.0f};
+		float floor_n[3] = {0.0f, 0.0f, 1.0f};
+		float steep[3] = {0.8660254f, 0.0f, 0.5f};
+		float clear0[3] = {50.0f, -30.0f, 0.0f};
+		float clear1[3] = {130.0f, 30.0f, 20.0f};
+
+		expect_int("prone boxes are stacked", OM_CorpseStacked(mine0, mine1, other0, other1), 1);
+		expect_int("a gap is not a stack", OM_CorpseStacked(clear0, clear1, other0, other1), 0);
+		expect_int("clear steps out of the overlap",
+		           OM_CorpseClear(origin, mine0, mine1, other0, other1, floor_n, 12.0f), 1);
+		expect_near("clear moves along the short axis", origin[0], 12.0f);
+		expect_near("clear stays on the plane", origin[2], 10.0f);
+		expect_int("a clear pair stays", OM_CorpseClear(origin, clear0, clear1, other0, other1, floor_n, 12.0f), 0);
+		origin[0] = 0.0f;
+		expect_int("a steep face is not a clear",
+		           OM_CorpseClear(origin, mine0, mine1, other0, other1, steep, 12.0f), 0);
+		expect_near("steep clear leaves x", origin[0], 0.0f);
+	}
+
 	/* Gravity on a steep face points downhill. A floor has no slide. */
 	{
 		float n[3] = {0.8660254f, 0.0f, 0.5f};

@@ -844,7 +844,8 @@ CL_FpsWriteLog(const om_fps_log_t *log)
 }
 
 /* One incident when this rendered frame is under 30 fps. The ring keeps ten
-   and skips a place that is already stored, so a stutter does not spam. */
+   and skips a place that is already stored. The line goes to om_fps.log only:
+   printing it draws across the top of the view. */
 static void
 CL_LowFpsIncident(int render_us)
 {
@@ -853,8 +854,6 @@ CL_LowFpsIncident(int render_us)
 	static cvar_t *cv;
 	char hardware[OM_FPS_TEXT];
 	char graphics[OM_FPS_TEXT];
-	char line[OM_FPS_LINE];
-	int age;
 
 	if (!cv)
 	{
@@ -882,9 +881,6 @@ CL_LowFpsIncident(int render_us)
 		return;
 	}
 
-	age = OM_FpsLog_Count(&log) - 1;
-	OM_FpsLog_FormatAt(&log, age, line, (int)sizeof(line));
-	Com_Printf("%s", line);
 	CL_FpsWriteLog(&log);
 }
 

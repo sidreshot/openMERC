@@ -85,17 +85,20 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 				if (!tr.startsolid && !tr.allsolid && tr.fraction < 1.0f && tr.ent &&
 				    !tr.ent->client && !tr.ent->ai && tr.ent->solid != SOLID_CORPSE) {
 					float pitch = 0.0f, roll = 0.0f;
-					/* Along the normal, and only while the bolt is still above
-					   the plane. A straight drop on a slope pushes the uphill
-					   corner through the face, and the unstick then hops.
-					   A hand below the bolt is left in the ground: pulling the
-					   origin up to clear it lifts the torso. */
-					int planted = OM_CorpsePlant(org, floor_height, tr.endpos, tr.plane.normal);
+					float sup = 0.0f, limb = 0.0f;
+					int fitted;
+					/* Along the normal. The drawn part meets the plane, and a
+					   hand only lifts the pelvis up to the cap, so the torso
+					   does not hop onto a dangling finger. */
 					if (OM_CorpseAlign(ent->s.angles[YAW], tr.plane.normal, &pitch, &roll)) {
 						ent->s.angles[PITCH] = pitch;
 						ent->s.angles[ROLL] = roll;
 						VectorClear(ent->avelocity);
 					}
+					if (!OM_CorpseContacts(ent, tr.endpos, tr.plane.normal, &sup, &limb))
+						fitted = OM_CorpsePlant(org, floor_height, tr.endpos, tr.plane.normal);
+					else
+						fitted = OM_CorpseFit(org, tr.plane.normal, sup, limb);
 					{
 						static cvar_t *dbg;
 						static int shown;
@@ -103,12 +106,12 @@ int OmAI::ChangeBBox(edict_t *ent, int i, bool allow_fallback)
 							dbg = gi.cvar("om_corpsedebug", "0", 0);
 						if (dbg->value && shown < 48) {
 							shown++;
-							gi.dprintf("OMBODY plant #%d z %.1f bolt %.1f floor %.1f pitch %.1f roll %.1f\n",
-							           (int)(ent - g_edicts), org[2], floor_height, tr.endpos[2],
+							gi.dprintf("OMBODY plant #%d z %.1f bolt %.1f floor %.1f sup %.1f limb %.1f pitch %.1f roll %.1f\n",
+							           (int)(ent - g_edicts), org[2], floor_height, tr.endpos[2], sup, limb,
 							           ent->s.angles[PITCH], ent->s.angles[ROLL]);
 						}
 					}
-					if (planted) {
+					if (fitted) {
 						VectorCopy(org, ent->s.origin);
 						gi.linkentity(ent);
 					}
@@ -547,8 +550,9 @@ void OmAI::Think(edict_t *ent)
 	if (ent->health <= 0) {
 		ent->svflags |= SVF_DEADMONSTER;
 		ent->solid = SOLID_CORPSE;
-		if (ent->maxs[2] > ent->mins[2] + 24.0f)
-			ent->maxs[2] = ent->mins[2] + 16.0f;
+		/* The shot has to reach the posed mesh. A 16-unit slab hid the head
+		   and the arms. Players do not clip this box. */
+		Dmg_CorpseHull(ent);
 		gi.linkentity(ent);
 	}
 	/* 2. the previous think's helper */
@@ -668,12 +672,11 @@ void OmAI::Think(edict_t *ent)
 	if (ent->health > 0)
 		MakeHelper(ent, this);
 	else {
-		/* a corpse is not a crate: the dead flag is what the player trace skips, and a death that never
-		   left the standing preset used to keep a ~70 unit column you could walk on */
+		/* a corpse is not a crate: the dead flag is what the player trace skips.
+		   The linked box stays the posed mesh, so a raised arm is a hit. */
 		ent->svflags |= SVF_DEADMONSTER;
 		ent->solid = SOLID_CORPSE;
-		if (ent->maxs[2] > ent->mins[2] + 24.0f)
-			ent->maxs[2] = ent->mins[2] + 16.0f;
+		Dmg_CorpseHull(ent);
 		gi.linkentity(ent);
 	}
 }

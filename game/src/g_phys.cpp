@@ -276,6 +276,8 @@ static float OM_CorpseFeet(edict_t *ent)
 /* Drop a corpse that has no floor under its feet onto the first supporting brush.
    A kill in the air (the sabre chase on the next train, and every other map) ends
    on that surface instead of staying at the kill height. */
+static void OM_Unpile(edict_t *ent);
+
 void OM_SettleDeadBody(edict_t *ent)
 {
 	float feet, origin[3], vel[3], floor_z, floor_nz;
@@ -401,6 +403,211 @@ void OM_SettleDeadBody(edict_t *ent)
 	}
 	Dmg_CorpseHull(ent);
 	gi.linkentity(ent);
+	OM_Unpile(ent);
+}
+
+/* A later corpse that landed in an earlier one steps aside along the plane.
+   The other body is not a floor, so this is not a stack and not a hop.
+   Six steps, then it stays: a slope pull must not trade places every frame. */
+static unsigned char om_unpile_n[1024];
+static int om_shift_why;
+
+static int OM_HoldFloor(edict_t *ent, vec3_t normal, float *floorz)
+{
+	vec3_t a, q;
+	trace_t tr;
+
+	VectorCopy(ent->s.origin, a);
+	a[2] += 8.0f;
+	VectorCopy(ent->s.origin, q);
+	q[2] -= 32.0f;
+	tr = gi.trace(a, vec3_origin, vec3_origin, q, ent, MASK_MONSTERSOLID);
+	if (tr.startsolid || tr.allsolid || tr.fraction >= 1.0f || tr.plane.normal[2] < OM_CORPSE_SLOPE_MIN)
+		return 0;
+	if (normal)
+		VectorCopy(tr.plane.normal, normal);
+	if (floorz)
+		*floorz = tr.endpos[2];
+	return 1;
+}
+
+static float OM_PlanarDist(const vec3_t a, const vec3_t b, const vec3_t n)
+{
+	vec3_t d;
+	float dot;
+
+	VectorSubtract(a, b, d);
+	dot = DotProduct(d, n);
+	VectorMA(d, -dot, n, d);
+	return VectorLength(d);
+}
+
+static int OM_ShiftOk(edict_t *ent, const vec3_t dest, float floorz)
+{
+	vec3_t mins, maxs, a, b;
+	trace_t tr;
+
+	om_shift_why = 0;
+	CorpseBox(ent, mins, maxs);
+	/* The feet are in the snow on purpose. A box that includes them is
+	   already solid, and then no sideways step is ever legal. */
+	if (mins[2] < 1.0f)
+		mins[2] = 1.0f;
+	tr = gi.trace(ent->s.origin, mins, maxs, dest, ent, MASK_SOLID);
+	if (tr.startsolid || tr.allsolid) {
+		om_shift_why = 1;
+		return 0;
+	}
+	if (tr.fraction < 1.0f) {
+		om_shift_why = 2;
+		return 0;
+	}
+	VectorCopy(dest, a);
+	a[2] += 12.0f;
+	VectorCopy(dest, b);
+	b[2] -= 40.0f;
+	tr = gi.trace(a, vec3_origin, vec3_origin, b, ent, MASK_MONSTERSOLID);
+	if (tr.startsolid || tr.allsolid || tr.fraction >= 1.0f) {
+		om_shift_why = 3;
+		return 0;
+	}
+	if (tr.plane.normal[2] < OM_CORPSE_SLOPE_MIN) {
+		om_shift_why = 4;
+		return 0;
+	}
+	if (floorz - tr.endpos[2] > 18.0f) {
+		om_shift_why = 5;
+		return 0;
+	}
+	VectorCopy(dest, ent->s.origin);
+	gi.linkentity(ent);
+	return 1;
+}
+
+static void OM_WorldBox(edict_t *ent, vec3_t mn, vec3_t mx)
+{
+	for (int i = 0; i < 3; i++) {
+		mn[i] = ent->s.origin[i] + ent->mins[i];
+		mx[i] = ent->s.origin[i] + ent->maxs[i];
+	}
+}
+
+/* One step that takes the drawn boxes apart along the plane. Origins a body
+   width apart still cover each other when both are prone. The straight push
+   is first. A wall gets the same step turned in the plane. */
+static int OM_StepAside(edict_t *mover, edict_t *other, const vec3_t n, float floorz)
+{
+	vec3_t kept, dest, away, side, dir, amn, amx, bmn, bmx;
+	float dot, len, old;
+	static const float turn[6][2] = {
+		{0.70710678f, 0.70710678f}, {0.70710678f, -0.70710678f}, {0.0f, 1.0f},
+		{0.0f, -1.0f}, {-0.70710678f, 0.70710678f}, {-0.70710678f, -0.70710678f}};
+
+	VectorCopy(mover->s.origin, kept);
+	VectorCopy(kept, dest);
+	OM_WorldBox(mover, amn, amx);
+	OM_WorldBox(other, bmn, bmx);
+	old = OM_PlanarDist(kept, other->s.origin, n);
+	if (!OM_CorpseClear(dest, amn, amx, bmn, bmx, n, 12.0f) &&
+	    !OM_CorpseSeparate(dest, other->s.origin, n, 36.0f, 12.0f))
+		return 0;
+	if (OM_ShiftOk(mover, dest, floorz))
+		return 1;
+	VectorSubtract(dest, kept, away);
+	dot = DotProduct(away, n);
+	VectorMA(away, -dot, n, away);
+	len = VectorNormalize(away);
+	if (len < 0.5f)
+		return 0;
+	side[0] = n[1] * away[2] - n[2] * away[1];
+	side[1] = n[2] * away[0] - n[0] * away[2];
+	side[2] = n[0] * away[1] - n[1] * away[0];
+	if (VectorNormalize(side) < 0.5f)
+		return 0;
+	for (int k = 0; k < 6; k++) {
+		for (int a = 0; a < 3; a++)
+			dir[a] = away[a] * turn[k][0] + side[a] * turn[k][1];
+		VectorMA(kept, 12.0f, dir, dest);
+		if (OM_PlanarDist(dest, other->s.origin, n) < old + 4.0f)
+			continue;
+		if (OM_ShiftOk(mover, dest, floorz))
+			return 1;
+	}
+	return 0;
+}
+
+static void OM_Unpile(edict_t *ent)
+{
+	vec3_t n;
+	float floorz;
+	int self, why, close;
+
+	if (!ent)
+		return;
+	self = (int)(ent - g_edicts);
+	if (self < 1 || self >= 1024 || om_unpile_n[self] >= 6)
+		return;
+	if (VectorLength(ent->velocity) > 8.0f)
+		return;
+	if (!OM_HoldFloor(ent, n, &floorz))
+		return;
+	why = 0;
+	close = 0;
+	for (int i = 1; i < self && i < globals.num_edicts; i++) {
+		edict_t *o = &g_edicts[i];
+		vec3_t on;
+		float ofz;
+		if (!o->inuse || o->solid != SOLID_CORPSE)
+			continue;
+		if (fabsf(o->s.origin[2] - ent->s.origin[2]) > 48.0f)
+			continue;
+		{
+			vec3_t amn, amx, bmn, bmx;
+			OM_WorldBox(ent, amn, amx);
+			OM_WorldBox(o, bmn, bmx);
+			/* 36 between origins left the prone meshes covering each other. */
+			if (!OM_CorpseStacked(amn, amx, bmn, bmx) &&
+			    OM_PlanarDist(ent->s.origin, o->s.origin, n) >= 35.5f)
+				continue;
+		}
+		close = 1;
+		if (OM_StepAside(ent, o, n, floorz)) {
+			om_unpile_n[self]++;
+			if (gi.cvar("om_corpsedebug", "0", 0)->value) {
+				static int shown;
+				if (shown < 24) {
+					shown++;
+					gi.dprintf("OMPILE #%d off #%d at %.0f %.0f %.0f\n", self, i, ent->s.origin[0],
+					           ent->s.origin[1], ent->s.origin[2]);
+				}
+			}
+			return;
+		}
+		why = om_shift_why;
+		if (i < 1024 && om_unpile_n[i] < 6 && VectorLength(o->velocity) <= 8.0f && OM_HoldFloor(o, on, &ofz) &&
+		    OM_StepAside(o, ent, on, ofz)) {
+			om_unpile_n[i]++;
+			if (gi.cvar("om_corpsedebug", "0", 0)->value) {
+				static int shown;
+				if (shown < 24) {
+					shown++;
+					gi.dprintf("OMPILE #%d off #%d at %.0f %.0f %.0f\n", i, self, o->s.origin[0], o->s.origin[1],
+					           o->s.origin[2]);
+				}
+			}
+			return;
+		}
+		if (om_shift_why)
+			why = om_shift_why;
+	}
+	if (close && gi.cvar("om_corpsedebug", "0", 0)->value) {
+		static int shown;
+		if (shown < 16) {
+			shown++;
+			gi.dprintf("OMSTUCK #%d why %d at %.0f %.0f %.0f\n", self, why, ent->s.origin[0], ent->s.origin[1],
+			           ent->s.origin[2]);
+		}
+	}
 }
 
 static void LandingEvent(edict_t *ent, float vz)

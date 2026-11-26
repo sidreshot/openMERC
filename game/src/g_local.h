@@ -868,6 +868,9 @@ void SV_CheckGround(edict_t *ent);
 void OM_SettleDeadBody(edict_t *ent);
 float OM_CorpseBolt(edict_t *ent);
 float OM_CorpseLowest(edict_t *ent, float *handz);
+float OM_CorpseMeshBottom(edict_t *ent);
+int OM_CorpseContacts(edict_t *ent, const float plane_point[3], const float normal[3], float *support_above,
+                      float *limb_above);
 void Dmg_CorpseHull(edict_t *ent);
 void G_TriggerSoundNoise(edict_t *source, const vec3_t where);
 

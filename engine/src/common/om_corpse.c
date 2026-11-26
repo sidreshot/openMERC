@@ -262,6 +262,148 @@ int OM_CorpseDownhill(const float normal[3], float dir[3])
 	return 1;
 }
 
+int OM_CorpseFit(float origin[3], const float normal[3], float support_above, float limb_above)
+{
+	float n[3];
+	float low, move, end_support;
+	int k;
+
+	if (!origin || !om_unit(normal, n))
+		return 0;
+	if (n[2] < OM_CORPSE_SLOPE_MIN)
+		return 0;
+	low = support_above < limb_above ? support_above : limb_above;
+	move = -low;
+	end_support = support_above + move;
+	/* The pelvis stays within the cap. A hand past that still clips, and the
+	   torso does not park in the air on it. */
+	if (end_support > OM_CORPSE_LIMB_CAP)
+		move -= end_support - OM_CORPSE_LIMB_CAP;
+	if (move > -0.5f && move < 0.5f)
+		return 0;
+	if (move < -80.0f || move > 48.0f)
+		return 0;
+	for (k = 0; k < 3; k++)
+		origin[k] += n[k] * move;
+	return 1;
+}
+
+static float om_len3(const float v[3])
+{
+	return sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+}
+
+int OM_CorpseSeparate(float origin[3], const float other[3], const float normal[3], float keep, float step)
+{
+	float n[3], dir[3], len, dot, move;
+	int k;
+
+	if (!origin || !other || !om_unit(normal, n))
+		return 0;
+	if (n[2] < OM_CORPSE_SLOPE_MIN)
+		return 0;
+	if (keep < 8.0f)
+		keep = 8.0f;
+	if (keep > 64.0f)
+		keep = 64.0f;
+	if (step < 1.0f)
+		return 0;
+	if (step > 24.0f)
+		step = 24.0f;
+	for (k = 0; k < 3; k++)
+		dir[k] = origin[k] - other[k];
+	dot = dir[0] * n[0] + dir[1] * n[1] + dir[2] * n[2];
+	for (k = 0; k < 3; k++)
+		dir[k] -= n[k] * dot;
+	len = om_len3(dir);
+	if (len >= keep - 0.5f)
+		return 0;
+	if (len < 1.0f) {
+		float ax, ay, az;
+
+		/* Same point on the plane. Step along the axis least aligned with the normal. */
+		ax = n[0] < 0.0f ? -n[0] : n[0];
+		ay = n[1] < 0.0f ? -n[1] : n[1];
+		az = n[2] < 0.0f ? -n[2] : n[2];
+		dir[0] = dir[1] = dir[2] = 0.0f;
+		if (ax <= ay && ax <= az)
+			dir[0] = 1.0f;
+		else if (ay <= az)
+			dir[1] = 1.0f;
+		else
+			dir[2] = 1.0f;
+		dot = dir[0] * n[0] + dir[1] * n[1] + dir[2] * n[2];
+		for (k = 0; k < 3; k++)
+			dir[k] -= n[k] * dot;
+		len = om_len3(dir);
+		if (len < 1.0e-4f)
+			return 0;
+	}
+	move = keep - len;
+	if (move > step)
+		move = step;
+	for (k = 0; k < 3; k++)
+		origin[k] += dir[k] / len * move;
+	return 1;
+}
+
+static float om_span(float a0, float a1, float b0, float b1)
+{
+	float lo, hi;
+
+	lo = a0 > b0 ? a0 : b0;
+	hi = a1 < b1 ? a1 : b1;
+	return hi - lo;
+}
+
+int OM_CorpseStacked(const float a0[3], const float a1[3], const float b0[3], const float b1[3])
+{
+	if (!a0 || !a1 || !b0 || !b1)
+		return 0;
+	if (om_span(a0[0], a1[0], b0[0], b1[0]) <= 4.0f)
+		return 0;
+	if (om_span(a0[1], a1[1], b0[1], b1[1]) <= 4.0f)
+		return 0;
+	return 1;
+}
+
+int OM_CorpseClear(float origin[3], const float mine0[3], const float mine1[3], const float other0[3],
+                   const float other1[3], const float normal[3], float step)
+{
+	float n[3], dir[3], ox, oy, oc, dot, len, move;
+	int axis, sign, k;
+
+	if (!origin || !mine0 || !mine1 || !other0 || !other1 || !om_unit(normal, n))
+		return 0;
+	if (n[2] < OM_CORPSE_SLOPE_MIN)
+		return 0;
+	if (!OM_CorpseStacked(mine0, mine1, other0, other1))
+		return 0;
+	if (step < 1.0f)
+		return 0;
+	if (step > 24.0f)
+		step = 24.0f;
+	ox = om_span(mine0[0], mine1[0], other0[0], other1[0]);
+	oy = om_span(mine0[1], mine1[1], other0[1], other1[1]);
+	axis = ox <= oy ? 0 : 1;
+	oc = 0.5f * (other0[axis] + other1[axis]);
+	sign = origin[axis] >= oc ? 1 : -1;
+	dir[0] = dir[1] = dir[2] = 0.0f;
+	dir[axis] = (float)sign;
+	move = (axis == 0 ? ox : oy) + 4.0f;
+	dot = dir[0] * n[0] + dir[1] * n[1] + dir[2] * n[2];
+	for (k = 0; k < 3; k++)
+		dir[k] -= n[k] * dot;
+	len = om_len3(dir);
+	if (len < 1.0e-4f)
+		return 0;
+	if (move > step)
+		move = step;
+	for (k = 0; k < 3; k++)
+		origin[k] += dir[k] / len * move;
+	return 1;
+}
+
 int OM_CorpsePlant(float origin[3], float feet, const float plane_point[3], const float normal[3])
 {
 	float n[3], bolt[3], dist;

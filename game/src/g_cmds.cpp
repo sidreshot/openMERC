@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
 #include "g_local.h"
+#include "../../engine/src/common/header/om_corpse.h"
 #include "nav/nav_api.h" /* G5 */
 #include "bots/bot_api.h" /* G5 */
 #include "modes/g_modes.h" /* G9 */
@@ -665,6 +666,9 @@ static void Cmd_OmCorpse_f(edict_t *ent)
 		edict_t *e = &g_edicts[i];
 		if (!e->inuse || e->client || !e->ai || e->health > 0)
 			continue;
+		gi.dprintf("OMCORPSE #%d %s %.0f %.0f %.0f mins %.0f %.0f %.0f maxs %.0f %.0f %.0f\n", i,
+		           e->classname ? e->classname : "-", e->s.origin[0], e->s.origin[1], e->s.origin[2], e->mins[0],
+		           e->mins[1], e->mins[2], e->maxs[0], e->maxs[1], e->maxs[2]);
 		vec3_t d;
 		VectorSubtract(e->s.origin, ent->s.origin, d);
 		if (VectorLength(d) < bd) {
@@ -681,6 +685,299 @@ static void Cmd_OmCorpse_f(edict_t *ent)
 	           best->classname, G_EdictNum(best), vtos(best->s.origin), (int)best->solid, best->svflags,
 	           best->clipmask, vtos(best->mins), vtos(best->maxs),
 	           best->groundentity ? G_EdictNum(best->groundentity) : -1);
+}
+
+/* The body omkill just shot. Nearest-dead is the wrong corpse once the camera has moved. */
+static int om_lastkill = -1;
+
+/* Lower of the two hand bolts, in world space. 0 when neither is posed. */
+static int OmLowerHand(edict_t *ent, vec3_t out)
+{
+	static const char *names[] = {"wbolt_hand_l", "wbolt_hand_r"};
+	float bestz = 1.0e9f;
+	int ok = 0;
+
+	for (int i = 0; i < 2; i++) {
+		vec3_t bp;
+		if (!G3G_BoltWorldByName(ent, names[i], bp))
+			continue;
+		ok = 1;
+		if (bp[2] < bestz) {
+			bestz = bp[2];
+			VectorCopy(bp, out);
+		}
+	}
+	return ok;
+}
+
+/* 1 when the eye is in open air and a wall does not stand between it and the aim point.
+   The corpse is ignored, so its own mesh does not count as a wall. */
+static int OmEyeClear(const vec3_t eye, const vec3_t aim, edict_t *ignore)
+{
+	vec3_t up;
+	trace_t tr;
+
+	if (gi.pointcontents(eye) & MASK_SOLID)
+		return 0;
+	VectorCopy(eye, up);
+	up[2] += 8.0f;
+	if (gi.pointcontents(up) & MASK_SOLID)
+		return 0;
+	tr = gi.trace(eye, vec3_origin, vec3_origin, aim, ignore, MASK_SOLID);
+	if (tr.startsolid || tr.allsolid || tr.fraction < 0.90f)
+		return 0;
+	return 1;
+}
+
+/* Pick an eye position that can see the aim point. hand: close and looking down, so a
+   finger in the floor is in the frame. wide: far enough to show the whole prone body.
+   Noclip would otherwise walk the eye through a wall into the next room. */
+static int OmPlaceEye(const vec3_t aim, edict_t *body, int hand, vec3_t eye, float *yaw, float *pitch)
+{
+	static const float yaws[] = {0, 45, 90, 135, 180, 225, 270, 315};
+	static const float wide_d[] = {64.0f, 88.0f, 112.0f};
+	static const float wide_u[] = {24.0f, 40.0f, 56.0f};
+	static const float hand_d[] = {32.0f, 44.0f, 58.0f};
+	static const float hand_u[] = {18.0f, 30.0f, 44.0f};
+	const float *dists = hand ? hand_d : wide_d;
+	const float *ups = hand ? hand_u : wide_u;
+	int found = 0;
+	float best = -1.0e9f;
+
+	for (int ui = 0; ui < 3; ui++) {
+		for (int di = 0; di < 3; di++) {
+			for (int yi = 0; yi < 8; yi++) {
+				vec3_t ang, fwd, cam, to, view;
+				float score;
+				VectorSet(ang, 0, yaws[yi], 0);
+				AngleVectors(ang, fwd, NULL, NULL);
+				VectorMA(aim, dists[di], fwd, cam);
+				cam[2] = aim[2] + ups[ui];
+				if (!OmEyeClear(cam, aim, body))
+					continue;
+				VectorSubtract(aim, cam, to);
+				vectoangles(to, view);
+				if (hand)
+					score = 50.0f - (view[PITCH] > 38.0f ? view[PITCH] - 38.0f : 38.0f - view[PITCH]) - dists[di] * 0.08f;
+				else
+					score = 50.0f - (view[PITCH] > 20.0f ? view[PITCH] - 20.0f : 20.0f - view[PITCH])
+					        - (dists[di] > 88.0f ? dists[di] - 88.0f : 88.0f - dists[di]) * 0.15f;
+				if (yaws[yi] == 0.0f)
+					score += 2.0f;
+				if (score > best) {
+					best = score;
+					VectorCopy(cam, eye);
+					*yaw = view[YAW];
+					*pitch = view[PITCH];
+					found = 1;
+				}
+			}
+		}
+	}
+	return found;
+}
+
+/* Ghoul ray only. 0 is a miss on the drawn mesh, not a part sphere. */
+static int OmMeshRay(edict_t *ent, const vec3_t from, const vec3_t to)
+{
+	vec3_t dir, ls, ld;
+	ghoul::HitRecord recs[4];
+
+	if (!ent || !ent->ghoulInst)
+		return -1;
+	VectorSubtract(to, from, dir);
+	if (VectorNormalize(dir) < 0.5f)
+		return -1;
+	G3_WorldToEntity(ent, from, ls);
+	G3_WorldDirToEntity(ent, dir, ld);
+	return ent->ghoulInst->TraceRay(G3_Time(), ls, ld, recs, 4);
+}
+
+/* omcorpsecam [last|#n] [wide|hand]: measure one corpse and look at it from open air.
+   The same body is sampled again later. dz is the origin change since the previous
+   sample, so a body that keeps falling is SINK even when a single frame looks seated.
+   gapm is the drawn mesh against the floor (negative is in the floor). gaph is the
+   hand bolt, which sits in the middle of the hand. */
+static void Cmd_OmCorpseCam_f(edict_t *ent)
+{
+	static float prevz[2048], prevt[2048], firstfl[2048];
+	static unsigned char flseen[2048];
+	edict_t *best = NULL;
+	float bd = 1e9f;
+	float handz = 1.0e9f, low, mesh, bolt, flm, fls, gapm, gaph, dz, dt, mloc;
+	vec3_t a, b;
+	trace_t trm, trs;
+	int id, ss, handmode, uselast, wantid;
+	char verdict[48];
+	const char *mode = "wide";
+
+	if (!CheatsOK(ent) || !ent->client)
+		return;
+	handmode = 0;
+	uselast = 0;
+	wantid = 0;
+	for (int aarg = 1; aarg < gi.argc(); aarg++) {
+		const char *s = gi.argv(aarg);
+		if (!s || !s[0])
+			continue;
+		if (s[0] == '#')
+			wantid = atoi(s + 1);
+		else if (!Q_stricmp(s, "last"))
+			uselast = 1;
+		else if (!Q_stricmp(s, "hand"))
+			handmode = 1;
+		else if (!Q_stricmp(s, "wide"))
+			handmode = 0;
+	}
+	if (wantid > 0 && wantid < globals.num_edicts && g_edicts[wantid].inuse)
+		best = &g_edicts[wantid];
+	else if (uselast && om_lastkill > 0 && om_lastkill < globals.num_edicts && g_edicts[om_lastkill].inuse)
+		best = &g_edicts[om_lastkill];
+	if (!best && !uselast && !wantid) {
+		for (int i = 1; i < globals.num_edicts; i++) {
+			edict_t *e = &g_edicts[i];
+			vec3_t d;
+			if (!e->inuse || e->client || !e->ai || e->health > 0)
+				continue;
+			VectorSubtract(e->s.origin, ent->s.origin, d);
+			if (VectorLength(d) < bd) {
+				bd = VectorLength(d);
+				best = e;
+			}
+		}
+	}
+	if (!best || !best->ai) {
+		gi.dprintf("OMCAM none\n");
+		return;
+	}
+	id = (int)(best - g_edicts);
+	low = OM_CorpseLowest(best, &handz);
+	mesh = OM_CorpseMeshBottom(best);
+	bolt = best->s.origin[2] + OM_CorpseBolt(best);
+	VectorCopy(best->s.origin, a);
+	a[2] += 24.0f;
+	VectorCopy(a, b);
+	b[2] -= 256.0f;
+	trm = gi.trace(a, vec3_origin, vec3_origin, b, best, MASK_MONSTERSOLID);
+	trs = gi.trace(a, vec3_origin, vec3_origin, b, best, MASK_SOLID);
+	ss = (trm.startsolid || trm.allsolid) ? 1 : 0;
+	flm = (!ss && trm.fraction < 1.0f) ? trm.endpos[2] : -9999.0f;
+	fls = (trs.fraction < 1.0f && !trs.startsolid) ? trs.endpos[2] : -9999.0f;
+	gapm = (mesh < 1.0e8f && flm > -9000.0f) ? mesh - flm : 9999.0f;
+	gaph = (handz < 1.0e8f && flm > -9000.0f) ? handz - flm : 9999.0f;
+	dz = 0.0f;
+	dt = 0.0f;
+	if (id > 0 && id < 2048 && prevt[id] > 0.0f) {
+		dt = level.time - prevt[id];
+		dz = best->s.origin[2] - prevz[id];
+	}
+	if (id > 0 && id < 2048) {
+		if (!flseen[id] && flm > -9000.0f) {
+			firstfl[id] = flm;
+			flseen[id] = 1;
+		}
+		prevz[id] = best->s.origin[2];
+		prevt[id] = level.time;
+	}
+	float cam_sup = 0.0f, cam_limb = 0.0f, cam_plh = 9999.0f, cam_nz = 0.0f;
+	int cam_have = 0, ray_t = -1, ray_h = -1, ray_a = -1;
+	if (!ss && trm.fraction < 1.0f) {
+		cam_nz = trm.plane.normal[2];
+		if (cam_nz >= OM_CORPSE_SLOPE_MIN)
+			cam_have = OM_CorpseContacts(best, trm.endpos, trm.plane.normal, &cam_sup, &cam_limb);
+	}
+	{
+		vec3_t from, to, handp;
+		VectorCopy(best->s.origin, to);
+		VectorCopy(to, from);
+		from[2] += 72.0f;
+		ray_t = OmMeshRay(best, from, to);
+		if (OmLowerHand(best, handp)) {
+			if (cam_have)
+				cam_plh = DotProduct(handp, trm.plane.normal) - DotProduct(trm.endpos, trm.plane.normal);
+			VectorCopy(handp, to);
+			VectorCopy(handp, from);
+			from[2] += 48.0f;
+			ray_h = OmMeshRay(best, from, to);
+		}
+		VectorCopy(best->s.origin, to);
+		to[0] += 80.0f;
+		VectorCopy(to, from);
+		from[2] += 72.0f;
+		ray_a = OmMeshRay(best, from, to);
+	}
+	/* World Z against the floor under the origin lies on a slope. The seat
+	   is the posed mesh's distance to that plane. */
+	if (cam_have) {
+		if (cam_limb < -1.5f)
+			snprintf(verdict, sizeof(verdict), "IN_FLOOR");
+		else if (cam_limb > 4.0f)
+			snprintf(verdict, sizeof(verdict), "HOVER");
+		else
+			snprintf(verdict, sizeof(verdict), "SEAT");
+	} else if (gapm < -1.5f)
+		snprintf(verdict, sizeof(verdict), "IN_FLOOR");
+	else if (gapm > 4.0f)
+		snprintf(verdict, sizeof(verdict), "HOVER");
+	else if (gapm > 9000.0f)
+		snprintf(verdict, sizeof(verdict), "NOMESH");
+	else
+		snprintf(verdict, sizeof(verdict), "SEAT");
+	if (dt > 0.4f && dz < -4.0f)
+		snprintf(verdict + strlen(verdict), sizeof(verdict) - strlen(verdict), "+SINK");
+	if (id > 0 && id < 2048 && flseen[id] && flm > -9000.0f && flm < firstfl[id] - 16.0f)
+		snprintf(verdict + strlen(verdict), sizeof(verdict) - strlen(verdict), "+FELL");
+	mloc = (mesh < 1.0e8f) ? mesh - best->s.origin[2] : 0.0f;
+	{
+		vec3_t aim, eye, origin;
+		vec3_t handp;
+		float cyaw = 0, cpitch = 0;
+		int placed = 0;
+		VectorCopy(best->s.origin, aim);
+		aim[2] += 6.0f;
+		if (handmode) {
+			mode = "hand";
+			if (OmLowerHand(best, handp))
+				VectorCopy(handp, aim);
+			else
+				mode = "NOHAND";
+		}
+		placed = OmPlaceEye(aim, best, handmode, eye, &cyaw, &cpitch);
+		if (!placed)
+			mode = "BLOCKED";
+		gi.dprintf("OMCAM #%d %s x %.1f y %.1f z %.1f vz %.1f flm %.1f fls %.1f bolt %.1f hand %.1f low %.1f mesh %.1f mloc %.1f gapm %.1f gaph %.1f nz %.2f sup %.1f limb %.1f plh %.1f rays %d %d %d gnd %d ss %d dz %.1f dt %.1f eye %.1f %.1f %.1f cyaw %.1f cpitch %.1f %s %s\n",
+		           id, best->classname ? best->classname : "-",
+		           best->s.origin[0], best->s.origin[1], best->s.origin[2], best->velocity[2],
+		           flm, fls, bolt, handz < 1.0e8f ? handz : 0.0f, low < 1.0e8f ? low : 0.0f,
+		           mesh < 1.0e8f ? mesh : 0.0f, mloc, gapm, gaph, cam_nz, cam_sup, cam_limb, cam_plh, ray_t, ray_h,
+		           ray_a, best->groundentity ? (int)(best->groundentity - g_edicts) : -1, ss, dz, dt,
+		           placed ? eye[0] : 0.0f, placed ? eye[1] : 0.0f, placed ? eye[2] : 0.0f,
+		           cyaw, cpitch, verdict, mode);
+		if (!placed)
+			return;
+		/* Noclip looks from origin + 35. Put that eye on the clear spot. */
+		VectorCopy(eye, origin);
+		origin[2] -= 35.0f;
+		ent->movetype = MOVETYPE_NOCLIP;
+		ent->flags |= FL_NOTARGET | FL_GODMODE;
+		ent->viewheight = 35;
+		VectorCopy(origin, ent->s.origin);
+		VectorClear(ent->velocity);
+		ent->s.angles[YAW] = cyaw;
+		ent->s.angles[PITCH] = 0;
+		ent->s.angles[ROLL] = 0;
+		ent->client->ps.pmove.delta_angles[YAW] = (short)ANGLE2SHORT(cyaw - ent->client->resp.cmd_angles[YAW]);
+		ent->client->ps.pmove.delta_angles[PITCH] = (short)ANGLE2SHORT(cpitch - ent->client->resp.cmd_angles[PITCH]);
+		ent->client->ps.pmove.delta_angles[ROLL] = (short)ANGLE2SHORT(0.0f - ent->client->resp.cmd_angles[ROLL]);
+		ent->client->ps.viewangles[YAW] = cyaw;
+		ent->client->ps.viewangles[PITCH] = cpitch;
+		ent->client->ps.viewangles[ROLL] = 0;
+		VectorCopy(ent->client->ps.viewangles, ent->client->v_angle);
+		VectorClear(ent->client->kick_angles);
+		for (int k = 0; k < 3; k++)
+			ent->client->ps.pmove.origin[k] = (short)(origin[k] * 8.0f);
+		gi.linkentity(ent);
+	}
 }
 
 static void Cmd_Gimme_f(edict_t *ent)
@@ -765,7 +1062,8 @@ static void Cmd_OmKill_f(edict_t *ent)
 	vec3_t dir;
 	VectorSubtract(best->s.origin, ent->s.origin, dir);
 	VectorNormalize(dir);
-	gi.dprintf("omkill %s at %.0f %.0f %.0f vel %.0f %.0f %.0f ground %d\n", best->classname,
+	om_lastkill = (int)(best - g_edicts);
+	gi.dprintf("omkill #%d %s at %.0f %.0f %.0f vel %.0f %.0f %.0f ground %d\n", om_lastkill, best->classname,
 	           best->s.origin[0], best->s.origin[1], best->s.origin[2], best->velocity[0], best->velocity[1],
 	           best->velocity[2], best->groundentity ? 1 : 0);
 	/* omkill dance: as a burst of an automatic weapon (the 0x10000 "dance" death flag, SPEC-722) */
@@ -1150,6 +1448,8 @@ void ClientCommand(edict_t *ent)
 		Cmd_Gimme_f(ent);
 	else if (Q_stricmp(cmd, "omcorpse") == 0)
 		Cmd_OmCorpse_f(ent);
+	else if (Q_stricmp(cmd, "omcorpsecam") == 0)
+		Cmd_OmCorpseCam_f(ent);
 	else if (Q_stricmp(cmd, "omfire") == 0)
 		Cmd_OmFire_f(ent);
 	else if (Q_stricmp(cmd, "omboxents") == 0)

@@ -2363,6 +2363,36 @@ public:
 				VectorCopy(kept, ent->s.origin);
 				continue;
 			}
+			/* A pull into another corpse stacks the meshes until one of them
+			   is hidden. That body steps aside on its own. */
+			{
+				int piled = 0;
+				int self = (int)(ent - g_edicts);
+				for (int oi = 1; oi < globals.num_edicts; oi++) {
+					edict_t *o = &g_edicts[oi];
+					float dx, dy, amn[3], amx[3], bmn[3], bmx[3];
+					if (oi == self || !o->inuse || o->solid != SOLID_CORPSE)
+						continue;
+					if (fabsf(o->s.origin[2] - ent->s.origin[2]) > 48.0f)
+						continue;
+					dx = o->s.origin[0] - ent->s.origin[0];
+					dy = o->s.origin[1] - ent->s.origin[1];
+					for (int k = 0; k < 3; k++) {
+						amn[k] = ent->s.origin[k] + ent->mins[k];
+						amx[k] = ent->s.origin[k] + ent->maxs[k];
+						bmn[k] = o->s.origin[k] + o->mins[k];
+						bmx[k] = o->s.origin[k] + o->maxs[k];
+					}
+					if (dx * dx + dy * dy < 32.0f * 32.0f || OM_CorpseStacked(amn, amx, bmn, bmx)) {
+						piled = 1;
+						break;
+					}
+				}
+				if (piled) {
+					VectorCopy(kept, ent->s.origin);
+					continue;
+				}
+			}
 			placed = 1;
 			break;
 		}
@@ -2427,45 +2457,37 @@ public:
 		VectorCopy(start, end);
 		end[2] = lowest - 128.0f;
 		trace_t tr;
-		gix.trace(start, NULL, NULL, end, ent, MASK_SOLID, &tr);
-		if (tr.startsolid || tr.fraction >= 1.0f)
-			return;
-		/* sunk: the bolt is the middle of the part, so the feet come up to 8 above the
-		   floor. floating (tsr1 istairsguy): that same 8 left the whole body in the air,
-		   so a pose above the floor sits the lowest bolt on the surface. */
-		/* posed part bounds are in the entity frame. origin + that min is the drawn
-		   bottom; it sits a little under the lowest bolt. A fixed +8 on the bolt left
-		   tsr1 istairsguy hovering, and 0 sunk a body whose mesh hangs below the bolt. */
-		float mesh = lowest;
-		{
-			float partz = 1e9f;
-			for (int i = 0; i < gore->numZones; i++) {
-				float zmn[3], zmx[3];
-				if (!gore->zones[i].owner)
-					continue;
-				inst->GetBounds(G3_Time(), NULL, zmn, zmx, gore->zones[i].owner, true);
-				if (zmn[2] == 0.0f && zmx[2] == 0.0f)
-					continue;
-				if (zmn[2] < partz)
-					partz = zmn[2];
+		/* A character is not a floor, and neither is a face steeper than 45
+		   degrees. Step past those and sit on the train or the snow under them.
+		   The drawn mesh meets that face. A 16-unit shot slab is not written
+		   here: it hid the head and the arms. */
+		int held = 0;
+		for (int ntry = 0; ntry < 4; ntry++) {
+			VectorCopy(start, end);
+			end[2] = lowest - 128.0f;
+			gix.trace(start, NULL, NULL, end, ent, MASK_MONSTERSOLID, &tr);
+			if (tr.startsolid || tr.fraction >= 1.0f)
+				break;
+			if (tr.ent && (tr.ent->client || tr.ent->ai || tr.ent->solid == SOLID_CORPSE)) {
+				start[2] = tr.endpos[2] - 1.0f;
+				continue;
 			}
-			if (partz < 1e8f) {
-				float world = ent->s.origin[2] + partz;
-				if (world < mesh)
-					mesh = world;
+			if (tr.plane.normal[2] < OM_CORPSE_SLOPE_MIN) {
+				start[2] = tr.endpos[2] - 1.0f;
+				continue;
 			}
+			held = 1;
+			break;
 		}
-		float lift = tr.endpos[2] - mesh;
-		if (lift > -1.5f && lift < 4.0f)
-			return;
-		if (lift < -96.0f || lift > 48.0f)
-			return;
-		ent->s.origin[2] += lift;
-		/* the flat box sits on the floor the trace hit, not at the old standing bottom */
-		ent->mins[2] = tr.endpos[2] - ent->s.origin[2];
-		ent->maxs[2] = ent->mins[2] + 16.0f;
-		if (owner)
-			owner->OnGroundOffset(ent->mins[2]);
+		if (held) {
+			float sup = 0.0f, limb = 0.0f;
+			vec3_t org;
+			VectorCopy(ent->s.origin, org);
+			if (OM_CorpseContacts(ent, tr.endpos, tr.plane.normal, &sup, &limb) &&
+			    OM_CorpseFit(org, tr.plane.normal, sup, limb))
+				VectorCopy(org, ent->s.origin);
+		}
+		Dmg_CorpseHull(ent);
 		gix.linkentity(ent);
 	}
 
