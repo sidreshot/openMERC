@@ -783,10 +783,15 @@ static const char *emu_vs =
 	"		vec3 p = lin + omTessK * (pn - lin);\n"
 	"		if (omTessCap > 0.0)\n"
 	"		{\n"
-	"			float el = min(length(P2 - P1), min(length(P3 - P2), length(P1 - P3)));\n"
+	"			float e01 = length(P2 - P1), e12 = length(P3 - P2), e20 = length(P1 - P3);\n"
+	"			float el = min(e01, min(e12, e20));\n"
 	"			vec3 d = p - lin;\n"
-	"			float dl = length(d);\n"
-	"			float lim = omTessCap * el;\n"
+	"			float dl = length(d), lim;\n"
+	"			/* Same rule as OM_TessLimit: a point on one edge uses that edge, so the face across it agrees. */\n"
+	"			if (w <= 1e-5 && u > 1e-5 && v > 1e-5) el = e01;\n"
+	"			else if (u <= 1e-5 && v > 1e-5 && w > 1e-5) el = e12;\n"
+	"			else if (v <= 1e-5 && u > 1e-5 && w > 1e-5) el = e20;\n"
+	"			lim = omTessCap * el;\n"
 	"			if (lim > 1.0) lim = 1.0;\n"
 	"			if (dl > lim) p = lin + d * (lim / dl);\n"
 	"		}\n"
@@ -2091,28 +2096,15 @@ Tessellate(emuvtx_t *in, int *n)
 		const float *P1 = a->eye, *P2 = b->eye, *P3 = c->eye;
 		const float *N1 = a->en, *N2 = b->en, *N3 = c->en;
 		float cp[10][3], Ev[3], V[3];
-		float edge = 0.0f;
+		float e01, e12, e20;
 		int i, j, k;
 
-		if (E.weapscale > 0)
-		{
-			float e01 = (P2[0] - P1[0]) * (P2[0] - P1[0]) + (P2[1] - P1[1]) * (P2[1] - P1[1]) + (P2[2] - P1[2]) * (P2[2] - P1[2]);
-			float e12 = (P3[0] - P2[0]) * (P3[0] - P2[0]) + (P3[1] - P2[1]) * (P3[1] - P2[1]) + (P3[2] - P2[2]) * (P3[2] - P2[2]);
-			float e20 = (P1[0] - P3[0]) * (P1[0] - P3[0]) + (P1[1] - P3[1]) * (P1[1] - P3[1]) + (P1[2] - P3[2]) * (P1[2] - P3[2]);
-			float es = e01;
-
-			if (e12 < es)
-			{
-				es = e12;
-			}
-
-			if (e20 < es)
-			{
-				es = e20;
-			}
-
-			edge = sqrtf(es);
-		}
+		e01 = (P2[0] - P1[0]) * (P2[0] - P1[0]) + (P2[1] - P1[1]) * (P2[1] - P1[1]) + (P2[2] - P1[2]) * (P2[2] - P1[2]);
+		e12 = (P3[0] - P2[0]) * (P3[0] - P2[0]) + (P3[1] - P2[1]) * (P3[1] - P2[1]) + (P3[2] - P2[2]) * (P3[2] - P2[2]);
+		e20 = (P1[0] - P3[0]) * (P1[0] - P3[0]) + (P1[1] - P3[1]) * (P1[1] - P3[1]) + (P1[2] - P3[2]) * (P1[2] - P3[2]);
+		e01 = sqrtf(e01);
+		e12 = sqrtf(e12);
+		e20 = sqrtf(e20);
 
 #define PN_W(Pi, Pj, Ni) (((Pj)[0] - (Pi)[0]) * (Ni)[0] + ((Pj)[1] - (Pi)[1]) * (Ni)[1] + ((Pj)[2] - (Pi)[2]) * (Ni)[2])
 		/* control points: 0 b210, 1 b120, 2 b021, 3 b012, 4 b102, 5 b201, 6 b111 */
@@ -2158,29 +2150,33 @@ Tessellate(emuvtx_t *in, int *n)
 								6 * cp[6][r] * u * w2 * w;
 						}
 
-						/* part of the way from the flat triangle to the PN surface. A weapon clamps that
-						   step to a fraction of the edge so the shotgun does not swell off its texture. */
-						if (E.weapscale > 0)
+						/* Part of the way from the flat triangle to the PN surface. The cap matches
+						   the GPU path (OM_TessLimit): a shared edge uses that edge on both faces. */
+						for (r = 0; r < 3; r++)
 						{
-							float delta[3], off[3];
-
-							for (r = 0; r < 3; r++)
-							{
-								delta[r] = pn[r] - lin[r];
-							}
-
-							OM_WeaponOffset(E.weapscale, edge, delta, off);
-
-							for (r = 0; r < 3; r++)
-							{
-								p[r] = lin[r] + off[r];
-							}
+							p[r] = lin[r] + E.tessk * (pn[r] - lin[r]);
 						}
-						else
+
+						if (E.pncap > 0.0f)
 						{
+							float delta[3], len, lim;
+
 							for (r = 0; r < 3; r++)
 							{
-								p[r] = lin[r] + E.tessk * (pn[r] - lin[r]);
+								delta[r] = p[r] - lin[r];
+							}
+
+							len = sqrtf(delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]);
+							lim = OM_TessLimit(E.pncap, e01, e12, e20, u, w2, w);
+
+							if ((len > lim) && (len > 0.0f))
+							{
+								float s = lim / len;
+
+								for (r = 0; r < 3; r++)
+								{
+									p[r] = lin[r] + delta[r] * s;
+								}
 							}
 						}
 

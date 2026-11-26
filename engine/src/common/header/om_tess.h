@@ -50,6 +50,13 @@ float OM_WeaponPnK(int level);
    edge <= 0 writes a zero offset. */
 void OM_WeaponOffset(int level, float edge, const float delta[3], float out[3]);
 
+/* How far a tessellated point may leave the flat triangle.
+   e01, e12, e20 are the edge lengths P1-P2, P2-P3, P3-P1. u, v, w are the
+   barycentric weights of P1, P2, P3. A point on one edge uses that edge, so the
+   triangle across the edge gets the same limit. An interior point uses the
+   shortest edge. The limit is at most 1. cap <= 0 returns a huge limit. */
+float OM_TessLimit(float cap, float e01, float e12, float e20, float u, float v, float w);
+
 /* Index of the view weapon in a list that already holds count entities and has room
    for limit. A full list still returns a slot (the last one is overwritten).
    yaw is ignored: turning the camera does not move the weapon out of the list.

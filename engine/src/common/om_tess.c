@@ -255,6 +255,60 @@ OM_WeaponOffset(int level, float edge, const float delta[3], float out[3])
 	}
 }
 
+float
+OM_TessLimit(float cap, float e01, float e12, float e20, float u, float v, float w)
+{
+	float el, lim;
+	const float edge = 1.0e-5f;
+
+	if (!(cap > 0.0f))
+	{
+		return 1.0e30f;
+	}
+
+	/* Exactly one weight is zero: that point is on one edge and not a corner. */
+	if ((w <= edge) && (u > edge) && (v > edge))
+	{
+		el = e01;
+	}
+	else if ((u <= edge) && (v > edge) && (w > edge))
+	{
+		el = e12;
+	}
+	else if ((v <= edge) && (u > edge) && (w > edge))
+	{
+		el = e20;
+	}
+	else
+	{
+		el = e01;
+
+		if (e12 < el)
+		{
+			el = e12;
+		}
+
+		if (e20 < el)
+		{
+			el = e20;
+		}
+	}
+
+	lim = cap * el;
+
+	if (lim > 1.0f)
+	{
+		lim = 1.0f;
+	}
+
+	if (lim < 0.0f)
+	{
+		lim = 0.0f;
+	}
+
+	return lim;
+}
+
 int
 OM_ViewWeaponSlot(int count, int limit, float yaw)
 {

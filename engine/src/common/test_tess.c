@@ -150,6 +150,23 @@ Weapon(void)
 	expect_true("a small step is kept", (out[0] > 0.0f) && (out[0] < OM_WEAPON_PN_EDGE * 10.0f));
 }
 
+/* Two faces share a long edge and each has its own short edge. The shared edge
+   must clamp by that long edge, or the faces split and a dark line shows. */
+static void
+SharedEdge(void)
+{
+	float mid = OM_TessLimit(OM_WEAPON_PN_EDGE, 10.0f, 2.0f, 8.0f, 0.5f, 0.5f, 0.0f);
+	float other = OM_TessLimit(OM_WEAPON_PN_EDGE, 10.0f, 3.0f, 7.0f, 0.5f, 0.5f, 0.0f);
+	float inside = OM_TessLimit(OM_WEAPON_PN_EDGE, 10.0f, 2.0f, 8.0f, 0.3f, 0.3f, 0.4f);
+	float corner = OM_TessLimit(OM_WEAPON_PN_EDGE, 10.0f, 2.0f, 8.0f, 1.0f, 0.0f, 0.0f);
+
+	expect_true("shared edge uses its own length", fabsf(mid - 1.0f) < 1.0e-4f);
+	expect_true("the face across the edge agrees", fabsf(other - mid) < 1.0e-4f);
+	expect_true("an interior point keeps the short edge", fabsf(inside - OM_WEAPON_PN_EDGE * 2.0f) < 1.0e-4f);
+	expect_true("a corner keeps the short edge", fabsf(corner - inside) < 1.0e-4f);
+	expect_true("no cap does not clamp", OM_TessLimit(0.0f, 10.0f, 2.0f, 8.0f, 0.5f, 0.5f, 0.0f) > 1000.0f);
+}
+
 static void
 ViewWeapon(void)
 {
@@ -174,6 +191,7 @@ main(void)
 {
 	Class();
 	Weapon();
+	SharedEdge();
 	ViewWeapon();
 	printf("tess_weapon_test failures=%d\n", failures);
 	return failures;
