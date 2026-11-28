@@ -1993,6 +1993,31 @@ Cost up to +0.004 ms. So A was taken out again and B2 stays open: what makes the
 part added in display values, which only B or C change. The choice between them (and whether it waits for B4) is the
 owner's.
 
+## B3: living flame and smoke (r_om_fxheat, 2026-11-28)
+
+The stock effect files still decide when a flame or a puff of smoke appears, where, how big, what colour and how
+long. The change is how that card is drawn (`gl3_fxheat.c`, the effect shader, `r_om_fxheat`).
+
+* The texture boils along the card's own motion. A still flame still rises. Two nearby times of the same card differ
+  inside the sprite, not only because the card grows and fades. Smoke boils the same way.
+* The air above a hot card is a camera-facing column, not a stretch of the sprite. It refracts the colour already
+  drawn (the scene copy the glass uses). The offset is dropped where the sample would hit nearer geometry, so the
+  haze stops at a wall and fades out before the top of the column. Smoke does not heat the air. A cold card (dust,
+  sparks, blood, a muzzle flash) is the original sprite: the kind comes from the effect's own name, and a cold token
+  wins over the shared sprite (`sparkpart` is both a campfire and a spark).
+* Edges of a living card fade where they meet the world. The signal-flare sprite stays hard. Stock size, timing,
+  colour and sound are unchanged.
+* `r_om_fxheat` 0 is that original sprite: grow and fade, no boil, no haze. `-1` follows the preset. High, and a
+  desktop preset left unset, turn it on. Low, Medium, Minimal and the GLES renderer leave it off. It also stays off
+  when the scene copy is not available. The video menu row is Living Flame. The gallery looks set the switch
+  (`new` 1, `orig` 0).
+* Checked in game on arm1, stock `environ/firelarge2`, `environ/normalsmoke` and `environ/gb_dustcloud01` from
+  `om_fxplay`, the same instance with the switch on and then off, twice. The door groove above the floor fire moves
+  (mean residual about 14 and about 9, against a ceiling of about 1.4 that does not). The smoke column's interior
+  swings both ways past the off-pair. The dust puff does not shift the ceiling. On Low the same fire is the original
+  sprite and the wall beside it does not move. GPU time of that fire, same camera: 0.51 ms with the feature on,
+  0.42 ms off.
+
 ## r_om_skyrays: the sudctf1 sun found again (2026-11-13)
 
 * The painted-sun search (SkyPaintedSun) missed the ugan sky of sudctf1: its sun is painted 215 215 215, and the

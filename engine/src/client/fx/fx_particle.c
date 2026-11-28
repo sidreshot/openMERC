@@ -1166,6 +1166,59 @@ CLFX_SceneQuadChains(sof_quadchain_t ***list)
 	return fx_num_scene_chains;
 }
 
+/* The effect file's name, not the shared sprite. sparkpart.m32 is both a campfire
+   and a spark, gb_smoke01 is both smoke and a dust cloud. A cold token in the
+   effect name wins, then a hot or smoke token, then the same test on the sprite. */
+static int
+FX_NameHeat(const char *name)
+{
+	if (!name || !name[0])
+	{
+		return OM_FXHEAT_NONE;
+	}
+
+	if (Q_strcasestr(name, "muzzle") || Q_strcasestr(name, "flash") || Q_strcasestr(name, "spark") ||
+		Q_strcasestr(name, "tracer") || Q_strcasestr(name, "blood") || Q_strcasestr(name, "dust") ||
+		Q_strcasestr(name, "debris") || Q_strcasestr(name, "snow") || Q_strcasestr(name, "water") ||
+		Q_strcasestr(name, "splash") || Q_strcasestr(name, "powder") || Q_strcasestr(name, "paper") ||
+		Q_strcasestr(name, "shard") || Q_strcasestr(name, "chunk") || Q_strcasestr(name, "gore"))
+	{
+		return OM_FXHEAT_COLD;
+	}
+
+	if (Q_strcasestr(name, "fire") || Q_strcasestr(name, "flame") || Q_strcasestr(name, "flare") ||
+		Q_strcasestr(name, "burn") || Q_strcasestr(name, "lava") || Q_strcasestr(name, "ember") ||
+		Q_strcasestr(name, "phos") || Q_strcasestr(name, "magma"))
+	{
+		return OM_FXHEAT_HOT;
+	}
+
+	if (Q_strcasestr(name, "smoke") || Q_strcasestr(name, "fume") || Q_strcasestr(name, "steam"))
+	{
+		return OM_FXHEAT_SMOKE;
+	}
+
+	return OM_FXHEAT_NONE;
+}
+
+static int
+FX_EffectHeat(const fx_part_t *p)
+{
+	int k = OM_FXHEAT_NONE;
+
+	if ((p->fx >= 0) && (p->fx < FX_MAX_RUNNING) && fx_running[p->fx].inuse && fx_running[p->fx].def)
+	{
+		k = FX_NameHeat(fx_running[p->fx].def->name);
+	}
+
+	if (!k)
+	{
+		k = FX_NameHeat(p->q.texname);
+	}
+
+	return k;
+}
+
 static void
 FX_FillQuad(fx_part_t *p)
 {
@@ -1193,6 +1246,13 @@ FX_FillQuad(fx_part_t *p)
 	q->color[2] = p->rgb[2];
 	q->color[3] = (byte)p->alpha;
 	q->next = NULL;
+
+	/* B3: this card's own motion, and whether the effect itself is hot. A quad that
+	   never passed through here has no magic, so leftover bytes are not a velocity. */
+	q->engine[0] = OM_FXHEAT_MAGIC;
+	q->engine[1] = (unsigned char)FX_EffectHeat(p);
+	q->engine[2] = q->engine[3] = 0;
+	memcpy(q->engine + 4, p->vel, 3 * sizeof(float));
 }
 
 void

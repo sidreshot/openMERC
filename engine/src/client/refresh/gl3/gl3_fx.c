@@ -41,6 +41,7 @@ static qboolean fxstate_valid;
 
 static GLint u_texmode, u_alphatest, u_fogmode, u_fogstart, u_fogend, u_fogcolor, u_fogplane;
 static GLint u_emis, u_softp, u_softv, u_depth, u_fxmat; /* GFX-modern (gl3_post.c) */
+static GLint u_fxheat = -1; /* B3 r_om_fxheat */
 static GLint u_relief; /* GFX-modern r_om_holes */
 static GLint u_liq, u_liqeye, u_liqrefl, u_liqrip; /* GFX-modern r_om_water (gl3_liquid.c) */
 static GLint u_pf0, u_pf1, u_pf2, u_pfpl; /* GFX-modern r_om_ppfog (gl3_fog.c) */
@@ -71,6 +72,7 @@ QueryUniforms(void)
 	u_softp = glGetUniformLocation(prog, "omSoftP");
 	u_softv = glGetUniformLocation(prog, "omSoftV");
 	u_depth = glGetUniformLocation(prog, "omDepth");
+	u_fxheat = glGetUniformLocation(prog, "omFxHeat"); /* B3 */
 	u_pf0 = glGetUniformLocation(prog, "omPF0");
 	u_pf1 = glGetUniformLocation(prog, "omPF1");
 	u_pf2 = glGetUniformLocation(prog, "omPF2");
@@ -286,6 +288,18 @@ uploaded:
 		{
 			glUniform4f(u_softv, 1, 1, 1, 0);
 		}
+
+		/* B3: 0 keeps the original sample. Sent every batch so a flame does not boil the next surface. */
+		{
+			float heat[4];
+
+			GL3_FxHeat_Feed(heat, st->heatmode);
+
+			if (u_fxheat != -1)
+			{
+				glUniform4fv(u_fxheat, 1, heat);
+			}
+		}
 	}
 
 	if (st->ppfog == 2)
@@ -334,6 +348,11 @@ uploaded:
 	else
 	{
 		glDisable(GL_CULL_FACE);
+	}
+
+	if (st->heatmode == 3)
+	{
+		GL3_FxHeat_Bind(); /* scene colour on the unit the effect shader already samples */
 	}
 
 	glDrawArrays(GL_TRIANGLES, fxfirst, numfxverts);
@@ -1319,6 +1338,7 @@ BillboardVerts(const sofalphaquad_t *q, const float rgba[4], gl3fxvtx_t v[4])
 		v[i].st[0] = st[i][0];
 		v[i].st[1] = st[i][1];
 		memcpy(v[i].rgba, rgba, sizeof(v[i].rgba));
+		v[i].aux[0] = v[i].aux[1] = 0; /* water writes its own aux; a card must not leak a flow */
 	}
 }
 
@@ -1355,6 +1375,7 @@ BeamVerts(const sofalphaquad_t *q, const float rgba[4], gl3fxvtx_t v[4])
 	for (i = 0; i < 4; i++)
 	{
 		memcpy(v[i].rgba, rgba, sizeof(v[i].rgba));
+		v[i].aux[0] = v[i].aux[1] = 0;
 	}
 
 	return true;
@@ -1466,6 +1487,272 @@ FlareSoft(int blend, qboolean billboard, qboolean depthtest, const gl3image_t *i
 	return soft;
 }
 
+/* B3: the card's axes, the same ones BillboardVerts builds, so the flow is along the card. */
+static void
+HeatAxes(const sofalphaquad_t *q, vec3_t A, vec3_t B)
+{
+	if (q->flags & SOF_AQ_ORIENTED)
+	{
+		vec3_t n, axis = {0, 0, 0};
+		int k = 0;
+		float d;
+
+		VectorCopy(q->normal, n);
+
+		if (fabsf(n[1]) < fabsf(n[k]))
+		{
+			k = 1;
+		}
+
+		if (fabsf(n[2]) < fabsf(n[k]))
+		{
+			k = 2;
+		}
+
+		axis[k] = 1;
+		d = DotProduct(axis, n);
+		VectorMA(axis, -d, n, B);
+		VectorNormalize(B);
+		CrossProduct(n, B, A);
+	}
+	else
+	{
+		VectorCopy(vup, A);
+		VectorCopy(vright, B);
+	}
+}
+
+static const char *
+HeatName(const sofalphaquad_t *q, const gl3image_t *image)
+{
+	if (q->texname && q->texname[0])
+	{
+		return q->texname;
+	}
+
+	if (image && image->name[0])
+	{
+		return image->name;
+	}
+
+	return NULL;
+}
+
+/* Decals stay the mark that was painted. The client packs the effect's own kind
+   (sparkpart is a campfire and a spark; the effect name decides). A packed cold
+   cannot become hot from the sprite. An unnamed quad falls back to the sprite. */
+static int
+HeatKindOf(const sofalphaquad_t *q, const gl3image_t *image)
+{
+	if (q->flags & SOF_AQ_DECAL)
+	{
+		return 0;
+	}
+
+	if (q->engine[0] == OM_FXHEAT_MAGIC)
+	{
+		if (q->engine[1] == OM_FXHEAT_SMOKE)
+		{
+			return 1;
+		}
+
+		if (q->engine[1] == OM_FXHEAT_HOT)
+		{
+			return 2;
+		}
+
+		if (q->engine[1] == OM_FXHEAT_COLD)
+		{
+			return 0;
+		}
+	}
+
+	return GL3_FxHeat_Kind(HeatName(q, image));
+}
+
+/* Edges of a living card meet the wall. Flare4 stays hard: the soft fade used to wipe that flame. */
+static void
+HeatSoften(gl3fxstate_t *st, int kind, const gl3image_t *image)
+{
+	if (!GL3_FxHeat_Active() || (kind < 1) || !st->depthtest)
+	{
+		return;
+	}
+
+	if (image && image->name[0] && Q_strcasestr(image->name, "flare4"))
+	{
+		return;
+	}
+
+	if (!st->soft)
+	{
+		st->soft = (st->blend == 1) ? 1 : 2;
+	}
+}
+
+/* UV velocity of this card. A still flame still rises: zero velocity is not "no boil". */
+static void
+HeatFlow(const sofalphaquad_t *q, float flow[2])
+{
+	vec3_t vel;
+
+	flow[0] = flow[1] = 0;
+
+	if (q->flags & SOF_AQ_BEAM)
+	{
+		vec3_t d;
+		float len, along = 0;
+
+		VectorSubtract(q->v0c, q->origin, d);
+		len = VectorNormalize(d);
+
+		if ((len > 1.0f) && GL3_FxHeat_Velocity(q, vel))
+		{
+			along = DotProduct(vel, d);
+		}
+
+		flow[0] = (fabsf(along) < 12.0f) ? 0.85f : Q_clamp(along / Q_max(len, 1.0f), -2.0f, 2.0f);
+		return;
+	}
+
+	{
+		vec3_t A, B;
+		float a, b, va, vb, speed;
+
+		HeatAxes(q, A, B);
+		a = Q_max(fabsf(q->v0c[0]), 1.0f);
+		b = Q_max(fabsf(q->v0c[1]), 1.0f);
+
+		if (!GL3_FxHeat_Velocity(q, vel) || (VectorLength(vel) < 12.0f))
+		{
+			va = A[2] * 48.0f;
+			vb = B[2] * 48.0f;
+		}
+		else
+		{
+			va = DotProduct(vel, A);
+			vb = DotProduct(vel, B);
+			speed = sqrtf(va * va + vb * vb);
+
+			if (speed < 12.0f)
+			{
+				va += A[2] * 48.0f;
+				vb += B[2] * 48.0f;
+			}
+		}
+
+		flow[1] = Q_clamp(va / (2.0f * a), -2.0f, 2.0f);
+		flow[0] = Q_clamp(vb / (2.0f * b), -2.0f, 2.0f);
+
+		if ((flow[0] == 0.0f) && (flow[1] == 0.0f))
+		{
+			flow[1] = 0.85f;
+		}
+	}
+}
+
+static void
+HeatStamp(const sofalphaquad_t *q, gl3fxvtx_t *v, int n)
+{
+	float flow[2];
+	int i;
+
+	HeatFlow(q, flow);
+
+	for (i = 0; i < n; i++)
+	{
+		v[i].aux[0] = flow[0];
+		v[i].aux[1] = flow[1];
+	}
+}
+
+/* A column of air over a hot card. It rises in world up, faces the camera, and
+   refracts the scene already drawn. The sprite itself is not stretched: stock
+   size stays on the card. A dying ember (low alpha) does not heat the air. */
+static void
+DrawHeatHaze(const sofalphaquad_t *q, const gl3fxstate_t *base)
+{
+	gl3fxvtx_t v[4];
+	gl3fxstate_t st;
+	float half, plume, width, a;
+	int i;
+
+	if (q->color[3] < 48)
+	{
+		return;
+	}
+
+	if (!GL3_FxHeat_EnsureCopy())
+	{
+		return;
+	}
+
+	half = Q_max(fabsf(q->v0c[0]), fabsf(q->v0c[1]));
+	half = Q_max(half, 6.0f);
+	/* Tall enough to cross the wall above a floor fire, short of a screen-filling box. */
+	plume = Q_clamp(half * 2.6f, 42.0f, 84.0f);
+	width = Q_clamp(half * 0.55f, 7.0f, 22.0f);
+	a = q->color[3] / 255.0f;
+
+	for (i = 0; i < 4; i++)
+	{
+		float side = (i == 0 || i == 3) ? -1.0f : 1.0f;
+		float up = (i >= 2) ? plume : -half * 0.15f;
+
+		v[i].pos[0] = q->origin[0] + side * width * vright[0];
+		v[i].pos[1] = q->origin[1] + side * width * vright[1];
+		v[i].pos[2] = q->origin[2] + up;
+		v[i].st[0] = (side < 0.0f) ? 0.0f : 1.0f;
+		v[i].st[1] = (i >= 2) ? 1.0f : 0.0f;
+		v[i].aux[0] = q->origin[2];
+		v[i].aux[1] = plume;
+		v[i].rgba[0] = v[i].rgba[1] = v[i].rgba[2] = 1.0f;
+		v[i].rgba[3] = a;
+	}
+
+	st = *base;
+	st.heatmode = 3;
+	st.blend = 1;
+	st.alphatest = false;
+	st.depthwrite = false;
+	st.depthtest = true;
+	st.soft = 1;
+	st.texmode = 0;
+	st.culling = false;
+	GL3_FX_SetState(&st);
+	GL3_FX_Add(v, 4, GL_TRIANGLE_FAN);
+}
+
+static void
+HeatDraw(const sofalphaquad_t *q, gl3fxstate_t *st, gl3fxvtx_t *v, int n, int kind, GLenum mode)
+{
+	int i;
+
+	if (GL3_FxHeat_Active() && (kind >= 1))
+	{
+		HeatStamp(q, v, n);
+
+		if ((kind == 2) && (q->flags & SOF_AQ_BILLBOARD) && !(q->flags & SOF_AQ_BATCHED))
+		{
+			DrawHeatHaze(q, st);
+		}
+
+		st->heatmode = 1;
+	}
+	else
+	{
+		for (i = 0; i < n; i++)
+		{
+			v[i].aux[0] = v[i].aux[1] = 0;
+		}
+
+		st->heatmode = 0;
+	}
+
+	GL3_FX_SetState(st);
+	GL3_FX_Add(v, n, mode);
+}
+
 /* one alpha quad drawn alone (SPEC-412 §8) */
 static void
 DrawAlphaQuad(sofalphaquad_t *q)
@@ -1475,6 +1762,7 @@ DrawAlphaQuad(sofalphaquad_t *q)
 	vec3_t light = {1, 1, 1};
 	float rgba[4];
 	int blend = QuadBlend(q->flags);
+	int kind;
 	gl3image_t *image = QuadImage(q);
 	qboolean lit = (q->flags & SOF_AQ_LIT) != 0;
 
@@ -1499,6 +1787,9 @@ DrawAlphaQuad(sofalphaquad_t *q)
 	st.soft = FlareSoft(blend, (q->flags & SOF_AQ_BILLBOARD) &&
 		!(q->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)), st.depthtest, image);
 
+	kind = HeatKindOf(q, image);
+	HeatSoften(&st, kind, image);
+
 	/* GFX-modern r_om_fxvolume: a puff lit as a ball, a fan around its centre */
 	{
 		gl3fxvtx_t fan[6];
@@ -1508,8 +1799,7 @@ DrawAlphaQuad(sofalphaquad_t *q)
 
 		if (FxVolumeVerts(q, blend, lit, unlit, fan))
 		{
-			GL3_FX_SetState(&st);
-			GL3_FX_Add(fan, 6, GL_TRIANGLE_FAN);
+			HeatDraw(q, &st, fan, 6, kind, GL_TRIANGLE_FAN);
 			return;
 		}
 	}
@@ -1530,8 +1820,7 @@ DrawAlphaQuad(sofalphaquad_t *q)
 		return;
 	}
 
-	GL3_FX_SetState(&st);
-	GL3_FX_Add(v, 4, GL_TRIANGLE_FAN);
+	HeatDraw(q, &st, v, 4, kind, GL_TRIANGLE_FAN);
 	/* no drawn mark: SPEC-412 §9 rule 7 marks chain members only, and the
 	   original leaves quads drawn alone unmarked (seen in the call traces) */
 }
@@ -1551,7 +1840,7 @@ DrawQuadChain(sofquadchain_t *chain)
 	sofalphaquad_t *first = chain->first, *q;
 	gl3fxstate_t st;
 	vec3_t light = {1, 1, 1};
-	int blend, drop = 0, i, count;
+	int blend, drop = 0, i, count, kind;
 	float F = gl_effectfill->value;
 	gl3image_t *image;
 	qboolean lit, batched, billboard, prevdrawn;
@@ -1639,6 +1928,11 @@ DrawQuadChain(sofquadchain_t *chain)
 	SetPointFog(&st, QuadFog(first), first->origin, blend);
 	st.soft = FlareSoft(blend, billboard && !(first->flags & (SOF_AQ_ORIENTED | SOF_AQ_DECAL)),
 		st.depthtest, image);
+
+	kind = HeatKindOf(first, image);
+	HeatSoften(&st, kind, image);
+	st.heatmode = (GL3_FxHeat_Active() && (kind >= 1)) ? 1 : 0;
+
 	GL3_FX_SetState(&st);
 
 	prevdrawn = false;
@@ -1689,7 +1983,7 @@ DrawQuadChain(sofquadchain_t *chain)
 					memcpy(v[i].rgba, rgba, sizeof(rgba));
 				}
 
-				GL3_FX_Add(v, 3, GL_TRIANGLES);
+				HeatDraw(q, &st, v, 3, kind, GL_TRIANGLES);
 			}
 			else
 			{
@@ -1703,18 +1997,18 @@ DrawQuadChain(sofquadchain_t *chain)
 
 				if ((qb == blend) && FxVolumeVerts(q, blend, ql, unlit, fan))
 				{
-					GL3_FX_Add(fan, 6, GL_TRIANGLE_FAN);
+					HeatDraw(q, &st, fan, 6, kind, GL_TRIANGLE_FAN);
 				}
 				else
 				{
 					BillboardVerts(q, rgba, v);
-					GL3_FX_Add(v, 4, GL_TRIANGLE_FAN);
+					HeatDraw(q, &st, v, 4, kind, GL_TRIANGLE_FAN);
 				}
 			}
 		}
 		else if (BeamVerts(q, rgba, v))
 		{
-			GL3_FX_Add(v, 4, GL_TRIANGLE_FAN);
+			HeatDraw(q, &st, v, 4, kind, GL_TRIANGLE_FAN);
 		}
 
 		q->flags |= SOF_AQ_DRAWN;
@@ -1769,6 +2063,7 @@ GL3_FX_BeginFrame3D(void)
 {
 	numalphasurfs = 0;
 	effecttotal = 0;
+	GL3_FxHeat_BeginFrame();
 	GL3_Glass_BeginFrame();
 	AngleVectors(r_newrefdef.viewangles, vforward, vright, vup);
 }

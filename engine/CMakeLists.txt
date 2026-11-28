@@ -636,6 +636,7 @@ set(GL3-Source
 	${REF_SRC_DIR}/gl3/gl3_shaders.c
 	${REF_SRC_DIR}/gl3/gl3_sof2d.c
 	${REF_SRC_DIR}/gl3/gl3_fx.c
+	${REF_SRC_DIR}/gl3/gl3_fxheat.c
 	${REF_SRC_DIR}/gl3/gl3_fog.c
 	${REF_SRC_DIR}/gl3/gl3_detail.c
 	${REF_SRC_DIR}/gl3/gl3_sofcvar.c

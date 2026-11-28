@@ -91,6 +91,7 @@ list | r_om_ssr_wet | 0,1 | Off,On | Выкл,Вкл | Wet Ground in Rain | Мо
 
 section | EFFECTS | ЭФФЕКТЫ | requires=r_om_bloom
 list | r_om_softparticles | 0,1 | Off,On | Выкл,Вкл | Soft Particles | Мягкие частицы | requires=r_om_softparticles
+list | r_om_fxheat | 0,1 | Off,On | Выкл,Вкл | Living Flame | Живое пламя | requires=r_om_fxheat | tip=Flame and smoke boil along their motion, and the air above a fire shimmers. Off keeps the original sprite/Пламя и дым кипят вдоль своего движения, воздух над огнём дрожит. Выкл оставляет прежний спрайт
 list | r_om_softparticles_dist | 6,12,24 | Short,Normal,Long | Короткое,Обычное,Длинное | Particle Fade Distance | Расстояние смягчения | requires=r_om_softparticles | pc
 list | r_om_ppfog | 0,1 | Off,On | Выкл,Вкл | Per-Pixel Fog | Попиксельный туман | requires=r_om_ppfog
 list | r_om_fogpix | 0,1 | Original,Modern | Оригинальный,Современный | Map Fog | Туман на картах | requires=r_om_fogpix | tip=Modern: one fog for everything, counted for every pixel along the view through the fog volumes; Original: the fog laid over the faces of the map, models and effects fogged as a whole/Современный: один туман для всего, считается для каждого пикселя вдоль взгляда сквозь объём тумана; Оригинальный: туман, наложенный на грани карты, модели и эффекты целиком

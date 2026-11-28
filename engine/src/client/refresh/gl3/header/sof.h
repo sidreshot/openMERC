@@ -170,7 +170,7 @@ typedef struct
 	float pos[3];
 	float st[2];
 	float rgba[4];
-	float aux[2];   /* r_om_water: x how open the sky is over the vertex (0..1); unused elsewhere */
+	float aux[2];   /* r_om_water: sky openness. B3 heat batches: UV flow, or the haze column (origin z, height) */
 } gl3fxvtx_t;
 
 /* render state of an effect batch */
@@ -203,6 +203,7 @@ typedef struct
 	/* GFX-modern r_om_holes: the relief of a bullet hole - the world's up in the mark's texture axes (xy, length 1 on a
 	   wall, 0 on a floor), z strength (0 off) */
 	float relief[4];
+	int heatmode; /* B3 r_om_fxheat: 0 original sprite, 1 boil, 3 heat haze */
 } gl3fxstate_t;
 qboolean GL3_Post_SSRActive(void);
 qboolean GL3_Post_TintHandled(void);
@@ -398,6 +399,7 @@ qboolean GL3_Post_DepthReady(void);
 qboolean GL3_Post_WaterCopy(void);
 qboolean GL3_Post_GlassCopy(const float *box);
 void GL3_Post_GlassBind(void);
+void GL3_Post_ViewInv(float *invw, float *invh);
 void GL3_Post_EndView(void);
 void GL3_Post_CaptureView(void);
 void GL3_Post_TAAJitter(hmm_mat4 *proj);
@@ -508,6 +510,16 @@ void GL3_Post_Beams(void);
 void GL3_Post_SkyRays(void);
 qboolean GL3_SkyLight(vec3_t dir, vec3_t color);
 qboolean GL3_CSM_SunDir(vec3_t dir, vec3_t color);
+
+/* B3: living flame and smoke (gl3_fxheat.c, r_om_fxheat). */
+int GL3_FxHeat_Kind(const char *name);
+void GL3_FxHeat_Resolve(void);
+qboolean GL3_FxHeat_Active(void);
+void GL3_FxHeat_BeginFrame(void);
+qboolean GL3_FxHeat_Velocity(const sofalphaquad_t *q, vec3_t vel);
+qboolean GL3_FxHeat_EnsureCopy(void);
+void GL3_FxHeat_Bind(void);
+void GL3_FxHeat_Feed(float out[4], int mode);
 
 
 #endif

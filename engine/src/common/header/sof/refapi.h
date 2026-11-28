@@ -126,6 +126,17 @@ typedef struct
 	float white;
 } soflightstyle_t;
 
+/* B3: byte 0 of sofalphaquad_t.engine is this when bytes 4..15 are the card's
+   world velocity (three floats, units per second). Byte 1 is the heat kind
+   decided from the effect's own name: 0 unnamed, 1 smoke, 2 hot, 3 cold.
+   Without the magic the renderer does not read those bytes. The record stays
+   100 bytes. */
+#define OM_FXHEAT_MAGIC 0xB3
+#define OM_FXHEAT_NONE  0
+#define OM_FXHEAT_SMOKE 1
+#define OM_FXHEAT_HOT   2
+#define OM_FXHEAT_COLD  3
+
 /* alpha quad, 100 bytes read by the renderer */
 typedef struct sofalphaquad_s
 {

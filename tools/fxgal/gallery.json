@@ -3,11 +3,11 @@
 
   "looks": {
     "new": {
-      "r_om_fxlight": "1", "r_om_fxvolume": "1", "r_om_fxsoft": "1", "r_om_softparticles": "1",
+      "r_om_fxlight": "1", "r_om_fxvolume": "1", "r_om_fxsoft": "1", "r_om_softparticles": "1", "r_om_fxheat": "1",
       "r_om_dlight_model": "1", "r_om_holes": "1", "r_om_wetblood": "1"
     },
     "orig": {
-      "r_om_fxlight": "0", "r_om_fxvolume": "0", "r_om_fxsoft": "0", "r_om_softparticles": "0",
+      "r_om_fxlight": "0", "r_om_fxvolume": "0", "r_om_fxsoft": "0", "r_om_softparticles": "0", "r_om_fxheat": "0",
       "r_om_dlight_model": "0", "r_om_holes": "0", "r_om_wetblood": "0"
     }
   },

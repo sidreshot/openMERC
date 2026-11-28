@@ -2678,7 +2678,7 @@ static const presetkey_t preset_minimal[] = {
 	{"r_om_mirror", "0"}, {"r_om_mirror_scale", "0.5"}, {"r_om_water", "1"}, {"r_om_water_quality", "1"},
 	{"r_om_tess", "0"}, {"r_om_ppl_models", "0"}, {"r_om_look", "0"}, {"r_om_worldlite", "1"},
 	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "0"}, {"r_om_tess_round", "0"}, {"r_om_tess_weapon", "0"},
-	{"r_om_glints", "0"}, {"r_om_skyrays", "0"}, {"r_om_softparticles", "0"},
+	{"r_om_glints", "0"}, {"r_om_skyrays", "0"}, {"r_om_softparticles", "0"}, {"r_om_fxheat", "0"},
 	{NULL, NULL}};
 
 static const presetkey_t preset_low[] = {
@@ -2699,7 +2699,7 @@ static const presetkey_t preset_low[] = {
 	/* the light world shaders: 33 -> 23.5 ms per frame on the Adreno 610 phone (arm1) */
 	{"r_om_worldlite", "1"},
 	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "0"}, {"r_om_tess_round", "0"}, {"r_om_tess_weapon", "0"},
-	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"},
+	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"}, {"r_om_fxheat", "0"},
 	{NULL, NULL}};
 
 static const presetkey_t preset_medium[] = {
@@ -2717,7 +2717,7 @@ static const presetkey_t preset_medium[] = {
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "0.7"}, {"r_om_water", "1"}, {"r_om_water_quality", "2"},
 	{"r_om_tess", "8"}, {"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
 	{"r_om_ssao_full", "0"}, {"r_om_tess_models", "2"}, {"r_om_tess_round", "1"}, {"r_om_tess_weapon", "1"},
-	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"},
+	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"}, {"r_om_fxheat", "0"},
 	{NULL, NULL}};
 
 static const presetkey_t preset_high[] = { /* every quality setting at the top of its menu range */
@@ -2735,7 +2735,7 @@ static const presetkey_t preset_high[] = { /* every quality setting at the top o
 	{"r_om_mirror", "1"}, {"r_om_mirror_scale", "1"}, {"r_om_water", "1"}, {"r_om_water_quality", "3"},
 	{"r_om_tess", "8"}, {"r_om_tess_models", "3"}, {"r_om_tess_round", "1"}, {"r_om_tess_weapon", "3"},
 	{"r_om_ppl_models", "1"}, {"r_om_look", "1"}, {"r_om_worldlite", "0"},
-	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"},
+	{"r_om_glints", "1"}, {"r_om_skyrays", "1"}, {"r_om_softparticles", "1"}, {"r_om_fxheat", "1"},
 	{NULL, NULL}};
 
 /* the tone of the picture: on phones minimal and low get the bright, saturated one in the spirit of the PlayStation
@@ -2900,6 +2900,9 @@ ApplyPreset(void)
 		preset->modified = true; /* a preset from the config applies at start */
 	}
 
+	/* B3: -1 follows this preset even when the key table is not applied again. */
+	GL3_FxHeat_Resolve();
+
 	if (!preset->modified)
 	{
 		return;
@@ -2946,6 +2949,8 @@ ApplyPreset(void)
 	{
 		ApplyPresetKeys(preset_aa_light);
 	}
+
+	ri.Cvar_Set("r_om_fxheat", "0"); /* B3: phones keep the original sprite */
 #else
 	ApplyPresetKeys(preset_tone_normal);
 

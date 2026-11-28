@@ -14,7 +14,7 @@ Rules for every item:
   the picture changes (timing, size, sound, gameplay);
 - the box here is ticked when the item is in `main`, on by default on High, and checked in the game.
 
-Progress: **19 of 41 done**. The README shows the same list.
+Progress: **20 of 41 done**. The README shows the same list.
 
 ## Done
 
@@ -39,6 +39,7 @@ Progress: **19 of 41 done**. The README shows the same list.
 | [x] | Rain on windows: beads and running drops on the panes that face the rain, each drop a small lens | `r_om_glass_rain` | 2026-11-13 |
 | [x] | Map fog per pixel: one fog for the world, models, effects, glass and water, along the view through the fog volumes | `r_om_fogpix` | 2026-11-13 |
 | [x] | B1. Effect gallery: every group below played at fixed spots of four maps (lit and dark, indoors and outdoors), the new and the original look shot on the same frozen frame, the frame's GPU time in each | [tools/fxgal](../tools/fxgal/README.md) | 2026-11-14 |
+| [x] | B3. Living flame and smoke: the card boils along its own motion, and the air above a fire refracts the scene already drawn | `r_om_fxheat` | 2026-11-28 |
 
 New effects without an original (not counted): snow on the sib maps (`r_om_snow`), anti-aircraft fire and the
 distant war around kos (`r_om_aa`, `r_om_war`), drifting clouds (`r_om_skyflow`), lens effects (`r_om_lens`).
@@ -53,9 +54,6 @@ These come first; the effects below are built on them.
   added in display values to a scene that becomes light only at the end, so their faint parts lie over the frame
   like a veil; brighter cores alone (tried) change almost nothing, the cores are white already. The choice is between
   adding them in linear light against the scene behind and a light target of their own (owner's decision).
-- [ ] **B3. Living flame and smoke.** Flow-noise animation of the cards (the texture moves and boils along the
-  card's own motion) instead of a sprite that only grows and fades; heat haze above hot effects (the refraction of the
-  glass, last frame's colour).
 - [ ] **B4. Fast particles stretched along their motion** over the frame time, with the camera's motion blur
   (sparks, tracers, embers, droplets).
 - [ ] **B5. Cheap path.** Every item below has a Low / GLES path or keeps the original look there; the cost on the

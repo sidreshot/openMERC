@@ -1714,6 +1714,7 @@ static const char* vertexSrcSoFfx = MULTILINE_STRING(
 		out float passFogDist;
 		out vec3 passFxWorld;
 		out float passLiqSky; // r_om_water: how open the sky is over the vertex (gl3_liquid.c, lightmap slot)
+		out vec2 passHeatFlow; // B3: UV flow of this card, or the haze column (origin z, height)
 
 		uniform vec4 fogplane; // view forward and -forward . eye
 		uniform vec4 omLiq;    // r_om_water: x mode (0 off), y time
@@ -1759,6 +1760,7 @@ static const char* vertexSrcSoFfx = MULTILINE_STRING(
 			passFogDist = abs(dot(fogplane.xyz, wp.xyz) + fogplane.w);
 			passFxWorld = wp.xyz;
 			passLiqSky = lmTexCoord.x;
+			passHeatFlow = lmTexCoord;
 			gl_Position = transProjView * wp;
 		}
 );
@@ -1783,6 +1785,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		uniform vec4 omEmis;   // mode 0: (0, 0, 0, a), 1: colour * x, 2: constant xyz
 		uniform vec4 omSoftP;  // projection C, D; depth range min, max
 		uniform vec4 omSoftV;  // 1 / framebuffer size, fade distance, mode (0 off, 1 alpha, 2 colour)
+		uniform vec4 omFxHeat; // B3 r_om_fxheat: x mode (0 off, 1 boil, 3 haze), zw 1/framebuffer size
 		uniform sampler2D omDepth;
 
 		// r_om_ppfog: the SoF fog region overlay alpha per fragment (gl3_fog.c OverlayAlpha)
@@ -1870,6 +1873,7 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 		uniform sampler2D omLiqTile;
 		uniform sampler2D omLiqReflTex;
 		in float passLiqSky;
+		in vec2 passHeatFlow; // B3
 		// GFX-modern: the rings of the last splashes: position, age in s (-1 off)
 		uniform vec4 omLiqRip[12];
 
@@ -1996,6 +2000,22 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			return omSoftP.y / (ndc + omSoftP.x);
 		}
 
+		// B3: the texture boils along this card's own motion. The noise field travels with the
+		// velocity; the sample stays inside the sprite (clamp), so a clamped or repeating
+		// texture does not tile a second copy across the card. t is a few seconds, not the raw clock.
+		vec2 omFxBoilUv(vec2 uv, vec2 flow, vec3 wpos, float t)
+		{
+			float sp = length(flow);
+			vec2 nd = (sp > 0.001) ? flow / sp : vec2(0.0, 1.0);
+			float phase = fract(wpos.x * 0.013 + wpos.y * 0.017 + wpos.z * 0.011) * 6.28318;
+			float adv = t * (0.65 + sp) + phase;
+			vec2 p = uv * vec2(3.4, 4.6) + nd * adv;
+			vec2 g = omLiqNoiseG(p) * 0.7 + omLiqNoiseG(p * 2.15 + vec2(5.2, 1.7)) * 0.45;
+			float roll = omLiqNoise(uv * 5.5 + nd * adv * 1.4 + phase);
+			vec2 off = g * 0.28 + nd * (roll - 0.5) * 0.22;
+			return clamp(uv + off, vec2(0.02), vec2(0.98));
+		}
+
 		void main()
 		{
 			vec4 c;
@@ -2031,10 +2051,26 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 			}
 			else
 			{
-				// r_om_water: the texture moves with the ripples per pixel (the warp only moves the vertices)
-				vec4 t = texture(tex, passTexCoord + liqN.xy * 0.03);
+				// r_om_water: the texture moves with the ripples per pixel (the warp only moves the vertices).
+				// B3: a flame or a smoke card boils along its own motion. Mode 0 is the original sample.
+				vec2 fxUv = passTexCoord;
+				if(omFxHeat.x > 0.5 && omFxHeat.x < 2.5)
+					fxUv = omFxBoilUv(passTexCoord, passHeatFlow, passFxWorld, mod(time, 48.0));
+				vec4 t = texture(tex, fxUv + liqN.xy * 0.03);
 				liqT = t;
 				c = (texmode == 1) ? t : t * passColor;
+				// A round spark still changes inside the card: the sample wobbles in brightness
+				// along the same flow, so two nearby times are not a uniform fade.
+				if(omFxHeat.x > 0.5 && omFxHeat.x < 2.5)
+				{
+					float sp = length(passHeatFlow);
+					vec2 nd = (sp > 0.001) ? passHeatFlow / sp : vec2(0.0, 1.0);
+					float phase = fract(passFxWorld.x * 0.013 + passFxWorld.y * 0.017 + passFxWorld.z * 0.011);
+					float adv = mod(time, 48.0) * (0.65 + sp) + phase * 6.28318;
+					float flick = omLiqNoise(passTexCoord * vec2(2.6, 3.4) + nd * adv * 1.15);
+					c.rgb *= 0.82 + 0.36 * flick;
+					c.a *= 0.86 + 0.28 * flick;
+				}
 				if(omRelief.z > 0.0)
 				{
 					vec2 ts = 1.0 / vec2(textureSize(tex, 0));
@@ -2184,6 +2220,42 @@ static const char* fragmentSrcSoFfx = MULTILINE_STRING(
 				float fade = clamp((scene - omEyeDist(gl_FragCoord.z)) / omSoftV.z, 0.0, 1.0);
 				if(omSoftV.w < 1.5) c.a *= fade;
 				else c.rgb *= fade;
+			}
+
+			// B3: the air above a hot card refracts the colour already drawn. The column fades at its
+			// sides and at its top, and the offset is dropped where it would sample geometry nearer
+			// than this fragment, so the haze does not smear through a wall or sit as a hard card.
+			if(omFxHeat.x > 2.5 && omFxHeat.z > 0.0)
+			{
+				vec2 inv = omFxHeat.zw;
+				vec2 suv = gl_FragCoord.xy * inv;
+				float surfD = omEyeDist(gl_FragCoord.z);
+				float ht = mod(time, 48.0);
+				float plumeH = max(passHeatFlow.y, 1.0);
+				float above = (passFxWorld.z - passHeatFlow.x) / plumeH;
+				float rise = smoothstep(0.08, 0.42, above) * (1.0 - smoothstep(0.72, 1.02, above));
+				float side = 1.0 - smoothstep(0.45, 1.0, abs(passTexCoord.x - 0.5) * 2.0);
+				float shim = omLiqNoise(passFxWorld.xy * 0.038 + vec2(0.0, ht * 1.35));
+				float mask = rise * side * (0.55 + 0.45 * shim) * 0.34 * clamp(passColor.a, 0.0, 1.0);
+				if(omSoftV.w > 0.5 && omSoftV.w < 2.5)
+				{
+					float sceneD = omEyeDist(texture(omDepth, suv).r);
+					mask *= clamp((sceneD - surfD) / max(omSoftV.z, 1.0), 0.0, 1.0);
+				}
+				if(mask >= 0.03)
+				{
+					vec2 wob = omLiqNoiseG(passFxWorld.xy * 0.032 + vec2(ht * 0.62, ht * 0.21));
+					vec3 shift = vec3(wob.x * 9.0, wob.y * 9.0, 2.0 + 2.0 * shim);
+					vec4 c0 = transProjView * vec4(passFxWorld, 1.0);
+					vec4 c1 = transProjView * vec4(passFxWorld + shift, 1.0);
+					vec2 off = clamp((c1.xy / max(c1.w, 0.0001) - c0.xy / max(c0.w, 0.0001)) * 0.5,
+						vec2(-0.012), vec2(0.012));
+					if(omEyeDist(texture(omDepth, suv + off).r) < surfD + 1.0)
+						off = vec2(0.0);
+					c = vec4(texture(omSceneCol, suv + off).rgb, clamp(mask, 0.0, 0.38));
+				}
+				else
+					discard;
 			}
 
 			// intensity is always 1 here; referenced so the uniCommon block stays active

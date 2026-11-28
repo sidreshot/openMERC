@@ -61,7 +61,7 @@ Every effect of the game is being redrawn with current techniques. The game's ow
 where and how big; only the drawing changes, and each new effect can be switched back to the original look. Details,
 the effects of each group and the rules: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Progress: 19 of 41 done.**
+**Progress: 20 of 41 done.**
 
 Done:
 
@@ -84,11 +84,11 @@ Done:
 - [x] Rain drops on windows
 - [x] Map fog per pixel instead of the old per-vertex fog
 - [x] B1. Effect gallery: before and after shots, frame cost
+- [x] B3. Living flame and smoke, heat haze
 
 To do:
 
 - [ ] B2. Effects as light sources in HDR and bloom
-- [ ] B3. Living flame and smoke, heat haze
 - [ ] B4. Fast particles stretched along their motion
 - [ ] B5. Cheap path for Low and phones
 - [ ] E1. Fire, burning bodies, phosphorus, road flares
@@ -236,7 +236,7 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 решают данные самой игры; меняется только отрисовка, и каждый новый эффект можно вернуть к оригинальному виду.
 Подробности, эффекты каждой группы и правила: [docs/EFFECTS.md](docs/EFFECTS.md).
 
-**Прогресс: сделано 19 из 41.**
+**Прогресс: сделано 20 из 41.**
 
 Сделано:
 
@@ -259,11 +259,11 @@ GOG или диск с патчем 1.07f). openMERC читает `.pak`-фай�
 - [x] Капли дождя на окнах
 - [x] Туман на картах попиксельный вместо старого повершинного
 - [x] B1. Галерея эффектов: снимки до и после, цена кадра
+- [x] B3. Живое пламя и дым, дрожание горячего воздуха
 
 Будет сделано:
 
 - [ ] B2. Эффекты как источники света в HDR и bloom
-- [ ] B3. Живое пламя и дым, дрожание горячего воздуха
 - [ ] B4. Быстрые частицы, вытянутые по движению
 - [ ] B5. Дешёвый путь для Low и телефонов
 - [ ] E1. Огонь, горящие тела, фосфор, фальшфейеры

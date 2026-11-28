@@ -2179,6 +2179,21 @@ GL3_Post_DepthCopyPossible(void)
 	return P.bound && P.texdepthcopy;
 }
 
+/* B3: 1 / framebuffer size for the heat-haze sample. Zero when this view has no post target. */
+void
+GL3_Post_ViewInv(float *invw, float *invh)
+{
+	if (P.w > 0 && P.h > 0)
+	{
+		*invw = 1.0f / (float)P.w;
+		*invh = 1.0f / (float)P.h;
+	}
+	else
+	{
+		*invw = *invh = 0;
+	}
+}
+
 qboolean
 GL3_Post_WaterCopy(void)
 {
