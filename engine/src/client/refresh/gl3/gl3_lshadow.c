@@ -687,8 +687,7 @@ static const char *ls_glsl =
 	"}\n"
 	/* GFX-modern r_om_pbr_models: how much of the shadowed lamps' light reaches a point of a model - each lamp in
 	   reach weighted by its light there, seen through the static layer (walls, crates: the legs behind a crate) and
-	   the dynamic one (other characters and props; a little more offset toward the lamp than for the world, a model
-	   would otherwise shadow its own skin). 1 without lamps */
+	   the dynamic one (other characters and props). The dynamic point steps a few units toward the lamp. The mesh is in that cube, and the near point laid the lamp shadow across the lit side. A texel-scaled step walked off a body into the next shadow when the lamp was far. 1 without lamps */
 	"float omLsModelVis(vec3 wp, vec3 N)\n"
 	"{\n"
 	"	int n = int(omLsP.x + 0.5);\n"
@@ -728,9 +727,16 @@ static const char *ls_glsl =
 	"		vec3 uvz = sc.xyz / sc.w * 0.5 + 0.5;\n"
 	"		float layer = float(i * 12 + f);\n"
 	"		float st = texture(omLsMap, vec4(uvz.xy, layer, uvz.z));\n"
+	"		vec3 pd = wp + (N * 0.5 + l) * 4.0;\n"
+	"		vec3 vd = pd - omLsPos[i].xyz;\n"
+	"		vec3 ad = abs(vd);\n"
+	"		int fd = (ad.x >= ad.y && ad.x >= ad.z) ? (vd.x < 0.0 ? 1 : 0) : ((ad.y >= ad.z) ? (vd.y < 0.0 ? 3 : 2) : (vd.z < 0.0 ? 5 : 4));\n"
+	"		vec4 scd = omLsVP[i * 6 + fd] * vec4(pd, 1.0);\n"
+	"		vec3 uvd = scd.xyz / scd.w * 0.5 + 0.5;\n"
+	"		float layerd = float(i * 12 + fd);\n"
 	"		float dy = 0.0;\n"
 	"		for (int k = 0; k < 4; k++)\n"
-	"			dy += texture(omLsMap, vec4(uvz.xy + omLsDisk[k * 4] * omLsP2.x * 1.5, layer + 6.0, uvz.z));\n"
+	"			dy += texture(omLsMap, vec4(uvd.xy + omLsDisk[k * 4] * omLsP2.x * 1.5, layerd + 6.0, uvd.z));\n"
 	"		tot += ci;\n"
 	"		vis += ci * st * (dy * 0.25);\n"
 	"	}\n"
@@ -769,9 +775,16 @@ static const char *ls_glsl =
 	"	vec3 uvz = sc.xyz / sc.w * 0.5 + 0.5;\n"
 	"	float layer = float(i * 12 + f);\n"
 	"	float st = texture(omLsMap, vec4(uvz.xy, layer, uvz.z));\n"
+	"	vec3 pd = wp + (N * 0.5 + l) * 4.0;\n"
+	"	vec3 vd = pd - omLsPos[i].xyz;\n"
+	"	vec3 ad = abs(vd);\n"
+	"	int fd = (ad.x >= ad.y && ad.x >= ad.z) ? (vd.x < 0.0 ? 1 : 0) : ((ad.y >= ad.z) ? (vd.y < 0.0 ? 3 : 2) : (vd.z < 0.0 ? 5 : 4));\n"
+	"	vec4 scd = omLsVP[i * 6 + fd] * vec4(pd, 1.0);\n"
+	"	vec3 uvd = scd.xyz / scd.w * 0.5 + 0.5;\n"
+	"	float layerd = float(i * 12 + fd);\n"
 	"	float dy = 0.0;\n"
 	"	for (int k = 0; k < 4; k++)\n"
-	"		dy += texture(omLsMap, vec4(uvz.xy + omLsDisk[k * 4] * omLsP2.x * 1.5, layer + 6.0, uvz.z));\n"
+	"		dy += texture(omLsMap, vec4(uvd.xy + omLsDisk[k * 4] * omLsP2.x * 1.5, layerd + 6.0, uvd.z));\n"
 	"	return st * (dy * 0.25);\n"
 	"}\n";
 
