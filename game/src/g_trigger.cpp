@@ -409,15 +409,24 @@ static void countdown_think(edict_t *self)
 	int left = (int)(self->count + self->timestamp - level.time);
 	if (left <= 0) {
 		countdown_send(0);
-		self->armed = 0;
 		if (!(self->spawnflags & 4)) {
+			self->armed = 0;
 			level.countdown_expired = 1;
 			G_UseTargets(self, self->activator);
 			G_FreeEdict(self);
 		} else {
+			/* Still armed, so the use below takes the stop path and the count sits idle.
+			   Clearing armed first made that same use start it again: sib1's valve timer
+			   (spawnflags 2|4) never left the screen. */
 			G_UseTargets(self, self->activator);
-			if (self->spawnflags & 2)
+			if (self->inuse && self->armed && (self->spawnflags & 2))
 				countdown_use(self, self, self);
+			else if (self->inuse && self->armed) {
+				self->armed = 0;
+				self->nextthink = 0;
+				self->solid = SOLID_TRIGGER;
+				gi.linkentity(self);
+			}
 		}
 		return;
 	}
